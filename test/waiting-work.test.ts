@@ -254,6 +254,7 @@ describe("An Agent Session's live updates", () => {
     const first = admin.post(`/api/documents/${doc.id}/comments`, { body: "@claude-laptop @codex, first." });
     await held.waiters(1);
     const second = admin.post("/api/tickets/CRONK-1/comments", { body: "Second." });
+    // The second post waits for the first to commit; if it overtook it instead, its event is the furthest id seen.
     if ((await Promise.race([second.then(() => "posted"), held.waiters(2)])) === "posted") seen.push((await stream.next())!);
     stream.close();
     await held.release();

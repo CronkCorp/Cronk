@@ -137,18 +137,18 @@ export async function markWaiting(
   for (const reason of WAITING_REASONS) {
     for (const agentId of candidates[reason]) if (agentId !== poster && !marked.has(agentId)) marked.set(agentId, reason);
   }
-  const concerned: [string, WaitingReason][] = [];
+  const concerned: { agentId: string; reason: WaitingReason }[] = [];
   for (const [agentId, reason] of marked) {
     const found = agents.find((a) => a.agent.id === agentId);
     if (!found?.owner.active) continue;
-    if (await canRead(db, agentReading(found.agent, found.owner), place.projectId)) concerned.push([agentId, reason]);
+    if (await canRead(db, agentReading(found.agent, found.owner), place.projectId)) concerned.push({ agentId, reason });
   }
   // Posts concerning the same Agent take positions and commit one after another, so a position
   // is never passed by one still uncommitted (see `missedWaitingWork`). Other Agents' posts don't
   // wait. Locking in id order keeps two posts naming the same Agents from deadlocking.
-  for (const agentId of concerned.map(([id]) => id).sort()) await lockUntilCommit(db, `waiting-work:${agentId}`);
+  for (const agentId of concerned.map((c) => c.agentId).sort()) await lockUntilCommit(db, `waiting-work:${agentId}`);
   const waiting: WaitingFor[] = [];
-  for (const [agentId, reason] of concerned) {
+  for (const { agentId, reason } of concerned) {
     const { rows } = await db.query<{ seq: string }>(
       "INSERT INTO waiting_work (agent_id, comment_id, reason, at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING seq",
       [agentId, comment.id, reason, at],
@@ -200,7 +200,7 @@ export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterS
 /**
  * The position of the work that last started waiting for the Agent, taken or not; "0" if none has.
  * Work for the Agent still uncommitted when this is read will have a higher position, as
- * `markWaiting` serializes it per Agent, so replaying from it skips nothing.
+ * `markWaiting` serializes it per Agent, so a replay from it never skips that work.
  */
 export async function latestWaitingSeq(db: Queryable, agentId: string): Promise<string> {
   const { rows } = await db.query<{ seq: string | null }>("SELECT max(seq)::text AS seq FROM waiting_work WHERE agent_id = $1", [agentId]);

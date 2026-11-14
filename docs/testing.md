@@ -13,3 +13,5 @@ A test exercises external behaviour only. It calls the HTTP API (or the MCP prot
 3. **Web UI (smoke only).** A small number of Playwright tests walk the main path (sign in, Inbox, a Ticket). The UI holds no rules, so it gets no further tests.
 
 Do not add lower-level unit seams for rules; test them through the API. New phases add tests at these same seams. Integrations with external systems (Git hosts, webhooks, email) are tested by feeding the API the events those systems send and asserting on the resulting state, without calling the real services.
+
+Concurrency and database faults are staged through the harness, not by reaching into tables: `terminateConnections` and `interruptQueriesOn` simulate a database blip, and `holdRow` holds a row as an updating transaction would, so a request that writes a row referencing it stops mid-transaction until released. The test still acts and asserts only through the API.
