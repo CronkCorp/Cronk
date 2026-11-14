@@ -25,3 +25,20 @@ jobs:
           name: playwright-traces
           path: test-results/
           retention-days: 7
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the Compose stack
+        run: docker compose up --build --wait --wait-timeout 120
+      - name: Check the app answers
+        run: |
+          curl --fail --silent http://localhost:3000/api/health
+          curl --fail --silent http://localhost:3000/api/setup
+          curl --fail --silent http://localhost:3000/ | grep -q '<div id="root">'
+      - name: Show logs
+        if: failure()
+        run: docker compose logs
+      - run: docker compose down -v
+        if: always()
