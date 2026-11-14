@@ -261,6 +261,21 @@ describe("the documents tool", () => {
     });
   });
 
+  it("replaces one section of a Document by its heading, and names the headings when there is no such section", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { id } = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "## Setup\n\nOld.\n\n## Usage\n\nRun it.\n" })).body.document;
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const replaced = await callTool(mcp, "documents", { action: "replace_section", id, baseVersion: 1, heading: "Setup", body: "New." });
+    expect(replaced.body.document).toMatchObject({ version: 2, body: "## Setup\n\nNew.\n\n## Usage\n\nRun it.\n" });
+
+    const missing = await callTool(mcp, "documents", { action: "replace_section", id, baseVersion: 2, heading: "Install", body: "x" });
+    expect(missing.isError).toBe(true);
+    expect(missing.body).toContain("no section headed “Install”");
+    expect(missing.body).toContain('"headings":["## Setup","## Usage"]');
+  });
+
   it("offers a read-only token only get and tree", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);

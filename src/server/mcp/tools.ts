@@ -149,14 +149,22 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description:
       "Documents: Markdown knowledge belonging to a Project or, without a project, the Workspace, arranged in a page tree. " +
       "Every update names the Version it is based on (`baseVersion`, the Document's `version`) and is refused if that is no " +
-      "longer current; the refusal carries the current Version, so merge your change into it and update again.",
+      "longer current; the refusal carries the current Version, so merge your change into it and update again. " +
+      "Prefer `replace_section` to change one section: small edits rarely clash with anyone else's.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
-      id: z.string().optional().describe("Document id (get, update)"),
+      id: z.string().optional().describe("Document id (get, update, replace_section)"),
       parentId: z.string().optional().describe("The Document to create it under; at the top if left out (create)"),
       title: z.string().optional().describe("Title (create, update)"),
-      body: z.string().optional().describe("Markdown body; Ticket keys such as CRONK-12 become links (create, update)"),
-      baseVersion: z.number().int().optional().describe("The Version this update is based on (update)"),
+      body: z
+        .string()
+        .optional()
+        .describe("Markdown body; Ticket keys such as CRONK-12 become links (create, update). For replace_section, what goes under the heading, without the heading line"),
+      heading: z
+        .string()
+        .optional()
+        .describe("The heading of the section to replace, such as `Setup`; prefix its # marks, such as `## Setup`, if several headings share the text (replace_section)"),
+      baseVersion: z.number().int().optional().describe("The Version this change is based on (update, replace_section)"),
     },
     actions: {
       get: {
@@ -187,6 +195,18 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             baseVersion: required(a.baseVersion, "a baseVersion", "update"),
             ...(a.title !== undefined && { title: a.title }),
             ...(a.body !== undefined && { body: a.body }),
+          }),
+      },
+      replace_section: {
+        description:
+          "saves a new Version replacing what sits under one heading, its subsections included, down to the next heading " +
+          "of the same or a higher level; the heading stays. Refused, listing the headings, if none or several match",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `/api/documents/${encodeURIComponent(required(a.id, "an id", "replace_section"))}/replace-section`, {
+            baseVersion: required(a.baseVersion, "a baseVersion", "replace_section"),
+            heading: required(a.heading, "a heading", "replace_section"),
+            body: required(a.body, "a body", "replace_section"),
           }),
       },
     },
