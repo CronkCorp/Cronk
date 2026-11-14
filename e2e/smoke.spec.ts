@@ -338,6 +338,23 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   await page.getByRole("button", { name: "Save" }).click();
   const usage = page.getByRole("region", { name: "## Usage" });
   await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
+  // Leaving the resolver keeps the draft; saving it again is refused and merges again.
+  await page.getByRole("button", { name: "Back to my draft" }).click();
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it hourly.\n");
+  await expect(page.getByRole("alert")).toContainText("Your draft is still behind theirs");
+  // While the save is in flight, the draft can't be changed under it.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**/api/documents/${id}`, async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByLabel("Title")).toBeDisabled();
+  await expect(page.getByLabel("Body (Markdown)")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Discard mine and edit theirs" })).toBeDisabled();
+  release();
+  await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
   await usage.getByRole("button", { name: "Use both" }).click();
   await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n\nRun it weekly.\n");
   await page.getByRole("button", { name: "Use these and keep editing" }).click();
@@ -379,4 +396,21 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByRole("button", { name: "Save" }).click();
   await expect(guidance).toContainText("Write tests first, always.");
   await expect(guidance).toContainText("Use pnpm.");
+
+  // Leaving a conflict keeps the draft; saving it again is refused and merges again.
+  await page.getByRole("button", { name: "Edit Guidance" }).click();
+  const draft = "## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse pnpm and tsc.\n";
+  await page.getByLabel("Guidance (Markdown)").fill(draft);
+  const { guidance: latest } = await (await page.request.get("/api/projects/CRONK/guidance")).json();
+  const clashing = { markdown: "## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse pnpm and vitest.\n", baseVersion: latest.version };
+  expect((await page.request.put("/api/projects/CRONK/guidance", { data: clashing })).status()).toBe(200);
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Back to my draft" }).click();
+  await expect(page.getByLabel("Guidance (Markdown)")).toHaveValue(draft);
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("region", { name: "## Tools" }).getByRole("button", { name: "Use both" }).click();
+  await page.getByRole("button", { name: "Use these and keep editing" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(guidance).toContainText("Use pnpm and tsc.");
+  await expect(guidance).toContainText("Use pnpm and vitest.");
 });

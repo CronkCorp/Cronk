@@ -15,20 +15,24 @@ export interface SavedText {
   body: string;
 }
 
-/** Where settling a refused save stands: a conflict to settle, a clean merge, or a conflict the User settled. */
-export type MergeStage = "conflict" | "merged" | "resolved";
+/**
+ * Where settling a refused save stands: a conflict to settle, a clean merge, a conflict the User
+ * settled, or a conflict the User left unsettled to go back to their draft.
+ */
+export type MergeStage = "conflict" | "merged" | "resolved" | "behind";
 
 const STAGE_ADVICE: Record<MergeStage, string> = {
   conflict: "You both changed the same part; choose or combine below, then save.",
   merged: "Their changes touched other sections and are merged into yours below; check them and save again.",
   resolved: "Your choices are merged into your draft below; check it and save again.",
+  behind: "Your draft is still behind theirs; save again to merge them.",
 };
 
 /**
  * Tells the User their save was refused because `by` saved `theirs` since `base`, shows what they
- * changed, and offers to drop the draft and edit their Version instead.
+ * changed, and offers to drop the draft and edit their Version instead (not while `disabled`, as during a save).
  */
-export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void }) {
+export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
   const { base, theirs } = props;
   return (
     <div className={props.stage === "conflict" ? "conflict" : "merged"} role="alert">
@@ -40,7 +44,7 @@ export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: Sa
         <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
       </details>
       <div className="actions">
-        <button type="button" className="secondary" onClick={props.onDiscardMine}>Discard mine and edit theirs</button>
+        <button type="button" className="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</button>
       </div>
     </div>
   );
@@ -80,8 +84,11 @@ interface Mergeable {
   sections: MergedSection[];
 }
 
-/** Lets the User settle each conflict of a merge, then hands back the merged title (empty without one) and body. */
-export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title: string; body: string }) => void; onCancel: () => void }) {
+/**
+ * Lets the User settle each conflict of a merge, then hands back the merged title (empty without one) and body.
+ * `onBack` leaves without settling, back to the User's own draft.
+ */
+export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title: string; body: string }) => void; onBack: () => void }) {
   const m = props.merge;
   const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
   const [kept, setKept] = useState<string[]>(m.sections.map((s) => s.text ?? s.conflict?.mine ?? ""));
@@ -100,7 +107,7 @@ export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title:
       )}
       <div className="actions">
         <button type="submit">Use these and keep editing</button>
-        <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+        <button type="button" className="secondary" onClick={props.onBack}>Back to my draft</button>
       </div>
     </form>
   );

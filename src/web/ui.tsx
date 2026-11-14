@@ -64,11 +64,13 @@ export function Field(props: {
   autoComplete?: string;
   required?: boolean;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="field">
       <span>{props.label}</span>
       <input
+        disabled={props.disabled}
         type={props.type ?? "text"}
         value={props.value}
         required={props.required ?? true}
@@ -80,11 +82,12 @@ export function Field(props: {
   );
 }
 
-export function TextArea(props: { label: string; value: string; onChange: (v: string) => void; rows?: number; placeholder?: string }) {
+export function TextArea(props: { label: string; value: string; onChange: (v: string) => void; rows?: number; placeholder?: string; disabled?: boolean }) {
   return (
     <label className="field">
       <span>{props.label}</span>
       <textarea
+        disabled={props.disabled}
         value={props.value}
         rows={props.rows ?? 6}
         placeholder={props.placeholder}

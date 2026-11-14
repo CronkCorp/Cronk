@@ -76,6 +76,8 @@ interface OtherEdit {
   by: string;
   /** Whether the merge left conflicts for the User to settle. */
   conflicted: boolean;
+  /** The User left the conflict unsettled and went back to their draft. */
+  wentBack?: boolean;
 }
 
 /**
@@ -136,6 +138,12 @@ function GuidanceEditor(props: {
     setOther(undefined);
   };
 
+  // The draft is still based on the Version editing started from, so its next save is refused and merges again.
+  const backToDraft = () => {
+    setResolving(undefined);
+    setOther((o) => o && { ...o, wentBack: true });
+  };
+
   return (
     <section className="panel wide">
       {other && (
@@ -143,8 +151,9 @@ function GuidanceEditor(props: {
           by={other.by}
           base={other.base}
           theirs={other.theirs}
-          stage={resolving ? "conflict" : other.conflicted ? "resolved" : "merged"}
+          stage={resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged"}
           onDiscardMine={() => takeTheirs(other.theirs)}
+          disabled={busy}
         />
       )}
       {resolving ? (
@@ -155,11 +164,12 @@ function GuidanceEditor(props: {
             setBase(resolving.onto.version);
             setResolving(undefined);
           }}
-          onCancel={props.onCancel}
+          onBack={backToDraft}
         />
       ) : (
         <form onSubmit={save}>
-          <TextArea label="Guidance (Markdown)" value={markdown} onChange={setMarkdown} rows={14} />
+          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+          <TextArea label="Guidance (Markdown)" value={markdown} onChange={setMarkdown} rows={14} disabled={busy} />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="submit" disabled={busy}>Save</button>
