@@ -35,4 +35,7 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
 - \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key. Beside it,
   \`<KEY>.activities/\`, \`<KEY>.comments/\` and \`<KEY>.reports/\` hold its Activities, Comments and Reports, each numbered from 1
   in the order they were written; replies and answers name them by that number.
+
+Not included: Ticket history, Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
+already in the installation an export is imported into come in deactivated, since they have no password there.
 `;

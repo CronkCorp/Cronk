@@ -4,6 +4,8 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ACTIVITY_KINDS, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
 import { unwrapFolder, type Folder } from "./archive.js";
 import { FORMAT } from "./format.js";
+import { accessSchema, agentAccessSchema, roleSchema } from "../schemas.js";
+import { PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { readFrontmatter } from "./frontmatter.js";
 
 /**
@@ -37,7 +39,7 @@ interface ActorIds {
 const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 const isUuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
-/** Imports `folder`, an export, into the Workspace for `importer`. Run inside a transaction. */
+/** Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. */
 export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date): Promise<Imported> {
   const folder = unwrapFolder(archived);
   const read = (path: string): File | undefined => {
@@ -117,7 +119,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     // No password hash matches "!", so the User can't sign in until one is set.
     const { rows: inserted } = await db.query<{ id: string }>(
       `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at) VALUES ($1, $2, $3, '!', $4, $5, $5) RETURNING id`,
-      [workspaceId, email, text(u.name, `${where}.name`), oneOf(u.role, ["admin", "member"], `${where}.role`), now],
+      [workspaceId, email, text(u.name, `${where}.name`), oneOf(u.role, roleSchema.enum, `${where}.role`), now],
     );
     userIds.set(email.toLowerCase(), inserted[0]!.id);
   }
@@ -151,7 +153,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   for (const [i, s] of list(people, "sessions").entries()) {
     const where = `people.md sessions[${i}]`;
     const lastSeenAt = date(s.lastSeenAt, `${where}.lastSeenAt`);
-    // A Session live at export has no connection here, so it ends when it was last seen.
+    // An Agent Session live at export has no connection here, so it ends when it was last seen.
     const { rows } = await db.query<{ id: string }>(
       "INSERT INTO agent_sessions (agent_id, started_at, last_seen_at, ended_at) VALUES ($1, $2, $3, $4) RETURNING id",
       [agent(s.agent, `${where}.agent`).id, date(s.startedAt, `${where}.startedAt`), lastSeenAt, optionalDate(s.endedAt, `${where}.endedAt`) ?? lastSeenAt],
@@ -280,7 +282,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await db.query("UPDATE workspaces SET name = $2, agent_access = $3, silence_threshold_seconds = $4 WHERE id = $1", [
       workspaceId,
       text(w.data.name, "workspace.md name"),
-      oneOf(w.data.agentAccess, ["none", "read", "write"], "workspace.md agentAccess"),
+      oneOf(w.data.agentAccess, agentAccessSchema.enum, "workspace.md agentAccess"),
       integer(w.data.silenceThresholdSeconds, "workspace.md silenceThresholdSeconds"),
     ]);
     await importGuidance("guidance", null);
@@ -296,7 +298,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     const p = need(`${dir}/project.md`);
     const projectKey = text(p.data.key, `${p.path} key`).toUpperCase();
     if (projectKey !== key.toUpperCase()) refuse(`${p.path} says its key is ${projectKey}, but it is in projects/${key}`);
-    if (!/^[A-Z][A-Z0-9]{1,9}$/.test(projectKey)) refuse(`${p.path} key must be a letter then 1 to 9 letters or digits`);
+    if (!new RegExp(`^${PROJECT_KEY_PATTERN}$`).test(projectKey)) refuse(`${p.path} key must be a letter then 1 to 9 letters or digits`);
     const { rows } = await db.query<{ id: string }>(
       `INSERT INTO projects (workspace_id, name, key, visibility, agent_access, archived_at, created_at, next_ticket_number)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
@@ -304,8 +306,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
         workspaceId,
         text(p.data.name, `${p.path} name`),
         projectKey,
-        oneOf(p.data.visibility, ["open", "private"], `${p.path} visibility`),
-        oneOf(p.data.agentAccess, ["none", "read", "write"], `${p.path} agentAccess`),
+        oneOf(p.data.visibility, VISIBILITIES, `${p.path} visibility`),
+        oneOf(p.data.agentAccess, agentAccessSchema.enum, `${p.path} agentAccess`),
         optionalDate(p.data.archivedAt, `${p.path} archivedAt`),
         date(p.data.createdAt, `${p.path} createdAt`),
         integer(p.data.nextTicketNumber, `${p.path} nextTicketNumber`),
@@ -335,7 +337,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
       await db.query("INSERT INTO project_members (project_id, user_id, access) VALUES ($1, $2, $3)", [
         projectId,
         await userId(m.user, `${p.path} members[${i}].user`),
-        oneOf(m.access, ["read", "write"], `${p.path} members[${i}].access`),
+        oneOf(m.access, accessSchema.enum, `${p.path} members[${i}].access`),
       ]);
     }
     await importGuidance(`${dir}/guidance`, projectId);

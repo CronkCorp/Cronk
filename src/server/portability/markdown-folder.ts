@@ -11,15 +11,15 @@ import { readFrontmatter } from "./frontmatter.js";
  */
 
 /** A Document to create, with those to create under it. */
-interface Page {
+interface DocumentToCreate {
   title: string;
   body: string;
-  children: Page[];
+  children: DocumentToCreate[];
 }
 
 const MARKDOWN = /\.(md|markdown)$/i;
-/** A folder's own page: its README or index file, whose Document the folder becomes. */
-const FOLDER_PAGE = /^(readme|index)\.(md|markdown)$/i;
+/** A folder's own file: its README or index, whose Document the folder becomes. */
+const FOLDER_OWN_FILE = /^(readme|index)\.(md|markdown)$/i;
 
 /**
  * Creates the Markdown files of `folder` as Documents at the top of `tree`, after those already
@@ -28,50 +28,50 @@ const FOLDER_PAGE = /^(readme|index)\.(md|markdown)$/i;
  */
 export async function importMarkdownFolder(db: Queryable, tree: Tree, folder: Folder, actor: Actor, now: Date): Promise<TreeEntry[]> {
   const markdown = unwrapFolder(new Map([...folder].filter(([path]) => MARKDOWN.test(path))));
-  const pages = pagesIn([...markdown.keys()].map((path) => ({ path, relative: path })), markdown);
+  const toCreate = documentsIn([...markdown.keys()].map((path) => ({ path, relative: path })), markdown);
   const created: TreeEntry[] = [];
-  const create = async (page: Page, parentId: string | null, depth: number) => {
-    const document = await insertDocument(db, { tree, parentId, title: page.title, body: page.body, actor, now });
+  const create = async (planned: DocumentToCreate, parentId: string | null, depth: number) => {
+    const document = await insertDocument(db, { tree, parentId, title: planned.title, body: planned.body, actor, now });
     if (document === "no such parent") throw new Error("A Document just created vanished");
     created.push({ id: document.id, parentId, title: document.title, depth });
-    for (const child of page.children) await create(child, document.id, depth + 1);
+    for (const child of planned.children) await create(child, document.id, depth + 1);
   };
-  for (const page of pages) await create(page, null, 0);
+  for (const planned of toCreate) await create(planned, null, 0);
   return created;
 }
 
-/** The pages of one folder's `entries` (paths relative to it), files and folders in natural name order. */
-function pagesIn(entries: { path: string; relative: string }[], folder: Folder): Page[] {
+/** The Documents to create for one folder's `entries` (paths relative to it), files and folders in natural name order. */
+function documentsIn(entries: { path: string; relative: string }[], folder: Folder): DocumentToCreate[] {
   let files = entries.filter((e) => !e.relative.includes("/"));
   const folders = new Map<string, { path: string; relative: string }[]>();
   for (const e of entries.filter((e) => e.relative.includes("/"))) {
     const [name, ...rest] = e.relative.split("/");
     folders.set(name!, [...(folders.get(name!) ?? []), { path: e.path, relative: rest.join("/") }]);
   }
-  const named: [name: string, page: Page][] = [];
+  const named: [name: string, planned: DocumentToCreate][] = [];
   for (const [name, inside] of folders) {
-    // A file named like the folder, such as `setup.md` beside `setup/`, is the folder's page if it has no README or index.
+    // A file named like the folder, such as `setup.md` beside `setup/`, is the folder's own file if it has no README or index.
     const beside = files.find((e) => e.relative.replace(MARKDOWN, "") === name);
-    const own = inside.find((e) => FOLDER_PAGE.test(e.relative)) ?? beside;
+    const own = inside.find((e) => FOLDER_OWN_FILE.test(e.relative)) ?? beside;
     if (own && own === beside) files = files.filter((e) => e !== beside);
     const rest = inside.filter((e) => e !== own);
-    named.push([name, { ...(own ? page(own.path, folder, name) : { title: name, body: "" }), children: pagesIn(rest, folder) }]);
+    named.push([name, { ...(own ? documentFrom(own.path, folder, name) : { title: name, body: "" }), children: documentsIn(rest, folder) }]);
   }
   for (const e of files) {
     const name = e.relative.replace(MARKDOWN, "");
-    named.push([name, page(e.path, folder, name)]);
+    named.push([name, documentFrom(e.path, folder, name)]);
   }
   return named.sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })).map(([, p]) => p);
 }
 
 /**
- * The page of the Markdown file at `path`: titled by its frontmatter's `title`, else by a `#`
+ * The Document to create from the Markdown file at `path`: titled by its frontmatter's `title`, else by a `#`
  * heading on its first line, else `fallback`. Frontmatter is left out of the body.
  */
-function page(path: string, folder: Folder, fallback: string): Page {
+function documentFrom(path: string, folder: Folder, fallback: string): DocumentToCreate {
   let parsed: ReturnType<typeof readFrontmatter>;
   try {
-    parsed = readFrontmatter(folder.get(path)!.replace(/^﻿/, ""));
+    parsed = readFrontmatter(folder.get(path)!.replace(/^\uFEFF/, ""));
   } catch (err) {
     throw new HttpError(400, `${path} can't be read: ${(err as Error).message}`);
   }

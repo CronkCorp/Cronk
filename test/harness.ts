@@ -92,11 +92,10 @@ export class Client {
   }
 
   private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
-    const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const res = await this.cronk.app.inject({
       method,
       url,
-      headers: { ...this.headers, ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      headers: this.authHeaders(),
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {

@@ -192,8 +192,8 @@ const IMPORT_RULES =
   "Files and folders are ordered by name, numbers counting as numbers. Files other than Markdown (`.md`, `.markdown`) and hidden ones are skipped, " +
   "and a single folder holding everything (as archiving a folder adds) is unwrapped.";
 
-/** The uploaded archive; a body sent as JSON or text isn't one. */
+/** The uploaded archive; a body sent as another type, such as JSON, is refused. */
 function archiveBody(body: unknown): Buffer {
   if (Buffer.isBuffer(body)) return body;
-  return Buffer.alloc(0);
+  throw new HttpError(400, `Send the archive itself as the request body, typed ${ARCHIVE_TYPES.join(", ")}`);
 }

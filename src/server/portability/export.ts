@@ -1,5 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import { STATUS_CATEGORIES } from "../../shared/values.js";
+import { ticketKeySql } from "../work/tickets.js";
 import type { Folder } from "./archive.js";
 import { writeFrontmatter } from "./frontmatter.js";
 import { FORMAT, README, slug, type ActorRef } from "./format.js";
@@ -201,7 +202,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
       [p.id],
     );
     const { rows: relations } = await db.query<{ kind: string; from_id: string; from_key: string; to_id: string; to_key: string }>(
-      `SELECT r.kind, r.from_ticket_id AS from_id, fp.key || '-' || f.number AS from_key, r.to_ticket_id AS to_id, tp.key || '-' || t.number AS to_key
+      `SELECT r.kind, r.from_ticket_id AS from_id, ${ticketKeySql("fp", "f")} AS from_key, r.to_ticket_id AS to_id, ${ticketKeySql("tp", "t")} AS to_key
        FROM ticket_relations r
          JOIN tickets f ON f.id = r.from_ticket_id JOIN projects fp ON fp.id = f.project_id
          JOIN tickets t ON t.id = r.to_ticket_id JOIN projects tp ON tp.id = t.project_id
