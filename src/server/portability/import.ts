@@ -7,7 +7,7 @@ import { FORMAT } from "./format.js";
 import { accessSchema, agentAccessSchema, roleSchema } from "../schemas.js";
 import { PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { readFrontmatter } from "./frontmatter.js";
-import { NO_PASSWORD } from "../identity/users.js";
+import { insertUserWithoutPassword } from "../identity/users.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -118,11 +118,14 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
       continue;
     }
     // With no password, the User can't sign in until they accept an invitation.
-    const { rows: inserted } = await db.query<{ id: string }>(
-      `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at) VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id`,
-      [workspaceId, email, text(u.name, `${where}.name`), NO_PASSWORD, oneOf(u.role, roleSchema.enum, `${where}.role`), now],
-    );
-    userIds.set(email.toLowerCase(), inserted[0]!.id);
+    const inserted = await insertUserWithoutPassword(db, {
+      workspaceId,
+      email,
+      name: text(u.name, `${where}.name`),
+      role: oneOf(u.role, roleSchema.enum, `${where}.role`),
+      now,
+    });
+    userIds.set(email.toLowerCase(), inserted.id);
   }
 
   const agentIds = new Map<string, { id: string; ownerId: string }>();
