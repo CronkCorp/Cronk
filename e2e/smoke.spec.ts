@@ -360,7 +360,7 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("link", { name: "Guidance" }).last().click();
+  await page.getByRole("navigation", { name: "View" }).getByRole("link", { name: "Guidance" }).click();
   await page.getByRole("button", { name: "Edit Guidance" }).click();
   await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n");
   await page.getByRole("button", { name: "Save" }).click();
