@@ -87,8 +87,9 @@ export function mcpRoutes(ctx: AppContext) {
           const text = waitingLines(waiting).join("\n");
           void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message: `Work is waiting for you:\n${text}`, waiting } }).catch(() => {});
         };
-        const closeEvents = baseUrl && (await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify));
-        const stopNotifying = closeEvents || (() => {});
+        const stopNotifying = baseUrl
+          ? await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify)
+          : () => {};
         connections.set(session.id, {
           transport,
           server,

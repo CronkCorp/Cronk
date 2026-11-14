@@ -402,6 +402,26 @@ describe("work waiting for an Agent over MCP", () => {
     });
   });
 
+  it("is pushed again after its stream ends without the Agent losing access, as on a database blip", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    let notified = false;
+    mcp.client.setNotificationHandler(LoggingMessageNotificationSchema, () => void (notified = true));
+
+    // The stream's access check, before it pushes this Comment's waiting work, fails, which ends the stream.
+    await cronk.interruptQueriesOn("agent_tokens", () => admin.post("/api/tickets/CRONK-1/comments", { body: "Lost." }));
+    expect(notified).toBe(false);
+
+    // Work keeps starting to wait for it until a notice gets through, or a few seconds pass.
+    const deadline = Date.now() + 5_000;
+    while (!notified && Date.now() < deadline) {
+      await admin.post("/api/tickets/CRONK-1/comments", { body: "Still there?" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    expect(notified).toBe(true);
+  });
+
   it("stops being pushed once the token is revoked, before the client's next request", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     const mcp = await connectMcp(cronk, claude.secret, { listening: true });
