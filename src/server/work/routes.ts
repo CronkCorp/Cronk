@@ -218,7 +218,8 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const ticket = await transaction(ctx.db, async (tx) => {
           const project = await projectOr404(tx, user.workspaceId, request.params.key);
-          // New Tickets start in the Project's first Status.
+          // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
+          await lockProject(tx, project.id);
           const [firstStatus] = await listStatuses(tx, project.id);
           return insertTicket(tx, {
             project,

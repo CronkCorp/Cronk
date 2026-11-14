@@ -193,4 +193,23 @@ describe("Statuses", () => {
     const tickets = (await admin.get("/api/projects/CRONK/tickets")).body.tickets;
     expect(tickets.filter((t: { status: Status }) => t.status.id === qa.id)).toEqual([]);
   });
+
+  it("leave no Ticket behind when Tickets are created while the first Status is removed", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const backlog = await statusNamed(admin, "Backlog");
+    const icebox = (await admin.post("/api/projects/CRONK/statuses", { name: "Icebox", category: "backlog" })).body.status;
+
+    const create = (i: number) => admin.post("/api/projects/CRONK/tickets", { title: `T${i}` });
+    const results = await Promise.all([
+      ...Array.from({ length: 10 }, (_, i) => create(i)),
+      admin.delete(`/api/projects/CRONK/statuses/${backlog.id}?moveTo=${icebox.id}`),
+      ...Array.from({ length: 10 }, (_, i) => create(i + 10)),
+    ]);
+    for (const result of results) expect([201, 204]).toContain(result.status);
+
+    const tickets = (await admin.get("/api/projects/CRONK/tickets")).body.tickets;
+    expect(tickets).toHaveLength(20);
+    expect(tickets.filter((t: { status: Status }) => t.status.id !== icebox.id)).toEqual([]);
+  });
 });
