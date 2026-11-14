@@ -89,6 +89,17 @@ export async function findActivity(db: Queryable, ticketId: string, id: string):
   return rows[0] && toActivity(rows[0]);
 }
 
+/** The unanswered questions of the Agents `ownerId` owns, on Tickets of the Projects `projectIds`, oldest first. */
+export async function listOpenQuestions(db: Queryable, ownerId: string, projectIds: string[]): Promise<Activity[]> {
+  const { rows } = await db.query<ActivityRow>(
+    `${selectFrom("activities")}
+     WHERE v.actor_user_id = $1 AND v.kind = 'question' AND v.answer_comment_id IS NULL AND t.project_id = ANY($2::uuid[])
+     ORDER BY v.seq`,
+    [ownerId, projectIds],
+  );
+  return rows.map(toActivity);
+}
+
 /**
  * Marks the question `activity` answered by `commentId`, unless it is not a question or is
  * already answered. Returns whether it did.

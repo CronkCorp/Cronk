@@ -16,6 +16,7 @@ import { knowledgeRoutes } from "./knowledge/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
+import { inboxRoutes } from "./inbox/routes.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -125,6 +126,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(conversationRoutes(ctx));
+  await app.register(inboxRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 
   const webRoot = opts.config.webRoot;
