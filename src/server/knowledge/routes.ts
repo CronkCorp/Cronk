@@ -6,6 +6,7 @@ import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access }
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { headingsIn, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -175,6 +176,52 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { id: string }; Body: { baseVersion: number; heading: string; body: string } }>(
+      "/api/documents/:id/replace-section",
+      {
+        schema: {
+          params: documentParams,
+          body: {
+            type: "object",
+            required: ["baseVersion", "heading", "body"],
+            additionalProperties: false,
+            properties: {
+              baseVersion,
+              heading: {
+                type: "string",
+                minLength: 1,
+                maxLength: 500,
+                pattern: "\\S",
+                description: "The section's heading text, such as `Setup`; put its `#` marks first, such as `## Setup`, to pick one of several headings with that text.",
+              },
+              body: {
+                ...body,
+                description: "The Markdown to put under the heading, replacing everything down to the next heading of the same or a higher level; the heading itself stays.",
+              },
+            },
+          },
+          response: {
+            200: answer("The Document at its new Version; unchanged if the replacement changed nothing", holding("document", "Document")),
+            ...errors(401, 403, 410),
+            400: { description: "The request is invalid, or several sections have that heading; a refused heading lists the Document's headings", ...ref("SectionRefused") },
+            404: { description: "There is no such Document, or it has no section with that heading, in which case its headings are listed", ...ref("SectionRefused") },
+            409: staleVersionAnswer,
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await transaction(ctx.db, async (tx) => {
+          const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireCurrent(tx, current, request.body.baseVersion);
+          const replaced = replaceSection(current.body, request.body.heading, request.body.body);
+          if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
+          return saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
+        });
+        return { document };
+      },
+    );
+
     app.post<{ Params: { id: string }; Body: { parentId: string | null; position?: number } }>(
       "/api/documents/:id/move",
       {
@@ -292,6 +339,15 @@ export function knowledgeRoutes(ctx: AppContext) {
 
 /** The page tree of a Project in the Actor's Workspace, or the Workspace's own with a null `projectId`. */
 const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId });
+
+/** Refuses a section replacement, listing the Document's headings so the caller can pick one. */
+function sectionRefused(document: Document, heading: string, refusal: SectionRefusal): HttpError {
+  const headings = headingsIn(document.body);
+  if (refusal.refused === "ambiguous") {
+    return new HttpError(400, `${refusal.matches} sections of ${document.title} are headed “${heading.trim()}”; put the heading's # marks first to pick one`, { headings });
+  }
+  return new HttpError(404, `${document.title} has no section headed “${heading.trim()}”`, { headings });
+}
 
 const notInTree = () => new HttpError(400, "The parent must be a Document of the same page tree");
 

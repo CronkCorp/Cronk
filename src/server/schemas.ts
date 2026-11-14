@@ -46,6 +46,7 @@ export type SharedSchemaName =
   | "Version"
   | "VersionSummary"
   | "StaleVersion"
+  | "SectionRefused"
   | "Guidance"
   | "GuidanceVersion"
   | "StaleGuidance";
@@ -268,6 +269,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   StaleVersion: {
     description: "A save refused because the Version it is based on is no longer current, with the current Version to merge with.",
     ...object({ error: { type: "string" }, current: ref("Version") }),
+  },
+  SectionRefused: {
+    description: "A section replacement refused because no section, or more than one, has that heading, with the Document's headings to pick from.",
+    ...object({ error: { type: "string" }, headings: { type: "array", items: { type: "string" }, description: "Its heading lines, such as `## Setup`, in order." } }, ["headings"]),
   },
   StaleGuidance: {
     description: "A save of Guidance refused because the Version it is based on is no longer current, with the current Guidance to merge with.",
