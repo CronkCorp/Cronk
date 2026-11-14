@@ -52,9 +52,13 @@ function required<T>(value: T | undefined, what: string, action: string): T {
 
 const error = (message: string): CallToolResult => ({ isError: true, content: [{ type: "text", text: message }] });
 
-/** The API's answer as a tool result: its JSON, or its error message. */
+/** The API's answer as a tool result: its JSON, or its error message followed by any details it carries as JSON. */
 function toResult(res: ApiResponse): CallToolResult {
-  if (res.status >= 400) return error(res.body?.error ?? `The API answered ${res.status}`);
+  if (res.status >= 400) {
+    const { error: message, ...details } = res.body ?? {};
+    const text = message ?? `The API answered ${res.status}`;
+    return error(Object.keys(details).length > 0 ? `${text}\n\n${JSON.stringify(details)}` : text);
+  }
   return { content: [{ type: "text", text: JSON.stringify(res.body ?? {}) }] };
 }
 
@@ -73,7 +77,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description: "Tickets: the units of work tracked in a Project, keyed like CRONK-12.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK (list)"),
-      key: z.string().optional().describe("Ticket key, such as CRONK-12 (get)"),
+      key: z.string().optional().describe("Ticket key, such as CRONK-12 (get, claim, release, move, create_sub_ticket)"),
+      to: z.string().optional().describe("The Status to move into, by name or id (move)"),
+      title: z.string().optional().describe("The new Sub-Ticket's title (create_sub_ticket)"),
+      description: z.string().optional().describe("The new Sub-Ticket's Markdown description (create_sub_ticket)"),
       status: z.array(z.string()).optional().describe("Only Tickets in one of these Status ids (list)"),
       category: z.array(z.enum(STATUS_CATEGORIES)).optional().describe("Only Tickets whose Status is in one of these Status Categories (list)"),
       priority: z.array(z.enum(PRIORITIES)).optional().describe("Only Tickets with one of these Priorities (list)"),
@@ -95,6 +102,113 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         writes: false,
         run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "get"))}`),
       },
+      next: {
+        description: "claim your next Ready Ticket (highest Priority, then oldest) and get it; `next` is null when none is Ready",
+        writes: true,
+        run: (api) => api("POST", "/api/agent-sessions/current/next"),
+      },
+      claim: {
+        description: "claim a Ticket delegated to you, so no other Agent Session works on it, and get it",
+        writes: true,
+        run: (api, a) => api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "claim"))}/claim`),
+      },
+      release: {
+        description: "release your Claim on a Ticket, leaving it delegated to you for another Agent Session",
+        writes: true,
+        run: (api, a) => api("DELETE", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "release"))}/claim`),
+      },
+      move: {
+        description: "move a Ticket you hold the Claim on into another Status (Unstarted, Started or In Review only)",
+        writes: true,
+        run: async (api, a) => {
+          const key = required(a.key, "a key", "move");
+          const to = required(a.to, "a Status to move to", "move");
+          const projectKey = key.slice(0, key.lastIndexOf("-"));
+          const project = await api("GET", `/api/projects/${encodeURIComponent(projectKey)}`);
+          if (project.status >= 400) return project;
+          const statuses = project.body.statuses as { id: string; name: string }[];
+          const status = statuses.find((s) => s.id === to) ?? statuses.find((s) => s.name.toLowerCase() === to.trim().toLowerCase());
+          if (!status) throw new ToolError(`${projectKey.toUpperCase()} has no Status named ${to}; it has ${statuses.map((s) => s.name).join(", ")}`);
+          return api("PATCH", `/api/tickets/${encodeURIComponent(key)}`, { statusId: status.id });
+        },
+      },
+      create_sub_ticket: {
+        description: "split a Ticket you hold the Claim on: create a Sub-Ticket that stays delegated to you",
+        writes: true,
+        run: (api, a) => {
+          const key = required(a.key, "a key", "create_sub_ticket");
+          const title = required(a.title, "a title", "create_sub_ticket");
+          return api("POST", `/api/tickets/${encodeURIComponent(key)}/sub-tickets`, { title, ...(a.description !== undefined && { description: a.description }) });
+        },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "documents",
+    description:
+      "Documents: Markdown knowledge belonging to a Project or, without a project, the Workspace, arranged in a page tree. " +
+      "Every update names the Version it is based on (`baseVersion`, the Document's `version`) and is refused if that is no " +
+      "longer current; the refusal carries the current Version, so merge your change into it and update again.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
+      id: z.string().optional().describe("Document id (get, update)"),
+      parentId: z.string().optional().describe("The Document to create it under; at the top if left out (create)"),
+      title: z.string().optional().describe("Title (create, update)"),
+      body: z.string().optional().describe("Markdown body; Ticket keys such as CRONK-12 become links (create, update)"),
+      baseVersion: z.number().int().optional().describe("The Version this update is based on (update)"),
+    },
+    actions: {
+      get: {
+        description: "one Document with its Markdown body and current Version",
+        writes: false,
+        run: (api, a) => api("GET", `/api/documents/${encodeURIComponent(required(a.id, "an id", "get"))}`),
+      },
+      tree: {
+        description: "a Project's (or the Workspace's) page tree, depth first, each Document with its depth",
+        writes: false,
+        run: (api, a) => api("GET", `${treePath(a.project)}/documents`),
+      },
+      create: {
+        description: "a new Document at Version 1, last among its siblings",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `${treePath(a.project)}/documents`, {
+            title: required(a.title, "a title", "create"),
+            ...(a.body !== undefined && { body: a.body }),
+            ...(a.parentId !== undefined && { parentId: a.parentId }),
+          }),
+      },
+      update: {
+        description: "saves a new Version with a new title and/or body",
+        writes: true,
+        run: (api, a) =>
+          api("PATCH", `/api/documents/${encodeURIComponent(required(a.id, "an id", "update"))}`, {
+            baseVersion: required(a.baseVersion, "a baseVersion", "update"),
+            ...(a.title !== undefined && { title: a.title }),
+            ...(a.body !== undefined && { body: a.body }),
+          }),
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "guidance",
+    description:
+      "Guidance: standing instructions Users wrote for Agents, as Markdown. The Workspace's applies everywhere; " +
+      "a Project's layers on top of it when you work in that Project.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK, for that Project's Guidance; leave out for the Workspace's"),
+    },
+    actions: {
+      get: {
+        description: "the current Guidance of the Workspace, or of a Project",
+        writes: false,
+        run: (api, a) => api("GET", a.project ? `/api/projects/${encodeURIComponent(a.project)}/guidance` : "/api/workspace/guidance"),
+      },
     },
   });
 }
+
+/** Where a page tree's API lives: a Project's, or the Workspace's when no Project is named. */
+const treePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);

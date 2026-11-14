@@ -109,7 +109,7 @@ A piece of written knowledge belonging to a Project or the Workspace, kept as Ma
 _Avoid_: Page, doc, wiki page, note
 
 **Version**:
-One saved state of a Document or Artifact, recording which Actor produced it.
+One saved state of a Document, Artifact or Guidance, recording which Actor produced it.
 _Avoid_: Revision, snapshot, history entry
 
 **Artifact**:

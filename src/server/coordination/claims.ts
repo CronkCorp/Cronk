@@ -1,0 +1,128 @@
+import type { Queryable } from "../db/database.js";
+import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
+import type { AgentRef } from "../work/tickets.js";
+import { isLiveAt, WITH_WORKSPACE } from "./agent-sessions.js";
+
+/**
+ * An Agent Session's exclusive, temporary hold on a Ticket. A Ticket stores at most one
+ * (its `claim_session_id`), and the Claim is live exactly while its Agent Session is: every
+ * call in the Session refreshes both, and both lapse once the Session stays silent longer
+ * than the Workspace's silence threshold. Lapsing keeps the Ticket's Delegate.
+ */
+export interface Claim {
+  agent: AgentRef;
+  session: { id: string };
+  claimedAt: Date;
+  /** When the Claim lapses if its Agent Session stays silent until then. */
+  endsIfSilentAt: Date;
+}
+
+interface ClaimRow {
+  agent_id: string;
+  agent_name: string;
+  session_id: string;
+  claimed_at: Date;
+  last_seen_at: Date;
+  silence_threshold_seconds: number;
+}
+
+/** The Ticket's live Claim, if it has one at `now`. */
+export async function findLiveClaim(db: Queryable, ticketId: string, now: Date): Promise<Claim | undefined> {
+  const { rows } = await db.query<ClaimRow>(
+    `SELECT a.id AS agent_id, a.name AS agent_name, s.id AS session_id, t.claimed_at, s.last_seen_at, w.silence_threshold_seconds
+     FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id ${WITH_WORKSPACE}
+     WHERE t.id = $1 AND ${isLiveAt("$2")}`,
+    [ticketId, now],
+  );
+  const row = rows[0];
+  return (
+    row && {
+      agent: { id: row.agent_id, name: row.agent_name },
+      session: { id: row.session_id },
+      claimedAt: row.claimed_at,
+      endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+    }
+  );
+}
+
+/**
+ * Gives the Session `sessionId` the Ticket's Claim, replacing any lapsed one. Callers check
+ * first, with the Ticket locked, that no other Session holds a live Claim. Claiming again
+ * from the same Session keeps the original time.
+ */
+export async function setClaim(db: Queryable, ticketId: string, sessionId: string, now: Date): Promise<void> {
+  await db.query(
+    `UPDATE tickets SET claim_session_id = $2, claimed_at = $3 WHERE id = $1 AND claim_session_id IS DISTINCT FROM $2`,
+    [ticketId, sessionId, now],
+  );
+}
+
+/** Drops the Ticket's Claim, as when it is released or its Delegate changes. */
+export async function clearClaim(db: Queryable, ticketId: string): Promise<void> {
+  await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL WHERE id = $1", [ticketId]);
+}
+
+/** SQL condition: the Ticket `t` has a live Claim at the time in the parameter `nowParam`. */
+const hasLiveClaim = (nowParam: string) => `EXISTS (
+  SELECT 1 FROM agent_sessions cs JOIN agents ca ON ca.id = cs.agent_id JOIN workspaces cw ON cw.id = ca.workspace_id
+  WHERE cs.id = t.claim_session_id AND ${isLiveAt(nowParam, { session: "cs", workspace: "cw" })})`;
+
+/** SQL list of the finished Status Categories, for `IN`. */
+const FINISHED = `(${FINISHED_CATEGORIES.map((c) => `'${c}'`).join(", ")})`;
+
+/**
+ * SQL condition: the Ticket `t`, in the Status `s`, is Ready for the Agent `agentParam` among the
+ * Projects `projectsParam`: delegated to it, not Completed or Canceled, not blocked by an
+ * unfinished Ticket, and without a live Claim.
+ */
+const isReady = (agentParam: string, projectsParam: string, nowParam: string) => `
+  t.delegate_id = ${agentParam} AND t.project_id = ANY(${projectsParam}::uuid[])
+  AND s.category NOT IN ${FINISHED}
+  AND NOT EXISTS (
+    SELECT 1 FROM ticket_relations r JOIN tickets b ON b.id = r.from_ticket_id JOIN statuses bs ON bs.id = b.status_id
+    WHERE r.kind = 'blocks' AND r.to_ticket_id = t.id AND bs.category NOT IN ${FINISHED})
+  AND NOT ${hasLiveClaim(nowParam)}`;
+
+/** Ready Tickets are offered highest Priority first, then oldest first. */
+const READY_ORDER = `
+  CASE t.priority ${PRIORITIES.map((p, i) => `WHEN '${p}' THEN ${i}`).join(" ")} END,
+  t.created_at, t.number, t.id`;
+
+/** Where an Agent looks for Ready Tickets: the Agent, and the Projects it may work in. */
+export interface ReadyScope {
+  agentId: string;
+  projectIds: string[];
+}
+
+/** The ids of the Agent's Ready Tickets in the order they are offered, at most `limit` of them if given. */
+export async function listReadyTicketIds(db: Queryable, scope: ReadyScope, now: Date, limit?: number): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.id FROM tickets t JOIN statuses s ON s.id = t.status_id WHERE ${isReady("$1", "$2", "$3")} ORDER BY ${READY_ORDER} LIMIT $4`,
+    [scope.agentId, scope.projectIds, now, limit ?? null],
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Claims the Agent's first Ready Ticket for the Session `sessionId` and returns its id;
+ * undefined if none is Ready. Run inside a transaction.
+ *
+ * Each candidate is locked and then checked again in a fresh statement, which sees any Claim
+ * committed before the lock was granted; a Ticket another call has locked is skipped. So two
+ * Sessions never get the same Ticket. (Checking within the locking statement isn't enough:
+ * Postgres re-checks a locked row's joins against the rows it first saw.)
+ */
+export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId: string, now: Date): Promise<string | undefined> {
+  for (const id of await listReadyTicketIds(db, scope, now)) {
+    const locked = await db.query("SELECT 1 FROM tickets WHERE id = $1 FOR UPDATE SKIP LOCKED", [id]);
+    if (locked.rowCount === 0) continue;
+    const ready = await db.query(
+      `SELECT 1 FROM tickets t JOIN statuses s ON s.id = t.status_id WHERE t.id = $4 AND ${isReady("$1", "$2", "$3")}`,
+      [scope.agentId, scope.projectIds, now, id],
+    );
+    if (ready.rowCount === 0) continue;
+    await setClaim(db, id, sessionId, now);
+    return id;
+  }
+  return undefined;
+}

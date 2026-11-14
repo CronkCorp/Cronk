@@ -17,14 +17,23 @@ export function workspaceRoutes(ctx: AppContext) {
       },
     );
 
-    app.patch<{ Body: { name?: string; agentAccess?: AgentAccess } }>(
+    app.patch<{ Body: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number } }>(
       "/api/workspace",
       {
         schema: {
           body: {
             type: "object",
             additionalProperties: false,
-            properties: { name: nameSchema, agentAccess: agentAccessSchema },
+            properties: {
+              name: nameSchema,
+              agentAccess: agentAccessSchema,
+              silenceThresholdSeconds: {
+                type: "integer",
+                minimum: 60,
+                maximum: 86_400,
+                description: "How long an Agent Session may stay silent before it ends and its Claims lapse: one minute to one day.",
+              },
+            },
           },
           response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403, 410) },
         },
@@ -32,10 +41,11 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change the Workspace");
-        const { name, agentAccess } = request.body;
+        const { name, agentAccess, silenceThresholdSeconds } = request.body;
         const workspace = await updateWorkspace(ctx.db, user.workspaceId, {
           ...(name !== undefined && { name: name.trim() }),
           ...(agentAccess !== undefined && { agentAccess }),
+          ...(silenceThresholdSeconds !== undefined && { silenceThresholdSeconds }),
         });
         return publicWorkspace(workspace);
       },

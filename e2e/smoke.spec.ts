@@ -25,6 +25,18 @@ test("set up a fresh installation, sign out, sign in and see the application she
 
   await page.reload();
   await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  // The Admin tunes how long a silent Agent Session keeps its Claims.
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("5");
+  await page.getByLabel("Silence threshold (minutes)").fill("10");
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("10");
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // The API refuses query parameters it doesn't know; the application shell takes any.
+  await page.goto("/?utm_source=bookmark");
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
 });
 
 // Runs after the test above on the same server, so the installation is already set up.
@@ -194,4 +206,52 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await expect(page.getByRole("list", { name: "History" })).toContainText(`claude-laptop (session ${session.slice(0, 4)}, for Ada) renamed it`);
   await page.getByRole("link", { name: "Agents" }).click();
   await expect(page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" })).toContainText(`Connected, session ${session.slice(0, 4)}`);
+  // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByTestId("ticket-claim")).toHaveText("Not Claimed");
+  await page.getByLabel("Assignee").selectOption({ label: "Ada" });
+  await page.getByLabel("Delegate").selectOption({ label: "claude-laptop" });
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada delegated it to claude-laptop");
+  const claimed = await request.post(`/api/tickets/${ticket.key}/claim`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+  });
+  expect(claimed.status()).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
+});
+
+// Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.
+test("write a Document, edit it, and restore an earlier Version", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: "Documents" }).last().click();
+
+  await page.getByRole("button", { name: "New Document" }).click();
+  await page.getByLabel("Title").fill("Onboarding");
+  await page.getByRole("button", { name: "Create Document" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Start with CRONK-1.");
+  await page.getByRole("button", { name: "Save" }).click();
+
+  const body = page.getByTestId("document-body");
+  await expect(body).toContainText("Start with CRONK-1.");
+  await expect(body.getByRole("link", { name: "CRONK-1" })).toHaveAttribute("href", "/tickets/CRONK-1");
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Rewritten.");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Rewritten.");
+
+  await page.getByRole("button", { name: "Versions" }).click();
+  const versions = page.getByRole("list", { name: "Versions" });
+  await expect(versions).toContainText("Version 3");
+  await versions.getByRole("listitem").filter({ hasText: "Version 2" }).getByRole("button", { name: "Restore" }).click();
+  await expect(body).toContainText("Start with CRONK-1.");
+  await expect(versions).toContainText("Version 4");
+  await expect(versions).toContainText("restored Version 2");
+
+  await page.getByRole("link", { name: "Documents", exact: true }).last().click();
+  await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
 });

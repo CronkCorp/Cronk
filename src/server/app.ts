@@ -5,15 +5,19 @@ import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
 import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
-import { addSharedSchemas, answer, publicRoute } from "./schemas.js";
+import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { mcpRoutes } from "./mcp/server.js";
 import { identityRoutes } from "./identity/routes.js";
+import { guidanceRoutes } from "./knowledge/guidance-routes.js";
+import { knowledgeRoutes } from "./knowledge/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
+/** Where the OpenAPI description is served; it takes any query string. */
+const OPENAPI_PATH = "/api/openapi.json";
 
 export interface AppConfig {
   databaseUrl: string;
@@ -45,9 +49,26 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure };
 
   app.addHook("onClose", async () => db.end());
+  // Every API route refuses query parameters it doesn't declare, including routes that declare none,
+  // so a new route can't forget to. The web shell and the OpenAPI document take any query string.
+  app.addHook("onRoute", (route) => {
+    if (!route.url.startsWith("/api/") || route.url === OPENAPI_PATH) return;
+    // Fastify also takes `query` for `querystring`; declaring both fails at startup, so fold it in.
+    const { query, querystring: declared, ...schema } = (route.schema ?? {}) as Record<string, unknown>;
+    // `properties: {}` so the OpenAPI description lists no query parameters rather than reading the schema as one.
+    const querystring = (declared ?? query ?? { type: "object", properties: {} }) as Record<string, unknown>;
+    // Only an inline object schema takes the default: beside a `$ref` it would refuse the declared parameters too.
+    const inline = querystring.type === "object" && !("$ref" in querystring);
+    route.schema = {
+      ...schema,
+      querystring: inline ? { additionalProperties: false, ...querystring } : querystring,
+      // So every operation's description says it can be refused; a route's own 400 description wins.
+      response: { ...errors(400), ...(schema.response as object | undefined) },
+    };
+  });
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
-    if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
+    if (err instanceof HttpError) return reply.code(err.statusCode).send({ ...err.details, error: err.message });
     const fastifyError = err as Partial<FastifyError>;
     if (fastifyError.validation) return reply.code(400).send({ error: validationMessage(fastifyError as FastifyError) });
     if (fastifyError.statusCode && fastifyError.statusCode < 500) {
@@ -83,7 +104,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     // Shared schemas appear under `components.schemas` by their `$id`.
     refResolver: { buildLocalReference: (json, _baseUri, _fragment, i) => (typeof json.$id === "string" ? json.$id : `def-${i}`) },
   });
-  app.get("/api/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+  app.get(OPENAPI_PATH, { schema: { hide: true } }, async () => app.swagger());
   app.get(
     "/api/health",
     { schema: { ...publicRoute, response: { 200: answer("Cronk is up and its database answers", healthSchema) } } },
@@ -96,6 +117,8 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
+  await app.register(knowledgeRoutes(ctx));
+  await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 

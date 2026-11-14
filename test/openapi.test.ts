@@ -64,20 +64,27 @@ describe("the OpenAPI description", () => {
   it("describes the errors each operation can answer with the shared error shape", async () => {
     const doc = await openapi();
     const errorBody = { $ref: "#/components/schemas/Error" };
+    const staleBody = { $ref: "#/components/schemas/StaleVersion" };
+    const staleGuidanceBody = { $ref: "#/components/schemas/StaleGuidance" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
       // Every operation that needs a sign-in or token can be refused without one, or for an ended Agent Session.
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
+      // Every operation refuses query parameters it doesn't take.
+      expect(errors, label).toContain("400");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        expect(op.responses[code].content["application/json"].schema, `${label} ${code}`).toEqual(errorBody);
+        // A stale save's refusal is the error shape plus the current Version (of a Document or of Guidance).
+        const allowed = code === "409" ? [errorBody, staleBody, staleGuidanceBody] : [errorBody];
+        expect(allowed, `${label} ${code}`).toContainEqual(op.responses[code].content["application/json"].schema);
       }
     }
     const errorsOf = (path: string, method: string) => Object.keys(doc.paths[path][method].responses).filter((c) => c.startsWith("4"));
-    expect(errorsOf("/api/tickets/{key}", "get")).toEqual(["401", "404", "410"]);
+    expect(errorsOf("/api/tickets/{key}", "get")).toEqual(["400", "401", "404", "410"]);
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
-    expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["404"]);
+    expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["400", "404"]);
+    expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toEqual(staleBody);
   });
 
   it("has no two paths that differ only in the names of their path parameters", async () => {
@@ -102,5 +109,15 @@ describe("the OpenAPI description", () => {
         expect(param.schema?.type, `${label} ${param.name}`).toBe("string");
       }
     }
+  });
+
+  it("lists only the query parameters an operation takes", async () => {
+    const doc = await openapi();
+    const query = (path: string, method: string) =>
+      (doc.paths[path][method].parameters ?? []).filter((p: { in: string }) => p.in === "query").map((p: { name: string }) => p.name);
+    expect(query("/api/tickets/{key}", "get")).toEqual([]);
+    expect(query("/api/projects", "post")).toEqual([]);
+    expect(query("/api/projects", "get")).toEqual(["archived"]);
+    expect(query("/api/projects/{key}/tickets", "get")).toEqual(["status", "category", "assignee", "priority", "label"]);
   });
 });
