@@ -1,12 +1,16 @@
 import type { FastifyInstance } from "fastify";
 import type { Actor } from "../actor.js";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
+import { userActor } from "../actor.js";
+import { findStatusToMoveInto, listStatuses } from "../work/projects.js";
+import { updateTicket } from "../work/tickets.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { answer, documentIdParam, errors, holding, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, type CommentPlace, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
@@ -117,9 +121,58 @@ export function conversationRoutes(ctx: AppContext) {
           return { ticket, posted: await post(tx, actor, { ticketId: ticket.id }, place, request.body) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
-        if (posted.answered) ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
+        if (posted.answered) {
+          ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
+          inboxesChanged(ctx.live, [posted.answered.agent.owner.id]);
+        }
         pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
         return reply.code(201).send({ comment: publicComment(posted.comment) });
+      },
+    );
+
+    // An Inbox action: hands work under review back, with a Comment saying what is left to do.
+    app.post<{ Params: { key: string }; Body: { comment: string; statusId?: string } }>(
+      "/api/tickets/:key/send-back",
+      {
+        schema: {
+          params: ticketParams,
+          body: {
+            type: "object",
+            required: ["comment"],
+            additionalProperties: false,
+            properties: {
+              comment: { ...newCommentBody.properties.body, description: `What is left to do, as Markdown. ${MENTION_SYNTAX}` },
+              statusId: { ...id, description: "A Started Status of the Ticket's Project. The Project's first Started Status if left out." },
+            },
+          },
+          response: {
+            200: answer(
+              "The Ticket, moved from its In Review Status back to a Started one, and the Comment posted on it, which waits for its Delegate",
+              { type: "object", required: ["ticket", "comment"], properties: { ticket: ref("Ticket"), comment: ref("Comment") } },
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const actor = userActor(user);
+        const { ticket, posted } = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (ticket.status.category !== "in_review") throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, not In Review`);
+          const started = (await listStatuses(tx, ticket.projectId)).filter((s) => s.category === "started");
+          const chosen = request.body.statusId === undefined ? started[0] : started.find((s) => s.id === request.body.statusId);
+          // Locked so it can't be removed before the move commits.
+          const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
+          if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
+          const moved = await updateTicket(tx, ticket, { status }, actor, ctx.clock.now());
+          const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+          return { ticket: moved, posted: await post(tx, actor, { ticketId: ticket.id }, place, { body: request.body.comment }) };
+        });
+        ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
+        pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+        inboxesChanged(ctx.live, [ticket.assignee?.id]);
+        return { ticket, comment: publicComment(posted.comment) };
       },
     );
 

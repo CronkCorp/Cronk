@@ -29,6 +29,7 @@ import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { SearchResult } from "./search/search.js";
+import type { QuestionItem, ReviewItem } from "./inbox/inbox.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
@@ -119,3 +120,7 @@ export type Merge = StoredMerge & { onto: Version };
 /** An edit of Guidance merged section by section with the Guidance it is merged `onto`. */
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
+
+/** One item in a User's Inbox: a Ticket to review, or an open question of one of their Agents. */
+export type InboxItem = Serialized<ReviewItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
+export type InboxKind = InboxItem["kind"];

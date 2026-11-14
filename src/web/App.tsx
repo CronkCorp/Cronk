@@ -3,6 +3,7 @@ import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
+import { inboxFilterFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { SearchBox, SearchPage, searchFilterFrom } from "./search.js";
 import { Link, navigate, useLocation } from "./router.js";
@@ -123,6 +124,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
         </Link>
         <div className="topbar-right">
           <SearchBox />
+          <Link to="/inbox" className="link">Inbox</Link>
           <Link to="/documents" className="link">Documents</Link>
           <Link to="/guidance" className="link">Guidance</Link>
           <Link to="/agents" className="link">Agents</Link>
@@ -161,6 +163,7 @@ function Page(props: { me: User }) {
   if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   if (path === "/agents") return <AgentsPage me={props.me} />;
   if (path === "/search") return <SearchPage filter={searchFilterFrom(search)} />;
+  if (path === "/inbox") return <InboxPage filter={inboxFilterFrom(search)} />;
   if (path === "/documents") return <DocumentsPage />;
   const projectDocuments = /^\/projects\/([^/]+)\/documents$/.exec(path);
   if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;

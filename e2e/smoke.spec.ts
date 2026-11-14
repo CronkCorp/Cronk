@@ -263,6 +263,36 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await page.getByRole("list", { name: "Reports" }).getByRole("link", { name: /What I found/ }).click();
   await expect(page.getByRole("heading", { name: /What I found/ })).toContainText(`Report on ${ticket.key}`);
   await expect(page.getByTestId("document-body")).toContainText("It was the cache.");
+
+  // The Session hands the Ticket over; it waits in Ada's Inbox with its Report, and new questions arrive there live.
+  const agentCall = { authorization: `Bearer ${token}`, "cronk-agent-session": session };
+  const statuses = (await (await request.get(`/api/projects/${ticket.key.split("-")[0]}`, { headers: agentCall })).json()).statuses;
+  const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
+  expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
+  await page.getByRole("link", { name: "Inbox" }).click();
+  const inbox = page.getByRole("list", { name: "Inbox" });
+  const review = inbox.getByRole("listitem", { name: `Review ${ticket.key}` });
+  await expect(review.getByRole("list", { name: `Reports on ${ticket.key}` })).toContainText("What I found");
+  await request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body: "Ship it **today**?", blocking: true } });
+  const question = inbox.getByRole("listitem", { name: `Question on ${ticket.key}` });
+  await expect(question).toContainText("Blocking question");
+  await expect(inbox.getByRole("listitem").first()).toContainText("Ship it today?");
+  await question.getByRole("button", { name: "Answer" }).click();
+  await question.getByLabel("Answer").fill("Yes.");
+  await question.getByRole("button", { name: "Post answer" }).click();
+  await expect(question).toHaveCount(0);
+  // The Ticket opens from the Inbox.
+  await review.getByRole("link", { name: new RegExp(ticket.key) }).click();
+  await expect(page.getByRole("heading", { name: "Filed and renamed by an Agent" })).toBeVisible();
+  await page.goBack();
+  // Ada sends the work back with what is left; it leaves her Inbox, and the Ticket shows why.
+  await review.getByRole("button", { name: "Send back" }).click();
+  await review.getByLabel("What is left to do").fill("Add a test.");
+  await review.getByRole("button", { name: "Send back" }).click();
+  await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByLabel("Status")).toHaveValue(statuses.find((s: { category: string }) => s.category === "started").id);
+  await expect(timeline).toContainText("Add a test.");
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.

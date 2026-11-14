@@ -6,7 +6,7 @@ import type { Queryable } from "../db/database.js";
 import { readablePlaces, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
 import { listLinkedDocuments } from "../knowledge/documents.js";
 import { ref } from "../schemas.js";
-import { findProjectById, listProjects } from "./projects.js";
+import { findProjectById, listAllProjects } from "./projects.js";
 import { listRelations, type Relations } from "./relations.js";
 import { findTicketByKey, listSubTickets, type RecordedChange, type Ticket, type TicketRef } from "./tickets.js";
 
@@ -55,7 +55,7 @@ export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, 
 
 /** Keys of the Projects, archived or not, that `actor` can see. */
 async function visibleProjectKeys(db: Queryable, actor: Actor): Promise<Set<string>> {
-  const projects = [...(await listProjects(db, actingUser(actor).workspaceId, false)), ...(await listProjects(db, actingUser(actor).workspaceId, true))];
+  const projects = await listAllProjects(db, actingUser(actor).workspaceId);
   return new Set((await visibleProjects(db, actor, projects)).map((p) => p.key));
 }
 
