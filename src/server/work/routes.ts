@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
-import { nameSchema } from "../schemas.js";
+import { agentAccessSchema, nameSchema } from "../schemas.js";
 import { actingUser, type Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { requireAdmin, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
+import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
 import { findUserById, publicUser } from "../identity/users.js";
 import {
@@ -53,6 +53,7 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "write");
         const key = request.body.key.toUpperCase();
         const project = await transaction(ctx.db, (tx) =>
           insertProject(tx, { workspaceId: actingUser(actor).workspaceId, name: request.body.name.trim(), key, now: ctx.clock.now() }),
@@ -68,26 +69,36 @@ export function workRoutes(ctx: AppContext) {
       return { project: { ...project, access }, statuses: await listStatuses(ctx.db, project.id) };
     });
 
-    app.patch<{ Params: { key: string }; Body: { name?: string; archived?: boolean; visibility?: Visibility } }>(
+    app.patch<{
+      Params: { key: string };
+      Body: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess };
+    }>(
       "/api/projects/:key",
       {
         schema: {
           body: {
             type: "object",
             additionalProperties: false,
-            properties: { name: nameSchema, archived: { type: "boolean" }, visibility: { type: "string", enum: ["open", "private"] } },
+            properties: {
+              name: nameSchema,
+              archived: { type: "boolean" },
+              visibility: { type: "string", enum: ["open", "private"] },
+              agentAccess: agentAccessSchema,
+            },
           },
         },
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { project, access } = await projectFor(ctx.db, actor, request.params.key, "write");
-        const { name, archived, visibility } = request.body;
+        const { name, archived, visibility, agentAccess } = request.body;
         if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
+        if (agentAccess !== undefined && actor.kind === "agent") throw new HttpError(403, "Only a User can change Agent Access");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
           ...(visibility !== undefined && { visibility }),
+          ...(agentAccess !== undefined && { agentAccess }),
         };
         return { project: { ...(await updateProject(ctx.db, project.id, changes, ctx.clock.now())), access } };
       },

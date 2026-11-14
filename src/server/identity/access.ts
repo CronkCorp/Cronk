@@ -12,28 +12,56 @@ import type { User } from "./users.js";
 /** What a User may do in a Project: Read, or Write (which includes Read). */
 export type Access = "read" | "write";
 
+/** The most a Project (or the Workspace) lets Agents do in it. */
+export type AgentAccess = "none" | Access;
+
 /** The part of a Project access depends on. */
 export interface AccessTarget {
   id: string;
   visibility: Visibility;
+  agentAccess: AgentAccess;
 }
 
 /**
- * The single rule. Admins have Write everywhere. A Member listed in a Project has
- * the access listed; otherwise an open Project gives them Write and a private one nothing.
+ * What a User has in a Project. Admins have Write everywhere. A Member listed in a Project
+ * has the access listed; otherwise an open Project gives them Write and a private one nothing.
  */
-function accessOf(user: User, project: AccessTarget, listed: Access | undefined): Access | undefined {
+function userAccess(user: User, project: AccessTarget, listed: Access | undefined): AgentAccess {
   if (user.role === "admin") return "write";
   if (listed) return listed;
-  return project.visibility === "open" ? "write" : undefined;
+  return project.visibility === "open" ? "write" : "none";
 }
 
-const covers = (has: Access, need: Access) => has === "write" || need === "read";
+const RANK: Record<AgentAccess, number> = { none: 0, read: 1, write: 2 };
+
+/** One thing limiting an Actor's access, with why it stops a write when it is Read. */
+interface Limit {
+  access: AgentAccess;
+  readOnlyBecause: string;
+}
 
 /**
- * Checks that `user` has at least `need` in `project` and returns what they have.
+ * Everything limiting what `actor` may do in a Project; their access is the lowest. A User
+ * is limited only by their own access. An Agent is also capped by the Project's Agent Access
+ * and by its token, and never gets more than its Owner has (ADR 0004).
+ */
+function limitsOf(actor: Actor, project: AccessTarget, listed: Access | undefined): Limit[] {
+  const own = userAccess(actingUser(actor), project, listed);
+  if (actor.kind === "user") return [{ access: own, readOnlyBecause: "You have Read access in this Project" }];
+  return [
+    { access: actor.readOnly ? "read" : "write", readOnlyBecause: "This Agent's token is read-only" },
+    { access: project.agentAccess, readOnlyBecause: "This Project's Agent Access is Read" },
+    { access: own, readOnlyBecause: "This Agent's Owner has Read access in this Project" },
+  ];
+}
+
+const lowest = (limits: Limit[]): AgentAccess =>
+  limits.reduce<AgentAccess>((low, l) => (RANK[l.access] < RANK[low] ? l.access : low), "write");
+
+/**
+ * Checks that `actor` has at least `need` in `project` and returns what they have.
  * A Project they can't see answers 404 with `hiddenAs`, as if it (or the thing in it) didn't
- * exist; Read where Write is needed answers 403.
+ * exist; Read where Write is needed answers 403, saying what limits them.
  */
 export async function requireProjectAccess(
   db: Queryable,
@@ -42,29 +70,48 @@ export async function requireProjectAccess(
   need: Access,
   hiddenAs = "No such Project",
 ): Promise<Access> {
-  const user = actingUser(actor);
   const { rows } = await db.query<{ access: Access }>(
     "SELECT access FROM project_members WHERE project_id = $1 AND user_id = $2",
-    [project.id, user.id],
+    [project.id, actingUser(actor).id],
   );
-  const access = accessOf(user, project, rows[0]?.access);
-  if (!access) throw new HttpError(404, hiddenAs);
-  if (!covers(access, need)) throw new HttpError(403, "You have Read access in this Project, so you can't change anything in it");
+  const limits = limitsOf(actor, project, rows[0]?.access);
+  const access = lowest(limits);
+  if (access === "none") throw new HttpError(404, hiddenAs);
+  const blocking = need === "write" && limits.find((l) => l.access === "read");
+  if (blocking) throw new HttpError(403, `${blocking.readOnlyBecause}, so you can't change anything in it`);
   return access;
 }
 
 /** The Projects `actor` can see, each with the access they have in it. */
 export async function visibleProjects<P extends AccessTarget>(db: Queryable, actor: Actor, projects: P[]): Promise<(P & { access: Access })[]> {
-  const user = actingUser(actor);
   const { rows } = await db.query<{ project_id: string; access: Access }>(
     "SELECT project_id, access FROM project_members WHERE user_id = $1",
-    [user.id],
+    [actingUser(actor).id],
   );
   const listed = new Map(rows.map((r) => [r.project_id, r.access]));
   return projects.flatMap((project) => {
-    const access = accessOf(user, project, listed.get(project.id));
-    return access ? [{ ...project, access }] : [];
+    const access = lowest(limitsOf(actor, project, listed.get(project.id)));
+    return access === "none" ? [] : [{ ...project, access }];
   });
+}
+
+/**
+ * Checks that `actor` has at least `need` in the Workspace outside any Project: reading it
+ * (its name, Users) or writing to it (creating Projects). Every User has Write here, but an
+ * Agent is capped by the Workspace's Agent Access and its token. Missing access answers 403.
+ */
+export async function requireWorkspaceAccess(db: Queryable, actor: Actor, need: Access): Promise<void> {
+  if (actor.kind === "user") return;
+  const { rows } = await db.query<{ agent_access: AgentAccess }>("SELECT agent_access FROM workspaces WHERE id = $1", [
+    actor.owner.workspaceId,
+  ]);
+  const limits: Limit[] = [
+    { access: actor.readOnly ? "read" : "write", readOnlyBecause: "This Agent's token is read-only" },
+    { access: rows[0]!.agent_access, readOnlyBecause: "The Workspace's Agent Access is Read" },
+  ];
+  if (lowest(limits) === "none") throw new HttpError(403, "The Workspace's Agent Access is None, so Agents can't use it");
+  const blocking = need === "write" && limits.find((l) => l.access === "read");
+  if (blocking) throw new HttpError(403, `${blocking.readOnlyBecause}, so you can't change anything in it`);
 }
 
 /** Refuses anyone but an Admin; an Agent never is one, even if its Owner is. `what` completes "Only an Admin can …". */

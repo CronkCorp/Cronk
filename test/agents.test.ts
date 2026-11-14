@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, startInstalledCronk } from "./harness.js";
+import { agentOf, joinAs, startInstalledCronk } from "./harness.js";
 
 describe("Agents", () => {
   it("lets a User register, rename and remove their own Agents", async () => {
@@ -84,5 +84,45 @@ describe("Agent tokens", () => {
   it("are refused when unknown", async () => {
     const { cronk } = await startInstalledCronk();
     expect((await cronk.client("not-a-token").get("/api/projects")).status).toBe(401);
+  });
+});
+
+describe("Agents and their Owner", () => {
+  it("stop working while their Owner is deactivated", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const claude = await agentOf(cronk, bob, "claude-laptop");
+    expect((await claude.get("/api/projects")).status).toBe(200);
+
+    await admin.patch(`/api/users/${bobId}`, { active: false });
+    expect((await claude.get("/api/projects")).status).toBe(401);
+    expect((await claude.get("/api/me")).status).toBe(401);
+
+    await admin.patch(`/api/users/${bobId}`, { active: true });
+    expect((await claude.get("/api/projects")).status).toBe(200);
+  });
+
+  it("can't manage Agents or do what only Admins can, even for an Admin", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const agentId = (await claude.get("/api/me")).body.agent.id;
+
+    for (const res of [
+      await claude.get("/api/agents"),
+      await claude.post("/api/agents", { name: "spawned" }),
+      await claude.post(`/api/agents/${agentId}/tokens`, {}),
+      await claude.post("/api/invitations", { email: "eve@example.com" }),
+      await claude.patch(`/api/users/${bobId}`, { role: "admin" }),
+      await claude.patch("/api/workspace", { name: "Taken" }),
+      await claude.patch("/api/projects/CRONK", { visibility: "private" }),
+      await claude.put(`/api/projects/CRONK/members/${bobId}`, { access: "read" }),
+    ]) {
+      expect(res.status).toBe(403);
+    }
+    expect((await admin.get("/api/projects/CRONK")).body.project.visibility).toBe("open");
   });
 });

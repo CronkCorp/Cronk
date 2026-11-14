@@ -145,6 +145,10 @@ export const migrations: Migration[] = [
         created_at timestamptz NOT NULL
       );
       CREATE INDEX agent_tokens_agent ON agent_tokens (agent_id);
+
+      -- The most Agents may do in a Project, or in the Workspace outside any Project (ADR 0004).
+      ALTER TABLE projects ADD COLUMN agent_access text NOT NULL DEFAULT 'write' CHECK (agent_access IN ('none', 'read', 'write'));
+      ALTER TABLE workspaces ADD COLUMN agent_access text NOT NULL DEFAULT 'write' CHECK (agent_access IN ('none', 'read', 'write'));
     `,
   },
 ];
