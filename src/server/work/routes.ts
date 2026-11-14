@@ -60,7 +60,9 @@ import {
   type TicketEdit,
   type TicketRef,
   type UserRef,
+  type AgentRef,
 } from "./tickets.js";
+import { findAgent } from "../identity/agents.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -574,6 +576,7 @@ export function workRoutes(ctx: AppContext) {
               priority: { type: "string", enum: PRIORITIES },
               labels: { type: "array", maxItems: 20, items: label },
               assigneeId: { type: ["string", "null"], format: "uuid" },
+              delegateId: { type: ["string", "null"], format: "uuid", description: "One of the Assignee's own Agents. Only Users assign and delegate." },
               parentKey: { type: ["string", "null"], maxLength: 30 },
             },
           },
@@ -582,7 +585,10 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { title, description, statusId, priority, labels, assigneeId, parentKey } = request.body;
+        const { title, description, statusId, priority, labels, assigneeId, delegateId, parentKey } = request.body;
+        if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
+          throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
+        }
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
@@ -597,6 +603,13 @@ export function workRoutes(ctx: AppContext) {
             changes.status = status;
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
+          const assignee = changes.assignee === undefined ? ticket.assignee : changes.assignee;
+          if (delegateId !== undefined) {
+            changes.delegate = delegateId === null ? null : await delegableAgent(tx, actingUser(actor).workspaceId, assignee, delegateId);
+          } else if (ticket.delegate && !(await ownsAgent(tx, actingUser(actor).workspaceId, assignee, ticket.delegate.id))) {
+            // A new Assignee doesn't take over someone else's Agent.
+            changes.delegate = null;
+          }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
           return updateTicket(tx, ticket, changes, actor, ctx.clock.now());
         });
@@ -635,6 +648,21 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
   const project = (await findProjectById(db, ticket.projectId))!;
   if ((await visibleProjects(db, userActor(assignee), [project])).length === 0) throw new HttpError(400, `${assignee.name} can't see this Project`);
   return { id: assignee.id, name: assignee.name };
+}
+
+/** The Agent `id`, as a Ticket shows it, if it is one of `assignee`'s own; otherwise a 400. */
+async function delegableAgent(db: Queryable, workspaceId: string, assignee: UserRef | null, id: string): Promise<AgentRef> {
+  if (!assignee) throw new HttpError(400, "Assign the Ticket to a User before delegating it");
+  const agent = await findAgent(db, workspaceId, id);
+  if (!agent) throw new HttpError(400, "No such Agent");
+  if (agent.ownerId !== assignee.id) throw new HttpError(400, `The Delegate must be one of the Assignee's own Agents, and ${agent.name} isn't ${assignee.name}'s`);
+  return { id: agent.id, name: agent.name };
+}
+
+/** Whether the Agent `agentId` exists and is one of `user`'s own. */
+async function ownsAgent(db: Queryable, workspaceId: string, user: UserRef | null, agentId: string): Promise<boolean> {
+  const agent = await findAgent(db, workspaceId, agentId);
+  return !!user && agent?.ownerId === user.id;
 }
 
 /** Keys of the Projects, archived or not, that `actor` can see. */

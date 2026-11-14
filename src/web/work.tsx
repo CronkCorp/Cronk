@@ -900,6 +900,8 @@ function describe(change: RecordedChange): string {
     }
     case "assignee":
       return change.to ? `assigned it to ${change.to.name}` : "unassigned it";
+    case "delegate":
+      return change.to ? `delegated it to ${change.to.name}` : `took it back from ${change.from!.name}`;
     case "parent":
       return change.to ? `made it a Sub-Ticket of ${change.to.key}` : `took it out of ${change.from!.key}`;
     case "relation added":

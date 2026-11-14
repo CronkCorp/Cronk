@@ -130,6 +130,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     priority,
     labels,
     assignee: nullable(named),
+    delegate: { ...nullable(named), description: "The Agent the Assignee handed the Ticket to; always one of the Assignee's own." },
     parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -166,7 +167,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "parent"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
           ...["relation added", "relation removed"],
         ],
       },
@@ -177,7 +178,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
-      object({ change: { const: "assignee" }, from: nullable(named), to: nullable(named) }),
+      ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
