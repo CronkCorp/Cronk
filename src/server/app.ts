@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import swagger from "@fastify/swagger";
@@ -37,14 +37,15 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     logger: opts.logger ?? false,
     // Refuse fields a route doesn't declare (its schema's `additionalProperties: false`) instead of
     // silently dropping them, so a caller never hears that a change worked when nothing changed.
-    ajv: { customOptions: { removeAdditional: false } },
+    // `allErrors` so an unknown field is named even when a required one is missing too: a misspelt field is both.
+    ajv: { customOptions: { removeAdditional: false, allErrors: true } },
   });
   app.addHook("onClose", async () => db.end());
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
-    const fastifyError = err as { validation?: unknown; statusCode?: number; message?: string };
-    if (fastifyError.validation) return reply.code(400).send({ error: validationMessage(fastifyError) });
+    const fastifyError = err as Partial<FastifyError>;
+    if (fastifyError.validation) return reply.code(400).send({ error: validationMessage(fastifyError as FastifyError) });
     if (fastifyError.statusCode && fastifyError.statusCode < 500) {
       return reply.code(fastifyError.statusCode).send({ error: fastifyError.message });
     }
@@ -93,17 +94,10 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   return app;
 }
 
-interface SchemaIssue {
-  keyword?: string;
-  instancePath?: string;
-  params?: { additionalProperty?: string };
-}
-
 /** Names the field a caller sent that the route doesn't know; other schema errors keep Fastify's message. */
-function validationMessage(err: { validation?: unknown; validationContext?: string; message?: string }): string {
-  const issues: SchemaIssue[] = Array.isArray(err.validation) ? err.validation : [];
-  const unknown = issues.find((issue) => issue.keyword === "additionalProperties" && issue.params?.additionalProperty);
-  if (!unknown) return err.message ?? "Invalid request";
-  const path = `${err.validationContext ?? "body"}${(unknown.instancePath ?? "").replaceAll("/", ".")}`;
-  return `${path} has unknown field "${unknown.params?.additionalProperty}"`;
+function validationMessage(err: FastifyError): string {
+  const extra = err.validation?.find((issue) => issue.keyword === "additionalProperties");
+  if (!extra) return err.message;
+  const path = `${err.validationContext}${extra.instancePath.replaceAll("/", ".")}`;
+  return `${path} has unknown field "${String(extra.params.additionalProperty)}"`;
 }

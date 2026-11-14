@@ -71,7 +71,7 @@ describe("Statuses", () => {
     // A Status keeps its Status Category for life: moving it could empty a Category.
     const recategorised = await admin.patch(`/api/projects/CRONK/statuses/${backlog.id}`, { category: "completed" });
     expect(recategorised.status).toBe(400);
-    expect(recategorised.body.error).toContain("category");
+    expect(recategorised.body.error).toBe('body has unknown field "category"');
     expect((await statusNamed(admin, "IDEAS")).category).toBe("backlog");
   });
 

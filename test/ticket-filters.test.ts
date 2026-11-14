@@ -69,6 +69,6 @@ describe("Filtering a Project's Tickets", () => {
     await seed(admin);
     const res = await admin.get("/api/projects/CRONK/tickets?labels=bug");
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain("labels");
+    expect(res.body.error).toBe('querystring has unknown field "labels"');
   });
 });
