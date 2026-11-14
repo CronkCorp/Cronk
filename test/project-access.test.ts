@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, startInstalledCronk, type Client } from "./harness.js";
+import { joinAs, projectWithTickets, startInstalledCronk, type Client } from "./harness.js";
 
 async function userId(client: Client): Promise<string> {
   return (await client.get("/api/me")).body.user.id;
@@ -151,5 +151,75 @@ describe("Project members and roles", () => {
 
     await admin.patch(`/api/users/${bobId}`, { role: "member" });
     expect((await bob.get("/api/projects/SECRET")).status).toBe(404);
+  });
+});
+
+describe("Ticket fields and Relations under Project access", () => {
+  it("lets a Member with Read access see a Ticket's fields and Relations but change none of them", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 2);
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    await admin.patch("/api/tickets/CRONK-1", { labels: ["bug"] });
+    await admin.put(`/api/projects/CRONK/members/${await userId(bob)}`, { access: "read" });
+
+    expect((await bob.get("/api/tickets/CRONK-2")).body.relations.blockedBy).toHaveLength(1);
+    expect((await bob.get("/api/projects/CRONK/labels")).body.labels).toEqual(["bug"]);
+    expect((await bob.get("/api/projects/CRONK/tickets?label=bug")).body.tickets).toHaveLength(1);
+    for (const res of [
+      await bob.patch("/api/tickets/CRONK-1", { priority: "high" }),
+      await bob.patch("/api/tickets/CRONK-1", { labels: [] }),
+      await bob.patch("/api/tickets/CRONK-1", { assigneeId: await userId(bob) }),
+      await bob.patch("/api/tickets/CRONK-2", { parentKey: "CRONK-1" }),
+      await bob.post("/api/tickets/CRONK-2/relations", { kind: "relates_to", ticketKey: "CRONK-1" }),
+      await bob.delete("/api/tickets/CRONK-2/relations/blocked_by/CRONK-1"),
+    ]) {
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("needs Write in both Projects to relate Tickets, and treats a Ticket the User can't see as missing", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 1);
+    await projectWithTickets(admin, "DOCS", 1);
+    await projectWithTickets(admin, "SECRET", 1);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.put(`/api/projects/DOCS/members/${await userId(bob)}`, { access: "read" });
+
+    expect((await bob.post("/api/tickets/CRONK-1/relations", { kind: "relates_to", ticketKey: "DOCS-1" })).status).toBe(403);
+    expect((await bob.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "SECRET-1" })).status).toBe(400);
+    expect((await bob.delete("/api/tickets/CRONK-1/relations/blocks/SECRET-1")).status).toBe(400);
+  });
+
+  it("leaves Tickets of Projects the User can't see out of Relations and history", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 2);
+    await projectWithTickets(admin, "SECRET", 1);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.post("/api/tickets/SECRET-1/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+    await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+
+    const relations = (await bob.get("/api/tickets/CRONK-1")).body.relations;
+    expect(relations.blockedBy.map((r: { key: string }) => r.key)).toEqual(["CRONK-2"]);
+    const history = (await bob.get("/api/tickets/CRONK-1/history")).body.changes;
+    expect(history.map((c: { ticket?: { key: string } }) => c.ticket?.key)).toEqual([undefined, "CRONK-2"]);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toHaveLength(2);
+  });
+
+  it("assigns a Ticket only to an active User who can see its Project", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const [bobId, carolId] = [await userId(bob), await userId(carol)];
+    await projectWithTickets(admin, "CRONK", 1);
+    await projectWithTickets(admin, "SECRET", 1);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+
+    expect((await admin.patch("/api/tickets/SECRET-1", { assigneeId: bobId })).status).toBe(400);
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: carolId })).status).toBe(400);
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId })).body.ticket.assignee).toMatchObject({ name: "bob" });
   });
 });

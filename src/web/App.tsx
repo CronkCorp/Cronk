@@ -3,7 +3,7 @@ import { api, ApiError, type User } from "./api.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
-import { ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
 
 type State =
   | { kind: "loading" }
@@ -155,7 +155,16 @@ function Page(props: { me: User }) {
   const { path, search } = useLocation();
   if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   const project = /^\/projects\/([^/]+)$/.exec(path);
-  if (project) return <ProjectPage projectKey={decodeURIComponent(project[1]!)} view={projectView(search.get("view"))} me={props.me} />;
+  if (project) {
+    return (
+      <ProjectPage
+        projectKey={decodeURIComponent(project[1]!)}
+        view={projectView(search.get("view"))}
+        filter={filterFrom(search)}
+        me={props.me}
+      />
+    );
+  }
   const ticket = /^\/tickets\/([^/]+)$/.exec(path);
   if (ticket) return <TicketPage ticketKey={decodeURIComponent(ticket[1]!)} />;
   return <ProjectsPage archived={path === "/archived"} />;

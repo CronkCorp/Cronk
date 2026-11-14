@@ -135,3 +135,10 @@ export async function joinAs(cronk: Cronk, admin: Client, email: string, role: "
 
 /** The password `joinAs` gives every User it creates. */
 export const memberPassword = "member password";
+
+/** Creates a Project named after its key, with `count` Tickets titled "Ticket 1", "Ticket 2", … */
+export async function projectWithTickets(client: Client, key: string, count: number): Promise<void> {
+  const res = await client.post("/api/projects", { name: key, key });
+  if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
+  for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
+}

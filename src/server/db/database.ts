@@ -24,6 +24,11 @@ export async function transaction<T>(db: Database, fn: (tx: pg.PoolClient) => Pr
   }
 }
 
+/** Takes a lock named `name` until the transaction ends, so work under the same name runs one at a time. */
+export async function lockUntilCommit(tx: Queryable, name: string): Promise<void> {
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [name]);
+}
+
 // Arbitrary constant so concurrent starts against one database migrate one at a time.
 const MIGRATION_LOCK = 0x63726f6e6b;
 

@@ -122,10 +122,37 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0004_status_names_unique",
+    id: "0004_ticket_fields_and_relations",
+    sql: `
+      ALTER TABLE tickets
+        ADD COLUMN priority text NOT NULL DEFAULT 'none' CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
+        -- Free-form, in the order given; never two that differ only in case.
+        ADD COLUMN labels text[] NOT NULL DEFAULT '{}',
+        ADD COLUMN assignee_id uuid REFERENCES users(id),
+        -- Set on a Sub-Ticket: its parent, always in the same Project.
+        ADD COLUMN parent_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      CREATE INDEX tickets_parent ON tickets (parent_id);
+
+      -- 'blocks' runs from the blocking Ticket to the blocked one and never forms a cycle.
+      -- 'relates_to' reads the same both ways, so it is stored once with the lower id first.
+      CREATE TABLE ticket_relations (
+        kind text NOT NULL CHECK (kind IN ('blocks', 'relates_to')),
+        from_ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        to_ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        PRIMARY KEY (kind, from_ticket_id, to_ticket_id),
+        CHECK (from_ticket_id <> to_ticket_id),
+        CHECK (kind <> 'relates_to' OR from_ticket_id < to_ticket_id)
+      );
+      CREATE INDEX ticket_relations_to ON ticket_relations (to_ticket_id);
+      CREATE INDEX ticket_relations_from ON ticket_relations (from_ticket_id);
+    `,
+  },
+  {
+    id: "0005_status_names_unique",
     sql: `
       -- A Project's Statuses are told apart by name, so no two may share one, ignoring case.
-      CREATE UNIQUE INDEX statuses_name_unique ON statuses (project_id, lower(name));
+      -- IF NOT EXISTS: this ran as 0004_status_names_unique on databases from the unmerged branch.
+      CREATE UNIQUE INDEX IF NOT EXISTS statuses_name_unique ON statuses (project_id, lower(name));
     `,
   },
 ];
