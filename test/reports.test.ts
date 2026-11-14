@@ -149,3 +149,18 @@ describe("A Project's Reports", () => {
     expect((await bob.get("/api/tickets/CRONK-1/reports")).status).toBe(404);
   });
 });
+
+describe("A Ticket's live updates", () => {
+  it("push each new Report on the Ticket to those watching it", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const stream = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." });
+
+    const [listed] = (await admin.get("/api/tickets/CRONK-1/reports")).body.reports;
+    expect(await stream.next()).toEqual({ event: "report", data: { report: listed } });
+  });
+});

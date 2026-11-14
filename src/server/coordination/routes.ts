@@ -10,7 +10,7 @@ import { accessSchema, answer, errors, holding, listing, noContent, pathParams, 
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
 import { claimNextReady, clearClaim, currentClaimId, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
-import { insertReport, listTicketReports } from "../knowledge/reports.js";
+import { findReport, insertReport, listTicketReports } from "../knowledge/reports.js";
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
@@ -271,12 +271,13 @@ export function coordinationRoutes(ctx: AppContext) {
         const actor = requireAgent(await requireActor(ctx, request));
         requireSession(actor);
         const now = ctx.clock.now();
-        const report = await transaction(ctx.db, async (tx) => {
+        const { ticket, report } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           await requireClaimHolder(tx, actor, ticket, now, "writing a Report on it");
           const claimId = (await currentClaimId(tx, ticket.id))!;
-          return insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now });
+          return { ticket, report: await insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now }) };
         });
+        ctx.live.publish(ticketTopic(ticket.id), { event: "report", data: { report: (await findReport(ctx.db, report.id))! } });
         return reply.code(201).send({ report });
       },
     );
@@ -304,7 +305,8 @@ export function coordinationRoutes(ctx: AppContext) {
             200: {
               description:
                 "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
-                "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON.",
+                "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON, " +
+                "and each new Report as a `report` event whose data is `{ report }`, a Report as JSON.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(401, 404, 410),

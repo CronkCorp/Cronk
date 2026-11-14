@@ -80,6 +80,12 @@ export async function insertReport(
   return (await findDocument(db, workspaceId, id))!;
 }
 
+/** The Report with this Document id, as listings show it. */
+export async function findReport(db: Queryable, id: string): Promise<Report | undefined> {
+  const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE d.id = $1`, [id]);
+  return rows[0] && toReport(rows[0]);
+}
+
 /** A Ticket's Reports, oldest first. */
 export async function listTicketReports(db: Queryable, ticketId: string): Promise<Report[]> {
   const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticketId]);
