@@ -236,6 +236,52 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge.sections.map((s: { heading: string }) => s.heading)).toEqual(["## Install", "## Usage"]);
   });
 
+  it("combines a renamed and moved section with an edit to its content", async () => {
+    const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nUse it.\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("Install it.", "Download it."));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## Usage\n\nUse it.\n\n## Install\n\nInstall it.\nThen run it.\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Usage\n\nUse it.\n\n## Install\n\nDownload it.\nThen run it.\n" });
+  });
+
+  it("pairs a moved section with the renamed section most alike it, not the first one alike enough", async () => {
+    const base = "## X\n\n1\n2\n3\n4\n\n## U\n\nu\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("4", "four"));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## U\n\nu\n\n## P\n\n1\n2\n3\nnew\n\n## Q\n\n1\n2\n3\n4\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## U\n\nu\n\n## P\n\n1\n2\n3\nnew\n\n## Q\n\n1\n2\n3\nfour\n" });
+  });
+
+  it("combines a renamed empty section with content added to it", async () => {
+    const base = "## Intro\n\nHi.\n\n## Setup\n\n## Usage\n\nUse it.\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("## Setup\n", "## Setup\n\nInstall it.\n"));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Setup", "## Install") });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Intro\n\nHi.\n\n## Install\n\nInstall it.\n\n## Usage\n\nUse it.\n" });
+  });
+
+  it("does not pair sections as a rename when their content shares only a line many sections have", async () => {
+    const base = "## A\n\n- [ ] TODO\nalpha\n\n## B\n\n- [ ] TODO\nbeta\n\n## C\n\n- [ ] TODO\ngamma\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\n- [ ] TODO\nalpha\n\n## C\n\n- [ ] TODO\ngamma\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## B\n\n- [ ] TODO\nbeta", "## D\n\n- [ ] TODO\ndelta") });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\n- [ ] TODO\nalpha\n\n## D\n\n- [ ] TODO\ndelta\n\n## C\n\n- [ ] TODO\ngamma\n" });
+  });
+
+  it("still pairs a renamed section by a line only one other section shares", async () => {
+    const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nThen run it.\n";
+    const { admin, id } = await editedUnderneath(base, "## Usage\n\nThen run it.\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Setup\n\nInstall it.", "## Install\n\nInstall it now.") });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 1, body: null });
+    expect(res.body.merge.sections[0].conflict).toMatchObject({ mine: "## Install\n\nInstall it now.\nThen run it.\n\n", theirs: null });
+  });
+
   it("reports a section both edits renamed differently as a conflict", async () => {
     const base = "## Setup\n\nInstall it.\n";
     const { admin, id } = await editedUnderneath(base, "## Install\n\nInstall it.\n");
