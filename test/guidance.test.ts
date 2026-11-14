@@ -114,3 +114,25 @@ describe("Project Guidance", () => {
     expect((await admin.get("/api/projects/CRONK/guidance")).body.guidance).toEqual({ markdown: "Use pnpm.", version: 1 });
   });
 });
+
+describe("Guidance in the welcome", () => {
+  it("gives an Agent Session the Workspace's Guidance and each visible Project's", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    await admin.post("/api/projects", { name: "Hidden", key: "HIDDEN" });
+    await admin.patch("/api/projects/HIDDEN", { agentAccess: "none" });
+    await admin.put("/api/workspace/guidance", { markdown: "Be kind.", baseVersion: 0 });
+    await admin.put("/api/projects/CRONK/guidance", { markdown: "Use pnpm.", baseVersion: 0 });
+    await admin.put("/api/projects/HIDDEN/guidance", { markdown: "Secret.", baseVersion: 0 });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    const { welcome } = (await claude.post("/api/agent-sessions")).body;
+
+    expect(welcome.workspace).toEqual({ name: "Acme", guidance: "Be kind." });
+    expect(welcome.projects).toEqual([
+      { key: "CRONK", name: "Cronk", access: "write", guidance: "Use pnpm." },
+      { key: "DOCS", name: "Docs", access: "write", guidance: "" },
+    ]);
+  });
+});

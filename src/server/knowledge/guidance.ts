@@ -67,3 +67,14 @@ export async function listGuidanceVersions(db: Queryable, owner: GuidanceOwner):
   );
   return rows.map((r) => ({ version: r.version, markdown: r.markdown, at: r.at, actor: { kind: "user", id: r.user_id, name: r.user_name } }));
 }
+
+/** The current Markdown of each of these Projects' Guidance, empty for one nobody has written. */
+export async function projectGuidanceMarkdown(db: Queryable, projectIds: string[]): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ project_id: string; markdown: string }>(
+    `SELECT DISTINCT ON (project_id) project_id, markdown FROM guidance_versions
+     WHERE project_id = ANY($1::uuid[]) ORDER BY project_id, version DESC`,
+    [projectIds],
+  );
+  const found = new Map(rows.map((r) => [r.project_id, r.markdown]));
+  return new Map(projectIds.map((id) => [id, found.get(id) ?? ""]));
+}
