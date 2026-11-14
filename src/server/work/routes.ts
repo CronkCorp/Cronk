@@ -16,7 +16,7 @@ import {
   ticketKeyParam,
   userIdParam,
 } from "../schemas.js";
-import { actingUser, userActor, type Actor } from "../actor.js";
+import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
 import { addRelation, listRelations, removeRelation, type Relations } from "./relations.js";
 import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
@@ -596,6 +596,7 @@ export function workRoutes(ctx: AppContext) {
           if (statusId !== undefined) {
             const status = await findStatusToMoveInto(tx, ticket.projectId, statusId);
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
+            if (actor.kind === "agent" && status.id !== ticket.status.id) await requireAgentMayMove(tx, actor, ticket, status, ctx.clock.now());
             changes.status = status;
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
@@ -666,6 +667,23 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
   const project = (await findProjectById(db, ticket.projectId))!;
   if ((await visibleProjects(db, userActor(assignee), [project])).length === 0) throw new HttpError(400, `${assignee.name} can't see this Project`);
   return { id: assignee.id, name: assignee.name };
+}
+
+/** The Status Categories an Agent may move a Ticket into; only Users complete, cancel or shelve work. */
+const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
+
+/**
+ * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
+ * In Review (a 403) and the Agent calls within the Agent Session holding the Ticket's live Claim (a 409).
+ */
+async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Ticket, status: Status, now: Date): Promise<void> {
+  if (!AGENT_CATEGORIES.includes(status.category)) {
+    throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
+  }
+  const claim = await findLiveClaim(db, ticket.id, now);
+  if (!agent.session || claim?.session.id !== agent.session.id) {
+    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before moving it`);
+  }
 }
 
 /** The Agent `id`, as a Ticket shows it, if it is one of `assignee`'s own; otherwise a 400. */

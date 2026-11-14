@@ -134,11 +134,11 @@ describe("Asking for the next Ready Ticket", () => {
     for (let i = 0; i < 4; i++) {
       const next = await agent.post("/api/agent-sessions/current/next");
       expect(next.status).toBe(200);
-      expect(next.body.claim.session.id).toBe(agent.sessionId);
-      keys.push(next.body.ticket.key);
+      expect(next.body.next.claim.session.id).toBe(agent.sessionId);
+      keys.push(next.body.next.ticket.key);
     }
     expect(keys).toEqual(["CRONK-3", "CRONK-4", "CRONK-1", "CRONK-2"]);
-    expect((await agent.post("/api/agent-sessions/current/next")).status).toBe(204);
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next).toBeNull();
   });
 
   it("leaves out Tickets not delegated to the Agent, Completed or Canceled, blocked by unfinished Tickets, or Claimed", async () => {
@@ -155,10 +155,10 @@ describe("Asking for the next Ready Ticket", () => {
     await other.post("/api/tickets/CRONK-6/claim");
     const agent = await session();
 
-    expect((await agent.post("/api/agent-sessions/current/next")).body.ticket.key).toBe("CRONK-5");
-    expect((await agent.post("/api/agent-sessions/current/next")).status).toBe(204);
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next.ticket.key).toBe("CRONK-5");
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next).toBeNull();
     await admin.patch("/api/tickets/CRONK-1", { statusId: inCategory("completed") });
-    expect((await agent.post("/api/agent-sessions/current/next")).body.ticket.key).toBe("CRONK-4");
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next.ticket.key).toBe("CRONK-4");
   });
 
   it("never gives two concurrent Agent Sessions the same Ticket", async () => {
@@ -167,14 +167,49 @@ describe("Asking for the next Ready Ticket", () => {
 
     const answers = await Promise.all(sessions.map((s) => s.post("/api/agent-sessions/current/next")));
 
-    const claimed = answers.filter((a) => a.status === 200).map((a) => a.body.ticket.key);
+    expect(answers.every((a) => a.status === 200)).toBe(true);
+    const claimed = answers.filter((a) => a.body.next).map((a) => a.body.next.ticket.key);
     expect(claimed.sort()).toEqual(["CRONK-1", "CRONK-2", "CRONK-3", "CRONK-4", "CRONK-5"]);
-    expect(answers.filter((a) => a.status === 204)).toHaveLength(3);
   });
 
   it("is only for an Agent Session", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     expect((await cronk.client(claude.secret).post("/api/agent-sessions/current/next")).status).toBe(400);
     expect((await admin.post("/api/agent-sessions/current/next")).status).toBe(400);
+  });
+});
+
+describe("The Claim holder", () => {
+  it("can move the Ticket into Unstarted, Started and In Review Statuses but never Completed, Canceled or Backlog", async () => {
+    const { admin, session } = await delegatedSetup();
+    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
+    const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    for (const category of ["started", "unstarted", "in_review"]) {
+      const moved = await agent.patch("/api/tickets/CRONK-1", { statusId: inCategory(category) });
+      expect(moved.status).toBe(200);
+      expect(moved.body.ticket.status.category).toBe(category);
+    }
+    for (const category of ["completed", "canceled", "backlog"]) {
+      const refused = await agent.patch("/api/tickets/CRONK-1", { statusId: inCategory(category) });
+      expect(refused.status).toBe(403);
+    }
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.status.category).toBe("in_review");
+    expect((await admin.patch("/api/tickets/CRONK-1", { statusId: inCategory("completed") })).status).toBe(200);
+  });
+
+  it("is the only Agent Session that can move the Ticket", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const started = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "started").id;
+    const holder = await session();
+    const other = await session();
+
+    expect((await holder.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(409);
+    await holder.post("/api/tickets/CRONK-1/claim");
+    expect((await other.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(409);
+    expect((await cronk.client(claude.secret).patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(409);
+    expect((await holder.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(200);
   });
 });

@@ -92,20 +92,22 @@ export function coordinationRoutes(ctx: AppContext) {
         schema: {
           headers: sessionHeader,
           response: {
-            200: answer("The Agent's next Ready Ticket, now Claimed by the Agent Session, with the Tickets around it", ticketDetailSchema),
-            204: noContent("None of the Agent's Tickets is Ready"),
+            200: answer("The Agent's next Ready Ticket, now Claimed by the Agent Session, with the Tickets around it", {
+              type: "object",
+              required: ["next"],
+              properties: { next: { anyOf: [ticketDetailSchema, { type: "null" }], description: "Null when none of the Agent's Tickets is Ready." } },
+            }),
             ...errors(400, 401, 403, 410),
           },
         },
       },
-      async (request, reply) => {
+      async (request) => {
         const actor = requireAgent(await requireActor(ctx, request));
         const session = requireSession(actor);
         const now = ctx.clock.now();
         const scope = await readyScope(ctx, actor);
         const id = await transaction(ctx.db, (tx) => claimNextReady(tx, scope, session.id, now));
-        if (!id) return reply.code(204).send();
-        return ticketDetail(ctx.db, actor, (await findTicketById(ctx.db, id))!, now);
+        return { next: id ? await ticketDetail(ctx.db, actor, (await findTicketById(ctx.db, id))!, now) : null };
       },
     );
 
