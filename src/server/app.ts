@@ -49,13 +49,17 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   // so a new route can't forget to. The web shell and the OpenAPI document take any query string.
   app.addHook("onRoute", (route) => {
     if (!route.url.startsWith("/api/") || route.url === "/api/openapi.json") return;
+    // Fastify also takes `query` for `querystring`; declaring both fails at startup, so fold it in.
+    const { query, querystring: declared, ...schema } = (route.schema ?? {}) as Record<string, unknown>;
     // `properties: {}` so the OpenAPI description lists no query parameters rather than reading the schema as one.
-    const querystring = (route.schema?.querystring ?? { type: "object", properties: {} }) as Record<string, unknown>;
+    const querystring = (declared ?? query ?? { type: "object", properties: {} }) as Record<string, unknown>;
+    // Only an inline object schema takes the default: beside a `$ref` it would refuse the declared parameters too.
+    const inline = querystring.type === "object" && !("$ref" in querystring);
     route.schema = {
-      ...route.schema,
-      querystring: { additionalProperties: false, ...querystring },
+      ...schema,
+      querystring: inline ? { additionalProperties: false, ...querystring } : querystring,
       // So every operation's description says it can be refused.
-      response: { ...errors(400), ...(route.schema?.response as object | undefined) },
+      response: { ...errors(400), ...(schema.response as object | undefined) },
     };
   });
   // Every API error has the same shape: `{ error: "<message>" }`.
