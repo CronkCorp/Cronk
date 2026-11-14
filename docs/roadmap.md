@@ -4,7 +4,7 @@ Cronk is built in three phases. Vocabulary follows `GLOSSARY.md`; decisions are 
 
 1. **Reconcile.** Check `GLOSSARY.md` and the ADRs against what was actually built in the previous phase, and fix whichever is wrong. `/retro` on the build sessions is a separate, optional step: it improves the agent environment (checks, navigation, coding standards), not the design.
 2. **Grill** the phase's open questions with `/grill-with-docs`, starting from the "Decided so far" and "Open questions" lists below.
-3. **Spec** with `/to-spec`, then **tickets** with `/to-tickets`, in the same session as the grilling, since both synthesise from that conversation.
+3. **Spec** with `/to-spec`, then **tickets** with `/to-tickets` (published as GitHub issues: the spec as a parent, tickets as sub-issues), in the same session as the grilling, since both synthesise from that conversation.
 4. **Build**, then update this roadmap.
 
 ## Where the design lives
@@ -14,7 +14,7 @@ A session starting a later phase should read, in order:
 1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
 2. `docs/adr/`: decisions that are hard to reverse (0001–0011).
 3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
-4. `.scratch/phase-1-core-loop/spec.md`: the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
+4. The Phase 1 spec, GitHub issue #1 (`gh issue view 1`): the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
 5. `docs/testing.md`: the test seams every phase uses.
 6. `docs/research/existing-platforms.md`: what comparable tools do, with sources, for when an open question needs outside examples.
 
@@ -40,7 +40,7 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 
 ## Phase 1: Core loop
 
-Spec and tickets: `.scratch/phase-1-core-loop/`.
+Spec: GitHub issue #1; its 17 tickets are sub-issues #2–#18 with native blocking dependencies.
 
 Workspace, Projects, Users (Admin, Member), open and private Projects, Agents with tokens and Agent Access, Agent Sessions over MCP, Tickets with Statuses, Status Categories, Priority, Labels, Sub-Tickets and blocking, Delegation, Claims, Ready and `next`, Activities, Reports (required when an Agent moves a Ticket to In Review), Comments and answering questions, the Inbox, Documents with Versions and version-based edits, Guidance, full-text search with context on claim, the HTTP API, Markdown export and import. Terms and Decisions exist only as plain Documents.
 
