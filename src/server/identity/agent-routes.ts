@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { nameSchema } from "../schemas.js";
+import { answer, nameSchema, noContent, ref } from "../schemas.js";
 import { requireAdmin } from "./access.js";
 import {
   findAgent,
@@ -18,6 +18,7 @@ import {
 import type { User } from "./users.js";
 
 const agentParams = { type: "object", properties: { id: { type: "string", format: "uuid" } } } as const;
+const agentAnswer = { type: "object", required: ["agent"], properties: { agent: ref("Agent") } } as const;
 const agentBody = { type: "object", required: ["name"], additionalProperties: false, properties: { name: nameSchema } } as const;
 
 export function agentRoutes(ctx: AppContext) {
@@ -25,7 +26,18 @@ export function agentRoutes(ctx: AppContext) {
     // Each User's own Agents; with `all`, an Admin sees every User's.
     app.get<{ Querystring: { all?: boolean } }>(
       "/api/agents",
-      { schema: { querystring: { type: "object", properties: { all: { type: "boolean" } } } } },
+      {
+        schema: {
+          querystring: { type: "object", properties: { all: { type: "boolean" } } },
+          response: {
+            200: answer("The Agents, by Owner then name", {
+              type: "object",
+              required: ["agents"],
+              properties: { agents: { type: "array", items: ref("Agent") } },
+            }),
+          },
+        },
+      },
       async (request) => {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");
@@ -34,16 +46,20 @@ export function agentRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Body: { name: string } }>("/api/agents", { schema: { body: agentBody } }, async (request, reply) => {
-      const user = await requireUser(ctx, request);
-      const name = request.body.name.trim();
-      const agent = await refusingTakenName(name, insertAgent(ctx.db, { owner: user, name, now: ctx.clock.now() }));
-      return reply.code(201).send({ agent: publicAgent(agent, user) });
-    });
+    app.post<{ Body: { name: string } }>(
+      "/api/agents",
+      { schema: { body: agentBody, response: { 201: answer("The new Agent, owned by the caller", agentAnswer) } } },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const name = request.body.name.trim();
+        const agent = await refusingTakenName(name, insertAgent(ctx.db, { owner: user, name, now: ctx.clock.now() }));
+        return reply.code(201).send({ agent: publicAgent(agent, user) });
+      },
+    );
 
     app.patch<{ Params: { id: string }; Body: { name: string } }>(
       "/api/agents/:id",
-      { schema: { params: agentParams, body: agentBody } },
+      { schema: { params: agentParams, body: agentBody, response: { 200: answer("The renamed Agent", agentAnswer) } } },
       async (request) => {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
@@ -52,16 +68,35 @@ export function agentRoutes(ctx: AppContext) {
       },
     );
 
-    app.delete<{ Params: { id: string } }>("/api/agents/:id", { schema: { params: agentParams } }, async (request, reply) => {
-      const user = await requireUser(ctx, request);
-      await transaction(ctx.db, async (tx) => removeAgent(tx, await ownAgent(ctx, user, request.params.id), ctx.clock.now()));
-      return reply.code(204).send();
-    });
+    app.delete<{ Params: { id: string } }>(
+      "/api/agents/:id",
+      { schema: { params: agentParams, response: { 204: noContent("The Agent is removed and its tokens revoked") } } },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        await transaction(ctx.db, async (tx) => removeAgent(tx, await ownAgent(ctx, user, request.params.id), ctx.clock.now()));
+        return reply.code(204).send();
+      },
+    );
 
-    app.get<{ Params: { id: string } }>("/api/agents/:id/tokens", { schema: { params: agentParams } }, async (request) => {
-      const user = await requireUser(ctx, request);
-      return { tokens: await listAgentTokens(ctx.db, await ownAgent(ctx, user, request.params.id)) };
-    });
+    app.get<{ Params: { id: string } }>(
+      "/api/agents/:id/tokens",
+      {
+        schema: {
+          params: agentParams,
+          response: {
+            200: answer("The Agent's tokens, oldest first, without their secrets", {
+              type: "object",
+              required: ["tokens"],
+              properties: { tokens: { type: "array", items: ref("AgentToken") } },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        return { tokens: await listAgentTokens(ctx.db, await ownAgent(ctx, user, request.params.id)) };
+      },
+    );
 
     // The secret is only ever returned here, once; Cronk keeps just its hash.
     app.post<{ Params: { id: string }; Body: { readOnly?: boolean } }>(
@@ -70,6 +105,13 @@ export function agentRoutes(ctx: AppContext) {
         schema: {
           params: agentParams,
           body: { type: "object", additionalProperties: false, properties: { readOnly: { type: "boolean" } } },
+          response: {
+            201: answer("The new token and its secret, sent as `Authorization: Bearer <secret>`; the secret is only ever returned here", {
+              type: "object",
+              required: ["token", "secret"],
+              properties: { token: ref("AgentToken"), secret: { type: "string" } },
+            }),
+          },
         },
       },
       async (request, reply) => {
@@ -85,6 +127,7 @@ export function agentRoutes(ctx: AppContext) {
       {
         schema: {
           params: { type: "object", properties: { id: { type: "string", format: "uuid" }, tokenId: { type: "string", format: "uuid" } } },
+          response: { 204: noContent("The token is revoked") },
         },
       },
       async (request, reply) => {

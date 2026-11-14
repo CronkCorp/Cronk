@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
-import { agentAccessSchema, nameSchema } from "../schemas.js";
+import { agentAccessSchema, answer, nameSchema, noContent, ref, type SharedSchemaName } from "../schemas.js";
 import { actingUser, userActor, type Actor } from "../actor.js";
 import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
 import type { Queryable } from "../db/database.js";
@@ -60,6 +60,22 @@ const description = { type: "string", maxLength: 100_000 } as const;
 /** A Label: non-blank, at most 50 characters. */
 const label = { type: "string", minLength: 1, maxLength: 50, pattern: "\\S" } as const;
 
+/** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
+const holding = (field: string, name: SharedSchemaName) => ({ type: "object", required: [field], properties: { [field]: ref(name) } });
+/** A JSON body with one field listing a shared shape, such as `{ tickets: Ticket[] }`. */
+const listing = (field: string, items: object) => ({
+  type: "object",
+  required: [field],
+  properties: { [field]: { type: "array", items } },
+});
+
+/** A User listed in a Project, with their access there. */
+const member = {
+  type: "object",
+  required: ["user", "access"],
+  properties: { user: ref("User"), access: { type: "string", enum: ["read", "write"] } },
+} as const;
+
 /** Filters for a Project's Ticket list; each may be repeated to match any of several values. */
 interface TicketQuery {
   status?: string[];
@@ -74,7 +90,12 @@ export function workRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     app.get<{ Querystring: { archived?: boolean } }>(
       "/api/projects",
-      { schema: { querystring: { type: "object", properties: { archived: { type: "boolean" } } } } },
+      {
+        schema: {
+          querystring: { type: "object", properties: { archived: { type: "boolean" } } },
+          response: { 200: answer("The Projects the caller can see", listing("projects", ref("Project"))) },
+        },
+      },
       async (request) => {
         const actor = await requireActor(ctx, request);
         const projects = await listProjects(ctx.db, actingUser(actor).workspaceId, request.query.archived ?? false);
@@ -92,6 +113,7 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, key: projectKey },
           },
+          response: { 201: answer("The new Project, with one Status per Status Category", holding("project", "Project")) },
         },
       },
       async (request, reply) => {
@@ -106,11 +128,25 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.get<{ Params: { key: string } }>("/api/projects/:key", async (request) => {
-      const actor = await requireActor(ctx, request);
-      const { project, access } = await projectFor(ctx.db, actor, request.params.key, "read");
-      return { project: { ...project, access }, statuses: await listStatuses(ctx.db, project.id) };
-    });
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key",
+      {
+        schema: {
+          response: {
+            200: answer("The Project and its Statuses, in workflow order", {
+              type: "object",
+              required: ["project", "statuses"],
+              properties: { project: ref("Project"), statuses: { type: "array", items: ref("Status") } },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project, access } = await projectFor(ctx.db, actor, request.params.key, "read");
+        return { project: { ...project, access }, statuses: await listStatuses(ctx.db, project.id) };
+      },
+    );
 
     app.patch<{
       Params: { key: string };
@@ -129,6 +165,7 @@ export function workRoutes(ctx: AppContext) {
               agentAccess: agentAccessSchema,
             },
           },
+          response: { 200: answer("The changed Project", holding("project", "Project")) },
         },
       },
       async (request) => {
@@ -147,12 +184,16 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.get<{ Params: { key: string } }>("/api/projects/:key/members", async (request) => {
-      const actor = await requireActor(ctx, request);
-      const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
-      const members = await listMemberships(ctx.db, project.id);
-      return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
-    });
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/members",
+      { schema: { response: { 200: answer("The Users listed in the Project, with their access", listing("members", member)) } } },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        const members = await listMemberships(ctx.db, project.id);
+        return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
+      },
+    );
 
     const memberParams = {
       type: "object",
@@ -170,6 +211,9 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { access: { type: "string", enum: ["read", "write"] } },
           },
+          response: {
+            200: answer("The User's access in the Project", { type: "object", required: ["member"], properties: { member } }),
+          },
         },
       },
       async (request) => {
@@ -186,7 +230,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.delete<{ Params: { key: string; userId: string } }>(
       "/api/projects/:key/members/:userId",
-      { schema: { params: memberParams } },
+      { schema: { params: memberParams, response: { 204: noContent("The User is no longer listed in the Project") } } },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
@@ -206,6 +250,7 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, category: { type: "string", enum: STATUS_CATEGORIES } },
           },
+          response: { 201: answer("The new Status, last of its Status Category", holding("status", "Status")) },
         },
       },
       async (request, reply) => {
@@ -231,6 +276,7 @@ export function workRoutes(ctx: AppContext) {
             // `position` counts from 0 among the Statuses of the same Status Category.
             properties: { name: nameSchema, position: { type: "integer", minimum: 0 } },
           },
+          response: { 200: answer("The changed Status", holding("status", "Status")) },
         },
       },
       async (request) => {
@@ -258,7 +304,12 @@ export function workRoutes(ctx: AppContext) {
     app.delete<{ Params: { key: string; statusId: string }; Querystring: { moveTo?: string } }>(
       "/api/projects/:key/statuses/:statusId",
       // `moveTo`: the Status the removed Status's Tickets move to. Required while any Ticket is in it.
-      { schema: { querystring: { type: "object", properties: { moveTo: { type: "string" } } } } },
+      {
+        schema: {
+          querystring: { type: "object", properties: { moveTo: { type: "string" } } },
+          response: { 204: noContent("The Status is removed, and any Tickets in it moved") },
+        },
+      },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { moveTo } = request.query;
@@ -303,6 +354,7 @@ export function workRoutes(ctx: AppContext) {
               label: { type: "array", items: { type: "string", maxLength: 50 } },
             },
           },
+          response: { 200: answer("The Project's Tickets matching the filters, in key order", listing("tickets", ref("Ticket"))) },
         },
       },
       async (request) => {
@@ -321,11 +373,21 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.get<{ Params: { key: string } }>("/api/projects/:key/labels", async (request) => {
-      const actor = await requireActor(ctx, request);
-      const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
-      return { labels: await listLabels(ctx.db, project.id) };
-    });
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/labels",
+      {
+        schema: {
+          response: {
+            200: answer("The Labels on the Project's Tickets, alphabetically, one per spelling ignoring case", listing("labels", { type: "string" })),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        return { labels: await listLabels(ctx.db, project.id) };
+      },
+    );
 
     app.post<{ Params: { key: string }; Body: { title: string; description?: string } }>(
       "/api/projects/:key/tickets",
@@ -337,6 +399,7 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { title, description },
           },
+          response: { 201: answer("The new Ticket, in the Project's first Status", holding("ticket", "Ticket")) },
         },
       },
       async (request, reply) => {
@@ -359,15 +422,29 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.get<{ Params: { key: string } }>("/api/tickets/:key", async (request) => {
-      const actor = await requireActor(ctx, request);
-      const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
-      return {
-        ticket,
-        subTickets: await listSubTickets(ctx.db, ticket.id),
-        relations: await visibleRelations(ctx.db, actor, await listRelations(ctx.db, ticket.id)),
-      };
-    });
+    app.get<{ Params: { key: string } }>(
+      "/api/tickets/:key",
+      {
+        schema: {
+          response: {
+            200: answer("The Ticket, its Sub-Tickets in key order, and its relations to Tickets the caller can see", {
+              type: "object",
+              required: ["ticket", "subTickets", "relations"],
+              properties: { ticket: ref("Ticket"), subTickets: { type: "array", items: ref("TicketRef") }, relations: ref("Relations") },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
+        return {
+          ticket,
+          subTickets: await listSubTickets(ctx.db, ticket.id),
+          relations: await visibleRelations(ctx.db, actor, await listRelations(ctx.db, ticket.id)),
+        };
+      },
+    );
 
     app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string } }>(
       "/api/tickets/:key/relations",
@@ -379,6 +456,7 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
           },
+          response: { 201: answer("The Ticket's relations, with the new one", holding("relations", "Relations")) },
         },
       },
       async (request, reply) => {
@@ -409,6 +487,7 @@ export function workRoutes(ctx: AppContext) {
             type: "object",
             properties: { key: { type: "string" }, kind: { type: "string", enum: RELATION_KINDS }, otherKey: { type: "string" } },
           },
+          response: { 200: answer("The Ticket's remaining relations", holding("relations", "Relations")) },
         },
       },
       async (request) => {
@@ -440,6 +519,7 @@ export function workRoutes(ctx: AppContext) {
               parentKey: { type: ["string", "null"], maxLength: 30 },
             },
           },
+          response: { 200: answer("The changed Ticket", holding("ticket", "Ticket")) },
         },
       },
       async (request) => {
@@ -466,11 +546,21 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.get<{ Params: { key: string } }>("/api/tickets/:key/history", async (request) => {
-      const actor = await requireActor(ctx, request);
-      const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
-      return { changes: await visibleHistory(ctx.db, actor, await listHistory(ctx.db, ticket.id)) };
-    });
+    app.get<{ Params: { key: string } }>(
+      "/api/tickets/:key/history",
+      {
+        schema: {
+          response: {
+            200: answer("The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see", listing("changes", ref("RecordedChange"))),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
+        return { changes: await visibleHistory(ctx.db, actor, await listHistory(ctx.db, ticket.id)) };
+      },
+    );
   };
 }
 

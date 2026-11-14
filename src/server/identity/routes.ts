@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { nameSchema, publicRoute } from "../schemas.js";
+import { answer, nameSchema, noContent, publicRoute, ref } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -24,13 +24,30 @@ const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
 const role = { type: "string", enum: ["admin", "member"] } as const;
 
+const userAnswer = { type: "object", required: ["user"], properties: { user: ref("User") } } as const;
+
 const INVITATION_GONE = "This invitation has expired or was withdrawn";
 
 const dummyHash = hashPassword("dummy password for unknown emails");
 
 export function identityRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    app.get("/api/setup", { schema: publicRoute }, async () => ({ required: (await countUsers(ctx.db)) === 0 }));
+    app.get(
+      "/api/setup",
+      {
+        schema: {
+          ...publicRoute,
+          response: {
+            200: answer("Whether the installation still needs its first Admin", {
+              type: "object",
+              required: ["required"],
+              properties: { required: { type: "boolean" } },
+            }),
+          },
+        },
+      },
+      async () => ({ required: (await countUsers(ctx.db)) === 0 }),
+    );
 
     app.post<{ Body: { email: string; password: string; name: string; workspaceName?: string } }>(
       "/api/setup",
@@ -43,6 +60,7 @@ export function identityRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { email, password, name: nameSchema, workspaceName: nameSchema },
           },
+          response: { 201: answer("The first Admin, now signed in", userAnswer) },
         },
       },
       async (request, reply) => {
@@ -79,6 +97,7 @@ export function identityRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { email: { type: "string", maxLength: 320 }, password: { type: "string", maxLength: 1024 } },
           },
+          response: { 200: answer("The User, now signed in", userAnswer) },
         },
       },
       async (request, reply) => {
@@ -93,7 +112,7 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.delete("/api/sign-in", { schema: publicRoute }, async (request, reply) => {
+    app.delete("/api/sign-in", { schema: { ...publicRoute, response: { 204: noContent("Signed out") } } }, async (request, reply) => {
       const token = request.cookies[SIGN_IN_COOKIE];
       if (token) await deleteSignIn(ctx.db, token);
       reply.clearCookie(SIGN_IN_COOKIE, { path: "/" });
@@ -105,6 +124,13 @@ export function identityRoutes(ctx: AppContext) {
       {
         schema: {
           body: { type: "object", required: ["email"], additionalProperties: false, properties: { email, role } },
+          response: {
+            201: answer("The invitation, with the secret token the invitee accepts it with; it is only ever returned here", {
+              type: "object",
+              required: ["invitation", "token"],
+              properties: { invitation: ref("Invitation"), token: { type: "string" } },
+            }),
+          },
         },
       },
       async (request, reply) => {
@@ -123,16 +149,35 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.get("/api/invitations", async (request) => {
-      const user = await requireUser(ctx, request);
-      requireAdmin(user, "see invitations");
-      const invitations = await listInvitations(ctx.db, user.workspaceId, ctx.clock.now());
-      return { invitations: invitations.map(publicInvitation) };
-    });
+    app.get(
+      "/api/invitations",
+      {
+        schema: {
+          response: {
+            200: answer("The Workspace's unexpired invitations, newest first", {
+              type: "object",
+              required: ["invitations"],
+              properties: { invitations: { type: "array", items: ref("Invitation") } },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "see invitations");
+        const invitations = await listInvitations(ctx.db, user.workspaceId, ctx.clock.now());
+        return { invitations: invitations.map(publicInvitation) };
+      },
+    );
 
     app.delete<{ Params: { id: string } }>(
       "/api/invitations/:id",
-      { schema: { params: { type: "object", properties: { id: { type: "string", format: "uuid" } } } } },
+      {
+        schema: {
+          params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
+          response: { 204: noContent("The invitation is withdrawn") },
+        },
+      },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "withdraw invitations");
@@ -142,12 +187,27 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     // Anyone holding an invitation's token may view and accept it; the token is the proof.
-    app.get<{ Params: { token: string } }>("/api/invitations/:token", { schema: publicRoute }, async (request) => {
-      const invitation = await findInvitationByToken(ctx.db, request.params.token, ctx.clock.now());
-      if (!invitation) throw new HttpError(404, INVITATION_GONE);
-      const workspace = await getWorkspace(ctx.db, invitation.workspaceId);
-      return { email: invitation.email, role: invitation.role, workspaceName: workspace.name };
-    });
+    app.get<{ Params: { token: string } }>(
+      "/api/invitations/:token",
+      {
+        schema: {
+          ...publicRoute,
+          response: {
+            200: answer("Who the invitation is for and which Workspace it joins", {
+              type: "object",
+              required: ["email", "role", "workspaceName"],
+              properties: { email: { type: "string" }, role, workspaceName: { type: "string" } },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const invitation = await findInvitationByToken(ctx.db, request.params.token, ctx.clock.now());
+        if (!invitation) throw new HttpError(404, INVITATION_GONE);
+        const workspace = await getWorkspace(ctx.db, invitation.workspaceId);
+        return { email: invitation.email, role: invitation.role, workspaceName: workspace.name };
+      },
+    );
 
     app.post<{ Params: { token: string }; Body: { name: string; password: string } }>(
       "/api/invitations/:token/accept",
@@ -160,6 +220,7 @@ export function identityRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, password },
           },
+          response: { 201: answer("The new User, now signed in", userAnswer) },
         },
       },
       async (request, reply) => {
@@ -190,11 +251,25 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.get("/api/users", async (request) => {
-      const actor = await requireActor(ctx, request);
-      await requireWorkspaceAccess(ctx.db, actor, "read");
-      return { users: (await listUsers(ctx.db, actingUser(actor).workspaceId)).map(publicUser) };
-    });
+    app.get(
+      "/api/users",
+      {
+        schema: {
+          response: {
+            200: answer("The Workspace's Users", {
+              type: "object",
+              required: ["users"],
+              properties: { users: { type: "array", items: ref("User") } },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "read");
+        return { users: (await listUsers(ctx.db, actingUser(actor).workspaceId)).map(publicUser) };
+      },
+    );
 
     app.patch<{ Params: { id: string }; Body: { role?: Role; active?: boolean } }>(
       "/api/users/:id",
@@ -202,6 +277,7 @@ export function identityRoutes(ctx: AppContext) {
         schema: {
           params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
           body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
+          response: { 200: answer("The changed User", userAnswer) },
         },
       },
       async (request) => {
@@ -217,10 +293,23 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     // Who the caller is: a User, or an Agent with its Owner and whether its token is read-only.
-    app.get("/api/me", async (request) => {
-      const actor = await requireActor(ctx, request);
-      if (actor.kind === "user") return { user: publicUser(actor.user) };
-      return { agent: publicAgent(actor.agent, actor.owner), readOnly: actor.readOnly };
-    });
+    app.get(
+      "/api/me",
+      {
+        schema: {
+          response: {
+            200: answer("A signed-in User gets `user`; an Agent token gets `agent` and whether the token is `readOnly`", {
+              type: "object",
+              properties: { user: ref("User"), agent: ref("Agent"), readOnly: { type: "boolean" } },
+            }),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        if (actor.kind === "user") return { user: publicUser(actor.user) };
+        return { agent: publicAgent(actor.agent, actor.owner), readOnly: actor.readOnly };
+      },
+    );
   };
 }

@@ -5,11 +5,13 @@ import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
 import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
-import { publicRoute } from "./schemas.js";
+import { addSharedSchemas, answer, publicRoute } from "./schemas.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { identityRoutes } from "./identity/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
+
+const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 
 export interface AppConfig {
   databaseUrl: string;
@@ -46,6 +48,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     return reply.code(500).send({ error: "Something went wrong" });
   });
   await app.register(cookie);
+  addSharedSchemas(app);
   // Describes every route from its schema; served at /api/openapi.json.
   await app.register(swagger, {
     openapi: {
@@ -66,12 +69,18 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
       },
       security: [{ signIn: [] }, { agentToken: [] }],
     },
+    // Shared schemas appear under `components.schemas` by their `$id`.
+    refResolver: { buildLocalReference: (json, _baseUri, _fragment, i) => (typeof json.$id === "string" ? json.$id : `def-${i}`) },
   });
   app.get("/api/openapi.json", { schema: { hide: true } }, async () => app.swagger());
-  app.get("/api/health", { schema: publicRoute }, async () => {
-    await db.query("SELECT 1");
-    return { status: "ok" };
-  });
+  app.get(
+    "/api/health",
+    { schema: { ...publicRoute, response: { 200: answer("Cronk is up and its database answers", healthSchema) } } },
+    async () => {
+      await db.query("SELECT 1");
+      return { status: "ok" };
+    },
+  );
   await app.register(identityRoutes(ctx));
   await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));

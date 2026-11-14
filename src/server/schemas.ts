@@ -1,3 +1,5 @@
+import type { FastifyInstance } from "fastify";
+
 /** JSON schemas for request fields used by more than one route. */
 
 /** A display name: non-blank, at most 200 characters. Routes trim it before storing. */
@@ -8,3 +10,148 @@ export const agentAccessSchema = { type: "string", enum: ["none", "read", "write
 
 /** Route schema for an operation anyone may call, signed in or not; the OpenAPI description lists no security for it. */
 export const publicRoute = { security: [] } as const;
+
+/*
+ * Response shapes shared by several routes. Each is registered once (see `addSharedSchemas`),
+ * appears under `components.schemas` in the OpenAPI description, and is referenced with `ref`.
+ *
+ * Fastify serializes a response with its schema and drops any property the schema doesn't
+ * list, so each one must list every field the API returns.
+ */
+
+export type SharedSchemaName =
+  | "Error"
+  | "User"
+  | "Invitation"
+  | "Workspace"
+  | "Agent"
+  | "AgentToken"
+  | "Project"
+  | "Status"
+  | "Ticket"
+  | "TicketRef"
+  | "Relations"
+  | "RecordedChange";
+
+/** A reference to a shared schema by name, such as `ref("Ticket")`. */
+export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
+
+const id = { type: "string", format: "uuid" } as const;
+const timestamp = { type: "string", format: "date-time" } as const;
+const object = (properties: Record<string, object>, optional: string[] = []) => ({
+  type: "object",
+  required: Object.keys(properties).filter((p) => !optional.includes(p)),
+  properties,
+});
+/** A User or Agent as another record names it. */
+const named = object({ id, name: { type: "string" } });
+const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
+/** Another Ticket as a Ticket's parent and history name it. */
+const ticketName = object({ key: { type: "string" }, title: { type: "string" } });
+const priority = { type: "string", enum: ["urgent", "high", "medium", "low", "none"] } as const;
+const labels = { type: "array", items: { type: "string" } } as const;
+
+const sharedSchemas: Record<SharedSchemaName, object> = {
+  Error: { description: "Every API error has this shape.", ...object({ error: { type: "string" } }) },
+  User: object({
+    id,
+    email: { type: "string" },
+    name: { type: "string" },
+    role: { type: "string", enum: ["admin", "member"] },
+    active: { type: "boolean", description: "False once an Admin has deactivated the User." },
+  }),
+  Invitation: object({
+    id,
+    email: { type: "string" },
+    role: { type: "string", enum: ["admin", "member"] },
+    createdAt: timestamp,
+    expiresAt: timestamp,
+  }),
+  Workspace: object({ name: { type: "string" }, agentAccess: agentAccessSchema }),
+  Agent: object({ id, name: { type: "string" }, owner: named, createdAt: timestamp }),
+  AgentToken: {
+    description: "A token an Agent calls the API with. A read-only token is refused every write.",
+    ...object({ id, readOnly: { type: "boolean" }, createdAt: timestamp }),
+  },
+  Project: object({
+    id,
+    name: { type: "string" },
+    key: { type: "string" },
+    archived: { type: "boolean" },
+    visibility: { type: "string", enum: ["open", "private"] },
+    agentAccess: agentAccessSchema,
+    access: { type: "string", enum: ["read", "write"], description: "What the caller may do in the Project." },
+  }),
+  Status: object({
+    id,
+    name: { type: "string" },
+    category: { type: "string", enum: ["backlog", "unstarted", "started", "in_review", "completed", "canceled"] },
+  }),
+  Ticket: object({
+    id,
+    projectId: id,
+    projectKey: { type: "string" },
+    key: { type: "string", description: "`<Project key>-<number>`, such as `CRONK-12`." },
+    number: { type: "integer" },
+    title: { type: "string" },
+    description: { type: "string", description: "Markdown." },
+    status: ref("Status"),
+    priority,
+    labels,
+    assignee: nullable(named),
+    parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }),
+  TicketRef: {
+    description: "Another Ticket, as a Ticket lists it among its Sub-Tickets or relations.",
+    ...object({ key: { type: "string" }, title: { type: "string" }, status: ref("Status") }),
+  },
+  Relations: {
+    description: "A Ticket's relations to other Tickets, each list in key order.",
+    ...object({
+      blocks: { type: "array", items: ref("TicketRef") },
+      blockedBy: { type: "array", items: ref("TicketRef") },
+      relatesTo: { type: "array", items: ref("TicketRef") },
+    }),
+  },
+  RecordedChange: {
+    description: "One change in a Ticket's history. `change` says which; the other fields depend on it.",
+    ...object({
+      at: timestamp,
+      actor: {
+        description: "Who made the change: a User, or an Agent with the Owner it acted for.",
+        ...object({ kind: { type: "string", enum: ["user", "agent"] }, id, name: { type: "string" }, owner: named }, ["owner"]),
+      },
+      change: {
+        type: "string",
+        enum: ["created", "title", "description", "status", "priority", "labels", "assignee", "parent", "relation added", "relation removed"],
+      },
+    }),
+    anyOf: [
+      object({ change: { const: "created" }, title: { type: "string" }, description: { type: "string" }, status: ref("Status") }),
+      ...(["title", "description"] as const).map((c) => object({ change: { const: c }, from: { type: "string" }, to: { type: "string" } })),
+      object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
+      object({ change: { const: "priority" }, from: priority, to: priority }),
+      object({ change: { const: "labels" }, from: labels, to: labels }),
+      object({ change: { const: "assignee" }, from: nullable(named), to: nullable(named) }),
+      object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
+      object({
+        change: { type: "string", enum: ["relation added", "relation removed"] },
+        kind: { type: "string", enum: ["blocks", "blocked_by", "relates_to"] },
+        ticket: ticketName,
+      }),
+    ],
+  },
+};
+
+/** Registers the shared response shapes, so routes can `ref` them. */
+export function addSharedSchemas(app: FastifyInstance): void {
+  for (const [name, schema] of Object.entries(sharedSchemas)) app.addSchema({ $id: name, ...schema });
+}
+
+/** A success answer with a JSON body. */
+export const answer = (description: string, schema: object) => ({ description, ...schema });
+
+/** A success answer with no body, such as a 204. */
+export const noContent = (description: string) => ({ description, type: "null" }) as const;
