@@ -2,6 +2,7 @@ import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { ticketKeySql, type Ticket } from "../work/tickets.js";
 import { findDocument, insertVersion, type Document } from "./documents.js";
+import { recordTicketMentions } from "./ticket-mentions.js";
 
 /**
  * Reports: Documents of findings an Agent Session writes on a Ticket while holding its Claim.
@@ -77,6 +78,7 @@ export async function insertReport(
   );
   const id = rows[0]!.id;
   await insertVersion(db, id, { number: 1, title: input.title, body: input.body, actor: input.agent, now: input.now, restoredFrom: null });
+  await recordTicketMentions(db, id, input);
   return (await findDocument(db, workspaceId, id))!;
 }
 

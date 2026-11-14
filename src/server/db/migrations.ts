@@ -1,3 +1,6 @@
+import type { Queryable } from "./database.js";
+import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
+
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
  * migration once it has shipped; add a new one instead.
@@ -5,6 +8,8 @@
 export interface Migration {
   id: string;
   sql: string;
+  /** Fills what the SQL created from existing data, when SQL alone can't, in the same transaction. */
+  backfill?: (db: Queryable) => Promise<void>;
 }
 
 export const migrations: Migration[] = [
@@ -386,5 +391,20 @@ export const migrations: Migration[] = [
       CREATE INDEX documents_search ON documents USING gin (to_tsvector('english', title || ' ' || body));
       CREATE INDEX comments_search ON comments USING gin (to_tsvector('english', body));
     `,
+  },
+  {
+    id: "0015_document_ticket_mentions",
+    sql: `
+      -- The Ticket keys each Document's current Version mentions (knowledge/ticket-mentions.ts), rewritten
+      -- on every change to it, so a Ticket finds the Documents that mention it without reading them all.
+      -- Keys stay as written, so a mention counts once a Ticket with that key exists.
+      CREATE TABLE document_ticket_mentions (
+        document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        ticket_key text NOT NULL,
+        PRIMARY KEY (document_id, ticket_key)
+      );
+      CREATE INDEX document_ticket_mentions_key ON document_ticket_mentions (ticket_key);
+    `,
+    backfill: backfillTicketMentions,
   },
 ];
