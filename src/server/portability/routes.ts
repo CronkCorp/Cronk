@@ -1,10 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { actingUser } from "../actor.js";
-import { requireActor, type AppContext } from "../context.js";
+import { requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
-import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
+import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
-import { unpackFolder } from "./archive.js";
+import { packFolder, unpackFolder } from "./archive.js";
+import { exportFolder } from "./export.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 
 /** The media types an uploaded archive may come as. */
@@ -28,6 +29,54 @@ export function portabilityRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     // Archives arrive as raw bytes; this parser applies only to the routes registered here.
     app.addContentTypeParser(ARCHIVE_TYPES, { parseAs: "buffer", bodyLimit: MAX_ARCHIVE_BYTES }, (_request, body, done) => done(null, body));
+
+    /** Answers with the export of the Workspace, or of one Project, as a gzipped tar archive to save. */
+    const sendExport = async (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null, versions: boolean) => {
+      const now = ctx.clock.now();
+      const folder = await transaction(ctx.db, async (tx) => {
+        await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+        return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now });
+      });
+      const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
+      return reply
+        .header("content-type", "application/gzip")
+        .header("content-disposition", `attachment; filename="cronk-${project ? project.key : "workspace"}-${stamp}.tar.gz"`)
+        .send(await packFolder(folder));
+    };
+
+    app.get<{ Querystring: { versions?: boolean } }>(
+      "/api/export",
+      {
+        schema: {
+          description: `Exports the whole Workspace: its settings, Users and Agents, Guidance, Documents and every Project with its Tickets. ${EXPORT_FORMAT}`,
+          querystring: versionsQuery,
+          response: { 200: exportAnswer, ...errors(401, 403, 410) },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "export the Workspace");
+        return sendExport(reply, user.workspaceId, null, request.query.versions ?? false);
+      },
+    );
+
+    app.get<{ Params: { key: string }; Querystring: { versions?: boolean } }>(
+      "/api/projects/:key/export",
+      {
+        schema: {
+          description: `Exports one Project: its settings, Statuses, members, Guidance, Documents and Tickets, and the Users and Agents they name. ${EXPORT_FORMAT}`,
+          params: pathParams({ key: projectKeyParam }),
+          querystring: versionsQuery,
+          response: { 200: exportAnswer, ...errors(401, 403, 404, 410) },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "export a Project");
+        const { project } = await projectFor(ctx.db, { kind: "user", user }, request.params.key, "read");
+        return sendExport(reply, user.workspaceId, project, request.query.versions ?? false);
+      },
+    );
 
     app.post(
       "/api/workspace/documents/import",
@@ -71,6 +120,21 @@ export function portabilityRoutes(ctx: AppContext) {
     );
   };
 }
+
+const EXPORT_FORMAT =
+  "The answer is a gzipped tar archive of Markdown files with YAML frontmatter, laid out as its README.md describes; POST /api/import reads it back.";
+
+const versionsQuery = {
+  type: "object",
+  properties: {
+    versions: { type: "boolean", default: false, description: "Include every Version of Documents, Reports and Guidance, not only the current one." },
+  },
+} as const;
+
+const exportAnswer = {
+  description: "The export, as a gzipped tar archive to save",
+  content: { "application/gzip": { schema: { type: "string", format: "binary" } } },
+};
 
 const IMPORT_RULES =
   "A file is titled by its frontmatter's `title`, else by a `#` heading on its first line, else by its name; frontmatter is left out of the body. " +
