@@ -54,14 +54,23 @@ export async function findLiveClaim(db: Queryable, ticketId: string, now: Date):
  */
 export async function setClaim(db: Queryable, ticketId: string, sessionId: string, now: Date): Promise<void> {
   await db.query(
-    `UPDATE tickets SET claim_session_id = $2, claimed_at = $3 WHERE id = $1 AND claim_session_id IS DISTINCT FROM $2`,
+    `UPDATE tickets SET claim_session_id = $2, claimed_at = $3, claim_id = gen_random_uuid() WHERE id = $1 AND claim_session_id IS DISTINCT FROM $2`,
     [ticketId, sessionId, now],
   );
 }
 
+/**
+ * The id of the Ticket's current Claim, which Reports written in it record. Each Claim gets a new
+ * one, so Claiming again after a release is a new Claim. Callers check the Claim is live.
+ */
+export async function currentClaimId(db: Queryable, ticketId: string): Promise<string | undefined> {
+  const { rows } = await db.query<{ claim_id: string | null }>("SELECT claim_id FROM tickets WHERE id = $1", [ticketId]);
+  return rows[0]?.claim_id ?? undefined;
+}
+
 /** Drops the Ticket's Claim, as when it is released or its Delegate changes. */
 export async function clearClaim(db: Queryable, ticketId: string): Promise<void> {
-  await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL WHERE id = $1", [ticketId]);
+  await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL, claim_id = NULL WHERE id = $1", [ticketId]);
 }
 
 /** SQL condition: the Ticket `t` has a live Claim at the time in the parameter `nowParam`. */

@@ -43,6 +43,7 @@ export type SharedSchemaName =
   | "RecordedChange"
   | "Activity"
   | "Document"
+  | "Report"
   | "DocumentTreeEntry"
   | "Version"
   | "VersionSummary"
@@ -270,12 +271,29 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       id,
       projectId: { ...nullable(id), description: "Null for a Workspace Document." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
-      parentId: { ...nullable(id), description: "The Document it sits under in the page tree; null at the top." },
+      parentId: { ...nullable(id), description: "The Document it sits under in the page tree; null at the top, and for a Report." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket a Report is on; null for any other Document. Reports stay out of the page tree." },
       title: { type: "string" },
       body: { type: "string", description: "Markdown." },
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
       createdAt: timestamp,
       updatedAt: timestamp,
+    }),
+  },
+  Report: {
+    description:
+      "A Report as its Ticket and Project list it, without its body: a Document of findings an Agent Session wrote on a Ticket while holding its Claim. " +
+      "Read or edit it as a Document by its id.",
+    ...object({
+      id,
+      ticketKey: { type: "string" },
+      ticketTitle: { type: "string" },
+      title: { type: "string" },
+      version: { type: "integer", description: "The number of its current Version." },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      agent: { ...object({ id, name: { type: "string" }, owner: named }), description: "The Agent that wrote it, with the Owner it acts for." },
+      session: { ...object({ id }), description: "The Agent Session it was written in." },
     }),
   },
   DocumentTreeEntry: {

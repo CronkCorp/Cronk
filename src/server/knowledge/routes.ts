@@ -285,6 +285,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const document = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
           const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
+          if (moved === "a report") throw new HttpError(400, "A Report lives with its Ticket, outside the page tree, so it can't be moved");
           if (moved === "no such parent") throw notInTree();
           if (moved === "under itself") throw new HttpError(409, "A Document can't move under itself or a Document under it");
           if (moved === "no such position") throw new HttpError(400, `There is no position ${position} among those Documents`);
