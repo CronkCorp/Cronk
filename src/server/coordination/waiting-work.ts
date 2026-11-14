@@ -3,7 +3,7 @@ import type { LiveEvent } from "../live/live-updates.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
-import type { Queryable } from "../db/database.js";
+import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
 import { listAgents, type Agent } from "../identity/agents.js";
 import type { User } from "../identity/users.js";
@@ -137,11 +137,18 @@ export async function markWaiting(
   for (const reason of WAITING_REASONS) {
     for (const agentId of candidates[reason]) if (agentId !== poster && !marked.has(agentId)) marked.set(agentId, reason);
   }
-  const waiting: WaitingFor[] = [];
+  const concerned: [string, WaitingReason][] = [];
   for (const [agentId, reason] of marked) {
     const found = agents.find((a) => a.agent.id === agentId);
     if (!found?.owner.active) continue;
-    if (!(await canRead(db, agentReading(found.agent, found.owner), place.projectId))) continue;
+    if (await canRead(db, agentReading(found.agent, found.owner), place.projectId)) concerned.push([agentId, reason]);
+  }
+  // Posts concerning the same Agent take positions and commit one after another, so a position
+  // is never passed by one still uncommitted (see `missedWaitingWork`). Other Agents' posts don't
+  // wait. Locking in id order keeps two posts naming the same Agents from deadlocking.
+  for (const agentId of concerned.map(([id]) => id).sort()) await lockUntilCommit(db, `waiting-work:${agentId}`);
+  const waiting: WaitingFor[] = [];
+  for (const [agentId, reason] of concerned) {
     const { rows } = await db.query<{ seq: string }>(
       "INSERT INTO waiting_work (agent_id, comment_id, reason, at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING seq",
       [agentId, comment.id, reason, at],
@@ -176,6 +183,10 @@ export async function takeWaitingWork(db: Queryable, agent: AgentActor, sessionI
  * The work still waiting for the Agent that started waiting after position `afterSeq`, with
  * each one's position, in that order, leaving out what the Agent can't see right now: what a
  * stream reopened from `afterSeq` missed. Nothing is taken.
+ *
+ * Safe because an Agent's committed positions are never passed by an uncommitted one
+ * (`markWaiting` serializes them per Agent): any work that commits later than position
+ * `afterSeq` was seen has a higher position, so it is never skipped.
  */
 export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterSeq: string): Promise<{ seq: string; work: WaitingWork }[]> {
   const { rows } = await db.query<{ seq: string; comment_id: string; reason: WaitingReason }>(
@@ -186,7 +197,11 @@ export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterS
   return rows.filter((r) => work.has(r.comment_id)).map((r) => ({ seq: r.seq, work: work.get(r.comment_id)! }));
 }
 
-/** The position of the work that last started waiting for the Agent, taken or not; "0" if none has. */
+/**
+ * The position of the work that last started waiting for the Agent, taken or not; "0" if none has.
+ * Work for the Agent still uncommitted when this is read will have a higher position, as
+ * `markWaiting` serializes it per Agent, so replaying from it skips nothing.
+ */
 export async function latestWaitingSeq(db: Queryable, agentId: string): Promise<string> {
   const { rows } = await db.query<{ seq: string | null }>("SELECT max(seq)::text AS seq FROM waiting_work WHERE agent_id = $1", [agentId]);
   return rows[0]?.seq ?? "0";

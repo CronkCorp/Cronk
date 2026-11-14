@@ -150,8 +150,21 @@ export interface Cronk {
    * blip, and lets the rest through.
    */
   interruptQueriesOn(table: string, cause: () => Promise<unknown>): Promise<void>;
+  /**
+   * Locks the row of `table` with this id, as a transaction updating it would, so writes that
+   * reference it (such as rows with a foreign key to it) wait until it is released.
+   */
+  holdRow(table: string, id: string): Promise<HeldRow>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
+}
+
+/** A row held by `Cronk.holdRow`. */
+export interface HeldRow {
+  /** Resolves once at least `n` queries on this test's database are waiting on a lock. */
+  waiters(n: number): Promise<void>;
+  /** Lets the writes waiting on the row through. */
+  release(): Promise<void>;
 }
 
 /**
@@ -219,6 +232,42 @@ export async function startCronk(): Promise<Cronk> {
         await admin.query("ROLLBACK").catch(() => {});
         await admin.end();
       }
+    },
+    holdRow: async (table, id) => {
+      const holder = new pg.Client({ connectionString: databaseUrl });
+      await holder.connect();
+      await holder.query("BEGIN");
+      await holder.query(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
+      let released = false;
+      const release = async () => {
+        if (released) return;
+        released = true;
+        await holder.query("ROLLBACK").catch(() => {});
+        await holder.end();
+      };
+      onTestFinished(release);
+      return {
+        waiters: async (n) => {
+          // Asked outside the holding transaction, as pg_stat_activity stays the same within one.
+          const watcher = new pg.Client({ connectionString: databaseUrl });
+          await watcher.connect();
+          try {
+            const deadline = Date.now() + 5_000;
+            for (;;) {
+              const { rows } = await watcher.query<{ n: number }>(
+                "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
+                [dbName],
+              );
+              if (rows[0]!.n >= n) return;
+              if (Date.now() > deadline) throw new Error(`Fewer than ${n} queries waited on a lock`);
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          } finally {
+            await watcher.end();
+          }
+        },
+        release,
+      };
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
