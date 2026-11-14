@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -462,22 +462,26 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
 // Runs after the tests above, so Ada exists; the Workspace's page tree is still empty.
 test("import a folder of Markdown files picked in the browser", async ({ page }) => {
   const picked = await mkdtemp(join(tmpdir(), "cronk-import-"));
-  await mkdir(join(picked, "handbook", "setup"), { recursive: true });
-  await writeFile(join(picked, "handbook", "README.md"), "# Handbook\n\nWelcome aboard.");
-  await writeFile(join(picked, "handbook", "setup", "install.md"), "# Installing\n\nRun it.");
-  await writeFile(join(picked, "handbook", "logo.png"), "not markdown");
+  try {
+    await mkdir(join(picked, "handbook", "setup"), { recursive: true });
+    await writeFile(join(picked, "handbook", "README.md"), "# Handbook\n\nWelcome aboard.");
+    await writeFile(join(picked, "handbook", "setup", "install.md"), "# Installing\n\nRun it.");
+    await writeFile(join(picked, "handbook", "logo.png"), "not markdown");
 
-  await page.goto("/");
-  await page.getByLabel("Email").fill(ada.email);
-  await page.getByLabel("Password").fill(ada.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
-  await page.goto("/documents");
+    await page.goto("/");
+    await page.getByLabel("Email").fill(ada.email);
+    await page.getByLabel("Password").fill(ada.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+    await page.goto("/documents");
 
-  await page.getByLabel("Import Markdown folder…").setInputFiles(join(picked, "handbook"));
-  const tree = page.getByRole("list", { name: "Documents" });
-  await expect(tree).toContainText("Handbook");
-  await expect(tree).toContainText("Installing");
-  await tree.getByRole("link", { name: "Installing" }).click();
-  await expect(page.getByTestId("document-body")).toContainText("Run it.");
+    await page.getByLabel("Import Markdown folder…").setInputFiles(join(picked, "handbook"));
+    const tree = page.getByRole("list", { name: "Documents" });
+    await expect(tree).toContainText("Handbook");
+    await expect(tree).toContainText("Installing");
+    await tree.getByRole("link", { name: "Installing" }).click();
+    await expect(page.getByTestId("document-body")).toContainText("Run it.");
+  } finally {
+    await rm(picked, { recursive: true, force: true });
+  }
 });

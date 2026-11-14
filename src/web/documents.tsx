@@ -87,7 +87,7 @@ export function DocumentsPage(props: { projectKey?: string }) {
     setImportError(undefined);
     try {
       const archive = await pack(files);
-      if (!archive) return setImportError("That folder holds no Markdown files (.md) to import");
+      if (!archive) return setImportError("That folder holds no Markdown files (.md or .markdown) to import");
       await api.importDocuments(props.projectKey, archive);
       reload();
     } catch (err) {

@@ -146,7 +146,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 async function upload<T>(path: string, file: Blob): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/gzip" },
+    // The server tells a zip from a tar, gzipped or not, by its bytes, so the upload is sent as plain bytes.
+    headers: { "content-type": "application/octet-stream" },
     body: file,
     credentials: "same-origin",
   });

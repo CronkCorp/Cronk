@@ -470,8 +470,9 @@ export function zip(files: Record<string, string>, { stored = false } = {}): Buf
   const directory = Buffer.concat(centrals);
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(centrals.length / 2, 8);
-  end.writeUInt16LE(centrals.length / 2, 10);
+  const count = Object.keys(files).length;
+  end.writeUInt16LE(count, 8);
+  end.writeUInt16LE(count, 10);
   end.writeUInt32LE(directory.length, 12);
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, directory, end]);
