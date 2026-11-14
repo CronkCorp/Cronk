@@ -236,6 +236,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge.sections.map((s: { heading: string }) => s.heading)).toEqual(["## Install", "## Usage"]);
   });
 
+  it("combines a renamed and moved section with an edit to its content", async () => {
+    const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nUse it.\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("Install it.", "Download it."));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## Usage\n\nUse it.\n\n## Install\n\nInstall it.\nThen run it.\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Usage\n\nUse it.\n\n## Install\n\nDownload it.\nThen run it.\n" });
+  });
+
   it("reports a section both edits renamed differently as a conflict", async () => {
     const base = "## Setup\n\nInstall it.\n";
     const { admin, id } = await editedUnderneath(base, "## Install\n\nInstall it.\n");

@@ -200,15 +200,25 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
     } else if (best[i]![j] === best[i + 1]![j]) i++;
     else j++;
   }
+  const pair = (i: number, j: number) => {
+    side[j]!.key = base[i]!.key;
+    pairedBase.add(i);
+    pairedSide.add(j);
+  };
+  const unpaired = (paired: Set<number>, length: number) => Array.from({ length }, (_, k) => k).filter((k) => k > 0 && !paired.has(k));
+  // A section moved elsewhere: first by its heading, then (renamed too) by its content.
+  for (const j of unpaired(pairedSide, m)) {
+    const moved = unpaired(pairedBase, n).find((i) => base[i]!.heading === side[j]!.heading);
+    if (moved !== undefined) pair(moved, j);
+  }
+  for (const j of unpaired(pairedSide, m)) {
+    let bestBase: number | undefined;
+    for (const i of unpaired(pairedBase, n)) if (scores[i]![j]! > (bestBase === undefined ? 0 : scores[bestBase]![j]!)) bestBase = i;
+    if (bestBase !== undefined) pair(bestBase, j);
+  }
   const added = new Map<string, number>();
   side.forEach((chunk, j) => {
     if (pairedSide.has(j)) return;
-    const moved = base.findIndex((b, i) => i > 0 && !pairedBase.has(i) && b.heading === chunk.heading);
-    if (moved > 0) {
-      chunk.key = base[moved]!.key;
-      pairedBase.add(moved);
-      return;
-    }
     const count = (added.get(chunk.heading!) ?? 0) + 1;
     added.set(chunk.heading!, count);
     chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
