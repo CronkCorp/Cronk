@@ -19,7 +19,21 @@ export interface Agent {
   name: string;
   owner: { id: string; name: string };
   createdAt: string;
+  /** The Agent's live Agent Sessions, oldest first. */
+  sessions: AgentSession[];
 }
+
+/** One continuous connection of an Agent, from connect to disconnect. */
+export interface AgentSession {
+  id: string;
+  startedAt: string;
+  lastSeenAt: string;
+  /** When the Session ends if the Agent stays silent until then. */
+  endsIfSilentAt: string;
+}
+
+/** How the UI names an Agent Session: by the start of its id, e.g. "session a3f2". */
+export const sessionName = (id: string) => `session ${id.slice(0, 4)}`;
 
 export interface AgentToken {
   id: string;
@@ -142,10 +156,10 @@ export interface TicketChanges {
 }
 
 
-/** Who made a change: a User, or an Agent with the Owner it acted for. */
+/** Who made a change: a User, or an Agent with the Owner it acted for and the Agent Session it was in, if any. */
 export type RecordedActor =
   | { kind: "user"; id: string; name: string }
-  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string } };
+  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
 
 
 export type RecordedChange = { at: string; actor: RecordedActor } & (
