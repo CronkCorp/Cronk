@@ -80,7 +80,7 @@ describe("Searching", () => {
 });
 
 describe("Search access", () => {
-  /** A Ticket, a Document, a Report and Comments on them in SECRET, and a Workspace Document with a Comment, all about the comet. */
+  /** A Ticket, a Document, a Report and Comments on each in SECRET, and a Workspace Document with a Comment, all about the comet. */
   async function cometEverywhere() {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
@@ -94,6 +94,7 @@ describe("Search access", () => {
     const reporting = await startSession(cronk, reporter.secret);
     await reporting.post("/api/tickets/SECRET-1/claim");
     expect((await reporting.post("/api/tickets/SECRET-1/reports", { title: "Comet report", body: "The comet passed." })).status).toBe(201);
+    await admin.post(`/api/documents/${(await admin.get("/api/tickets/SECRET-1/reports")).body.reports[0].id}/comments`, { body: "Comet report reviewed." });
     const handbook = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "On the comet." })).body.document.id;
     await admin.post(`/api/documents/${handbook}/comments`, { body: "Comet again." });
     return { cronk, admin };
@@ -102,7 +103,7 @@ describe("Search access", () => {
     ((await client.get("/api/search?q=comet&limit=100")).body.results as { kind: string; projectKey: string | null }[])
       .map((r) => `${r.kind} ${r.projectKey}`)
       .sort();
-  const everything = ["comment SECRET", "comment SECRET", "comment null", "document SECRET", "document null", "report SECRET", "ticket SECRET"];
+  const everything = ["comment SECRET", "comment SECRET", "comment SECRET", "comment null", "document SECRET", "document null", "report SECRET", "ticket SECRET"];
   const workspaceOnly = ["comment null", "document null"];
 
   it("leaves out a private Project's Tickets, Documents, Reports and Comments for Members not in it", async () => {
@@ -134,5 +135,15 @@ describe("Search access", () => {
     await admin.patch("/api/projects/SECRET", { agentAccess: "write", visibility: "private" });
     expect(await places(bobsAgent)).toEqual([]);
     expect(await places(await agentOf(cronk, admin, "adas-agent"))).toEqual(everything.filter((p) => !p.endsWith("null")));
+  });
+
+  it("keeps finding an archived Project's content for those who may read it, and only for them", async () => {
+    const { cronk, admin } = await cometEverywhere();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/projects/SECRET", { archived: true });
+    expect(await places(bob)).toEqual(everything);
+
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    expect(await places(bob)).toEqual(workspaceOnly);
   });
 });
