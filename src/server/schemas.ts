@@ -69,6 +69,12 @@ const object = (properties: Record<string, object>, optional: string[] = []) => 
 const named = object({ id, name: { type: "string" } });
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
 /** Another Ticket as a Ticket's parent and history name it. */
+/** Who wrote an Activity or a Report: the Agent with the Owner it acts for, and the Agent Session it was in. */
+const writtenBy = {
+  agent: { ...object({ id, name: { type: "string" }, owner: named }), description: "The Agent that wrote it, with the Owner it acts for." },
+  session: { ...object({ id }), description: "The Agent Session it was written in." },
+};
+
 const ticketName = object({ key: { type: "string" }, title: { type: "string" } });
 const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
@@ -261,8 +267,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       body: { type: "string", description: "Markdown." },
       blocking: { type: "boolean", description: "True for a question the Agent waits on; only questions can be." },
       at: timestamp,
-      agent: { ...object({ id, name: { type: "string" }, owner: named }), description: "The Agent, with the Owner it acts for." },
-      session: object({ id }),
+      ...writtenBy,
     }),
   },
   Document: {
@@ -292,8 +297,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       version: { type: "integer", description: "The number of its current Version." },
       createdAt: timestamp,
       updatedAt: timestamp,
-      agent: { ...object({ id, name: { type: "string" }, owner: named }), description: "The Agent that wrote it, with the Owner it acts for." },
-      session: { ...object({ id }), description: "The Agent Session it was written in." },
+      ...writtenBy,
     }),
   },
   DocumentTreeEntry: {
