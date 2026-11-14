@@ -89,6 +89,7 @@ function GuidanceEditor(props: {
       // Listed after the merge, so the Version it merged onto is among them.
       const versions = await api.guidanceVersions(props.projectKey);
       const at = (version: number): SavedText => ({ number: version, body: versions.find((v) => v.version === version)?.markdown ?? "" });
+      // Someone saved since: the page shows their Version as current while this edit is merged onto it.
       props.onCurrentChanged(merge.onto);
       return {
         base: at(baseVersion),

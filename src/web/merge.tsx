@@ -71,10 +71,7 @@ export interface StaleMerge {
 }
 
 /** Someone else's save that refused this one, and how settling it stands. */
-interface OtherEdit {
-  base: SavedText;
-  theirs: SavedText;
-  by: string;
+interface OtherEdit extends Pick<StaleMerge, "base" | "theirs" | "by"> {
   /** Whether the merge left conflicts for the User to settle. */
   conflicted: boolean;
   /** The User left the conflict unsettled and went back to their draft. */
@@ -86,6 +83,7 @@ interface OtherEdit {
  * that save is refused because someone saved since: show their edit, and merge it into the draft
  * section by section, leaving sections both changed differently for the User to choose or combine.
  * Documents and Guidance share it; each passes its own save and merge calls, adapted to a `Draft`.
+ * The merge call runs once per refused save and may also tell the page what the Version now is.
  * Hands back the draft, the save handler, and the props for `StaleSaveNotice` and `ResolveMerge`
  * while there is a refused save to settle.
  */
@@ -120,7 +118,8 @@ export function useStaleSave<D extends Draft, T>(options: {
       }
       try {
         const m = await options.merge(draft, base);
-        setOther({ base: m.base, theirs: m.theirs, by: m.by, conflicted: m.merged === null });
+        const { base: started, theirs, by } = m;
+        setOther({ base: started, theirs, by, conflicted: m.merged === null });
         if (m.merged) {
           replaceDraft(m.merged.text, m.merged.title);
           setBase(m.theirs.number);
