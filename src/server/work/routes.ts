@@ -3,6 +3,7 @@ import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { userActor } from "../actor.js";
+import { findUserById } from "../identity/users.js";
 import type { Queryable } from "../db/database.js";
 import {
   findProjectByKey,
@@ -25,6 +26,7 @@ import {
   type Priority,
   type Ticket,
   type TicketEdit,
+  type UserRef,
 } from "./tickets.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
@@ -145,7 +147,7 @@ export function workRoutes(ctx: AppContext) {
       return { ticket: await ticketOr404(ctx, user.workspaceId, request.params.key) };
     });
 
-    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[] } }>(
+    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[]; assigneeId?: string | null } }>(
       "/api/tickets/:key",
       {
         schema: {
@@ -158,13 +160,14 @@ export function workRoutes(ctx: AppContext) {
               statusId: { type: "string", format: "uuid" },
               priority: { type: "string", enum: PRIORITIES },
               labels: { type: "array", maxItems: 20, items: label },
+              assigneeId: { type: ["string", "null"], format: "uuid" },
             },
           },
         },
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const { title, description, statusId, priority, labels } = request.body;
+        const { title, description, statusId, priority, labels, assigneeId } = request.body;
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await findTicketByKey(tx, user.workspaceId, request.params.key, { forUpdate: true });
           if (!ticket) throw new HttpError(404, "No such Ticket");
@@ -179,6 +182,7 @@ export function workRoutes(ctx: AppContext) {
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
             changes.status = status;
           }
+          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await workspaceUser(tx, user.workspaceId, assigneeId);
           return updateTicket(tx, ticket, changes, userActor(user), ctx.clock.now());
         });
         return { ticket };
@@ -191,6 +195,13 @@ export function workRoutes(ctx: AppContext) {
       return { changes: await listHistory(ctx.db, ticket.id) };
     });
   };
+}
+
+/** A User of the Workspace, as a Ticket shows them, or a 400. */
+async function workspaceUser(db: Queryable, workspaceId: string, id: string): Promise<UserRef> {
+  const found = await findUserById(db, id);
+  if (!found || found.workspaceId !== workspaceId) throw new HttpError(400, "No such User");
+  return { id: found.id, name: found.name };
 }
 
 async function projectOr404(db: Queryable, workspaceId: string, key: string): Promise<Project> {

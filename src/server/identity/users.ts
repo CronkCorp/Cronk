@@ -56,3 +56,9 @@ export async function findUserById(db: Queryable, id: string): Promise<User | un
   const { rows } = await db.query<UserRow>("SELECT * FROM users WHERE id = $1", [id]);
   return rows[0] && toUser(rows[0]);
 }
+
+/** A Workspace's Users by name. */
+export async function listUsers(db: Queryable, workspaceId: string): Promise<User[]> {
+  const { rows } = await db.query<UserRow>("SELECT * FROM users WHERE workspace_id = $1 ORDER BY lower(name), email", [workspaceId]);
+  return rows.map(toUser);
+}

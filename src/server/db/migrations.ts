@@ -94,7 +94,8 @@ export const migrations: Migration[] = [
       ALTER TABLE tickets
         ADD COLUMN priority text NOT NULL DEFAULT 'none' CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
         -- Free-form, in the order given; never two that differ only in case.
-        ADD COLUMN labels text[] NOT NULL DEFAULT '{}';
+        ADD COLUMN labels text[] NOT NULL DEFAULT '{}',
+        ADD COLUMN assignee_id uuid REFERENCES users(id);
     `,
   },
 ];

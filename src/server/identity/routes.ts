@@ -5,7 +5,7 @@ import { nameSchema } from "../schemas.js";
 import { insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { countUsers, findUserByEmail, insertUser, publicUser } from "./users.js";
+import { countUsers, findUserByEmail, insertUser, listUsers, publicUser } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -85,5 +85,10 @@ export function identityRoutes(ctx: AppContext) {
     });
 
     app.get("/api/me", async (request) => ({ user: publicUser(await requireUser(ctx, request)) }));
+
+    app.get("/api/users", async (request) => {
+      const user = await requireUser(ctx, request);
+      return { users: (await listUsers(ctx.db, user.workspaceId)).map(publicUser) };
+    });
   };
 }

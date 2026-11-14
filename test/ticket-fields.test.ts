@@ -76,3 +76,30 @@ describe("Ticket Labels", () => {
     expect(res.body.labels).toEqual(["bug", "docs", "ui"]);
   });
 });
+
+describe("Ticket Assignee", () => {
+  it("starts unset and can be set to a User of the Workspace and cleared", async () => {
+    const { admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const users = await admin.get("/api/users");
+    expect(users.status).toBe(200);
+    const [ada] = users.body.users;
+    expect(ada).toMatchObject({ name: "Ada" });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.assignee).toBeNull();
+
+    const assigned = await admin.patch("/api/tickets/CRONK-1", { assigneeId: ada.id });
+    expect(assigned.status).toBe(200);
+    expect(assigned.body.ticket.assignee).toEqual({ id: ada.id, name: "Ada" });
+
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: "00000000-0000-4000-8000-000000000000" })).status).toBe(400);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.assignee).toEqual({ id: ada.id, name: "Ada" });
+
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: null })).body.ticket.assignee).toBeNull();
+
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    expect(changes.slice(1)).toMatchObject([
+      { change: "assignee", from: null, to: { id: ada.id, name: "Ada" } },
+      { change: "assignee", from: { id: ada.id, name: "Ada" }, to: null },
+    ]);
+  });
+});

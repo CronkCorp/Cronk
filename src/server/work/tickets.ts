@@ -6,6 +6,12 @@ import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
+/** A User as a Ticket shows them. */
+export interface UserRef {
+  id: string;
+  name: string;
+}
+
 export interface Ticket {
   id: string;
   projectId: string;
@@ -17,6 +23,7 @@ export interface Ticket {
   status: Status;
   priority: Priority;
   labels: string[];
+  assignee: UserRef | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,6 +40,8 @@ interface TicketRow {
   status_category: Status["category"];
   priority: Priority;
   labels: string[];
+  assignee_id: string | null;
+  assignee_name: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -48,14 +57,17 @@ const toTicket = (row: TicketRow): Ticket => ({
   status: { id: row.status_id, name: row.status_name, category: row.status_category },
   priority: row.priority,
   labels: row.labels,
+  assignee: row.assignee_id === null ? null : { id: row.assignee_id, name: row.assignee_name! },
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.created_at, t.updated_at,
-         s.id AS status_id, s.name AS status_name, s.category AS status_category
-  FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id`;
+         s.id AS status_id, s.name AS status_name, s.category AS status_category,
+         a.id AS assignee_id, a.name AS assignee_name
+  FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
+  LEFT JOIN users a ON a.id = t.assignee_id`;
 
 /**
  * Creates a Ticket with the Project's next number and records it in the history.
@@ -118,6 +130,8 @@ export interface TicketEdit {
   status?: Status;
   priority?: Priority;
   labels?: string[];
+  /** A User of the Ticket's Workspace, or null to leave it unassigned. */
+  assignee?: UserRef | null;
 }
 
 /**
@@ -126,38 +140,38 @@ export interface TicketEdit {
  */
 export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketEdit, actor: Actor, now: Date): Promise<Ticket> {
   const recorded: TicketChange[] = [];
+  const columns: [column: string, value: unknown][] = [];
   if (changes.title !== undefined && changes.title !== ticket.title) {
     recorded.push({ change: "title", from: ticket.title, to: changes.title });
+    columns.push(["title", changes.title]);
   }
   if (changes.description !== undefined && changes.description !== ticket.description) {
     recorded.push({ change: "description", from: ticket.description, to: changes.description });
+    columns.push(["description", changes.description]);
   }
   if (changes.status !== undefined && changes.status.id !== ticket.status.id) {
     recorded.push({ change: "status", from: ticket.status, to: changes.status });
+    columns.push(["status_id", changes.status.id]);
   }
   if (changes.priority !== undefined && changes.priority !== ticket.priority) {
     recorded.push({ change: "priority", from: ticket.priority, to: changes.priority });
+    columns.push(["priority", changes.priority]);
   }
   if (changes.labels !== undefined && !sameList(changes.labels, ticket.labels)) {
     recorded.push({ change: "labels", from: ticket.labels, to: changes.labels });
+    columns.push(["labels", changes.labels]);
+  }
+  if (changes.assignee !== undefined && changes.assignee?.id !== ticket.assignee?.id) {
+    recorded.push({ change: "assignee", from: ticket.assignee, to: changes.assignee });
+    columns.push(["assignee_id", changes.assignee?.id ?? null]);
   }
   if (recorded.length === 0) return ticket;
 
-  await db.query(
-    `UPDATE tickets
-     SET title = coalesce($2, title), description = coalesce($3, description), status_id = coalesce($4, status_id),
-         priority = coalesce($6, priority), labels = coalesce($7, labels), updated_at = $5
-     WHERE id = $1`,
-    [
-      ticket.id,
-      changes.title ?? null,
-      changes.description ?? null,
-      changes.status?.id ?? null,
-      now,
-      changes.priority ?? null,
-      changes.labels ?? null,
-    ],
-  );
+  columns.push(["updated_at", now]);
+  await db.query(`UPDATE tickets SET ${columns.map(([column], i) => `${column} = $${i + 2}`).join(", ")} WHERE id = $1`, [
+    ticket.id,
+    ...columns.map(([, value]) => value),
+  ]);
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
   return (await findTicketById(db, ticket.id))!;
 }
@@ -183,7 +197,8 @@ export type TicketChange =
   | { change: "description"; from: string; to: string }
   | { change: "status"; from: Status; to: Status }
   | { change: "priority"; from: Priority; to: Priority }
-  | { change: "labels"; from: string[]; to: string[] };
+  | { change: "labels"; from: string[]; to: string[] }
+  | { change: "assignee"; from: UserRef | null; to: UserRef | null };
 
 export type RecordedChange = { at: Date; actor: { kind: "user"; id: string; name: string } } & TicketChange;
 
