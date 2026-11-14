@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
+import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { Link, navigate, useLocation } from "./router.js";
@@ -119,6 +120,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
           <span data-testid="workspace-name">{workspace?.name}</span>
         </Link>
         <div className="topbar-right">
+          <Link to="/documents" className="link">Documents</Link>
           <Link to="/agents" className="link">Agents</Link>
           {props.user.role === "admin" && (
             <>
@@ -154,6 +156,11 @@ function Page(props: { me: User }) {
   const { path, search } = useLocation();
   if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   if (path === "/agents") return <AgentsPage me={props.me} />;
+  if (path === "/documents") return <DocumentsPage />;
+  const projectDocuments = /^\/projects\/([^/]+)\/documents$/.exec(path);
+  if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;
+  const documentMatch = /^\/documents\/([^/]+)$/.exec(path);
+  if (documentMatch) return <DocumentPage id={decodeURIComponent(documentMatch[1]!)} edit={search.get("edit") === "1"} />;
   const project = /^\/projects\/([^/]+)$/.exec(path);
   if (project) {
     return (

@@ -20,6 +20,7 @@ import type {
   UserRef,
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
+import type { Document as StoredDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
@@ -72,3 +73,12 @@ export interface TicketDetail {
 }
 
 export type RecordedChange = Serialized<StoredRecordedChange>;
+
+/** A Document at its current Version. */
+export type Document = Serialized<StoredDocument>;
+/** One saved state of a Document. */
+export type Version = Serialized<StoredVersion>;
+/** A Version without its body, as a Document's Version list shows it. */
+export type VersionSummary = Omit<Version, "body">;
+/** A Document as its page tree lists it. */
+export type DocumentTreeEntry = TreeEntry;

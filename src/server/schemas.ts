@@ -39,7 +39,12 @@ export type SharedSchemaName =
   | "Ticket"
   | "TicketRef"
   | "Relations"
-  | "RecordedChange";
+  | "RecordedChange"
+  | "Document"
+  | "DocumentTreeEntry"
+  | "Version"
+  | "VersionSummary"
+  | "StaleVersion";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -59,6 +64,30 @@ const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
 const ticketName = object({ key: { type: "string" }, title: { type: "string" } });
 const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
+
+/** Who did something, as history records it. */
+const recordedActor = {
+  description: "A User, or an Agent with the Owner it acted for and the Agent Session it was in.",
+  ...object(
+    {
+      kind: { type: "string", enum: ["user", "agent"] },
+      id,
+      name: { type: "string" },
+      owner: named,
+      session: { ...nullable(object({ id })), description: "The Agent Session an Agent acted in, if any." },
+    },
+    ["owner", "session"],
+  ),
+};
+
+/** A Version's fields, all but its body. */
+const versionFields = {
+  number: { type: "integer", description: "Counts from 1 per Document." },
+  title: { type: "string" },
+  at: timestamp,
+  actor: { ...recordedActor, description: "Who saved it." },
+  restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+};
 
 const sharedSchemas: Record<SharedSchemaName, object> = {
   Error: { description: "Every API error has this shape.", ...object({ error: { type: "string" } }) },
@@ -150,19 +179,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "One change in a Ticket's history. `change` says which; the other fields depend on it.",
     ...object({
       at: timestamp,
-      actor: {
-        description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in.",
-        ...object(
-          {
-            kind: { type: "string", enum: ["user", "agent"] },
-            id,
-            name: { type: "string" },
-            owner: named,
-            session: { ...nullable(object({ id })), description: "The Agent Session an Agent's change was made in, if any." },
-          },
-          ["owner", "session"],
-        ),
-      },
+      actor: { ...recordedActor, description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in." },
       change: {
         type: "string",
         enum: [
@@ -185,6 +202,38 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         ticket: ticketName,
       }),
     ],
+  },
+  Document: {
+    description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",
+    ...object({
+      id,
+      projectId: { ...nullable(id), description: "Null for a Workspace Document." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+      parentId: { ...nullable(id), description: "The Document it sits under in the page tree; null at the top." },
+      title: { type: "string" },
+      body: { type: "string", description: "Markdown." },
+      version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }),
+  },
+  DocumentTreeEntry: {
+    description: "A Document as its page tree lists it.",
+    ...object({
+      id,
+      parentId: { ...nullable(id), description: "The Document it sits under; null at the top." },
+      title: { type: "string" },
+      depth: { type: "integer", description: "How deep it sits: 0 at the top." },
+    }),
+  },
+  Version: {
+    description: "One saved state of a Document, recording which Actor produced it. Never changes.",
+    ...object({ ...versionFields, body: { type: "string", description: "Markdown." } }),
+  },
+  VersionSummary: { description: "A Version without its body, as a Document's Version list shows it.", ...object(versionFields) },
+  StaleVersion: {
+    description: "A save refused because the Version it is based on is no longer current, with the current Version to merge with.",
+    ...object({ error: { type: "string" }, current: ref("Version") }),
   },
 };
 
@@ -228,6 +277,9 @@ export const projectKeyParam = { type: "string", description: "The Project's key
 
 /** A User's id. */
 export const userIdParam = { type: "string", format: "uuid", description: "The User's id." } as const;
+
+/** A Document's id. */
+export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
