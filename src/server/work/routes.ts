@@ -59,7 +59,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, currentClaimId, requireClaimHolder } from "../coordination/claims.js";
+import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
 
@@ -697,13 +697,14 @@ const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"]
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
  * In Review (a 403) and the Agent calls within the Agent Session holding the Ticket's live Claim (a 409).
  * Moving into In Review hands the work over, so it also needs a Report written during that Claim (a 409).
+ * (Agents can't complete Tickets yet; once Autonomous Delegation lets them, completing needs one too.)
  */
 async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Ticket, status: Status, now: Date): Promise<void> {
   if (!AGENT_CATEGORIES.includes(status.category)) {
     throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
   }
-  await requireClaimHolder(db, agent, ticket, now, "moving it");
-  if (status.category === "in_review" && !(await hasReportFromClaim(db, ticket.id, (await currentClaimId(db, ticket.id))!))) {
+  const claimId = await requireClaimHolder(db, agent, ticket, now, "moving it");
+  if (status.category === "in_review" && !(await hasReportFromClaim(db, ticket.id, claimId))) {
     throw new HttpError(
       409,
       `Write a Report on ${ticket.key} before moving it to ${status.name}: handing work over needs a Report written during your current Claim`,

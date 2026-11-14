@@ -9,7 +9,7 @@ import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
-import { claimNextReady, clearClaim, currentClaimId, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
+import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
 import { findReport, insertReport, listTicketReports } from "../knowledge/reports.js";
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
@@ -273,8 +273,7 @@ export function coordinationRoutes(ctx: AppContext) {
         const now = ctx.clock.now();
         const { ticket, report } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          await requireClaimHolder(tx, actor, ticket, now, "writing a Report on it");
-          const claimId = (await currentClaimId(tx, ticket.id))!;
+          const claimId = await requireClaimHolder(tx, actor, ticket, now, "writing a Report on it");
           return { ticket, report: await insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now }) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "report", data: { report: (await findReport(ctx.db, report.id))! } });
