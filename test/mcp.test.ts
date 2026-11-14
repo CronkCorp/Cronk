@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { connectMcp, registerAgent, startInstalledCronk } from "./harness.js";
+import type { McpConnection } from "./harness.js";
+import { connectMcp, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+
+/** Calls a tool and returns its result: the API's answer parsed from the text, and whether it is an error. */
+async function callTool(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: any }> {
+  const result = (await mcp.client.callTool({ name, arguments: args })) as { isError?: boolean; content: { type: string; text: string }[] };
+  const text = result.content[0]!.text;
+  return { isError: result.isError ?? false, body: result.isError ? text : JSON.parse(text) };
+}
 
 describe("the MCP endpoint", () => {
   it("starts an Agent Session for an Agent token and welcomes it", async () => {
@@ -50,5 +58,46 @@ describe("the MCP endpoint", () => {
     const mcp = await connectMcp(cronk, claude.secret);
     await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`);
     await expect(mcp.client.ping()).rejects.toMatchObject({ code: 401 });
+  });
+});
+
+describe("the tickets tool", () => {
+  it("lists a Project's Tickets and gets one, through the API's access rules", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 2);
+    await projectWithTickets(admin, "SECRET", 1);
+    await admin.patch("/api/projects/SECRET", { agentAccess: "none" });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const listed = await callTool(mcp, "tickets", { action: "list", project: "CRONK" });
+    expect(listed.body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1", "CRONK-2"]);
+    const got = await callTool(mcp, "tickets", { action: "get", key: "CRONK-2" });
+    expect(got.body.ticket).toMatchObject({ key: "CRONK-2", title: "Ticket 2" });
+
+    expect(await callTool(mcp, "tickets", { action: "get", key: "SECRET-1" })).toEqual({ isError: true, body: "No such Ticket" });
+    expect(await callTool(mcp, "tickets", { action: "list", project: "SECRET" })).toEqual({ isError: true, body: "No such Project" });
+    expect(await callTool(mcp, "tickets", { action: "get" })).toEqual({ isError: true, body: "The get action needs a key" });
+  });
+
+  it("offers a read-only token only the actions that read", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    expect(mcp.client.getInstructions()).toContain("read-only");
+    const { tools } = await mcp.client.listTools();
+    const tickets = tools.find((t) => t.name === "tickets");
+    expect(tickets?.inputSchema.properties?.action).toMatchObject({ enum: ["list", "get"] });
+    expect((await callTool(mcp, "tickets", { action: "get", key: "CRONK-1" })).body.ticket.key).toBe("CRONK-1");
+  });
+
+  it("filters the list as the API does", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 3);
+    await admin.patch("/api/tickets/CRONK-2", { priority: "high", labels: ["ui"] });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const listed = await callTool(mcp, "tickets", { action: "list", project: "CRONK", priority: ["high"], label: ["UI"] });
+    expect(listed.body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
   });
 });
