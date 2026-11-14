@@ -5,6 +5,7 @@ import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
 import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
+import { publicRoute } from "./schemas.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { identityRoutes } from "./identity/routes.js";
 import { workRoutes } from "./work/routes.js";
@@ -67,7 +68,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     },
   });
   app.get("/api/openapi.json", { schema: { hide: true } }, async () => app.swagger());
-  app.get("/api/health", async () => {
+  app.get("/api/health", { schema: publicRoute }, async () => {
     await db.query("SELECT 1");
     return { status: "ok" };
   });

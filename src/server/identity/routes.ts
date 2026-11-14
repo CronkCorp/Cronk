@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { nameSchema } from "../schemas.js";
+import { nameSchema, publicRoute } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -30,12 +30,13 @@ const dummyHash = hashPassword("dummy password for unknown emails");
 
 export function identityRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    app.get("/api/setup", async () => ({ required: (await countUsers(ctx.db)) === 0 }));
+    app.get("/api/setup", { schema: publicRoute }, async () => ({ required: (await countUsers(ctx.db)) === 0 }));
 
     app.post<{ Body: { email: string; password: string; name: string; workspaceName?: string } }>(
       "/api/setup",
       {
         schema: {
+          ...publicRoute,
           body: {
             type: "object",
             required: ["email", "password", "name"],
@@ -71,6 +72,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/sign-in",
       {
         schema: {
+          ...publicRoute,
           body: {
             type: "object",
             required: ["email", "password"],
@@ -91,7 +93,7 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.delete("/api/sign-in", async (request, reply) => {
+    app.delete("/api/sign-in", { schema: publicRoute }, async (request, reply) => {
       const token = request.cookies[SIGN_IN_COOKIE];
       if (token) await deleteSignIn(ctx.db, token);
       reply.clearCookie(SIGN_IN_COOKIE, { path: "/" });
@@ -140,7 +142,7 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     // Anyone holding an invitation's token may view and accept it; the token is the proof.
-    app.get<{ Params: { token: string } }>("/api/invitations/:token", async (request) => {
+    app.get<{ Params: { token: string } }>("/api/invitations/:token", { schema: publicRoute }, async (request) => {
       const invitation = await findInvitationByToken(ctx.db, request.params.token, ctx.clock.now());
       if (!invitation) throw new HttpError(404, INVITATION_GONE);
       const workspace = await getWorkspace(ctx.db, invitation.workspaceId);
@@ -151,6 +153,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/invitations/:token/accept",
       {
         schema: {
+          ...publicRoute,
           body: {
             type: "object",
             required: ["name", "password"],

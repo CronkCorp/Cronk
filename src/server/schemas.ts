@@ -5,3 +5,6 @@ export const nameSchema = { type: "string", minLength: 1, maxLength: 200, patter
 
 /** Agent Access: the most Agents may do in a Project or the Workspace. */
 export const agentAccessSchema = { type: "string", enum: ["none", "read", "write"] } as const;
+
+/** Route schema for an operation anyone may call, signed in or not; the OpenAPI description lists no security for it. */
+export const publicRoute = { security: [] } as const;

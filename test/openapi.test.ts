@@ -11,6 +11,11 @@ describe("the OpenAPI description", () => {
       expect.arrayContaining(["/api/projects", "/api/tickets/{key}", "/api/agents", "/api/agents/{id}/tokens"]),
     );
     expect(res.body.paths["/api/projects/{key}"].patch.requestBody.content["application/json"].schema.properties).toHaveProperty("agentAccess");
+    // Routes anyone may call say so; the rest need a sign-in or an Agent token.
+    for (const [path, method] of [["/api/setup", "post"], ["/api/sign-in", "post"], ["/api/invitations/{token}/accept", "post"], ["/api/health", "get"]] as const) {
+      expect(res.body.paths[path][method].security).toEqual([]);
+    }
+    expect(res.body.paths["/api/projects"].get.security).toBeUndefined();
     expect(res.body.components.securitySchemes).toMatchObject({ agentToken: { type: "http", scheme: "bearer" } });
   });
 });
