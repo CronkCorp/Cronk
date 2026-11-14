@@ -314,9 +314,11 @@ function mergeBodies(base: string, mine: string, theirs: string): MergedSection[
     else if (part.merged && !(key === "" && part.merged.text === "")) merged.push({ heading: part.merged.heading, chunk: part.merged });
   }
   // A section that ended its Version's body may now have one after it: keep a blank line between them.
+  // One that had a section after it may now end the body: end it with a single line break.
   const spaced = (chunk: Chunk | undefined, last: boolean) => {
     if (!chunk) return null;
-    if (last || chunk.text.endsWith("\n\n") || (!chunk.last && chunk.text.endsWith("\n"))) return chunk.text;
+    if (last) return chunk.last ? chunk.text : chunk.text.replace(/\n+$/, "\n");
+    if (chunk.text.endsWith("\n\n") || (!chunk.last && chunk.text.endsWith("\n"))) return chunk.text;
     return chunk.text.replace(/\n?$/, "\n\n");
   };
   return merged.map((s, i) => {

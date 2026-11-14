@@ -158,6 +158,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na\n\n## New\n\nnew\n\n## C\n\nc\n\n## Last\n\nlast" });
   });
 
+  it("ends the merged body with a single line break when the section that now ends it had one after it", async () => {
+    const base = "## A\n\na\n\n## B\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\na changed\n\n## B\n\nb\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## A\n\na\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na changed\n" });
+  });
+
   it("reports a section one edit removed and the other changed as a conflict", async () => {
     const base = "## A\n\na\n\n## B\n\nb\n";
     const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n## B\n\nb changed\n");
