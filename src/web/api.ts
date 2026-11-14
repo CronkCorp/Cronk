@@ -28,6 +28,7 @@ export interface Project {
 
 export interface Ticket {
   key: string;
+  projectKey: string;
   title: string;
   description: string;
   status: Status;

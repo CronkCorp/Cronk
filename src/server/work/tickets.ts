@@ -5,6 +5,7 @@ import type { Project, Status } from "./projects.js";
 export interface Ticket {
   id: string;
   projectId: string;
+  projectKey: string;
   key: string;
   number: number;
   title: string;
@@ -31,6 +32,7 @@ interface TicketRow {
 const toTicket = (row: TicketRow): Ticket => ({
   id: row.id,
   projectId: row.project_id,
+  projectKey: row.project_key,
   key: `${row.project_key}-${row.number}`,
   number: row.number,
   title: row.title,

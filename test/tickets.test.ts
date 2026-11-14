@@ -39,6 +39,7 @@ describe("Tickets", () => {
     expect(viewed.status).toBe(200);
     expect(viewed.body.ticket).toMatchObject({
       key: "CRONK-1",
+      projectKey: "CRONK",
       title: "Add login",
       description: "# Why\n\nUsers need *access*.",
       status: { name: "Backlog", category: "backlog" },

@@ -205,55 +205,64 @@ function NewTicket(props: { projectKey: string; onDone: (ticket: Ticket) => void
 /** One Ticket: its description, Status and history. */
 export function TicketPage(props: { ticketKey: string }) {
   const [ticket, , setTicket] = useLoad(() => api.ticket(props.ticketKey), [props.ticketKey]);
-  const projectKey = props.ticketKey.slice(0, props.ticketKey.lastIndexOf("-"));
-  const [project] = useLoad(() => api.project(projectKey), [projectKey]);
-  const [history, reloadHistory] = useLoad(() => api.ticketHistory(props.ticketKey), [props.ticketKey]);
-  const [editing, setEditing] = useState(false);
+  return <Show state={ticket}>{(t) => <TicketView ticket={t} onChanged={setTicket} />}</Show>;
+}
 
-  const changed = (t: Ticket) => {
-    setTicket(t);
+function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void }) {
+  const t = props.ticket;
+  const [project] = useLoad(() => api.project(t.projectKey), [t.projectKey]);
+  const [history, reloadHistory] = useLoad(() => api.ticketHistory(t.key), [t.key]);
+  const [editing, setEditing] = useState(false);
+  const archived = project.kind === "loaded" && project.value.project.archived;
+
+  const changed = (updated: Ticket) => {
+    props.onChanged(updated);
     reloadHistory();
   };
 
   return (
-    <Show state={ticket}>
-      {(t) => (
-        <article className="ticket">
-          <div className="muted">
-            <Link to="/" className="link">Projects</Link> / <Link to={`/projects/${projectKey}`} className="link">{projectKey}</Link> / {t.key}
+    <article className="ticket">
+      <div className="muted">
+        <Link to={archived ? "/archived" : "/"} className="link">Projects</Link> /{" "}
+        <Link to={`/projects/${t.projectKey}`} className="link">{t.projectKey}</Link> / {t.key}
+      </div>
+      {editing ? (
+        <EditTicket
+          ticket={t}
+          onCancel={() => setEditing(false)}
+          onDone={(updated) => {
+            setEditing(false);
+            changed(updated);
+          }}
+        />
+      ) : (
+        <>
+          <div className="page-head">
+            <h1>{t.title}</h1>
+            <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
           </div>
-          {editing ? (
-            <EditTicket ticket={t} onCancel={() => setEditing(false)} onDone={(updated) => { setEditing(false); changed(updated); }} />
-          ) : (
-            <>
-              <div className="page-head">
-                <h1>{t.title}</h1>
-                <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
-              </div>
-              <Show state={project}>
-                {({ statuses }) => <StatusPicker ticket={t} statuses={statuses} onChanged={changed} />}
-              </Show>
-              <div className="markdown" data-testid="ticket-description">
-                {t.description.trim() ? <Markdown>{t.description}</Markdown> : <p className="muted">No description.</p>}
-              </div>
-            </>
-          )}
-          <h2>History</h2>
-          <Show state={history}>
-            {(changes) => (
-              <ol className="history" aria-label="History">
-                {changes.map((entry, i) => (
-                  <li key={i}>
-                    <span className="muted">{new Date(entry.at).toLocaleString()}</span> <strong>{entry.actor.name}</strong>{" "}
-                    {describe(entry)}
-                  </li>
-                ))}
-              </ol>
-            )}
+          <Show state={project}>
+            {({ statuses }) => <StatusPicker ticket={t} statuses={statuses} onChanged={changed} />}
           </Show>
-        </article>
+          <div className="markdown" data-testid="ticket-description">
+            {t.description.trim() ? <Markdown>{t.description}</Markdown> : <p className="muted">No description.</p>}
+          </div>
+        </>
       )}
-    </Show>
+      <h2>History</h2>
+      <Show state={history}>
+        {(changes) => (
+          <ol className="history" aria-label="History">
+            {changes.map((change, i) => (
+              <li key={i}>
+                <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>{" "}
+                {describe(change)}
+              </li>
+            ))}
+          </ol>
+        )}
+      </Show>
+    </article>
   );
 }
 
@@ -305,15 +314,15 @@ function EditTicket(props: { ticket: Ticket; onDone: (ticket: Ticket) => void; o
   );
 }
 
-function describe(entry: RecordedChange): string {
-  switch (entry.change) {
+function describe(change: RecordedChange): string {
+  switch (change.change) {
     case "created":
-      return `created the Ticket in ${entry.status.name}`;
+      return `created the Ticket in ${change.status.name}`;
     case "title":
-      return `renamed it from “${entry.from}” to “${entry.to}”`;
+      return `renamed it from “${change.from}” to “${change.to}”`;
     case "description":
       return "edited the description";
     case "status":
-      return `moved it from ${entry.from.name} to ${entry.to.name}`;
+      return `moved it from ${change.from.name} to ${change.to.name}`;
   }
 }
