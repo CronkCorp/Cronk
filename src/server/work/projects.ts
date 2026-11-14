@@ -17,11 +17,15 @@ const DEFAULT_STATUSES: { name: string; category: StatusCategory }[] = [
 /** A Project key: a letter then letters or digits, 2 to 10 characters. Stored upper case; Ticket keys are built from it. */
 export const PROJECT_KEY_PATTERN = "[A-Za-z][A-Za-z0-9]{1,9}";
 
+/** Open Projects are open to every Member; private ones only to the Members invited to them. */
+export type Visibility = "open" | "private";
+
 export interface Project {
   id: string;
   name: string;
   key: string;
   archived: boolean;
+  visibility: Visibility;
 }
 
 export interface Status {
@@ -35,9 +39,16 @@ interface ProjectRow {
   name: string;
   key: string;
   archived_at: Date | null;
+  visibility: Visibility;
 }
 
-const toProject = (row: ProjectRow): Project => ({ id: row.id, name: row.name, key: row.key, archived: row.archived_at !== null });
+const toProject = (row: ProjectRow): Project => ({
+  id: row.id,
+  name: row.name,
+  key: row.key,
+  archived: row.archived_at !== null,
+  visibility: row.visibility,
+});
 
 /** Creates a Project with the default Statuses, or returns undefined if its key is taken. Run inside a transaction. */
 export async function insertProject(
@@ -70,6 +81,11 @@ export async function findProjectByKey(db: Queryable, workspaceId: string, key: 
   return rows[0] && toProject(rows[0]);
 }
 
+export async function findProjectById(db: Queryable, id: string): Promise<Project | undefined> {
+  const { rows } = await db.query<ProjectRow>("SELECT * FROM projects WHERE id = $1", [id]);
+  return rows[0] && toProject(rows[0]);
+}
+
 /** A Project's Statuses in workflow order. */
 export async function listStatuses(db: Queryable, projectId: string): Promise<Status[]> {
   const { rows } = await db.query<Status>(
@@ -88,21 +104,25 @@ export async function listProjects(db: Queryable, workspaceId: string, archived:
   return rows.map(toProject);
 }
 
-/** Renames and/or archives or restores a Project. Its key never changes, since Ticket keys are built from it. */
+/**
+ * Renames, archives or restores a Project, or changes whether it is open or private.
+ * Its key never changes, since Ticket keys are built from it.
+ */
 export async function updateProject(
   db: Queryable,
   id: string,
-  changes: { name?: string; archived?: boolean },
+  changes: { name?: string; archived?: boolean; visibility?: Visibility },
   now: Date,
 ): Promise<Project> {
   const { rows } = await db.query<ProjectRow>(
     `UPDATE projects SET
        name = coalesce($2, name),
+       visibility = coalesce($5, visibility),
        archived_at = CASE WHEN $3::boolean IS NULL THEN archived_at
                           WHEN $3 THEN coalesce(archived_at, $4)
                           ELSE NULL END
      WHERE id = $1 RETURNING *`,
-    [id, changes.name ?? null, changes.archived ?? null, now],
+    [id, changes.name ?? null, changes.archived ?? null, now, changes.visibility ?? null],
   );
   return toProject(rows[0]!);
 }

@@ -107,6 +107,18 @@ export const migrations: Migration[] = [
 
       -- A deactivated User can't sign in; their history stays.
       ALTER TABLE users ADD COLUMN deactivated_at timestamptz;
+
+      -- Open Projects are open to every Member; private ones only to those listed in project_members.
+      ALTER TABLE projects ADD COLUMN visibility text NOT NULL DEFAULT 'open' CHECK (visibility IN ('open', 'private'));
+
+      -- A Member's access in a Project: who may enter a private Project, and Read or Write in any Project.
+      CREATE TABLE project_members (
+        project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        access text NOT NULL CHECK (access IN ('read', 'write')),
+        PRIMARY KEY (project_id, user_id)
+      );
+      CREATE INDEX project_members_user ON project_members (user_id);
     `,
   },
 ];
