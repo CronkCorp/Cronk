@@ -78,13 +78,16 @@ function proseOf(node: Nodes): string {
 }
 
 /**
- * The Agents the writer `writerId` means by each mention. `@owner/name` is that Owner's Agent
- * of that name. `@name` is the writer's own Agent of that name if they have one, otherwise
- * every other Owner's Agent of that name.
+ * The Agents `actor` means by each mention. `@owner/name` is that Owner's Agent of that name.
+ * `@name` is the writer's own Agent of that name if they have one, otherwise every other
+ * Owner's Agent of that name. The writer is the posting User, or the posting Agent's Owner;
+ * an Agent never means itself.
  */
-function mentionedAgents(agents: { agent: Agent; owner: User }[], writerId: string, mentions: Mention[]): string[] {
+function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, mentions: Mention[]): string[] {
+  const writerId = actingUser(actor).id;
+  const poster = actor.kind === "agent" ? actor.agent.id : null;
   return mentions.flatMap(({ owner, name }) => {
-    const named = agents.filter((a) => a.agent.name.toLowerCase() === name);
+    const named = agents.filter((a) => a.agent.name.toLowerCase() === name && a.agent.id !== poster);
     if (owner !== null) return named.filter((a) => a.owner.name.toLowerCase() === owner).map((a) => a.agent.id);
     const own = named.filter((a) => a.owner.id === writerId);
     return (own.length > 0 ? own : named).map((a) => a.agent.id);
@@ -108,7 +111,7 @@ export async function markWaiting(
   const agents = await listAgents(db, actingUser(actor).workspaceId);
   const candidates: Record<WaitingReason, string[]> = {
     answer: answered ? [answered.agentId] : [],
-    mention: mentionedAgents(agents, actingUser(actor).id, mentionsIn(comment.body)),
+    mention: mentionedAgents(agents, actor, mentionsIn(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;
