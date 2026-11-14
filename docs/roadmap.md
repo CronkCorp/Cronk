@@ -24,7 +24,7 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 
 - **Vocabulary.** The unit of work is a Ticket (not Issue, Task or Work item), partly to avoid clashing with GitHub and GitLab Issues.
 - **Structure.** The Workspace holds Projects plus knowledge spanning them (Documents, Terms, Decisions, Guidance) but never Tickets. Project knowledge layers over the Workspace's.
-- **Agent Sessions.** One MCP connection is one Agent Session; the Claim silence threshold defaults to 5 minutes and is configurable per Workspace. Activities and tool calls keep Claims alive.
+- **Agent Sessions.** One MCP connection is one Agent Session; the MCP session id is the Agent Session's id. It ends when the client disconnects (an MCP DELETE) or stays silent longer than the Workspace's silence threshold (default 5 minutes, configurable per Workspace), after which the client must reconnect. Every call in a Session refreshes it; Activities and tool calls keep Claims alive. The MCP server calls the HTTP API as the Agent, sending the `Cronk-Agent-Session` header so the API knows the Session; history records it.
 - **Ticket keys.** `<PROJECT KEY>-<n>`, numbered in order per Project by the server.
 - **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise.
 - **Reports.** Required whenever an Agent hands work over: moving a Ticket to In Review, or completing it under Autonomous Delegation. Not required when an Agent just releases its Claim.
