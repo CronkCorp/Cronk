@@ -117,6 +117,8 @@ interface Chunk {
   /** Which section it is, the same across Versions for sections paired by `keyAgainstBase`; "" before the first heading. */
   key: string;
   heading: string | null;
+  /** Its heading's level, 1 to 6; 0 for the text before the first heading. */
+  level: number;
   text: string;
   /** Whether it ends its Version's body. */
   last: boolean;
@@ -125,10 +127,10 @@ interface Chunk {
 /** `markdown` cut at every heading, always starting with the (perhaps empty) text before the first one; keys are left to `keyAgainstBase`. */
 function chunksOf(markdown: string): Chunk[] {
   const headings = headingsOf(markdown);
-  const chunks: Chunk[] = [{ key: "", heading: null, text: markdown.slice(0, headings[0]?.start ?? markdown.length), last: headings.length === 0 }];
+  const chunks: Chunk[] = [{ key: "", heading: null, level: 0, text: markdown.slice(0, headings[0]?.start ?? markdown.length), last: headings.length === 0 }];
   headings.forEach((h, i) => {
     const end = headings[i + 1]?.start ?? markdown.length;
-    chunks.push({ key: "", heading: headingLine(h), text: markdown.slice(h.start, end), last: i === headings.length - 1 });
+    chunks.push({ key: "", heading: headingLine(h), level: h.level, text: markdown.slice(h.start, end), last: i === headings.length - 1 });
   });
   return chunks;
 }
@@ -167,9 +169,6 @@ function boilerplateIn(chunks: Chunk[]): Set<string> {
   return new Set([...sections].filter(([, count]) => count >= BOILERPLATE_SECTIONS).map(([line]) => line));
 }
 
-/** A section's heading level, 1 to 6; 0 for the text before the first heading. */
-const levelOf = (chunk: Chunk) => /^#*/.exec(chunk.heading ?? "")![0].length;
-
 /** How alike a renamed section's content must stay to still pair with the base section it came from. */
 const RENAME_SIMILARITY = 0.5;
 
@@ -188,6 +187,31 @@ function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
   return x.length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
 }
 
+/** One Version's sections while `keyAgainstBase` pairs them, and which of them are paired so far. */
+interface PairingSide {
+  chunks: Chunk[];
+  /** Indexes into `chunks` already paired. The preamble (0) is never paired by a pass, whether or not the set holds it. */
+  paired: Set<number>;
+}
+
+/** The state `keyAgainstBase` threads through its pairing passes. */
+interface Pairing {
+  base: PairingSide;
+  side: PairingSide;
+  /** scores[i][j]: how well `side.chunks[j]` pairs with `base.chunks[i]`, from `pairScore`. */
+  scores: number[][];
+}
+
+/** Gives `side`'s section `j` the key of `base`'s section `i`, and marks both paired. */
+function pair(p: Pairing, i: number, j: number): void {
+  p.side.chunks[j]!.key = p.base.chunks[i]!.key;
+  p.base.paired.add(i);
+  p.side.paired.add(j);
+}
+
+/** The indexes of a side's sections not paired yet, in order, never the preamble. */
+const unpaired = (s: PairingSide) => s.chunks.map((_, k) => k).filter((k) => k > 0 && !s.paired.has(k));
+
 /** A side keyed against the base by content and heading, with what is left to key once the other side is too. */
 interface SidePairing {
   /** The keys of the base sections this side still has. */
@@ -197,80 +221,105 @@ interface SidePairing {
 }
 
 /**
- * Keys `base` by position, then keys each section of `side` after the base section it came from:
- * first by a best-scoring alignment that keeps both orders; then, among what is left (a section
- * moved elsewhere), by heading, then by the best-scoring renames. `keyRest` then keys a renamed
- * empty section by its being the only empty one of its level between the same two paired sections,
- * if the other side still has its base section; and keys sections `side` added by their heading and
- * how often it was added, so both sides adding the same section pair too.
+ * Keys `base` by position, then keys each section of `side` after the base section it came from,
+ * pass by pass, each pairing only what earlier passes left: `pairInOrder`, `pairMovedByHeading`,
+ * then `pairMovedByRename`. Once the other side is keyed too, `keyRest` runs `pairEmptyBySlot`,
+ * which needs to know which base sections the other side still has, then `keyAdded`.
  */
 function keyAgainstBase(base: Chunk[], side: Chunk[]): SidePairing {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
-  const [n, m] = [base.length, side.length];
   const boilerplate = boilerplateIn(base);
-  const scores = base.map((b) => side.map((c) => pairScore(b, c, boilerplate)));
+  const p: Pairing = {
+    base: { chunks: base, paired: new Set() },
+    side: { chunks: side, paired: new Set([0]) },
+    scores: base.map((b) => side.map((c) => pairScore(b, c, boilerplate))),
+  };
+  pairInOrder(p);
+  pairMovedByHeading(p);
+  pairMovedByRename(p);
+  const kept = new Set([...p.base.paired].map((i) => base[i]!.key));
+  const keyRest = (keptByOther: Set<string>) => {
+    pairEmptyBySlot(p, keptByOther);
+    keyAdded(p.side);
+  };
+  return { kept, keyRest };
+}
+
+/** Pairs sections by the best-scoring alignment that keeps both sides' orders, preambles excluded. */
+function pairInOrder(p: Pairing): void {
+  const [n, m] = [p.base.chunks.length, p.side.chunks.length];
   // best[i][j]: the highest total score aligning base[i..] with side[j..], preambles excluded.
   const best = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 1; i--) {
     for (let j = m - 1; j >= 1; j--) {
-      const score = scores[i]![j]!;
+      const score = p.scores[i]![j]!;
       best[i]![j] = Math.max(best[i + 1]![j]!, best[i]![j + 1]!, score > 0 ? score + best[i + 1]![j + 1]! : 0);
     }
   }
-  const pairedBase = new Set<number>();
-  const pairedSide = new Set<number>([0]);
-  const pair = (i: number, j: number) => {
-    side[j]!.key = base[i]!.key;
-    pairedBase.add(i);
-    pairedSide.add(j);
-  };
   for (let i = 1, j = 1; i < n && j < m; ) {
-    const score = scores[i]![j]!;
+    const score = p.scores[i]![j]!;
     if (score > 0 && best[i]![j] === score + best[i + 1]![j + 1]!) {
-      pair(i, j);
+      pair(p, i, j);
       i++;
       j++;
     } else if (best[i]![j] === best[i + 1]![j]) i++;
     else j++;
   }
-  const unpaired = (paired: Set<number>, length: number) => Array.from({ length }, (_, k) => k).filter((k) => k > 0 && !paired.has(k));
-  // A section moved elsewhere: first by its heading, then (renamed too) by its content.
-  for (const j of unpaired(pairedSide, m)) {
-    const moved = unpaired(pairedBase, n).find((i) => base[i]!.heading === side[j]!.heading);
-    if (moved !== undefined) pair(moved, j);
+}
+
+/** Pairs a section moved elsewhere with the first unpaired base section of the same heading. */
+function pairMovedByHeading(p: Pairing): void {
+  for (const j of unpaired(p.side)) {
+    const moved = unpaired(p.base).find((i) => p.base.chunks[i]!.heading === p.side.chunks[j]!.heading);
+    if (moved !== undefined) pair(p, moved, j);
   }
-  const renames = unpaired(pairedBase, n)
-    .flatMap((i) => unpaired(pairedSide, m).map((j) => ({ i, j, score: scores[i]![j]! })))
-    .filter((p) => p.score > 0)
+}
+
+/** Pairs a section both moved and renamed by its content, best-scoring pairs first. */
+function pairMovedByRename(p: Pairing): void {
+  const renames = unpaired(p.base)
+    .flatMap((i) => unpaired(p.side).map((j) => ({ i, j, score: p.scores[i]![j]! })))
+    .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score);
-  for (const { i, j } of renames) if (!pairedBase.has(i) && !pairedSide.has(j)) pair(i, j);
-  const kept = new Set([...pairedBase].map((i) => base[i]!.key));
-  return { kept, keyRest };
-  function keyRest(keptByOther: Set<string>) {
-    // A renamed empty section has no content to pair on: pair it when it is the only empty section of
-    // its level, on each side, between the same two paired sections. When the other side no longer has
-    // that base section, it was removed (or replaced) there: read this one as added, not renamed.
-    const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
-      const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
-      const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
-      return `${levelOf(chunks[k]!)}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
-    };
-    const emptyIn = (chunks: Chunk[], paired: Set<number>, length: number) =>
-      unpaired(paired, length).filter((k) => contentLines(chunks[k]!).length === 0).map((k) => ({ k, slot: slot(chunks, paired, k) }));
-    const [emptyBase, emptySide] = [emptyIn(base, pairedBase, n), emptyIn(side, pairedSide, m)];
-    for (const s of emptySide) {
-      const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
-      if (bases.length === 1 && sides.length === 1 && keptByOther.has(base[bases[0]!.k]!.key)) pair(bases[0]!.k, s.k);
-    }
-    const added = new Map<string, number>();
-    side.forEach((chunk, j) => {
-      if (pairedSide.has(j)) return;
-      const count = (added.get(chunk.heading!) ?? 0) + 1;
-      added.set(chunk.heading!, count);
-      chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
-    });
+  for (const { i, j } of renames) if (!p.base.paired.has(i) && !p.side.paired.has(j)) pair(p, i, j);
+}
+
+/**
+ * Pairs a renamed empty section, which has no content to pair on, when it is the only empty section
+ * of its level, on each side, between the same two paired sections. When the other side no longer
+ * has that base section, it was removed (or replaced) there: the empty section is left to read as
+ * added, not renamed.
+ */
+function pairEmptyBySlot(p: Pairing, keptByOther: Set<string>): void {
+  const [emptyBase, emptySide] = [emptySlots(p.base), emptySlots(p.side)];
+  for (const s of emptySide) {
+    const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
+    if (bases.length === 1 && sides.length === 1 && keptByOther.has(p.base.chunks[bases[0]!.k]!.key)) pair(p, bases[0]!.k, s.k);
   }
+}
+
+/** A side's unpaired empty sections, each with its slot: its level and the keys of the paired sections around it. */
+function emptySlots(s: PairingSide): { k: number; slot: string }[] {
+  const slot = (k: number) => {
+    const before = [...s.paired].filter((q) => q < k).reduce((a, b) => Math.max(a, b), 0);
+    const after = [...s.paired].filter((q) => q > k).reduce((a, b) => Math.min(a, b), Infinity);
+    return `${s.chunks[k]!.level}\u0000${s.chunks[before]!.key}\u0000${s.chunks[after]?.key ?? "end"}`;
+  };
+  return unpaired(s)
+    .filter((k) => contentLines(s.chunks[k]!).length === 0)
+    .map((k) => ({ k, slot: slot(k) }));
+}
+
+/** Keys each section still unpaired as added, by its heading and how often it was added, so both sides adding the same section pair too. */
+function keyAdded(s: PairingSide): void {
+  const added = new Map<string, number>();
+  s.chunks.forEach((chunk, j) => {
+    if (s.paired.has(j)) return;
+    const count = (added.get(chunk.heading!) ?? 0) + 1;
+    added.set(chunk.heading!, count);
+    chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
+  });
 }
 
 /** Whether two sides' texts say the same, ignoring trailing blank space; undefined (no such part) only equals undefined. */
@@ -302,7 +351,7 @@ function mergeSection(base: Chunk | undefined, mine: Chunk | undefined, theirs: 
   const rest = mergePart(b.rest, m.rest, t.rest);
   if (head === "conflict" || rest === "conflict") return "conflict";
   const [h, r] = [head.merged!, rest.merged!];
-  return { merged: { key: base.key, heading: h.heading, text: h.text + r.text, last: r.last } };
+  return { merged: { key: base.key, heading: h.heading, level: h.level, text: h.text + r.text, last: r.last } };
 }
 
 /** Whether `a` and `b` put the sections they share in the same order. */
