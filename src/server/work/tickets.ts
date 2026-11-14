@@ -2,6 +2,10 @@ import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
+/** A Ticket's Priority, most urgent first. */
+export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
+export type Priority = (typeof PRIORITIES)[number];
+
 export interface Ticket {
   id: string;
   projectId: string;
@@ -11,6 +15,8 @@ export interface Ticket {
   title: string;
   description: string;
   status: Status;
+  priority: Priority;
+  labels: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +31,8 @@ interface TicketRow {
   status_id: string;
   status_name: string;
   status_category: Status["category"];
+  priority: Priority;
+  labels: string[];
   created_at: Date;
   updated_at: Date;
 }
@@ -38,12 +46,14 @@ const toTicket = (row: TicketRow): Ticket => ({
   title: row.title,
   description: row.description,
   status: { id: row.status_id, name: row.status_name, category: row.status_category },
+  priority: row.priority,
+  labels: row.labels,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
 const SELECT_TICKETS = `
-  SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.created_at, t.updated_at,
+  SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id`;
 
@@ -106,6 +116,8 @@ export interface TicketEdit {
   title?: string;
   description?: string;
   status?: Status;
+  priority?: Priority;
+  labels?: string[];
 }
 
 /**
@@ -123,16 +135,45 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
   if (changes.status !== undefined && changes.status.id !== ticket.status.id) {
     recorded.push({ change: "status", from: ticket.status, to: changes.status });
   }
+  if (changes.priority !== undefined && changes.priority !== ticket.priority) {
+    recorded.push({ change: "priority", from: ticket.priority, to: changes.priority });
+  }
+  if (changes.labels !== undefined && !sameList(changes.labels, ticket.labels)) {
+    recorded.push({ change: "labels", from: ticket.labels, to: changes.labels });
+  }
   if (recorded.length === 0) return ticket;
 
   await db.query(
     `UPDATE tickets
-     SET title = coalesce($2, title), description = coalesce($3, description), status_id = coalesce($4, status_id), updated_at = $5
+     SET title = coalesce($2, title), description = coalesce($3, description), status_id = coalesce($4, status_id),
+         priority = coalesce($6, priority), labels = coalesce($7, labels), updated_at = $5
      WHERE id = $1`,
-    [ticket.id, changes.title ?? null, changes.description ?? null, changes.status?.id ?? null, now],
+    [
+      ticket.id,
+      changes.title ?? null,
+      changes.description ?? null,
+      changes.status?.id ?? null,
+      now,
+      changes.priority ?? null,
+      changes.labels ?? null,
+    ],
   );
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
   return (await findTicketById(db, ticket.id))!;
+}
+
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Trims Labels and drops any that repeat an earlier one, ignoring case. */
+export function normalizeLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const label of labels.map((l) => l.trim())) {
+    if (seen.has(label.toLowerCase())) continue;
+    seen.add(label.toLowerCase());
+    result.push(label);
+  }
+  return result;
 }
 
 /** One change in a Ticket's history. */
@@ -140,7 +181,9 @@ export type TicketChange =
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
-  | { change: "status"; from: Status; to: Status };
+  | { change: "status"; from: Status; to: Status }
+  | { change: "priority"; from: Priority; to: Priority }
+  | { change: "labels"; from: string[]; to: string[] };
 
 export type RecordedChange = { at: Date; actor: { kind: "user"; id: string; name: string } } & TicketChange;
 
@@ -169,4 +212,14 @@ export async function listHistory(db: Queryable, ticketId: string): Promise<Reco
 export async function listTickets(db: Queryable, projectId: string): Promise<Ticket[]> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.project_id = $1 ORDER BY t.number`, [projectId]);
   return rows.map(toTicket);
+}
+
+/** The Labels on a Project's Tickets, alphabetically, one per spelling ignoring case. */
+export async function listLabels(db: Queryable, projectId: string): Promise<string[]> {
+  const { rows } = await db.query<{ label: string }>(
+    `SELECT DISTINCT ON (lower(label)) label
+     FROM tickets, unnest(labels) AS label WHERE project_id = $1 ORDER BY lower(label), label`,
+    [projectId],
+  );
+  return rows.map((r) => r.label);
 }

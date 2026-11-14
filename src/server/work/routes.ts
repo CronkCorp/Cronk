@@ -13,7 +13,19 @@ import {
   updateProject,
   type Project,
 } from "./projects.js";
-import { findTicketByKey, insertTicket, listHistory, listTickets, updateTicket, type Ticket, type TicketEdit } from "./tickets.js";
+import {
+  findTicketByKey,
+  insertTicket,
+  listHistory,
+  listLabels,
+  normalizeLabels,
+  listTickets,
+  PRIORITIES,
+  updateTicket,
+  type Priority,
+  type Ticket,
+  type TicketEdit,
+} from "./tickets.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -21,6 +33,9 @@ const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as co
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
 /** A Ticket's Markdown description. */
 const description = { type: "string", maxLength: 100_000 } as const;
+
+/** A Label: non-blank, at most 50 characters. */
+const label = { type: "string", minLength: 1, maxLength: 50, pattern: "\\S" } as const;
 
 export function workRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -88,6 +103,12 @@ export function workRoutes(ctx: AppContext) {
       return { tickets: await listTickets(ctx.db, project.id) };
     });
 
+    app.get<{ Params: { key: string } }>("/api/projects/:key/labels", async (request) => {
+      const user = await requireUser(ctx, request);
+      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
+      return { labels: await listLabels(ctx.db, project.id) };
+    });
+
     app.post<{ Params: { key: string }; Body: { title: string; description?: string } }>(
       "/api/projects/:key/tickets",
       {
@@ -124,26 +145,34 @@ export function workRoutes(ctx: AppContext) {
       return { ticket: await ticketOr404(ctx, user.workspaceId, request.params.key) };
     });
 
-    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string } }>(
+    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[] } }>(
       "/api/tickets/:key",
       {
         schema: {
           body: {
             type: "object",
             additionalProperties: false,
-            properties: { title, description, statusId: { type: "string", format: "uuid" } },
+            properties: {
+              title,
+              description,
+              statusId: { type: "string", format: "uuid" },
+              priority: { type: "string", enum: PRIORITIES },
+              labels: { type: "array", maxItems: 20, items: label },
+            },
           },
         },
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const { title, description, statusId } = request.body;
+        const { title, description, statusId, priority, labels } = request.body;
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await findTicketByKey(tx, user.workspaceId, request.params.key, { forUpdate: true });
           if (!ticket) throw new HttpError(404, "No such Ticket");
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
+            ...(priority !== undefined && { priority }),
+            ...(labels !== undefined && { labels: normalizeLabels(labels) }),
           };
           if (statusId !== undefined) {
             const status = (await listStatuses(tx, ticket.projectId)).find((s) => s.id === statusId);
