@@ -96,7 +96,7 @@ export function workRoutes(ctx: AppContext) {
     app.get<{ Params: { key: string } }>("/api/projects/:key/members", async (request) => {
       const user = await requireUser(ctx, request);
       const { project } = await projectFor(ctx.db, user, request.params.key, "read");
-      const members = await listMemberships(ctx.db, user.workspaceId, project.id);
+      const members = await listMemberships(ctx.db, project.id);
       return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
     });
 

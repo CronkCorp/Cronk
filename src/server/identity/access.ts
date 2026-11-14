@@ -1,5 +1,6 @@
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
+import type { Visibility } from "../work/projects.js";
 import type { User } from "./users.js";
 
 /**
@@ -13,7 +14,7 @@ export type Access = "read" | "write";
 /** The part of a Project access depends on. */
 export interface AccessTarget {
   id: string;
-  visibility: "open" | "private";
+  visibility: Visibility;
 }
 
 /**

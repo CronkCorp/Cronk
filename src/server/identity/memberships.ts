@@ -1,6 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { Access } from "./access.js";
-import { listUsers, type User } from "./users.js";
+import { findUserById, type User } from "./users.js";
 
 /** A User listed in a Project, with the access they have there. */
 export interface Membership {
@@ -9,16 +9,14 @@ export interface Membership {
 }
 
 /** The Users listed in a Project, by name. */
-export async function listMemberships(db: Queryable, workspaceId: string, projectId: string): Promise<Membership[]> {
-  const { rows } = await db.query<{ user_id: string; access: Access }>(
-    "SELECT user_id, access FROM project_members WHERE project_id = $1",
+export async function listMemberships(db: Queryable, projectId: string): Promise<Membership[]> {
+  const { rows } = await db.query<{ id: string; access: Access }>(
+    `SELECT u.id, m.access FROM project_members m JOIN users u ON u.id = m.user_id
+     WHERE m.project_id = $1 ORDER BY lower(u.name), lower(u.email)`,
     [projectId],
   );
-  const access = new Map(rows.map((r) => [r.user_id, r.access]));
-  return (await listUsers(db, workspaceId)).flatMap((user) => {
-    const a = access.get(user.id);
-    return a ? [{ user, access: a }] : [];
-  });
+  const users = await Promise.all(rows.map((r) => findUserById(db, r.id)));
+  return rows.map((r, i) => ({ user: users[i]!, access: r.access }));
 }
 
 /** Lists a User in a Project with the given access, replacing what they had. */
