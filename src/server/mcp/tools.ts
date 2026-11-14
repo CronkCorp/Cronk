@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
@@ -322,6 +322,32 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
     },
   });
+
+  registerSearchTool(server, ctx);
+}
+
+/** Registers the `search` tool: one operation, so it takes no `action`. It only reads, so every token is offered it. */
+function registerSearchTool(server: McpServer, ctx: ToolContext): void {
+  const inputSchema = z.object({
+    query: z.string().describe('What to look for, as typed into a search box: words, "quoted phrases", and -words to leave out'),
+    kind: z.array(z.enum(SEARCH_KINDS)).optional().describe("Only these kinds: ticket, document (in a page tree), report, comment"),
+    project: z.array(z.string()).optional().describe("Only in these Projects, by key such as CRONK; leaves out the Workspace outside any Project"),
+    limit: z.number().int().optional().describe("At most this many results, up to 100; 20 if left out"),
+  });
+  server.registerTool(
+    "search",
+    {
+      description:
+        "Full-text search across the Tickets, Documents, Reports and Comments you may read, best match first, each result with an " +
+        "excerpt around the match. Get a result with the tickets or documents tool by its ticketKey or documentId.",
+      inputSchema,
+    },
+    async (input, extra) => {
+      const { query: q, kind, project, limit } = input as z.infer<typeof inputSchema>;
+      const api = ctx.api({ token: extra.authInfo!.token, sessionId: extra.sessionId });
+      return toResult(await api("GET", `/api/search${query({ q: [q], kind, project, limit: limit === undefined ? undefined : [String(limit)] })}`));
+    },
+  );
 }
 
 /** Where the Comments on the Ticket `key` or the Document `documentId` live; exactly one must be given. */
