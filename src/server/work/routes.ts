@@ -9,15 +9,24 @@ import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProj
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
 import { findUserById, publicUser } from "../identity/users.js";
 import {
+  countTicketsInStatus,
+  deleteStatus,
   findProjectById,
   findProjectByKey,
+  findStatusToMoveInto,
   insertProject,
+  insertStatus,
+  lockProject,
+  lockStatus,
+  moveStatus,
+  renameStatus,
   listProjects,
   listStatuses,
   PROJECT_KEY_PATTERN,
   STATUS_CATEGORIES,
   updateProject,
   type Project,
+  type Status,
   type StatusCategory,
   type Visibility,
 } from "./projects.js";
@@ -26,6 +35,7 @@ import {
   insertTicket,
   listHistory,
   listLabels,
+  moveTicketsBetweenStatuses,
   listSubTickets,
   wouldNestUnderItself,
   normalizeLabels,
@@ -186,6 +196,99 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { key: string }; Body: { name: string; category: StatusCategory } }>(
+      "/api/projects/:key/statuses",
+      {
+        schema: {
+          body: {
+            type: "object",
+            required: ["name", "category"],
+            additionalProperties: false,
+            properties: { name: nameSchema, category: { type: "string", enum: STATUS_CATEGORIES } },
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const name = request.body.name.trim();
+        const status = await transaction(ctx.db, async (tx) => {
+          const { project } = await projectFor(tx, actor, request.params.key, "write");
+          await lockProject(tx, project.id);
+          return insertStatus(tx, project.id, { name, category: request.body.category });
+        });
+        if (!status) throw statusNameTaken(name);
+        return reply.code(201).send({ status });
+      },
+    );
+
+    app.patch<{ Params: { key: string; statusId: string }; Body: { name?: string; position?: number } }>(
+      "/api/projects/:key/statuses/:statusId",
+      {
+        schema: {
+          body: {
+            type: "object",
+            additionalProperties: false,
+            // `position` counts from 0 among the Statuses of the same Status Category.
+            properties: { name: nameSchema, position: { type: "integer", minimum: 0 } },
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const name = request.body.name?.trim();
+        const status = await transaction(ctx.db, async (tx) => {
+          const { project } = await projectFor(tx, actor, request.params.key, "write");
+          await lockProject(tx, project.id);
+          let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
+          if (name !== undefined) {
+            const renamed = await renameStatus(tx, project.id, status.id, name);
+            if (!renamed) throw statusNameTaken(name);
+            status = renamed;
+          }
+          const { position } = request.body;
+          if (position !== undefined && !(await moveStatus(tx, project.id, status, position))) {
+            throw new HttpError(400, `${status.name} can't move to position ${position}: its Status Category isn't that long`);
+          }
+          return status;
+        });
+        return { status };
+      },
+    );
+
+    app.delete<{ Params: { key: string; statusId: string }; Querystring: { moveTo?: string } }>(
+      "/api/projects/:key/statuses/:statusId",
+      // `moveTo`: the Status the removed Status's Tickets move to. Required while any Ticket is in it.
+      { schema: { querystring: { type: "object", properties: { moveTo: { type: "string" } } } } },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const { moveTo } = request.query;
+        await transaction(ctx.db, async (tx) => {
+          const { project } = await projectFor(tx, actor, request.params.key, "write");
+          await lockProject(tx, project.id);
+          const statuses = await listStatuses(tx, project.id);
+          const status = statusOr404(statuses, request.params.statusId);
+          if (!statuses.some((s) => s.category === status.category && s.id !== status.id)) {
+            throw new HttpError(409, `${status.name} is the last Status of its Status Category, which needs at least one`);
+          }
+          await lockStatus(tx, status.id);
+          const target = moveTo === undefined ? undefined : statuses.find((s) => s.id === moveTo && s.id !== status.id);
+          if (moveTo !== undefined && !target) {
+            throw new HttpError(400, "Tickets can only move to another Status of this Project");
+          }
+          if (target) {
+            await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
+          } else {
+            const inUse = await countTicketsInStatus(tx, status.id);
+            if (inUse > 0) {
+              throw new HttpError(409, `${inUse} Ticket${inUse === 1 ? " is" : "s are"} in ${status.name}; choose a Status to move them to`);
+            }
+          }
+          await deleteStatus(tx, status.id);
+        });
+        return reply.code(204).send();
+      },
+    );
+
     app.get<{ Params: { key: string }; Querystring: TicketQuery }>(
       "/api/projects/:key/tickets",
       {
@@ -240,7 +343,8 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const ticket = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
-          // New Tickets start in the Project's first Status.
+          // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
+          await lockProject(tx, project.id);
           const [firstStatus] = await listStatuses(tx, project.id);
           return insertTicket(tx, {
             project,
@@ -350,7 +454,7 @@ export function workRoutes(ctx: AppContext) {
             ...(labels !== undefined && { labels: normalizeLabels(labels) }),
           };
           if (statusId !== undefined) {
-            const status = (await listStatuses(tx, ticket.projectId)).find((s) => s.id === statusId);
+            const status = await findStatusToMoveInto(tx, ticket.projectId, statusId);
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
             changes.status = status;
           }
@@ -433,6 +537,15 @@ async function projectFor(db: Queryable, actor: Actor, key: string, need: Access
   if (!project) throw new HttpError(404, "No such Project");
   return { project, access: await requireProjectAccess(db, actor, project, need) };
 }
+
+/** The Status with this id among a Project's Statuses. */
+function statusOr404(statuses: Status[], statusId: string): Status {
+  const status = statuses.find((s) => s.id === statusId);
+  if (!status) throw new HttpError(404, "No such Status in this Project");
+  return status;
+}
+
+const statusNameTaken = (name: string) => new HttpError(409, `Another Status is already named ${name}`);
 
 /**
  * The Ticket with this key, if `actor` has at least `need` in its Project. A Ticket in

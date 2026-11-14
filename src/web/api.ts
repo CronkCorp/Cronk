@@ -45,7 +45,17 @@ export interface Workspace {
   agentAccess: AgentAccess;
 }
 
-export type StatusCategory = "backlog" | "unstarted" | "started" | "in_review" | "completed" | "canceled";
+/** The fixed Status Categories, in workflow order, with their display names. */
+export const STATUS_CATEGORIES = [
+  ["backlog", "Backlog"],
+  ["unstarted", "Unstarted"],
+  ["started", "Started"],
+  ["in_review", "In Review"],
+  ["completed", "Completed"],
+  ["canceled", "Canceled"],
+] as const;
+
+export type StatusCategory = (typeof STATUS_CATEGORIES)[number][0];
 
 export interface Status {
   id: string;
@@ -220,6 +230,20 @@ export const api = {
     request<{ member: Member }>("PUT", `/api/projects/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`, { access }),
   removeMember: (key: string, userId: string) =>
     request<void>("DELETE", `/api/projects/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`),
+
+  addStatus: (projectKey: string, input: { name: string; category: StatusCategory }) =>
+    request<{ status: Status }>("POST", `/api/projects/${encodeURIComponent(projectKey)}/statuses`, input).then((r) => r.status),
+  /** `position` counts from 0 among the Statuses of the same Status Category. */
+  updateStatus: (projectKey: string, statusId: string, changes: { name?: string; position?: number }) =>
+    request<{ status: Status }>("PATCH", `/api/projects/${encodeURIComponent(projectKey)}/statuses/${encodeURIComponent(statusId)}`, changes).then(
+      (r) => r.status,
+    ),
+  /** `moveTo` is where the Status's Tickets go; required while any Ticket is in it. */
+  removeStatus: (projectKey: string, statusId: string, moveTo?: string) =>
+    request<void>(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(projectKey)}/statuses/${encodeURIComponent(statusId)}${moveTo ? `?moveTo=${encodeURIComponent(moveTo)}` : ""}`,
+    ),
 
   labels: (projectKey: string) =>
     request<{ labels: string[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/labels`).then((r) => r.labels),

@@ -97,6 +97,14 @@ a.link:hover { text-decoration: underline; }
 .dot.canceled { background: #fa5252; }
 .dot.backlog { background: transparent; border: 1px dashed var(--muted); }
 
+.status-category .rows { margin-bottom: 10px; }
+.status-row .row:hover { background: none; }
+.status-row input, .add-status input { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.status-row .field { margin-bottom: 0; }
+.add-status { display: flex; gap: 8px; }
+.add-status input { flex: 1; }
+form.add-status button[type="submit"], .status-row form button[type="submit"] { width: auto; }
+
 .ticket h2 { margin-top: 28px; }
 .status-picker { margin-bottom: 16px; }
 .markdown { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px; overflow-wrap: anywhere; }

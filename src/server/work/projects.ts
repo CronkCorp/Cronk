@@ -90,13 +90,46 @@ export async function findProjectById(db: Queryable, id: string): Promise<Projec
   return rows[0] && toProject(rows[0]);
 }
 
-/** A Project's Statuses in workflow order. */
+/** Orders Statuses by Status Category, then by their place within it. */
+const STATUS_ORDER = `array_position(ARRAY['${STATUS_CATEGORIES.join("','")}'], category), position`;
+
+/**
+ * A Project's Statuses in workflow order: grouped by Status Category in its
+ * fixed order, then in the order the Project chose within each Category.
+ */
 export async function listStatuses(db: Queryable, projectId: string): Promise<Status[]> {
   const { rows } = await db.query<Status>(
-    "SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY position",
+    `SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY ${STATUS_ORDER}`,
     [projectId],
   );
   return rows;
+}
+
+/**
+ * Locks the Project row until the transaction ends, so changes to its Statuses
+ * (and Ticket creation, which takes the first Status) happen one at a time.
+ */
+export async function lockProject(db: Queryable, projectId: string): Promise<void> {
+  await db.query("SELECT 1 FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
+}
+
+/**
+ * Adds a Status last in its Status Category, or returns undefined if the
+ * Project already has a Status with that name. Lock the Project first.
+ */
+export async function insertStatus(
+  db: Queryable,
+  projectId: string,
+  input: { name: string; category: StatusCategory },
+): Promise<Status | undefined> {
+  const { rows } = await db.query<Status>(
+    `INSERT INTO statuses (project_id, name, category, position)
+     SELECT $1, $2, $3, coalesce(max(position) + 1, 0) FROM statuses WHERE project_id = $1 AND category = $3
+     ON CONFLICT (project_id, lower(name)) DO NOTHING
+     RETURNING id, name, category`,
+    [projectId, input.name, input.category],
+  );
+  return rows[0];
 }
 
 /** The Workspace's Projects by name: those not archived, or with `archived`, only the archived ones. */
@@ -106,6 +139,73 @@ export async function listProjects(db: Queryable, workspaceId: string, archived:
     [workspaceId, archived],
   );
   return rows.map(toProject);
+}
+
+/**
+ * Renames a Status, or returns undefined if another Status of its Project
+ * already has that name. Lock the Project first.
+ */
+export async function renameStatus(db: Queryable, projectId: string, statusId: string, name: string): Promise<Status | undefined> {
+  const { rows: clashes } = await db.query(
+    "SELECT 1 FROM statuses WHERE project_id = $1 AND lower(name) = lower($2) AND id <> $3",
+    [projectId, name, statusId],
+  );
+  if (clashes.length > 0) return undefined;
+  const { rows } = await db.query<Status>("UPDATE statuses SET name = $2 WHERE id = $1 RETURNING id, name, category", [
+    statusId,
+    name,
+  ]);
+  return rows[0]!;
+}
+
+/**
+ * Moves a Status to `position` (counted from 0) among the Statuses of its
+ * Status Category. Returns false, changing nothing, if there is no such
+ * position. Lock the Project first.
+ */
+export async function moveStatus(db: Queryable, projectId: string, status: Status, position: number): Promise<boolean> {
+  const order = (await listStatuses(db, projectId)).filter((s) => s.category === status.category).map((s) => s.id);
+  if (position >= order.length) return false;
+  order.splice(order.indexOf(status.id), 1);
+  order.splice(position, 0, status.id);
+  await db.query(
+    `UPDATE statuses SET position = ordered.position - 1
+     FROM unnest($1::uuid[]) WITH ORDINALITY AS ordered(id, position) WHERE statuses.id = ordered.id`,
+    [order],
+  );
+  return true;
+}
+
+/**
+ * One of a Project's Statuses, locked against removal until the transaction
+ * ends so a Ticket can move into it. Waits out a removal in progress, then
+ * returns undefined if the Status is gone.
+ */
+export async function findStatusToMoveInto(db: Queryable, projectId: string, statusId: string): Promise<Status | undefined> {
+  const { rows } = await db.query<Status>(
+    "SELECT id, name, category FROM statuses WHERE project_id = $1 AND id = $2 FOR KEY SHARE",
+    [projectId, statusId],
+  );
+  return rows[0];
+}
+
+/**
+ * Locks a Status so no Ticket can move into it until the transaction ends.
+ * Take it before checking which Tickets are in a Status you are removing.
+ */
+export async function lockStatus(db: Queryable, statusId: string): Promise<void> {
+  await db.query("SELECT 1 FROM statuses WHERE id = $1 FOR UPDATE", [statusId]);
+}
+
+/** How many Tickets are in a Status. */
+export async function countTicketsInStatus(db: Queryable, statusId: string): Promise<number> {
+  const { rows } = await db.query<{ count: number }>("SELECT count(*)::int AS count FROM tickets WHERE status_id = $1", [statusId]);
+  return rows[0]!.count;
+}
+
+/** Removes a Status no Ticket is in. Lock the Project first. */
+export async function deleteStatus(db: Queryable, statusId: string): Promise<void> {
+  await db.query("DELETE FROM statuses WHERE id = $1", [statusId]);
 }
 
 /**

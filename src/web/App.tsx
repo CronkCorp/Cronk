@@ -4,7 +4,7 @@ import { api, ApiError, type AgentAccess, type User, type Workspace } from "./ap
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
-import { filterFrom, ProjectPage, ProjectsPage, TicketPage } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
 
 type State =
   | { kind: "loading" }
@@ -159,7 +159,7 @@ function Page(props: { me: User }) {
     return (
       <ProjectPage
         projectKey={decodeURIComponent(project[1]!)}
-        view={search.get("view") === "board" ? "board" : "list"}
+        view={projectView(search.get("view"))}
         filter={filterFrom(search)}
         me={props.me}
       />
@@ -189,4 +189,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
       </form>
     </section>
   );
+}
+
+function projectView(view: string | null): ProjectView {
+  return view === "board" || view === "statuses" ? view : "list";
 }

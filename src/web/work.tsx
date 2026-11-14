@@ -4,6 +4,7 @@ import {
   api,
   type AgentAccess,
   PRIORITIES,
+  STATUS_CATEGORIES,
   type Priority,
   type Project,
   type RecordedChange,
@@ -112,6 +113,8 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
   );
 }
 
+export type ProjectView = "list" | "board" | "statuses";
+
 /** The filter fields a Project page keeps in its address, in the order the filter bar shows them. */
 const FILTER_FIELDS = ["status", "category", "assignee", "priority", "label"] as const;
 
@@ -125,19 +128,23 @@ export function filterFrom(search: URLSearchParams): TicketFilter {
   return filter as TicketFilter;
 }
 
-/** A Project page's address for a view and filter. */
-function projectPath(projectKey: string, view: "list" | "board", filter: TicketFilter): string {
+/** A Project page's address for a view and filter. The Statuses view takes no filter. */
+function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter): string {
   const query = new URLSearchParams();
-  if (view === "board") query.set("view", "board");
-  for (const field of FILTER_FIELDS) if (filter[field]) query.set(field, filter[field]);
+  if (view !== "list") query.set("view", view);
+  if (view !== "statuses") for (const field of FILTER_FIELDS) if (filter[field]) query.set(field, filter[field]);
   return `/projects/${projectKey}${query.size ? `?${query}` : ""}`;
 }
 
-/** One Project's Tickets, as a list or as a board grouped by Status, narrowed by the filters in its address. */
-export function ProjectPage(props: { projectKey: string; view: "list" | "board"; filter: TicketFilter; me: User }) {
-  const filterKey = JSON.stringify(props.filter);
-  const [project, , setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
-  const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, props.filter), [props.projectKey, filterKey]);
+/**
+ * One Project's Tickets, as a list or as a board grouped by Status, narrowed by the
+ * filters in its address; or its Statuses to tailor, counting all its Tickets.
+ */
+export function ProjectPage(props: { projectKey: string; view: ProjectView; filter: TicketFilter; me: User }) {
+  const filter = props.view === "statuses" ? {} : props.filter;
+  const filterKey = JSON.stringify(filter);
+  const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
+  const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
   const [creating, setCreating] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
   const agentAccess = useAction(
@@ -206,44 +213,60 @@ export function ProjectPage(props: { projectKey: string; view: "list" | "board";
           <nav className="tabs" aria-label="View">
             <Link to={projectPath(p.key, "list", props.filter)} className={props.view === "list" ? "tab active" : "tab"}>List</Link>
             <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
+            <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
           </nav>
-          <FilterBar
-            projectKey={p.key}
-            statuses={statuses}
-            filter={props.filter}
-            onChange={(filter) => navigate(projectPath(p.key, props.view, filter))}
-          />
+          {props.view !== "statuses" && (
+            <FilterBar
+              projectKey={p.key}
+              statuses={statuses}
+              filter={props.filter}
+              onChange={(filter) => navigate(projectPath(p.key, props.view, filter))}
+            />
+          )}
           <Show state={tickets}>
-            {(list) => (
-              <>
-                {list.length === 0 && filtered && (
-                  <div className="empty">
-                    <h2>No Tickets match these filters</h2>
-                    <Link to={projectPath(p.key, props.view, {})} className="link">Clear filters</Link>
-                  </div>
-                )}
-                {props.view === "board" ? (
-                  <Board statuses={statuses} tickets={list} />
-                ) : list.length === 0 ? (
-                  !filtered && <div className="empty"><h2>No Tickets yet</h2></div>
-                ) : (
-                  <ul className="rows" aria-label="Tickets">
-                    {list.map((ticket) => (
-                      <li key={ticket.key}>
-                        <Link to={`/tickets/${ticket.key}`} className="row">
-                          <PriorityIcon priority={ticket.priority} />
-                          <span className="key">{ticket.key}</span>
-                          <span className="grow">{ticket.title}</span>
-                          <LabelChips labels={ticket.labels} />
-                          {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
-                          <StatusPill status={ticket.status} />
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            )}
+            {(list) =>
+              props.view === "statuses" ? (
+                <StatusesView
+                  projectKey={p.key}
+                  statuses={statuses}
+                  tickets={list}
+                  canChange={p.access === "write"}
+                  onChanged={() => {
+                    reloadProject();
+                    reloadTickets();
+                  }}
+                />
+              ) : (
+                <>
+                  {list.length === 0 && filtered && (
+                    <div className="empty">
+                      <h2>No Tickets match these filters</h2>
+                      <Link to={projectPath(p.key, props.view, {})} className="link">Clear filters</Link>
+                    </div>
+                  )}
+                  {props.view === "board" ? (
+                    <Board statuses={statuses} tickets={list} />
+                  ) : list.length === 0 ? (
+                    !filtered && <div className="empty"><h2>No Tickets yet</h2></div>
+                  ) : (
+                    <ul className="rows" aria-label="Tickets">
+                      {list.map((ticket) => (
+                        <li key={ticket.key}>
+                          <Link to={`/tickets/${ticket.key}`} className="row">
+                            <PriorityIcon priority={ticket.priority} />
+                            <span className="key">{ticket.key}</span>
+                            <span className="grow">{ticket.title}</span>
+                            <LabelChips labels={ticket.labels} />
+                            {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
+                            <StatusPill status={ticket.status} />
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )
+            }
           </Show>
         </section>
       )}
@@ -333,6 +356,179 @@ function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
         );
       })}
     </div>
+  );
+}
+
+/** The Project's Statuses by Status Category, to add, rename, reorder and remove. */
+function StatusesView(props: { projectKey: string; statuses: Status[]; tickets: Ticket[]; canChange: boolean; onChanged: () => void }) {
+  return (
+    <div className="status-categories">
+      {STATUS_CATEGORIES.map(([category, label]) => (
+        <StatusCategorySection
+          key={category}
+          {...props}
+          category={category}
+          label={label}
+          inCategory={props.statuses.filter((s) => s.category === category)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function StatusCategorySection(props: {
+  projectKey: string;
+  category: StatusCategory;
+  label: string;
+  statuses: Status[];
+  inCategory: Status[];
+  tickets: Ticket[];
+  canChange: boolean;
+  onChanged: () => void;
+}) {
+  const [name, setName] = useState("");
+  const add = useSubmit(
+    () => api.addStatus(props.projectKey, { name, category: props.category }),
+    () => {
+      setName("");
+      props.onChanged();
+    },
+  );
+  return (
+    <section className="panel wide status-category" aria-label={props.label}>
+      <h2 className="column-head">
+        <span className={`dot ${props.category}`} />
+        {props.label}
+      </h2>
+      <ul className="rows">
+        {props.inCategory.map((status, position) => (
+          <StatusRow
+            key={status.id}
+            {...props}
+            status={status}
+            position={position}
+            ticketCount={props.tickets.filter((t) => t.status.id === status.id).length}
+          />
+        ))}
+      </ul>
+      {props.canChange && (
+        <form className="add-status" onSubmit={add.submit}>
+          <input aria-label={`New ${props.label} Status`} placeholder="New Status" value={name} required onChange={(e) => setName(e.target.value)} />
+          <button type="submit" disabled={add.busy}>Add</button>
+        </form>
+      )}
+      {add.error && <p className="error" role="alert">{add.error}</p>}
+    </section>
+  );
+}
+
+function StatusRow(props: {
+  projectKey: string;
+  status: Status;
+  position: number;
+  statuses: Status[];
+  inCategory: Status[];
+  ticketCount: number;
+  canChange: boolean;
+  onChanged: () => void;
+}) {
+  const s = props.status;
+  const [mode, setMode] = useState<"view" | "rename" | "remove">("view");
+  const [name, setName] = useState(s.name);
+  const others = props.statuses.filter((o) => o.id !== s.id);
+  const [chosen, setChosen] = useState<string>();
+  // The chosen Status may have been removed since; fall back to the first other one.
+  const moveTo = others.some((o) => o.id === chosen) ? chosen! : (others[0]?.id ?? "");
+  const done = () => {
+    setMode("view");
+    props.onChanged();
+  };
+  const update = useAction((changes: { name?: string; position?: number }) => api.updateStatus(props.projectKey, s.id, changes), done);
+  const remove = useAction(async () => {
+    try {
+      await api.removeStatus(props.projectKey, s.id, props.ticketCount > 0 ? moveTo : undefined);
+    } catch (err) {
+      // Our Ticket counts may be out of date; reload so the picker shows if Tickets need moving.
+      props.onChanged();
+      throw err;
+    }
+  }, done);
+  const error = update.error ?? remove.error;
+
+  return (
+    <li className="status-row">
+      {mode === "rename" ? (
+        <form
+          className="row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void update.run({ name });
+          }}
+        >
+          <input aria-label={`Name of ${s.name}`} className="grow" value={name} required onChange={(e) => setName(e.target.value)} />
+          <button type="submit" disabled={update.busy}>Save</button>
+          <button type="button" className="secondary" onClick={() => setMode("view")}>Cancel</button>
+        </form>
+      ) : (
+        <div className="row">
+          <span className="grow">{s.name}</span>
+          <span className="muted">{props.ticketCount} {props.ticketCount === 1 ? "Ticket" : "Tickets"}</span>
+          {props.canChange && (
+            <>
+              <button
+                className="link"
+                aria-label={`Move ${s.name} up`}
+                disabled={props.position === 0 || update.busy}
+                onClick={() => void update.run({ position: props.position - 1 })}
+              >
+                ↑
+              </button>
+              <button
+                className="link"
+                aria-label={`Move ${s.name} down`}
+                disabled={props.position === props.inCategory.length - 1 || update.busy}
+                onClick={() => void update.run({ position: props.position + 1 })}
+              >
+                ↓
+              </button>
+              <button
+                className="link"
+                aria-label={`Rename ${s.name}`}
+                onClick={() => {
+                  setName(s.name);
+                  setMode("rename");
+                }}
+              >
+                Rename
+              </button>
+              {/* A Status Category keeps at least one Status, so its last can't be removed. */}
+              {props.inCategory.length > 1 && (
+                <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {mode === "remove" && (
+        <div className="row remove-status">
+          {props.ticketCount > 0 ? (
+            <label className="field inline grow">
+              <span>Move its Tickets to</span>
+              <select value={moveTo} onChange={(e) => setChosen(e.target.value)}>
+                {others.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span className="grow muted">No Tickets are in {s.name}.</span>
+          )}
+          <button disabled={remove.busy} onClick={() => void remove.run()}>Remove Status</button>
+          <button className="secondary" onClick={() => setMode("view")}>Cancel</button>
+        </div>
+      )}
+      {error && <p className="error row" role="alert">{error}</p>}
+    </li>
   );
 }
 
