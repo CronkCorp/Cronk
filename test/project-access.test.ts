@@ -135,3 +135,21 @@ describe("deactivated Users", () => {
     }
   });
 });
+
+describe("Project members and roles", () => {
+  it("drops a Member's Project listings when they are made an Admin, so demoting them doesn't bring old access back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = await userId(bob);
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.put(`/api/projects/SECRET/members/${bobId}`, { access: "read" });
+
+    await admin.patch(`/api/users/${bobId}`, { role: "admin" });
+    expect((await admin.get("/api/projects/SECRET/members")).body.members).toEqual([]);
+    expect((await bob.get("/api/projects/SECRET")).body.project.access).toBe("write");
+
+    await admin.patch(`/api/users/${bobId}`, { role: "member" });
+    expect((await bob.get("/api/projects/SECRET")).status).toBe(404);
+  });
+});
