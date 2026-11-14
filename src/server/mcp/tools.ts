@@ -185,6 +185,41 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerGroupedTool(server, ctx, {
+    name: "comments",
+    description:
+      "Comments: conversation any User or Agent posts on a Ticket or a Document, kept apart from Activities. Reply to a Comment " +
+      "to thread under it. A User answers your question by replying to its Activity. On a Document, a Comment can anchor to a " +
+      "passage it is about. Comments that @mention you, answer your questions or land on Tickets delegated to you wait for you " +
+      "in your welcome.",
+    parameters: {
+      key: z.string().optional().describe("Ticket key, such as CRONK-12, for its Comments (list, post)"),
+      documentId: z.string().optional().describe("Document id, for its Comments, instead of a key (list, post)"),
+      body: z.string().optional().describe("Markdown text of the Comment; @name mentions an Agent (post)"),
+      replyToCommentId: z.string().optional().describe("The Comment to reply to, on the same Ticket or Document (post)"),
+      replyToActivityId: z.string().optional().describe("The Activity on the same Ticket to reply to (post)"),
+      passage: z.string().optional().describe("On a Document: the exact text of its current Version the Comment is about (post)"),
+    },
+    actions: {
+      list: {
+        description: "the Comments on a Ticket or a Document, oldest first",
+        writes: false,
+        run: (api, a) => api("GET", commentsPath(a, "list")),
+      },
+      post: {
+        description: "post a Comment on a Ticket or a Document, optionally replying to a Comment or an Activity",
+        writes: true,
+        run: (api, a) =>
+          api("POST", commentsPath(a, "post"), {
+            body: required(a.body, "a body", "post"),
+            ...(a.replyToCommentId !== undefined && { replyToCommentId: a.replyToCommentId }),
+            ...(a.replyToActivityId !== undefined && { replyToActivityId: a.replyToActivityId }),
+            ...(a.passage !== undefined && { anchor: { passage: a.passage } }),
+          }),
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
     name: "documents",
     description:
       "Documents: Markdown knowledge belonging to a Project or, without a project, the Workspace, arranged in a page tree. " +
@@ -269,6 +304,12 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
     },
   });
+}
+
+/** Where the Comments on the Ticket `key` or the Document `documentId` live; exactly one must be given. */
+function commentsPath(a: { key?: string | undefined; documentId?: string | undefined }, action: string): string {
+  if ((a.key === undefined) === (a.documentId === undefined)) throw new ToolError(`The ${action} action needs a key or a documentId`);
+  return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
 }
 
 /** Where a page tree's API lives: a Project's, or the Workspace's when no Project is named. */

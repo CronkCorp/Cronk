@@ -316,3 +316,28 @@ describe("the documents tool", () => {
     expect(tools.find((t) => t.name === "documents")?.inputSchema.properties?.action).toMatchObject({ enum: ["get", "tree"] });
   });
 });
+
+describe("the comments tool", () => {
+  it("posts and lists Comments on Tickets and Documents, replying to a Comment and anchoring to a passage", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "Use a cache." })).body.document;
+    const asked = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Ready?" })).body.comment;
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const reply = await callTool(mcp, "comments", { action: "post", key: "CRONK-1", body: "Yes.", replyToCommentId: asked.id });
+    expect(reply.body.comment).toMatchObject({ ticketKey: "CRONK-1", replyToCommentId: asked.id, actor: { kind: "agent", session: { id: mcp.transport.sessionId } } });
+    const anchored = await callTool(mcp, "comments", { action: "post", documentId: doc.id, body: "Which cache?", passage: "a cache" });
+    expect(anchored.body.comment.anchor).toEqual({ passage: "a cache", version: 1, inCurrentVersion: true });
+
+    expect((await callTool(mcp, "comments", { action: "list", key: "CRONK-1" })).body).toEqual((await admin.get("/api/tickets/CRONK-1/comments")).body);
+    expect((await callTool(mcp, "comments", { action: "list", documentId: doc.id })).body.comments).toHaveLength(1);
+    expect(await callTool(mcp, "comments", { action: "list" })).toEqual({ isError: true, body: "The list action needs a key or a documentId" });
+  });
+
+  it("offers a read-only token only the list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "comments")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
+  });
+});
