@@ -3,9 +3,12 @@ import { AgentAccessSelect } from "./agents.js";
 import {
   api,
   type AgentAccess,
+  type Priority,
   type Project,
   type RecordedChange,
+  type RelationKind,
   type Status,
+  type StatusCategory,
   type Ticket,
   type TicketChanges,
   type TicketDetail,
@@ -13,7 +16,7 @@ import {
   type TicketRef,
   type User,
 } from "./api.js";
-import { PRIORITIES, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../shared/values.js";
+import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";

@@ -1,11 +1,7 @@
 import { actingUser, type Actor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
-import type { RelationKind } from "./relations.js";
-import { PROJECT_KEY_PATTERN, type Project, type Status, type StatusCategory } from "./projects.js";
-
-import type { Priority } from "../../shared/values.js";
-
-export { PRIORITIES, type Priority } from "../../shared/values.js";
+import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
+import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
 /** A User as a Ticket shows them. */
 export interface UserRef {
@@ -143,7 +139,10 @@ export async function findTicketByKey(
   return rows[0] && toTicket(rows[0]);
 }
 
-/** A Ticket update as the API takes it: Status, assignee and parent by id or key, and null to clear them. */
+/**
+ * A Ticket update as the API takes it: Status, assignee and parent by id or key, and null to clear them.
+ * Routes resolve it into a `TicketEdit`, which carries the records themselves.
+ */
 export interface TicketChanges {
   title?: string;
   description?: string;

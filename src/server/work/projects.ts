@@ -1,9 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { AgentAccess } from "../identity/access.js";
-
 import { STATUS_CATEGORIES, type StatusCategory } from "../../shared/values.js";
-
-export { STATUS_CATEGORIES, type StatusCategory };
 
 /** The Statuses a new Project starts with: one per Status Category. */
 const DEFAULT_STATUSES: { name: string; category: StatusCategory }[] = [

@@ -3,7 +3,8 @@ import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { agentAccessSchema, nameSchema } from "../schemas.js";
 import { actingUser, userActor, type Actor } from "../actor.js";
-import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
+import { addRelation, listRelations, removeRelation, type Relations } from "./relations.js";
+import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
@@ -23,11 +24,9 @@ import {
   listProjects,
   listStatuses,
   PROJECT_KEY_PATTERN,
-  STATUS_CATEGORIES,
   updateProject,
   type Project,
   type Status,
-  type StatusCategory,
   type Visibility,
 } from "./projects.js";
 import {
@@ -40,9 +39,7 @@ import {
   wouldNestUnderItself,
   normalizeLabels,
   listTickets,
-  PRIORITIES,
   updateTicket,
-  type Priority,
   type RecordedChange,
   type Ticket,
   type TicketChanges,
