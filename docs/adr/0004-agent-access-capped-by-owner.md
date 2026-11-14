@@ -1,0 +1,3 @@
+# Agent access is capped by its Owner; Protected items take Suggestions only
+
+An Agent's effective access is the lower of the Agent Access its Project (or the Workspace) allows and what its Owner can do, so an Agent can never reach content its human couldn't (unlike Notion's custom agents) nor automatically inherit everything its human can do (unlike Atlassian's Rovo). Individual Documents, Terms, Decisions and Artifacts can be marked Protected, so Agents read but never edit them; accepted Decisions are Protected by default. Agents influence Protected content only through Suggestions that a User accepts or rejects.

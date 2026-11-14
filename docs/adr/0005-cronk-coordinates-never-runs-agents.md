@@ -1,0 +1,3 @@
+# Cronk coordinates Agents but never runs them
+
+Cronk records and coordinates Agent work (Tickets, Claims, Activities, Reports) but never launches, hosts or supervises agent processes. When work becomes available to an Agent (a new delegation, a failed CI check on its Pull Request, an answered question), Cronk marks it as waiting, includes it in the welcome of the Agent's next Agent Session, and optionally calls a webhook the Agent has registered; whatever runner the User already has (a CI job, an n8n flow, a script) decides whether to start a session. Tools that tried to also be the agent runner, such as Vibe Kanban, took on large scope and were shut down; keeping execution out keeps Cronk small and agnostic about which agents people use.
