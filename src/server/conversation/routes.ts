@@ -28,7 +28,16 @@ const newCommentBody = {
   required: ["body"],
   additionalProperties: false,
   properties: {
-    body: { type: "string", minLength: 1, maxLength: 100_000, pattern: "\\S", description: "Markdown." },
+    body: {
+      type: "string",
+      minLength: 1,
+      maxLength: 100_000,
+      pattern: "\\S",
+      description:
+        "Markdown. `@name` mentions the writer's own Agent of that name, or else every other Owner's Agent of that name; " +
+        '`@owner/name` picks another Owner\'s Agent; quote names with spaces, as in `@"claude laptop"`. Mentions inside code ' +
+        "and block quotes don't count.",
+    },
     replyToCommentId: { ...id, description: "The Comment this one replies to, on the same Ticket or Document." },
     replyToActivityId: {
       ...id,
