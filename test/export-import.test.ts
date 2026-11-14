@@ -180,9 +180,9 @@ describe("importing an export", () => {
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
 
-    // Users who weren't in the installation come in deactivated: they have no password here yet.
+    // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
-      value?.email === "grace@example.com" ? { ...value, active: false } : value,
+      value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
   });
@@ -299,13 +299,13 @@ describe("a User an import brought in", () => {
 
   it("can be invited, and accepting sets their password, reactivates them and keeps their id and history", async () => {
     const { cronk, admin, imported } = await importedGrace();
-    expect(imported).toMatchObject({ name: "Grace", active: false });
+    expect(imported).toMatchObject({ name: "Grace", active: false, joined: false });
 
     const invited = await admin.post("/api/invitations", { email: "grace@example.com" });
     expect(invited.status).toBe(201);
     const accepted = await cronk.client().post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: "Grace H", password: "graces password" });
     expect(accepted.status).toBe(201);
-    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true });
+    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true, joined: true });
 
     const grace = cronk.client();
     expect((await grace.post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
