@@ -7,6 +7,7 @@ import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
+import { conversationRoutes } from "./conversation/routes.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { mcpRoutes } from "./mcp/server.js";
 import { identityRoutes } from "./identity/routes.js";
@@ -123,6 +124,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
+  await app.register(conversationRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 
   const webRoot = opts.config.webRoot;

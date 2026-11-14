@@ -42,6 +42,7 @@ export type SharedSchemaName =
   | "Relations"
   | "RecordedChange"
   | "Activity"
+  | "Comment"
   | "Document"
   | "DocumentTreeEntry"
   | "Version"
@@ -262,6 +263,23 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       at: timestamp,
       agent: { ...object({ id, name: { type: "string" }, owner: named }), description: "The Agent, with the Owner it acts for." },
       session: object({ id }),
+      answer: {
+        ...nullable(object({ commentId: id, at: timestamp })),
+        description: "For a question, once answered: the first Comment replying to it from anyone but the Agent that asked.",
+      },
+    }),
+  },
+  Comment: {
+    description: "A message an Actor posted on a Ticket or a Document: conversation, as opposed to an Agent's own Activities.",
+    ...object({
+      id,
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null on a Document." },
+      documentId: { ...nullable(id), description: "The Document it is on; null on a Ticket." },
+      replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
+      replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
+      body: { type: "string", description: "Markdown." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who posted it." },
     }),
   },
   Document: {

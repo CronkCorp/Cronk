@@ -309,4 +309,36 @@ export const migrations: Migration[] = [
       CREATE INDEX activities_ticket ON activities (ticket_id, seq);
     `,
   },
+  {
+    id: "0012_comments",
+    sql: `
+      -- A message any Actor posts on a Ticket or a Document: on exactly one of them. It may reply to
+      -- another Comment on the same Ticket or Document, or to an Activity on the same Ticket.
+      -- actor_user_id is the Agent's Owner when an Agent posted it, as history records it.
+      CREATE TABLE comments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        seq bigserial NOT NULL,
+        ticket_id uuid REFERENCES tickets(id) ON DELETE CASCADE,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        reply_to_comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        reply_to_activity_id uuid REFERENCES activities(id) ON DELETE CASCADE,
+        body text NOT NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((ticket_id IS NULL) <> (document_id IS NULL)),
+        CHECK (reply_to_comment_id IS NULL OR reply_to_activity_id IS NULL),
+        CHECK (reply_to_activity_id IS NULL OR ticket_id IS NOT NULL),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+      CREATE INDEX comments_ticket ON comments (ticket_id, seq) WHERE ticket_id IS NOT NULL;
+      CREATE INDEX comments_document ON comments (document_id, seq) WHERE document_id IS NOT NULL;
+
+      -- The Comment that answered a question: the first reply to it from anyone but the Agent that asked.
+      ALTER TABLE activities ADD COLUMN answer_comment_id uuid REFERENCES comments(id) ON DELETE SET NULL
+        CHECK (answer_comment_id IS NULL OR kind = 'question');
+    `,
+  },
 ];
