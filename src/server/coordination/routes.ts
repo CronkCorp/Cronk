@@ -10,7 +10,7 @@ import { accessSchema, answer, errors, holding, listing, noContent, pathParams, 
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
 import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
-import { insertActivity, listActivities } from "./activities.js";
+import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
@@ -223,7 +223,8 @@ export function coordinationRoutes(ctx: AppContext) {
           await requireClaimHolder(tx, actor, ticket, now, "logging Activities on it");
           return insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
         });
-        return reply.code(201).send({ activity });
+        ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
+        return reply.code(201).send({ activity: publicActivity(activity) });
       },
     );
 
@@ -237,7 +238,33 @@ export function coordinationRoutes(ctx: AppContext) {
       },
       async (request) => {
         const ticket = await ticketFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
-        return { activities: await listActivities(ctx.db, ticket.id) };
+        return { activities: (await listActivities(ctx.db, ticket.id)).map(publicActivity) };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/tickets/:key/events",
+      {
+        schema: {
+          params: ticketParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
+                "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const ticket = await ticketFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await ticketFor(ctx.db, actor, ticket.key, "read"));
+        };
+        ctx.live.stream(request, reply, ticketTopic(ticket.id), canSee);
       },
     );
 
@@ -252,6 +279,9 @@ export function coordinationRoutes(ctx: AppContext) {
     );
   };
 }
+
+/** The live-update topic of one Ticket's changes. */
+const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
 
 /** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
 async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {

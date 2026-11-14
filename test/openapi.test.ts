@@ -42,8 +42,9 @@ describe("the OpenAPI description", () => {
       expect(success, label).toHaveLength(1);
       const response = op.responses[success[0]!];
       expect(response.description, label).toBeTruthy();
-      // A 204 has no body; every other success answers JSON with a schema.
-      if (success[0] !== "204") expect(response.content?.["application/json"]?.schema, label).toBeDefined();
+      // A 204 has no body; a live-update stream answers server-sent events; every other success answers JSON with a schema.
+      const type = label.endsWith("/events") ? "text/event-stream" : "application/json";
+      if (success[0] !== "204") expect(response.content?.[type]?.schema, label).toBeDefined();
     }
   });
 

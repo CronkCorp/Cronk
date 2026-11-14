@@ -90,3 +90,39 @@ describe("An Activity", () => {
     expect((await bob.get("/api/tickets/CRONK-1/activities")).status).toBe(404);
   });
 });
+
+describe("A Ticket's live updates", () => {
+  it("push each new Activity on the Ticket to those watching it, and only that Ticket's", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-2/claim");
+
+    const stream = await admin.events("/api/tickets/CRONK-1/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    await agent.post("/api/tickets/CRONK-2/activities", { kind: "plan", body: "Elsewhere" });
+    const logged = await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body: "Halfway" });
+
+    expect(await stream.next()).toEqual({ event: "activity", data: { activity: logged.body.activity } });
+  });
+
+  it("are refused to those who can't see the Ticket, and end once they no longer can", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/projects/CRONK", { agentAccess: "none" });
+    expect((await cronk.client(claude.secret).events("/api/tickets/CRONK-1/events")).status).toBe(404);
+    await admin.patch("/api/projects/CRONK", { agentAccess: "write" });
+
+    const stream = await bob.events("/api/tickets/CRONK-1/events");
+    expect((await stream.next())?.event).toBe("ready");
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect((await bob.events("/api/tickets/CRONK-1/events")).status).toBe(404);
+
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "finding", body: "A secret" });
+    expect(await stream.next()).toBeNull();
+  });
+});

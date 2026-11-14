@@ -51,6 +51,21 @@ export class Client {
     return this.request<T>("DELETE", path);
   }
 
+  /**
+   * Opens a server-sent event stream at `path` over real HTTP, as a browser's EventSource
+   * does, sending this caller's cookies and headers. Closed when the test ends.
+   */
+  async events(path: string): Promise<EventStream> {
+    const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const abort = new AbortController();
+    const res = await fetch(new URL(path, await this.cronk.url()), {
+      headers: { ...this.headers, accept: "text/event-stream", ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      signal: abort.signal,
+    });
+    onTestFinished(() => abort.abort());
+    return new EventStream(res, () => abort.abort());
+  }
+
   private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
     const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const res = await this.cronk.app.inject({
@@ -65,6 +80,52 @@ export class Client {
     }
     const text = res.body;
     return { status: res.statusCode, body: (text ? JSON.parse(text) : undefined) as T };
+  }
+}
+
+/** One server-sent event: its name and parsed JSON data. */
+export interface ServerEvent {
+  event: string;
+  data: any;
+}
+
+/** A server-sent event stream being read, one event at a time. */
+export class EventStream {
+  readonly status: number;
+  private buffer = "";
+  private readonly reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  private readonly decoder = new TextDecoder();
+
+  constructor(
+    res: globalThis.Response,
+    readonly close: () => void,
+  ) {
+    this.status = res.status;
+    this.reader = res.ok ? res.body!.getReader() : undefined;
+  }
+
+  /** The next event, skipping comments; null once the server ends the stream. Fails if none comes within `timeoutMs`. */
+  async next(timeoutMs = 5_000): Promise<ServerEvent | null> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const end = this.buffer.indexOf("\n\n");
+      if (end >= 0) {
+        const block = this.buffer.slice(0, end);
+        this.buffer = this.buffer.slice(end + 2);
+        const fields = block.split("\n").filter((line) => !line.startsWith(":"));
+        if (fields.length === 0) continue;
+        const field = (name: string) => fields.find((l) => l.startsWith(`${name}:`))?.slice(name.length + 1).trim();
+        const data = field("data");
+        return { event: field("event") ?? "message", data: data === undefined ? undefined : JSON.parse(data) };
+      }
+      if (!this.reader) return null;
+      const read = await Promise.race([
+        this.reader.read().catch(() => ({ done: true as const, value: undefined })),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("No server-sent event came in time")), Math.max(0, deadline - Date.now()))),
+      ]);
+      if (read.done) return null;
+      this.buffer += this.decoder.decode(read.value, { stream: true });
+    }
   }
 }
 

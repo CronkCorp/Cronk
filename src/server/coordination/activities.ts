@@ -8,6 +8,7 @@ import type { ActivityKind } from "../../shared/values.js";
  */
 export interface Activity {
   id: string;
+  ticketId: string;
   ticketKey: string;
   kind: ActivityKind;
   body: string;
@@ -19,6 +20,7 @@ export interface Activity {
 
 interface ActivityRow {
   id: string;
+  ticket_id: string;
   ticket_key: string;
   kind: ActivityKind;
   body: string;
@@ -32,13 +34,14 @@ interface ActivityRow {
 }
 
 const SELECT = `
-  SELECT v.id, p.key || '-' || t.number AS ticket_key, v.kind, v.body, v.blocking, v.at,
+  SELECT v.id, v.ticket_id, p.key || '-' || t.number AS ticket_key, v.kind, v.body, v.blocking, v.at,
     a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id
   FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN projects p ON p.id = t.project_id
     JOIN agents a ON a.id = v.actor_agent_id JOIN users u ON u.id = v.actor_user_id`;
 
 const toActivity = (row: ActivityRow): Activity => ({
   id: row.id,
+  ticketId: row.ticket_id,
   ticketKey: row.ticket_key,
   kind: row.kind,
   body: row.body,
@@ -71,3 +74,6 @@ export async function listActivities(db: Queryable, ticketId: string): Promise<A
   const { rows } = await db.query<ActivityRow>(`${SELECT} WHERE v.ticket_id = $1 ORDER BY v.seq`, [ticketId]);
   return rows.map(toActivity);
 }
+
+/** The shape of an Activity the API returns. */
+export const publicActivity = ({ ticketId: _, ...activity }: Activity) => activity;
