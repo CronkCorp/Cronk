@@ -93,3 +93,17 @@ export function TextArea(props: { label: string; value: string; onChange: (v: st
     </label>
   );
 }
+
+/** The centred card the signed-out pages (setup, sign-in, invitations) are shown in. */
+export function AuthCard(props: { title: string; intro?: string; children: ReactNode }) {
+  return (
+    <main className="auth">
+      <div className="auth-card">
+        <div className="brand">Cronk</div>
+        <h1>{props.title}</h1>
+        {props.intro && <p className="muted">{props.intro}</p>}
+        {props.children}
+      </div>
+    </main>
+  );
+}

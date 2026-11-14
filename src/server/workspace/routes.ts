@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireUser, type AppContext } from "../context.js";
+import { requireUser, type AppContext } from "../context.js";
+import { requireAdmin } from "../identity/access.js";
 import { nameSchema } from "../schemas.js";
 import { getWorkspace, renameWorkspace } from "./workspaces.js";
 
@@ -25,7 +26,7 @@ export function workspaceRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        if (user.role !== "admin") throw new HttpError(403, "Only an Admin can rename the Workspace");
+        requireAdmin(user, "rename the Workspace");
         const workspace = await renameWorkspace(ctx.db, user.workspaceId, request.body.name.trim());
         return { name: workspace.name };
       },

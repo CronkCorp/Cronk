@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
-import { api, type RecordedChange, type Project, type Status, type Ticket } from "./api.js";
+import { api, type RecordedChange, type Project, type Status, type Ticket, type User } from "./api.js";
+import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -43,7 +44,9 @@ export function ProjectsPage(props: { archived: boolean }) {
                 <li key={project.id}>
                   <Link to={`/projects/${project.key}`} className="row">
                     <span className="key">{project.key}</span>
-                    <span>{project.name}</span>
+                    <span className="grow">{project.name}</span>
+                    {project.visibility === "private" && <span className="badge">Private</span>}
+                    {project.access === "read" && <span className="badge">Read only</span>}
                   </Link>
                 </li>
               ))}
@@ -77,10 +80,11 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
 }
 
 /** One Project's Tickets, as a list or as a board grouped by Status. */
-export function ProjectPage(props: { projectKey: string; view: "list" | "board" }) {
+export function ProjectPage(props: { projectKey: string; view: "list" | "board"; me: User }) {
   const [project, , setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey), [props.projectKey]);
   const [creating, setCreating] = useState(false);
+  const [showAccess, setShowAccess] = useState(false);
   const archive = useSubmit(
     async () => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -97,17 +101,32 @@ export function ProjectPage(props: { projectKey: string; view: "list" | "board" 
             <div>
               <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
               <h1>
-                {p.name} {p.archived && <span className="badge">Archived</span>}
+                {p.name} {p.archived && <span className="badge">Archived</span>}{" "}
+                {p.visibility === "private" && <span className="badge">Private</span>}{" "}
+                {p.access === "read" && <span className="badge">Read only</span>}
               </h1>
             </div>
             <div className="actions">
-              <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
-                {p.archived ? "Restore Project" : "Archive Project"}
-              </button>
-              {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+              {props.me.role === "admin" && (
+                <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
+              )}
+              {p.access === "write" && (
+                <>
+                  <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
+                    {p.archived ? "Restore Project" : "Archive Project"}
+                  </button>
+                  {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+                </>
+              )}
             </div>
           </div>
           {archive.error && <p className="error" role="alert">{archive.error}</p>}
+          {showAccess && (
+            <ProjectAccessPanel
+              project={p}
+              onProjectChanged={(updated) => setProject({ project: updated, statuses })}
+            />
+          )}
           {creating && (
             <NewTicket
               projectKey={p.key}
@@ -214,6 +233,7 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
   const [history, reloadHistory] = useLoad(() => api.ticketHistory(t.key), [t.key]);
   const [editing, setEditing] = useState(false);
   const archived = project.kind === "loaded" && project.value.project.archived;
+  const canWrite = project.kind === "loaded" && project.value.project.access === "write";
 
   const changed = (updated: Ticket) => {
     props.onChanged(updated);
@@ -239,10 +259,12 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
         <>
           <div className="page-head">
             <h1>{t.title}</h1>
-            <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
+            {canWrite && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
           </div>
           <Show state={project}>
-            {({ statuses }) => <StatusPicker ticket={t} statuses={statuses} onChanged={changed} />}
+            {({ project: p, statuses }) => (
+              <StatusPicker ticket={t} statuses={statuses} readOnly={p.access === "read"} onChanged={changed} />
+            )}
           </Show>
           <div className="markdown" data-testid="ticket-description">
             {t.description.trim() ? <Markdown>{t.description}</Markdown> : <p className="muted">No description.</p>}
@@ -266,7 +288,7 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
   );
 }
 
-function StatusPicker(props: { ticket: Ticket; statuses: Status[]; onChanged: (ticket: Ticket) => void }) {
+function StatusPicker(props: { ticket: Ticket; statuses: Status[]; readOnly: boolean; onChanged: (ticket: Ticket) => void }) {
   const { run: move, error, busy } = useAction(
     (statusId: string) => api.updateTicket(props.ticket.key, { statusId }),
     props.onChanged,
@@ -275,7 +297,7 @@ function StatusPicker(props: { ticket: Ticket; statuses: Status[]; onChanged: (t
     <div className="status-picker">
       <label className="field inline">
         <span>Status</span>
-        <select value={props.ticket.status.id} disabled={busy} onChange={(e) => void move(e.target.value)}>
+        <select value={props.ticket.status.id} disabled={busy || props.readOnly} onChange={(e) => void move(e.target.value)}>
           {props.statuses.map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}

@@ -38,11 +38,14 @@ export class Client {
   patch<T = any>(path: string, body?: unknown) {
     return this.request<T>("PATCH", path, body);
   }
+  put<T = any>(path: string, body?: unknown) {
+    return this.request<T>("PUT", path, body);
+  }
   delete<T = any>(path: string) {
     return this.request<T>("DELETE", path);
   }
 
-  private async request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
+  private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
     const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const res = await this.cronk.app.inject({
       method,
@@ -116,3 +119,19 @@ export async function startInstalledCronk(workspaceName = "Acme"): Promise<{ cro
   if (setup.status !== 201) throw new Error(`Setup failed: ${JSON.stringify(setup.body)}`);
   return { cronk, admin };
 }
+
+/**
+ * Has `admin` invite `email` and accepts the invitation on a new client, which is
+ * returned signed in. The name is the email's local part and the password is fixed.
+ */
+export async function joinAs(cronk: Cronk, admin: Client, email: string, role: "admin" | "member" = "member"): Promise<Client> {
+  const invited = await admin.post("/api/invitations", { email, role });
+  if (invited.status !== 201) throw new Error(`Inviting ${email} failed: ${JSON.stringify(invited.body)}`);
+  const client = cronk.client();
+  const accepted = await client.post(`/api/invitations/${invited.body.token}/accept`, { name: email.split("@")[0], password: memberPassword });
+  if (accepted.status !== 201) throw new Error(`Accepting ${email} failed: ${JSON.stringify(accepted.body)}`);
+  return client;
+}
+
+/** The password `joinAs` gives every User it creates. */
+export const memberPassword = "member password";

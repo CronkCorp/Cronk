@@ -31,7 +31,8 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 - **Documents.** Human-curated Documents live in a page tree per Project and Workspace; Reports live with their Ticket; Terms and Decisions get their own views. Agents follow Guidance about where new Documents go.
 - **Comments.** Threaded, on Tickets and Documents, from any Actor, optionally anchored to a passage. Answers to Agent questions are Comment replies. Comments, @mentions and answers mark work as waiting for an Agent.
 - **Inbox and Triage.** One Inbox per User for everything waiting on them, blocking questions first; Triage for waiting items without a clear User.
-- **Access.** Workspace roles Admin and Member; open or private Projects; Read or Write per Member. Protected means "Agents can't edit", not "only Admins can edit".
+- **Access.** Workspace roles Admin and Member; open or private Projects; Read or Write per Member. Admins have Write in every Project. A Member listed in a Project has the access listed; an unlisted Member has Write in an open Project and nothing in a private one, which answers as if it didn't exist. Only Admins change roles, invitations, visibility and listings. Protected means "Agents can't edit", not "only Admins can edit".
+- **Invitations.** Until outside-app email arrives (Phase 3), inviting a User gives the Admin a one-time link, valid 7 days, to send themselves.
 - **Sign-in.** Email and password, with optional OIDC in Phase 3.
 - **Search.** Postgres full-text search plus context on claim. Semantic search is optional and off by default; Cronk must never require an extra AI service.
 - **Notifications.** In-app live updates. Outside the app only from Phase 3, via webhooks or optional email, defaulting to urgent events only. No native apps for now.
