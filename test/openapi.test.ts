@@ -94,7 +94,10 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
     expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["400", "404"]);
-    expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toEqual(staleBody);
+    // A save is refused as stale, or because an Agent changes a Report without its Ticket's Claim.
+    expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toMatchObject({
+      anyOf: [staleBody, errorBody],
+    });
     expect(doc.paths["/api/documents/{id}"].delete.responses["409"].content["application/json"].schema).toMatchObject({
       anyOf: [staleBody, errorBody],
     });

@@ -331,6 +331,19 @@ describe("the documents tool", () => {
     });
   });
 
+  it("refuses to update a Report without the Claim on its Ticket, naming the Claim", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const { id } = (await callTool(mcp, "documents", { action: "write_report", key: "CRONK-1", title: "Findings", body: "Done." })).body.report;
+    await callTool(mcp, "tickets", { action: "release", key: "CRONK-1" });
+
+    expect(await callTool(mcp, "documents", { action: "update", id, baseVersion: 1, body: "Rewritten." })).toEqual({
+      isError: true,
+      body: expect.stringContaining("Claim CRONK-1"),
+    });
+  });
+
   it("offers a read-only token only get and tree", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
