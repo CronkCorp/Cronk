@@ -236,6 +236,16 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge.sections.map((s: { heading: string }) => s.heading)).toEqual(["## Install", "## Usage"]);
   });
 
+  it("reports a section both edits renamed differently as a conflict", async () => {
+    const base = "## Setup\n\nInstall it.\n";
+    const { admin, id } = await editedUnderneath(base, "## Install\n\nInstall it.\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## Getting started\n\nInstall it.\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 1, body: null });
+    expect(res.body.merge.sections[0].conflict).toMatchObject({ base, mine: "## Getting started\n\nInstall it.\n", theirs: "## Install\n\nInstall it.\n" });
+  });
+
   it("refuses a base Version the Document never had", async () => {
     const { admin, id } = await documentWith(plan);
     expect((await admin.post(`/api/documents/${id}/merge`, { baseVersion: 5, body: "x" })).status).toBe(404);
