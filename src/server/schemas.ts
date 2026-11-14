@@ -168,3 +168,16 @@ const ERROR_MEANINGS = {
 /** The error answers of a route, each with the shared `Error` shape. */
 export const errors = (...codes: (keyof typeof ERROR_MEANINGS)[]) =>
   Object.fromEntries(codes.map((code) => [code, { description: ERROR_MEANINGS[code], ...ref("Error") }]));
+
+/** A route's path parameters; each is required, and each schema should say what it names. */
+export const pathParams = <P extends Record<string, { readonly type: string; readonly description: string }>>(properties: P) => ({
+  type: "object",
+  required: Object.keys(properties),
+  properties,
+});
+
+/** A Project's key, such as `CRONK`, in any case. */
+export const projectKeyParam = { type: "string", description: "The Project's key, such as `CRONK`; any case." } as const;
+
+/** A Ticket's key, such as `CRONK-12`, in any case. */
+export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;

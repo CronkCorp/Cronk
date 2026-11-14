@@ -78,4 +78,18 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
     expect(errorsOf("/api/invitations/{token}", "get")).toEqual(["404"]);
   });
+
+  it("declares and describes every path parameter", async () => {
+    const doc = await openapi();
+    for (const [label, op] of operations(doc)) {
+      const names = [...label.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+      const declared = (op.parameters ?? []).filter((p: { in: string }) => p.in === "path");
+      expect(declared.map((p: { name: string }) => p.name).sort(), label).toEqual(names.sort());
+      for (const param of declared) {
+        expect(param.required, `${label} ${param.name}`).toBe(true);
+        expect(param.description, `${label} ${param.name}`).toBeTruthy();
+        expect(param.schema?.type, `${label} ${param.name}`).toBe("string");
+      }
+    }
+  });
 });

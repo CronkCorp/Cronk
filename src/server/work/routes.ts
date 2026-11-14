@@ -1,7 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
-import { agentAccessSchema, answer, errors, nameSchema, noContent, ref, type SharedSchemaName } from "../schemas.js";
+import {
+  agentAccessSchema,
+  answer,
+  errors,
+  nameSchema,
+  noContent,
+  pathParams,
+  projectKeyParam,
+  ref,
+  ticketKeyParam,
+  type SharedSchemaName,
+} from "../schemas.js";
 import { actingUser, userActor, type Actor } from "../actor.js";
 import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
 import type { Queryable } from "../db/database.js";
@@ -59,6 +70,10 @@ const description = { type: "string", maxLength: 100_000 } as const;
 
 /** A Label: non-blank, at most 50 characters. */
 const label = { type: "string", minLength: 1, maxLength: 50, pattern: "\\S" } as const;
+
+const projectParams = pathParams({ key: projectKeyParam });
+const statusParams = pathParams({ key: projectKeyParam, statusId: { type: "string", description: "The Status's id." } });
+const ticketParams = pathParams({ key: ticketKeyParam });
 
 /** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
 const holding = (field: string, name: SharedSchemaName) => ({ type: "object", required: [field], properties: { [field]: ref(name) } });
@@ -135,6 +150,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key",
       {
         schema: {
+          params: projectParams,
           response: {
             200: answer("The Project and its Statuses, in workflow order", {
               type: "object",
@@ -159,6 +175,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key",
       {
         schema: {
+          params: projectParams,
           body: {
             type: "object",
             additionalProperties: false,
@@ -192,6 +209,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/members",
       {
         schema: {
+          params: projectParams,
           response: { 200: answer("The Users listed in the Project, with their access", listing("members", member)), ...errors(401, 404) },
         },
       },
@@ -203,10 +221,10 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    const memberParams = {
-      type: "object",
-      properties: { key: { type: "string" }, userId: { type: "string", format: "uuid" } },
-    } as const;
+    const memberParams = pathParams({
+      key: projectKeyParam,
+      userId: { type: "string", format: "uuid", description: "The User's id." },
+    });
 
     app.put<{ Params: { key: string; userId: string }; Body: { access: Access } }>(
       "/api/projects/:key/members/:userId",
@@ -258,6 +276,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/statuses",
       {
         schema: {
+          params: projectParams,
           body: {
             type: "object",
             required: ["name", "category"],
@@ -287,6 +306,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/statuses/:statusId",
       {
         schema: {
+          params: statusParams,
           body: {
             type: "object",
             additionalProperties: false,
@@ -323,6 +343,7 @@ export function workRoutes(ctx: AppContext) {
       // `moveTo`: the Status the removed Status's Tickets move to. Required while any Ticket is in it.
       {
         schema: {
+          params: statusParams,
           querystring: { type: "object", properties: { moveTo: { type: "string" } } },
           response: { 204: noContent("The Status is removed, and any Tickets in it moved"), ...errors(400, 401, 403, 404, 409) },
         },
@@ -361,6 +382,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/tickets",
       {
         schema: {
+          params: projectParams,
           querystring: {
             type: "object",
             properties: {
@@ -397,6 +419,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/labels",
       {
         schema: {
+          params: projectParams,
           response: {
             200: answer("The Labels on the Project's Tickets, alphabetically, one per spelling ignoring case", listing("labels", { type: "string" })),
             ...errors(401, 404),
@@ -414,6 +437,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/tickets",
       {
         schema: {
+          params: projectParams,
           body: {
             type: "object",
             required: ["title"],
@@ -450,6 +474,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/tickets/:key",
       {
         schema: {
+          params: ticketParams,
           response: {
             200: answer("The Ticket, its Sub-Tickets in key order, and its relations to Tickets the caller can see", {
               type: "object",
@@ -475,6 +500,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/tickets/:key/relations",
       {
         schema: {
+          params: ticketParams,
           body: {
             type: "object",
             required: ["kind", "ticketKey"],
@@ -511,10 +537,15 @@ export function workRoutes(ctx: AppContext) {
       "/api/tickets/:key/relations/:kind/:otherKey",
       {
         schema: {
-          params: {
-            type: "object",
-            properties: { key: { type: "string" }, kind: { type: "string", enum: RELATION_KINDS }, otherKey: { type: "string" } },
-          },
+          params: pathParams({
+            key: ticketKeyParam,
+            kind: {
+              type: "string",
+              enum: RELATION_KINDS,
+              description: "How the Ticket relates to the other, read from the Ticket's side.",
+            },
+            otherKey: { type: "string", description: "The other Ticket's key, such as `CRONK-7`; any case." },
+          }),
           response: { 200: answer("The Ticket's remaining relations", holding("relations", "Relations")), ...errors(400, 401, 403, 404) },
         },
       },
@@ -534,6 +565,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/tickets/:key",
       {
         schema: {
+          params: ticketParams,
           body: {
             type: "object",
             additionalProperties: false,
@@ -578,6 +610,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/tickets/:key/history",
       {
         schema: {
+          params: ticketParams,
           response: {
             200: answer("The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see", listing("changes", ref("RecordedChange"))),
             ...errors(401, 404),

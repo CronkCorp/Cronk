@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { answer, errors, nameSchema, noContent, publicRoute, ref } from "../schemas.js";
+import { answer, errors, nameSchema, noContent, pathParams, publicRoute, ref } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -25,6 +25,9 @@ const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
 const role = { type: "string", enum: ["admin", "member"] } as const;
 
 const userAnswer = { type: "object", required: ["user"], properties: { user: ref("User") } } as const;
+
+/** The path parameters of the routes anyone holding an invitation's token may call. */
+const invitationTokenParams = pathParams({ token: { type: "string", description: "The secret token the invitation was sent with." } });
 
 const INVITATION_GONE = "This invitation has expired or was withdrawn";
 
@@ -176,7 +179,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/invitations/:id",
       {
         schema: {
-          params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
+          params: pathParams({ id: { type: "string", format: "uuid", description: "The invitation's id." } }),
           response: { 204: noContent("The invitation is withdrawn"), ...errors(400, 401, 403, 404) },
         },
       },
@@ -193,6 +196,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/invitations/:token",
       {
         schema: {
+          params: invitationTokenParams,
           ...publicRoute,
           response: {
             200: answer("Who the invitation is for and which Workspace it joins", {
@@ -216,6 +220,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/invitations/:token/accept",
       {
         schema: {
+          params: invitationTokenParams,
           ...publicRoute,
           body: {
             type: "object",
@@ -279,7 +284,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/users/:id",
       {
         schema: {
-          params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
+          params: pathParams({ id: { type: "string", format: "uuid", description: "The User's id." } }),
           body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
           response: { 200: answer("The changed User", userAnswer), ...errors(400, 401, 403, 404, 409) },
         },

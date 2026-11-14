@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { answer, errors, nameSchema, noContent, ref } from "../schemas.js";
+import { answer, errors, nameSchema, noContent, pathParams, ref } from "../schemas.js";
 import { requireAdmin } from "./access.js";
 import {
   findAgent,
@@ -17,7 +17,8 @@ import {
 } from "./agents.js";
 import type { User } from "./users.js";
 
-const agentParams = { type: "object", properties: { id: { type: "string", format: "uuid" } } } as const;
+const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
+const agentParams = pathParams({ id: agentId });
 const agentAnswer = { type: "object", required: ["agent"], properties: { agent: ref("Agent") } } as const;
 const agentBody = { type: "object", required: ["name"], additionalProperties: false, properties: { name: nameSchema } } as const;
 
@@ -145,7 +146,7 @@ export function agentRoutes(ctx: AppContext) {
       "/api/agents/:id/tokens/:tokenId",
       {
         schema: {
-          params: { type: "object", properties: { id: { type: "string", format: "uuid" }, tokenId: { type: "string", format: "uuid" } } },
+          params: pathParams({ id: agentId, tokenId: { type: "string", format: "uuid", description: "The token's id." } }),
           response: { 204: noContent("The token is revoked"), ...errors(400, 401, 403, 404) },
         },
       },
