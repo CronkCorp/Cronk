@@ -147,7 +147,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerGroupedTool(server, ctx, {
     name: "activities",
     description:
-      "Activities: your work log on a Ticket, shown live to Users on its timeline. Log one while you hold the Ticket's Claim, " +
+      "Activities: the timestamped entries you write on a Ticket while you work on it, shown live to Users on its page. Write one while you hold the Ticket's Claim, " +
       "whenever you plan, make progress, find something or hit an error; each one keeps your Claim alive. " +
       "Ask a question as an Activity too, marking it blocking when you must wait for the answer.",
     parameters: {
