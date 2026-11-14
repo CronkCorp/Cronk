@@ -1,4 +1,5 @@
 import type { Nodes } from "mdast";
+import type { LiveEvent } from "../live/live-updates.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
@@ -21,6 +22,8 @@ export type { WaitingReason };
 export interface WaitingFor {
   agentId: string;
   reason: WaitingReason;
+  /** Its position in the order work starts waiting, which only grows; its stream event's id. */
+  seq: string;
 }
 
 /** A Comment waiting for an Agent, with why and what it is on. */
@@ -29,6 +32,11 @@ export interface WaitingWork {
   comment: ReturnType<typeof publicComment>;
   ticket: CommentOn["ticket"];
   document: CommentOn["document"];
+}
+
+/** The `waiting` event that pushes `work` to the Agent's live Agent Sessions, with its position as the event's id. */
+export function waitingEvent(seq: string, work: WaitingWork): LiveEvent {
+  return { event: "waiting", id: seq, data: { waiting: work } };
 }
 
 /** Where a Comment was posted, as deciding who it waits for needs it. */
@@ -134,13 +142,11 @@ export async function markWaiting(
     const found = agents.find((a) => a.agent.id === agentId);
     if (!found?.owner.active) continue;
     if (!(await canRead(db, agentReading(found.agent, found.owner), place.projectId))) continue;
-    await db.query("INSERT INTO waiting_work (agent_id, comment_id, reason, at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING", [
-      agentId,
-      comment.id,
-      reason,
-      at,
-    ]);
-    waiting.push({ agentId, reason });
+    const { rows } = await db.query<{ seq: string }>(
+      "INSERT INTO waiting_work (agent_id, comment_id, reason, at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING seq",
+      [agentId, comment.id, reason, at],
+    );
+    if (rows[0]) waiting.push({ agentId, reason, seq: rows[0].seq });
   }
   return waiting;
 }
@@ -164,6 +170,26 @@ export async function takeWaitingWork(db: Queryable, agent: AgentActor, sessionI
     );
   }
   return work;
+}
+
+/**
+ * The work still waiting for the Agent that started waiting after position `afterSeq`, with
+ * each one's position, in that order, leaving out what the Agent can't see right now: what a
+ * stream reopened from `afterSeq` missed. Nothing is taken.
+ */
+export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterSeq: string): Promise<{ seq: string; work: WaitingWork }[]> {
+  const { rows } = await db.query<{ seq: string; comment_id: string; reason: WaitingReason }>(
+    "SELECT seq, comment_id, reason FROM waiting_work WHERE agent_id = $1 AND taken_at IS NULL AND seq > $2 ORDER BY seq",
+    [agent.agent.id, afterSeq],
+  );
+  const work = new Map((await waitingWorkFor(db, agent, rows.map((r) => ({ commentId: r.comment_id, reason: r.reason })))).map((w) => [w.comment.id, w]));
+  return rows.filter((r) => work.has(r.comment_id)).map((r) => ({ seq: r.seq, work: work.get(r.comment_id)! }));
+}
+
+/** The position of the work that last started waiting for the Agent, taken or not; "0" if none has. */
+export async function latestWaitingSeq(db: Queryable, agentId: string): Promise<string> {
+  const { rows } = await db.query<{ seq: string | null }>("SELECT max(seq)::text AS seq FROM waiting_work WHERE agent_id = $1", [agentId]);
+  return rows[0]?.seq ?? "0";
 }
 
 /** The waiting work for these Comments, in the order they were posted, leaving out those `agent` can't see. */

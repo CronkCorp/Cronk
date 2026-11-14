@@ -6,6 +6,16 @@ export interface LiveEvent {
   event: string;
   /** Its JSON data. */
   data: object;
+  /** Its id, if it has one: where a stream reopened from it (with `Last-Event-ID`) picks up. */
+  id?: string;
+}
+
+/** What a stream reopened from an event's id missed, and the id its `ready` carries, to reopen from if nothing else arrives. */
+export interface CatchUp {
+  /** The events the stream missed, in the order to send them. */
+  missed: LiveEvent[];
+  /** The id `ready` carries: where the stream stands once it has sent them. */
+  readyId: string;
 }
 
 type Listener = (event: LiveEvent) => void;
@@ -47,12 +57,17 @@ export class LiveUpdates {
    * once it says no (or throws), so a caller who loses access stops hearing about it. Check
    * access before calling this, so a caller who can't see the topic gets an ordinary error
    * answer instead.
+   *
+   * With `catchUp`, the stream first sends the events it answers as missed, each behind the
+   * same access check, then a `ready` carrying the id it answers. It is called once the stream
+   * is watching, so nothing published meanwhile is lost; a published event with the id of one
+   * it already sent as missed isn't sent again. The stream ends if it fails.
    */
-  stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>): void {
+  stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>, catchUp?: () => Promise<CatchUp>): void {
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
-    const write = ({ event, data }: LiveEvent) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const write = ({ event, data, id }: LiveEvent) => res.write(`event: ${event}\n${id === undefined ? "" : `id: ${id}\n`}data: ${JSON.stringify(data)}\n\n`);
 
     // Events are sent one at a time, in order, each after its access check.
     let queue = Promise.resolve();
@@ -65,21 +80,39 @@ export class LiveUpdates {
       this.streams.delete(end);
       res.end();
     };
+    // Whether the stream is still open and the caller may still see the topic; it may have closed during the check.
+    const allowed = async () => open && (await canSee().catch(() => false)) && open;
     // Runs `send` after the access check, or ends the stream if the caller may no longer see the topic.
     const checked = (send: () => void) => {
       queue = queue.then(async () => {
         if (!open) return;
-        const allowed = await canSee().catch(() => false);
-        if (!open) return;
-        if (allowed) send();
+        if (await allowed()) send();
         else end();
       });
     };
-    const unsubscribe = this.subscribe(topic, (event) => checked(() => write(event)));
+    const sent = new Set<string>();
+    const unsubscribe = this.subscribe(topic, (event) => checked(() => (event.id === undefined || !sent.has(event.id)) && write(event)));
     const heartbeat = setInterval(() => checked(() => res.write(": keep-alive\n\n")), HEARTBEAT_MS).unref();
     this.streams.add(end);
     res.on("close", end);
-    write({ event: "ready", data: {} });
+    if (!catchUp) {
+      write({ event: "ready", data: {} });
+      return;
+    }
+    // Live events wait in the queue behind the catch-up.
+    queue = (async () => {
+      try {
+        const { missed, readyId } = await catchUp();
+        for (const event of missed) {
+          if (!(await allowed())) return end();
+          if (event.id !== undefined) sent.add(event.id);
+          write(event);
+        }
+        if (open) write({ event: "ready", id: readyId, data: {} });
+      } catch {
+        end();
+      }
+    })();
   }
 
   /** Ends every open stream, as when the server stops. */
