@@ -102,6 +102,30 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await expect(page.getByText("No Tickets match these filters")).toBeVisible();
 });
 
+// Runs after the tests above, so CRONK-1 "Add sign-in" exists and is In Progress.
+test("tailor the Project's Statuses and see the board follow them", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: "Statuses" }).click();
+
+  const started = page.getByRole("region", { name: "Started", exact: true });
+  await started.getByLabel("New Started Status").fill("In QA");
+  await started.getByRole("button", { name: "Add" }).click();
+  await expect(started.getByRole("listitem")).toHaveText([/In Progress/, /In QA/]);
+
+  await started.getByRole("button", { name: "Remove In Progress" }).click();
+  await started.getByLabel("Move its Tickets to").selectOption({ label: "In QA" });
+  await started.getByRole("button", { name: "Remove Status" }).click();
+  await expect(started.getByRole("listitem")).toHaveText([/In QA/]);
+
+  await page.getByRole("link", { name: "Board" }).click();
+  await expect(page.getByRole("region", { name: "In QA" })).toContainText("Add sign-in");
+  await expect(page.getByRole("region", { name: "In Progress" })).toHaveCount(0);
+});
+
 // Runs after the tests above, so Ada and the CRONK Project exist.
 test("invite a Member, who joins from the link and loses sight of the Project once it is private", async ({ page, browser }) => {
   await page.goto("/");

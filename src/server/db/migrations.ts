@@ -147,4 +147,12 @@ export const migrations: Migration[] = [
       CREATE INDEX ticket_relations_from ON ticket_relations (from_ticket_id);
     `,
   },
+  {
+    id: "0005_status_names_unique",
+    sql: `
+      -- A Project's Statuses are told apart by name, so no two may share one, ignoring case.
+      -- IF NOT EXISTS: this ran as 0004_status_names_unique on databases from the unmerged branch.
+      CREATE UNIQUE INDEX IF NOT EXISTS statuses_name_unique ON statuses (project_id, lower(name));
+    `,
+  },
 ];

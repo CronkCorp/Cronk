@@ -324,3 +324,12 @@ export async function listTicketRefs(db: Queryable, where: string, params: unkno
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${where} ORDER BY p.key, t.number`, params);
   return rows.map(toTicket).map((ticket) => ({ key: ticket.key, title: ticket.title, status: ticket.status }));
 }
+
+/**
+ * Moves every Ticket in one Status to another, recording the move in each
+ * Ticket's history. Locks those Tickets; run inside a transaction.
+ */
+export async function moveTicketsBetweenStatuses(db: Queryable, from: Status, to: Status, actor: Actor, now: Date): Promise<void> {
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.status_id = $1 ORDER BY t.number FOR UPDATE OF t`, [from.id]);
+  for (const row of rows) await updateTicket(db, toTicket(row), { status: to }, actor, now);
+}
