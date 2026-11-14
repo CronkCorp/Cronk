@@ -153,6 +153,9 @@ function similarity(a: Chunk, b: Chunk): number {
   return (2 * common) / (x.length + y.length);
 }
 
+/** A section's heading level, 1 to 6; 0 for the text before the first heading. */
+const levelOf = (chunk: Chunk) => /^#*/.exec(chunk.heading ?? "")![0].length;
+
 /** How alike a renamed section's content must stay to still pair with the base section it came from. */
 const RENAME_SIMILARITY = 0.5;
 
@@ -215,6 +218,20 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
     let bestBase: number | undefined;
     for (const i of unpaired(pairedBase, n)) if (scores[i]![j]! > (bestBase === undefined ? 0 : scores[bestBase]![j]!)) bestBase = i;
     if (bestBase !== undefined) pair(bestBase, j);
+  }
+  // A renamed empty section has no content to pair on: pair it when it is the only empty section of
+  // its level, on each side, between the same two paired sections.
+  const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
+    const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
+    const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
+    return `${levelOf(chunks[k]!)}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
+  };
+  const emptyIn = (chunks: Chunk[], paired: Set<number>, length: number) =>
+    unpaired(paired, length).filter((k) => contentLines(chunks[k]!).length === 0).map((k) => ({ k, slot: slot(chunks, paired, k) }));
+  const [emptyBase, emptySide] = [emptyIn(base, pairedBase, n), emptyIn(side, pairedSide, m)];
+  for (const s of emptySide) {
+    const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
+    if (bases.length === 1 && sides.length === 1) pair(bases[0]!.k, s.k);
   }
   const added = new Map<string, number>();
   side.forEach((chunk, j) => {
