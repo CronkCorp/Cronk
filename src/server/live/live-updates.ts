@@ -12,7 +12,9 @@ export interface LiveEvent {
 
 /** What a stream reopened from an event's id missed, and the id its `ready` carries, to reopen from if nothing else arrives. */
 export interface CatchUp {
+  /** The events the stream missed, in the order to send them. */
   missed: LiveEvent[];
+  /** The id `ready` carries: where the stream stands once it has sent them. */
   readyId: string;
 }
 
@@ -78,8 +80,9 @@ export class LiveUpdates {
       this.streams.delete(end);
       res.end();
     };
-    // Runs `send` after the access check, or ends the stream if the caller may no longer see the topic.
+    // Whether the stream is still open and the caller may still see the topic; it may have closed during the check.
     const allowed = async () => open && (await canSee().catch(() => false)) && open;
+    // Runs `send` after the access check, or ends the stream if the caller may no longer see the topic.
     const checked = (send: () => void) => {
       queue = queue.then(async () => {
         if (!open) return;

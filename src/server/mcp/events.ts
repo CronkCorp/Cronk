@@ -99,21 +99,21 @@ async function openStream(
       return status >= 400 && status < 500 && status !== 408 && status !== 429 ? "refused" : "failed";
     }
     const events = readEvents(res)[Symbol.asyncIterator]();
-    const take = (event: LiveEvent) => {
+    const receive = (event: LiveEvent) => {
       // Work can be pushed out of the order it started waiting in, so resume from the furthest id, not the latest.
       if (event.id !== undefined && (last.id === undefined || furthest(last.id, event.id) === event.id)) last.id = event.id;
       if (event.event !== "ready") onEvent(event);
     };
     // What was missed while the stream was down comes first, then `ready`.
-    let e = await events.next();
-    for (; !e.done && e.value.event !== "ready"; e = await events.next()) take(e.value);
-    if (e.done) {
+    let next = await events.next();
+    for (; !next.done && next.value.event !== "ready"; next = await events.next()) receive(next.value);
+    if (next.done) {
       close();
       return "failed";
     }
-    take(e.value);
+    receive(next.value);
     const ended = (async () => {
-      for (let next = await events.next(); !next.done; next = await events.next()) take(next.value);
+      for (let next = await events.next(); !next.done; next = await events.next()) receive(next.value);
     })()
       .catch(() => {})
       .finally(close);

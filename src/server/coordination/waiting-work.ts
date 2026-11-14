@@ -1,4 +1,5 @@
 import type { Nodes } from "mdast";
+import type { LiveEvent } from "../live/live-updates.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
@@ -31,6 +32,11 @@ export interface WaitingWork {
   comment: ReturnType<typeof publicComment>;
   ticket: CommentOn["ticket"];
   document: CommentOn["document"];
+}
+
+/** The `waiting` event that pushes `work` to the Agent's live Agent Sessions, with its position as the event's id. */
+export function waitingEvent(seq: string, work: WaitingWork): LiveEvent {
+  return { event: "waiting", id: seq, data: { waiting: work } };
 }
 
 /** Where a Comment was posted, as deciding who it waits for needs it. */

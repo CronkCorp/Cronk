@@ -14,7 +14,7 @@ import { findReport, insertReport, listTicketReports } from "../knowledge/report
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
-import { latestWaitingSeq, missedWaitingWork, takeWaitingWork } from "./waiting-work.js";
+import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } from "./waiting-work.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
@@ -366,7 +366,7 @@ export function coordinationRoutes(ctx: AppContext) {
         const catchUp = async () => ({
           missed:
             typeof lastEventId === "string" && /^\d{1,18}$/.test(lastEventId)
-              ? (await missedWaitingWork(ctx.db, agent, lastEventId)).map(({ seq, work }) => ({ event: "waiting", id: seq, data: { waiting: work } }))
+              ? (await missedWaitingWork(ctx.db, agent, lastEventId)).map(({ seq, work }) => waitingEvent(seq, work))
               : [],
           readyId: await latestWaitingSeq(ctx.db, agent.agent.id),
         });
