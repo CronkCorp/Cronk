@@ -86,6 +86,19 @@ describe("An @mention of an Agent", () => {
     expect(await mentionedIn(cronk, bobsDesktop)).toHaveLength(1);
   });
 
+  it("takes bare names in any script, and mentions that start a line after a hard break", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const zoe = await joinAs(cronk, admin, "zoe@example.com", "member", "Zoë");
+    const zoesCodex = await registerAgent(zoe, "codex");
+    const zoesHelper = await registerAgent(zoe, "hëlper");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Thanks  \n@zoë/codex" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Thanks\\\n@hëlper" });
+
+    expect(await mentionedIn(cronk, zoesCodex)).toEqual(["Thanks  \n@zoë/codex"]);
+    expect(await mentionedIn(cronk, zoesHelper)).toEqual(["Thanks\\\n@hëlper"]);
+  });
+
   it("doesn't count mentions inside code spans, code blocks or block quotes", async () => {
     const { cronk, admin } = await delegatedSetup();
     const codex = await registerAgent(admin, "codex");

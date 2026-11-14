@@ -40,10 +40,19 @@ export interface CommentPlace {
 }
 
 /** An @mention of an Agent: its name, and the name of the Owner it picks, if it picks one. Both lower-cased. */
-export interface Mention {
+interface Mention {
   owner: string | null;
   name: string;
 }
+
+/** A letter, mark, digit or `_`, in any script. */
+const WORD = String.raw`[\p{L}\p{M}\p{N}_]`;
+
+/** One name in a mention, captured in `quoted` or `bare`: `"anything but quotes"`, or word characters and `-` with inner dots. */
+const namePart = (group: string) => String.raw`"(?<${group}Quoted>[^"\n]+)"|(?<${group}Bare>(?:${WORD}|-)+(?:\.(?:${WORD}|-)+)*)`;
+
+/** `@name` or `@owner/name`, not preceded by a word character or another `@`. */
+const MENTION = new RegExp(String.raw`(?<!${WORD}|@)@(?:(?:${namePart("owner")})/)?(?:${namePart("name")})`, "gu");
 
 /**
  * The @mentions in a Comment's Markdown, without repeats: each `@name` or `@owner/name` not
@@ -51,13 +60,12 @@ export interface Mention {
  * a name that contains anything else, such as spaces, goes in double quotes: `@"claude laptop"`.
  * Mentions inside code spans, code blocks and block quotes don't count.
  */
-export function mentionsIn(body: string): Mention[] {
-  const part = String.raw`"([^"\n]+)"|([\w-]+(?:\.[\w-]+)*)`;
-  const pattern = new RegExp(String.raw`(?<![\w@])@(?:(?:${part})/)?(?:${part})`, "gu");
+function mentionsIn(body: string): Mention[] {
   const seen = new Map<string, Mention>();
-  for (const m of proseOf(fromMarkdown(body)).matchAll(pattern)) {
-    const owner = m[1] ?? m[2];
-    const mention = { owner: owner?.trim().toLowerCase() ?? null, name: (m[3] ?? m[4])!.trim().toLowerCase() };
+  for (const { groups } of proseOf(fromMarkdown(body)).matchAll(MENTION)) {
+    const owner = groups!.ownerQuoted ?? groups!.ownerBare;
+    const name = (groups!.nameQuoted ?? groups!.nameBare)!;
+    const mention = { owner: owner?.trim().toLowerCase() ?? null, name: name.trim().toLowerCase() };
     seen.set(JSON.stringify(mention), mention);
   }
   return [...seen.values()];
@@ -67,12 +75,13 @@ export function mentionsIn(body: string): Mention[] {
 const NOT_PROSE = new Set(["code", "inlineCode", "blockquote", "html"]);
 
 /** Markdown nodes whose children run together on one line. */
-const INLINE = new Set(["paragraph", "heading", "tableCell", "emphasis", "strong", "delete", "link", "linkReference"]);
+const INLINE = new Set(["paragraph", "heading", "emphasis", "strong", "link", "linkReference"]);
 
-/** The prose text of Markdown `node`, leaving out code and quotes; blocks go on lines of their own. */
+/** The prose text of Markdown `node`, leaving out code and quotes; blocks and hard breaks start new lines. */
 function proseOf(node: Nodes): string {
   if (NOT_PROSE.has(node.type)) return " ";
   if (node.type === "text") return node.value;
+  if (node.type === "break") return "\n";
   if (!("children" in node)) return "";
   return node.children.map(proseOf).join(INLINE.has(node.type) ? "" : "\n");
 }
