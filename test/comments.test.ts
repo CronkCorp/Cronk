@@ -100,3 +100,63 @@ describe("Replying to an Activity", () => {
     expect((await admin.get("/api/tickets/CRONK-2/activities")).body.activities[0].answer).toBeNull();
   });
 });
+
+describe("Comments on a Document", () => {
+  it("are posted and listed like a Ticket's, and only to those who can see the Document", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "# Design\n\nUse a cache." })).body.document;
+    const workspaceDoc = (await admin.post("/api/workspace/documents", { title: "Handbook" })).body.document;
+
+    const posted = await admin.post(`/api/documents/${doc.id}/comments`, { body: "Is this still true?" });
+    expect(posted.status).toBe(201);
+    const reply = await agent.post(`/api/documents/${doc.id}/comments`, { body: "Yes.", replyToCommentId: posted.body.comment.id });
+    expect(reply.status).toBe(201);
+    expect((await admin.post(`/api/documents/${workspaceDoc.id}/comments`, { body: "Needs an owner." })).status).toBe(201);
+
+    const listed = await admin.get(`/api/documents/${doc.id}/comments`);
+    expect(listed.body.comments).toMatchObject([
+      { documentId: doc.id, ticketKey: null, body: "Is this still true?", anchor: null, actor: { kind: "user", name: "Ada" } },
+      { documentId: doc.id, body: "Yes.", replyToCommentId: posted.body.comment.id, actor: { kind: "agent", name: "claude-laptop" } },
+    ]);
+    expect((await admin.get(`/api/documents/${workspaceDoc.id}/comments`)).body.comments).toHaveLength(1);
+
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect((await bob.get(`/api/documents/${doc.id}/comments`)).status).toBe(404);
+    expect((await bob.post(`/api/documents/${doc.id}/comments`, { body: "Hi" })).status).toBe(404);
+  });
+
+  it("can anchor to a passage, and stay anchored through later Versions while the passage is still there", async () => {
+    const { admin } = await delegatedSetup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "# Design\n\nUse a cache for reads.\n" })).body.document;
+
+    const posted = await admin.post(`/api/documents/${doc.id}/comments`, { body: "Which cache?", anchor: { passage: "a cache for reads" } });
+    expect(posted.status).toBe(201);
+    expect(posted.body.comment.anchor).toEqual({ passage: "a cache for reads", version: 1, inCurrentVersion: true });
+
+    await admin.patch(`/api/documents/${doc.id}`, { baseVersion: 1, body: "# Design\n\nIntro.\n\nUse a cache for reads, Redis.\n" });
+    expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments[0].anchor).toEqual({
+      passage: "a cache for reads",
+      version: 1,
+      inCurrentVersion: true,
+    });
+
+    await admin.patch(`/api/documents/${doc.id}`, { baseVersion: 2, body: "# Design\n\nNo cache.\n" });
+    expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments[0].anchor).toEqual({
+      passage: "a cache for reads",
+      version: 1,
+      inCurrentVersion: false,
+    });
+  });
+
+  it("refuses an anchor to a passage the Document doesn't hold, and an anchor anywhere but a Document", async () => {
+    const { admin } = await delegatedSetup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "Use a cache." })).body.document;
+
+    expect((await admin.post(`/api/documents/${doc.id}/comments`, { body: "?", anchor: { passage: "a queue" } })).status).toBe(400);
+    expect((await admin.post(`/api/documents/${doc.id}/comments`, { body: "?", anchor: { passage: "" } })).status).toBe(400);
+    expect((await admin.post("/api/tickets/CRONK-1/comments", { body: "?", anchor: { passage: "a cache" } })).status).toBe(400);
+    expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments).toEqual([]);
+  });
+});

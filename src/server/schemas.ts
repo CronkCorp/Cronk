@@ -277,6 +277,16 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       documentId: { ...nullable(id), description: "The Document it is on; null on a Ticket." },
       replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
       replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
+      anchor: {
+        ...nullable(
+          object({
+            passage: { type: "string", description: "The text it is about, exactly as the Document held it." },
+            version: { type: "integer", description: "The Version of the Document it was anchored in." },
+            inCurrentVersion: { type: "boolean", description: "Whether the current Version still holds the passage; it stays anchored while it does." },
+          }),
+        ),
+        description: "The passage of its Document it is anchored to; null when it isn't anchored.",
+      },
       body: { type: "string", description: "Markdown." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },

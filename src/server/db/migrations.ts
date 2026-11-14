@@ -322,6 +322,10 @@ export const migrations: Migration[] = [
         document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
         reply_to_comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
         reply_to_activity_id uuid REFERENCES activities(id) ON DELETE CASCADE,
+        -- A Comment on a Document may anchor to a passage: text the Document held at Version anchor_version.
+        -- It stays anchored while the Document's current Version still holds the passage.
+        anchor_passage text,
+        anchor_version integer,
         body text NOT NULL,
         at timestamptz NOT NULL,
         actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
@@ -331,6 +335,8 @@ export const migrations: Migration[] = [
         CHECK ((ticket_id IS NULL) <> (document_id IS NULL)),
         CHECK (reply_to_comment_id IS NULL OR reply_to_activity_id IS NULL),
         CHECK (reply_to_activity_id IS NULL OR ticket_id IS NOT NULL),
+        CHECK ((anchor_passage IS NULL) = (anchor_version IS NULL)),
+        CHECK (anchor_passage IS NULL OR document_id IS NOT NULL),
         CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
       );
       CREATE INDEX comments_ticket ON comments (ticket_id, seq) WHERE ticket_id IS NOT NULL;
