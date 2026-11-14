@@ -9,7 +9,7 @@ import {
   type RecordedActor,
   type Version,
 } from "./api.js";
-import { ResolveMerge, VersionDiff } from "./merge.js";
+import { ResolveMerge, StaleSaveNotice, VersionDiff } from "./merge.js";
 import { DocumentComments } from "./timeline.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
@@ -224,6 +224,8 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
 interface OtherEdit {
   base: Version;
   theirs: Version;
+  /** Whether the merge left conflicts for the User to settle. */
+  conflicted: boolean;
 }
 
 /**
@@ -254,7 +256,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
       }
       try {
         const [merge, started] = await Promise.all([api.mergeDocument(id, { baseVersion: base, title, body }), api.version(id, base)]);
-        setOther({ base: started, theirs: merge.onto });
+        setOther({ base: started, theirs: merge.onto, conflicted: merge.conflicts > 0 });
         if (merge.conflicts === 0) {
           setTitle(merge.title!);
           setBody(merge.body!);
@@ -280,21 +282,13 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
   return (
     <section className="panel wide">
       {other && (
-        <div className={resolving ? "conflict" : "merged"} role="alert">
-          <p>
-            <strong>{actorName(other.theirs.actor)}</strong> saved Version {other.theirs.number} while you were editing, so your save was not made.{" "}
-            {resolving
-              ? "You both changed the same part; choose or combine below, then save."
-              : "Their changes touched other sections and are merged into yours below; check them and save again."}
-          </p>
-          <details open={!!resolving}>
-            <summary>Their changes (Version {other.base.number} to {other.theirs.number})</summary>
-            <VersionDiff before={other.base} after={other.theirs} label={`Their changes, Version ${other.base.number} to ${other.theirs.number}`} />
-          </details>
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => takeTheirs(other.theirs)}>Discard mine and edit theirs</button>
-          </div>
-        </div>
+        <StaleSaveNotice
+          by={actorName(other.theirs.actor)}
+          base={other.base}
+          theirs={other.theirs}
+          stage={resolving ? "conflict" : other.conflicted ? "resolved" : "merged"}
+          onDiscardMine={() => takeTheirs(other.theirs)}
+        />
       )}
       {resolving ? (
         <ResolveMerge

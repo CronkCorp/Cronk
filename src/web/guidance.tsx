@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError, type Guidance, type GuidanceMerge } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
-import { ResolveMerge, VersionDiff } from "./merge.js";
+import { ResolveMerge, StaleSaveNotice, type SavedText } from "./merge.js";
 import { messageOf, Show, TextArea, useLoad } from "./ui.js";
 
 /**
@@ -70,10 +70,12 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
 
 /** Someone else's save that refused this one: the Guidance this edit started from, and the Version they saved. */
 interface OtherEdit {
-  base: Guidance;
-  theirs: Guidance;
+  base: SavedText;
+  theirs: SavedText;
   /** Who saved their Version. */
   by: string;
+  /** Whether the merge left conflicts for the User to settle. */
+  conflicted: boolean;
 }
 
 /**
@@ -107,13 +109,12 @@ function GuidanceEditor(props: {
         return;
       }
       try {
-        const [merge, versions] = await Promise.all([
-          api.mergeGuidance(props.projectKey, { markdown, baseVersion: base }),
-          api.guidanceVersions(props.projectKey),
-        ]);
-        const started = versions.find((v) => v.version === base) ?? { markdown: "", version: 0 };
+        const merge = await api.mergeGuidance(props.projectKey, { markdown, baseVersion: base });
+        // Listed after the merge, so the Version it merged onto is among them.
+        const versions = await api.guidanceVersions(props.projectKey);
+        const at = (version: number): SavedText => ({ number: version, body: versions.find((v) => v.version === version)?.markdown ?? "" });
         const by = versions.find((v) => v.version === merge.onto.version)?.actor.name ?? "Someone";
-        setOther({ base: { markdown: started.markdown, version: started.version }, theirs: merge.onto, by });
+        setOther({ base: at(base), theirs: { number: merge.onto.version, body: merge.onto.markdown }, by, conflicted: merge.conflicts > 0 });
         props.onCurrentChanged(merge.onto);
         if (merge.conflicts === 0) {
           setMarkdown(merge.markdown!);
@@ -128,9 +129,9 @@ function GuidanceEditor(props: {
       setBusy(false);
     }
   };
-  const takeTheirs = (theirs: Guidance) => {
-    setMarkdown(theirs.markdown);
-    setBase(theirs.version);
+  const takeTheirs = (theirs: SavedText) => {
+    setMarkdown(theirs.body);
+    setBase(theirs.number);
     setResolving(undefined);
     setOther(undefined);
   };
@@ -138,25 +139,13 @@ function GuidanceEditor(props: {
   return (
     <section className="panel wide">
       {other && (
-        <div className={resolving ? "conflict" : "merged"} role="alert">
-          <p>
-            <strong>{other.by}</strong> saved Version {other.theirs.version} while you were editing, so your save was not made.{" "}
-            {resolving
-              ? "You both changed the same part; choose or combine below, then save."
-              : "Their changes touched other sections and are merged into yours below; check them and save again."}
-          </p>
-          <details open={!!resolving}>
-            <summary>Their changes (Version {other.base.version} to {other.theirs.version})</summary>
-            <VersionDiff
-              before={{ title: "", body: other.base.markdown }}
-              after={{ title: "", body: other.theirs.markdown }}
-              label={`Their changes, Version ${other.base.version} to ${other.theirs.version}`}
-            />
-          </details>
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => takeTheirs(other.theirs)}>Discard mine and edit theirs</button>
-          </div>
-        </div>
+        <StaleSaveNotice
+          by={other.by}
+          base={other.base}
+          theirs={other.theirs}
+          stage={resolving ? "conflict" : other.conflicted ? "resolved" : "merged"}
+          onDiscardMine={() => takeTheirs(other.theirs)}
+        />
       )}
       {resolving ? (
         <ResolveMerge

@@ -8,6 +8,44 @@ import { TextArea } from "./ui.js";
  * choice for each part both edits changed. Documents and Guidance share it, as they share the merge.
  */
 
+/** One side of a stale save, as `StaleSaveNotice` shows it: a Version's number and text, and a Document's title. */
+export interface SavedText {
+  number: number;
+  title?: string;
+  body: string;
+}
+
+/** Where settling a refused save stands: a conflict to settle, a clean merge, or a conflict the User settled. */
+export type MergeStage = "conflict" | "merged" | "resolved";
+
+const STAGE_ADVICE: Record<MergeStage, string> = {
+  conflict: "You both changed the same part; choose or combine below, then save.",
+  merged: "Their changes touched other sections and are merged into yours below; check them and save again.",
+  resolved: "Your choices are merged into your draft below; check it and save again.",
+};
+
+/**
+ * Tells the User their save was refused because `by` saved `theirs` since `base`, shows what they
+ * changed, and offers to drop the draft and edit their Version instead.
+ */
+export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void }) {
+  const { base, theirs } = props;
+  return (
+    <div className={props.stage === "conflict" ? "conflict" : "merged"} role="alert">
+      <p>
+        <strong>{props.by}</strong> saved Version {theirs.number} while you were editing, so your save was not made. {STAGE_ADVICE[props.stage]}
+      </p>
+      <details open={props.stage === "conflict"}>
+        <summary>Their changes (Version {base.number} to {theirs.number})</summary>
+        <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+      </details>
+      <div className="actions">
+        <button type="button" className="secondary" onClick={props.onDiscardMine}>Discard mine and edit theirs</button>
+      </div>
+    </div>
+  );
+}
+
 /** One conflicting part: base, mine and theirs side by side, and the text to keep, which starts as mine. */
 function ConflictChoice(props: { label: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
   const c = props.conflict;
@@ -48,7 +86,7 @@ export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title:
   const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
   const [kept, setKept] = useState<string[]>(m.sections.map((s) => s.text ?? s.conflict?.mine ?? ""));
   const keep = (i: number, text: string) => setKept(kept.map((k, at) => (at === i ? text : k)));
-  const sectionName = (s: MergedSection) => s.heading ?? (m.sections.length === 1 ? "The whole body" : "Before the first heading");
+  const sectionName = (s: MergedSection) => s.heading ?? (m.sections.length === 1 ? "The whole text" : "Before the first heading");
   return (
     <form
       onSubmit={(event) => {
@@ -72,7 +110,7 @@ export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title:
 const CONTEXT = 3;
 
 /** What changed from one Version (or edit) to another, line by line. */
-export function VersionDiff(props: { before: { title: string; body: string }; after: { title: string; body: string }; label: string }) {
+export function VersionDiff(props: { before: { title?: string; body: string }; after: { title?: string; body: string }; label: string }) {
   const lines = diffLines(props.before.body, props.after.body);
   const changed = lines.map((l) => l.kind !== "same");
   const near = (i: number) => changed.slice(Math.max(0, i - CONTEXT), i + CONTEXT + 1).some(Boolean);
