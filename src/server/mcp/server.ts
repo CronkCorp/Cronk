@@ -53,8 +53,13 @@ export function mcpRoutes(ctx: AppContext) {
       for (const [id, c] of connections) if (c.endsIfSilentAt <= now) await drop(id);
     };
     const sweeping = setInterval(() => void sweep(), SWEEP_INTERVAL_MS).unref();
+    // Set once the server starts closing, so a connection still starting isn't held after the rest are dropped.
+    let closing = false;
     app.addHook("preClose", async () => {
+      closing = true;
       clearInterval(sweeping);
+      // Every stream stops first, so none is opened again while the others' servers close.
+      for (const c of connections.values()) c.stopNotifying();
       for (const id of [...connections.keys()]) await drop(id);
     });
 
@@ -90,6 +95,10 @@ export function mcpRoutes(ctx: AppContext) {
         const stopNotifying = baseUrl
           ? await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify)
           : () => {};
+        if (closing) {
+          stopNotifying();
+          return refuse(reply, 503, "Cronk is shutting down; reconnect once it is back");
+        }
         connections.set(session.id, {
           transport,
           server,
