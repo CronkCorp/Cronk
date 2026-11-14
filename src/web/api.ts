@@ -11,7 +11,17 @@ export interface Workspace {
   name: string;
 }
 
-export type StatusCategory = "backlog" | "unstarted" | "started" | "in_review" | "completed" | "canceled";
+/** The fixed Status Categories, in workflow order, with their display names. */
+export const STATUS_CATEGORIES = [
+  ["backlog", "Backlog"],
+  ["unstarted", "Unstarted"],
+  ["started", "Started"],
+  ["in_review", "In Review"],
+  ["completed", "Completed"],
+  ["canceled", "Canceled"],
+] as const;
+
+export type StatusCategory = (typeof STATUS_CATEGORIES)[number][0];
 
 export interface Status {
   id: string;
@@ -83,6 +93,20 @@ export const api = {
   project: (key: string) => request<{ project: Project; statuses: Status[] }>("GET", `/api/projects/${encodeURIComponent(key)}`),
   updateProject: (key: string, changes: { name?: string; archived?: boolean }) =>
     request<{ project: Project }>("PATCH", `/api/projects/${encodeURIComponent(key)}`, changes).then((r) => r.project),
+
+  addStatus: (projectKey: string, input: { name: string; category: StatusCategory }) =>
+    request<{ status: Status }>("POST", `/api/projects/${encodeURIComponent(projectKey)}/statuses`, input).then((r) => r.status),
+  /** `position` counts from 0 among the Statuses of the same Status Category. */
+  updateStatus: (projectKey: string, statusId: string, changes: { name?: string; position?: number }) =>
+    request<{ status: Status }>("PATCH", `/api/projects/${encodeURIComponent(projectKey)}/statuses/${statusId}`, changes).then(
+      (r) => r.status,
+    ),
+  /** `moveTo` is where the Status's Tickets go; required while any Ticket is in it. */
+  removeStatus: (projectKey: string, statusId: string, moveTo?: string) =>
+    request<void>(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(projectKey)}/statuses/${statusId}${moveTo ? `?moveTo=${moveTo}` : ""}`,
+    ),
 
   tickets: (projectKey: string) =>
     request<{ tickets: Ticket[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/tickets`).then((r) => r.tickets),

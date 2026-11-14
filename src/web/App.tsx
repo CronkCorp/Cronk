@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, type User } from "./api.js";
 import { Link, useLocation } from "./router.js";
 import { Field, messageOf, useSubmit } from "./ui.js";
-import { ProjectPage, ProjectsPage, TicketPage } from "./work.js";
+import { ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
 
 type State =
   | { kind: "loading" }
@@ -148,7 +148,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
 function Page() {
   const { path, search } = useLocation();
   const project = /^\/projects\/([^/]+)$/.exec(path);
-  if (project) return <ProjectPage projectKey={decodeURIComponent(project[1]!)} view={search.get("view") === "board" ? "board" : "list"} />;
+  if (project) return <ProjectPage projectKey={decodeURIComponent(project[1]!)} view={projectView(search.get("view"))} />;
   const ticket = /^\/tickets\/([^/]+)$/.exec(path);
   if (ticket) return <TicketPage ticketKey={decodeURIComponent(ticket[1]!)} />;
   return <ProjectsPage archived={path === "/archived"} />;
@@ -170,4 +170,8 @@ function RenameWorkspace(props: { current: string; onDone: (name: string) => voi
       </form>
     </section>
   );
+}
+
+function projectView(view: string | null): ProjectView {
+  return view === "board" || view === "statuses" ? view : "list";
 }
