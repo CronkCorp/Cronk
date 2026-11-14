@@ -150,3 +150,10 @@ export async function agentOf(cronk: Cronk, owner: Client, name: string, opts: {
   if (issued.status !== 201) throw new Error(`Issuing a token for ${name} failed: ${JSON.stringify(issued.body)}`);
   return cronk.client(issued.body.secret);
 }
+
+/** Creates a Project named after its key, with `count` Tickets titled "Ticket 1", "Ticket 2", … */
+export async function projectWithTickets(client: Client, key: string, count: number): Promise<void> {
+  const res = await client.post("/api/projects", { name: key, key });
+  if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
+  for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
+}

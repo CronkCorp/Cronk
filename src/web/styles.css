@@ -103,6 +103,29 @@ a.link:hover { text-decoration: underline; }
 .markdown pre { overflow-x: auto; }
 .history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 
+.filters { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
+.filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.filter select, .inline-form select, .inline-form input, .labels input {
+  font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
+}
+.priority { font-size: 12px; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
+.priority.urgent { color: #fff; background: #e03131; border-color: #e03131; }
+.priority.high { color: #e8590c; border-color: #e8590c; }
+.priority.medium { color: #f08c00; }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.chip { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.chip-remove { background: none; color: var(--muted); padding: 0 2px; line-height: 1; }
+.assignee { font-size: 13px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.ticket-fields { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.ticket-fields .field { margin-bottom: 8px; }
+.labels { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.inline-form button[type="submit"] { width: auto; }
+.parent { margin-top: 16px; }
+.relation-group h3 { font-size: 14px; margin: 12px 0 6px; color: var(--muted); }
+.relation-group + .inline-form, .relation-group .rows { margin-bottom: 8px; }
+.row-link { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
 .copy { width: 100%; font: inherit; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .rows li.row:hover { background: none; }
 .row select, .add-member select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }

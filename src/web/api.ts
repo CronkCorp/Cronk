@@ -64,26 +64,90 @@ export interface Project {
   access: Access;
 }
 
+export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
+export type Priority = (typeof PRIORITIES)[number];
+
+export interface UserRef {
+  id: string;
+  name: string;
+}
+
+/** Another Ticket as a parent or history entry names it. */
+export interface TicketName {
+  key: string;
+  title: string;
+}
+
+/** Another Ticket as a Ticket lists it among its Sub-Tickets or relations. */
+export interface TicketRef extends TicketName {
+  status: Status;
+}
+
 export interface Ticket {
   key: string;
   projectKey: string;
   title: string;
   description: string;
   status: Status;
+  priority: Priority;
+  labels: string[];
+  assignee: UserRef | null;
+  parent: TicketName | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type RelationKind = "blocks" | "blocked_by" | "relates_to";
+
+export interface Relations {
+  blocks: TicketRef[];
+  blockedBy: TicketRef[];
+  relatesTo: TicketRef[];
+}
+
+/** A Ticket with the Tickets around it, as its page shows it. */
+export interface TicketDetail {
+  ticket: Ticket;
+  subTickets: TicketRef[];
+  relations: Relations;
+}
+
+/** Narrows a Project's Ticket list; `assignee` takes a User id or `none`. */
+export interface TicketFilter {
+  status?: string;
+  category?: StatusCategory;
+  assignee?: string;
+  priority?: Priority;
+  label?: string;
+}
+
+export interface TicketChanges {
+  title?: string;
+  description?: string;
+  statusId?: string;
+  priority?: Priority;
+  labels?: string[];
+  assigneeId?: string | null;
+  parentKey?: string | null;
+}
+
 
 /** Who made a change: a User, or an Agent with the Owner it acted for. */
 export type RecordedActor =
   | { kind: "user"; id: string; name: string }
   | { kind: "agent"; id: string; name: string; owner: { id: string; name: string } };
 
+
 export type RecordedChange = { at: string; actor: RecordedActor } & (
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
   | { change: "status"; from: Status; to: Status }
+  | { change: "priority"; from: Priority; to: Priority }
+  | { change: "labels"; from: string[]; to: string[] }
+  | { change: "assignee"; from: UserRef | null; to: UserRef | null }
+  | { change: "parent"; from: TicketName | null; to: TicketName | null }
+  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
 );
 
 export class ApiError extends Error {
@@ -157,13 +221,27 @@ export const api = {
   removeMember: (key: string, userId: string) =>
     request<void>("DELETE", `/api/projects/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`),
 
-  tickets: (projectKey: string) =>
-    request<{ tickets: Ticket[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/tickets`).then((r) => r.tickets),
+  labels: (projectKey: string) =>
+    request<{ labels: string[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/labels`).then((r) => r.labels),
+  tickets: (projectKey: string, filter: TicketFilter = {}) => {
+    const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    const search = query.size ? `?${query}` : "";
+    return request<{ tickets: Ticket[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/tickets${search}`).then((r) => r.tickets);
+  },
   createTicket: (projectKey: string, input: { title: string; description?: string }) =>
     request<{ ticket: Ticket }>("POST", `/api/projects/${encodeURIComponent(projectKey)}/tickets`, input).then((r) => r.ticket),
-  ticket: (key: string) => request<{ ticket: Ticket }>("GET", `/api/tickets/${encodeURIComponent(key)}`).then((r) => r.ticket),
-  updateTicket: (key: string, changes: { title?: string; description?: string; statusId?: string }) =>
+  ticket: (key: string) => request<TicketDetail>("GET", `/api/tickets/${encodeURIComponent(key)}`),
+  updateTicket: (key: string, changes: TicketChanges) =>
     request<{ ticket: Ticket }>("PATCH", `/api/tickets/${encodeURIComponent(key)}`, changes).then((r) => r.ticket),
+  addRelation: (key: string, kind: RelationKind, ticketKey: string) =>
+    request<{ relations: Relations }>("POST", `/api/tickets/${encodeURIComponent(key)}/relations`, { kind, ticketKey }).then(
+      (r) => r.relations,
+    ),
+  removeRelation: (key: string, kind: RelationKind, otherKey: string) =>
+    request<{ relations: Relations }>(
+      "DELETE",
+      `/api/tickets/${encodeURIComponent(key)}/relations/${kind}/${encodeURIComponent(otherKey)}`,
+    ).then((r) => r.relations),
   ticketHistory: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };
