@@ -5,6 +5,8 @@
  */
 import type { publicAgentSession } from "./coordination/agent-sessions.js";
 import type { publicActivity } from "./coordination/activities.js";
+import type { publicComment } from "./conversation/comments.js";
+import type { WaitingWork as StoredWaitingWork } from "./coordination/waiting-work.js";
 import type { Claim as StoredClaim } from "./coordination/claims.js";
 import type { welcome } from "./coordination/routes.js";
 import type { AgentToken as StoredAgentToken, issueAgentToken, publicAgent } from "./identity/agents.js";
@@ -89,6 +91,12 @@ export type RecordedChange = Serialized<StoredRecordedChange>;
 
 /** One timestamped entry an Agent Session wrote on a Ticket while holding its Claim. */
 export type Activity = Serialized<ReturnType<typeof publicActivity>>;
+
+/** A message an Actor posted on a Ticket or a Document. */
+export type Comment = Serialized<ReturnType<typeof publicComment>>;
+
+/** A Comment waiting for an Agent, with why and what it is on. */
+export type WaitingWork = Serialized<StoredWaitingWork>;
 
 /** A Document at its current Version. */
 export type Document = Serialized<StoredDocument>;

@@ -2,10 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
-import { findProjectById } from "../work/projects.js";
-import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { documentFor } from "./document-reads.js";
+import { deleteDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
@@ -450,20 +450,4 @@ async function requireCurrent(db: Queryable, document: Document, baseVersion: nu
     `This ${write} is based on Version ${baseVersion}, but the Document is at Version ${document.version}; ${AFTER_STALE[write]}`,
     { current },
   );
-}
-
-/**
- * The Document with this id, if `actor` has at least `need` where it belongs: in its
- * Project (one they can't see answers 404, as if the Document didn't exist), or in the
- * Workspace for a Workspace Document.
- */
-async function documentFor(db: Queryable, actor: Actor, id: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Document> {
-  const document = await findDocument(db, actingUser(actor).workspaceId, id, opts);
-  if (!document) throw new HttpError(404, "No such Document");
-  if (document.projectId === null) {
-    await requireWorkspaceAccess(db, actor, need);
-  } else {
-    await requireProjectAccess(db, actor, (await findProjectById(db, document.projectId))!, need, "No such Document");
-  }
-  return document;
 }

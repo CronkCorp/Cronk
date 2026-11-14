@@ -1,0 +1,182 @@
+import { describe, expect, it } from "vitest";
+import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+
+describe("Comments on a Ticket", () => {
+  it("are posted by Users and Agents and listed oldest first, with replies naming the Comment they answer", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+
+    const posted = await admin.post("/api/tickets/CRONK-1/comments", { body: "What about **caching**?" });
+    expect(posted.status).toBe(201);
+    cronk.clock.advance(60_000);
+    const reply = await agent.post("/api/tickets/CRONK-1/comments", { body: "Caching is out of scope.", replyToCommentId: posted.body.comment.id });
+    expect(reply.status).toBe(201);
+
+    const listed = await admin.get("/api/tickets/CRONK-1/comments");
+    expect(listed.status).toBe(200);
+    expect(listed.body.comments).toMatchObject([
+      {
+        id: posted.body.comment.id,
+        ticketKey: "CRONK-1",
+        documentId: null,
+        body: "What about **caching**?",
+        replyToCommentId: null,
+        replyToActivityId: null,
+        at: "2026-01-01T09:00:00.000Z",
+        actor: { kind: "user", name: "Ada" },
+      },
+      {
+        body: "Caching is out of scope.",
+        replyToCommentId: posted.body.comment.id,
+        at: "2026-01-01T09:01:00.000Z",
+        actor: { kind: "agent", id: claude.agentId, name: "claude-laptop", owner: { name: "Ada" }, session: { id: agent.sessionId } },
+      },
+    ]);
+    expect(listed.body.comments[0]).toEqual(posted.body.comment);
+  });
+});
+
+describe("Posting a Comment", () => {
+  it("needs Write where it is posted, and is listed only to those who can see it", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await admin.get("/api/users")).body.users.find((u: { name: string }) => u.name === "bob").id;
+    await admin.put(`/api/projects/CRONK/members/${bobId}`, { access: "read" });
+    const readOnly = cronk.client((await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret);
+
+    expect((await bob.post("/api/tickets/CRONK-1/comments", { body: "Hi" })).status).toBe(403);
+    expect((await readOnly.post("/api/tickets/CRONK-1/comments", { body: "Hi" })).status).toBe(403);
+    expect((await bob.get("/api/tickets/CRONK-1/comments")).status).toBe(200);
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.delete(`/api/projects/CRONK/members/${bobId}`);
+    expect((await bob.get("/api/tickets/CRONK-1/comments")).status).toBe(404);
+    expect((await bob.post("/api/tickets/CRONK-1/comments", { body: "Hi" })).status).toBe(404);
+  });
+
+  it("refuses a blank body, and a reply to a Comment that isn't on the same Ticket", async () => {
+    const { admin } = await delegatedSetup(2);
+    const elsewhere = await admin.post("/api/tickets/CRONK-2/comments", { body: "On the other Ticket" });
+
+    expect((await admin.post("/api/tickets/CRONK-1/comments", { body: "  " })).status).toBe(400);
+    const refused = await admin.post("/api/tickets/CRONK-1/comments", { body: "Reply", replyToCommentId: elsewhere.body.comment.id });
+    expect(refused.status).toBe(400);
+    expect((await admin.get("/api/tickets/CRONK-1/comments")).body.comments).toEqual([]);
+  });
+});
+
+describe("Replying to an Activity", () => {
+  it("answers a question, which is marked answered by the first reply from a User", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Postgres or SQLite?", blocking: true })).body.activity;
+    const plan = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Write the schema" })).body.activity;
+
+    await agent.post("/api/tickets/CRONK-1/comments", { body: "Still waiting on this.", replyToActivityId: question.id });
+    expect((await codex.post("/api/tickets/CRONK-1/comments", { body: "I'd guess Postgres.", replyToActivityId: question.id })).status).toBe(201);
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Good plan.", replyToActivityId: plan.id });
+    expect((await admin.get("/api/tickets/CRONK-1/activities")).body.activities.map((a: { answer: unknown }) => a.answer)).toEqual([null, null]);
+
+    cronk.clock.advance(60_000);
+    const answer = await admin.post("/api/tickets/CRONK-1/comments", { body: "Postgres.", replyToActivityId: question.id });
+    expect(answer.status).toBe(201);
+    expect(answer.body.comment.replyToActivityId).toBe(question.id);
+    cronk.clock.advance(60_000);
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Version 17, to be exact.", replyToActivityId: question.id });
+
+    const [asked, planned] = (await admin.get("/api/tickets/CRONK-1/activities")).body.activities;
+    expect(asked.answer).toEqual({ commentId: answer.body.comment.id, at: "2026-01-01T09:01:00.000Z" });
+    expect(planned.answer).toBeNull();
+  });
+
+  it("is refused for an Activity on another Ticket", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-2/claim");
+    const question = (await agent.post("/api/tickets/CRONK-2/activities", { kind: "question", body: "Which one?" })).body.activity;
+
+    const refused = await admin.post("/api/tickets/CRONK-1/comments", { body: "This one.", replyToActivityId: question.id });
+    expect(refused.status).toBe(400);
+    expect((await admin.get("/api/tickets/CRONK-2/activities")).body.activities[0].answer).toBeNull();
+  });
+});
+
+describe("Comments on a Document", () => {
+  it("are posted and listed like a Ticket's, and only to those who can see the Document", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "# Design\n\nUse a cache." })).body.document;
+    const workspaceDoc = (await admin.post("/api/workspace/documents", { title: "Handbook" })).body.document;
+
+    const posted = await admin.post(`/api/documents/${doc.id}/comments`, { body: "Is this still true?" });
+    expect(posted.status).toBe(201);
+    const reply = await agent.post(`/api/documents/${doc.id}/comments`, { body: "Yes.", replyToCommentId: posted.body.comment.id });
+    expect(reply.status).toBe(201);
+    expect((await admin.post(`/api/documents/${workspaceDoc.id}/comments`, { body: "Needs an owner." })).status).toBe(201);
+
+    const listed = await admin.get(`/api/documents/${doc.id}/comments`);
+    expect(listed.body.comments).toMatchObject([
+      { documentId: doc.id, ticketKey: null, body: "Is this still true?", anchor: null, actor: { kind: "user", name: "Ada" } },
+      { documentId: doc.id, body: "Yes.", replyToCommentId: posted.body.comment.id, actor: { kind: "agent", name: "claude-laptop" } },
+    ]);
+    expect((await admin.get(`/api/documents/${workspaceDoc.id}/comments`)).body.comments).toHaveLength(1);
+
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect((await bob.get(`/api/documents/${doc.id}/comments`)).status).toBe(404);
+    expect((await bob.post(`/api/documents/${doc.id}/comments`, { body: "Hi" })).status).toBe(404);
+  });
+
+  it("can anchor to a passage, and stay anchored through later Versions while the passage is still there", async () => {
+    const { admin } = await delegatedSetup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "# Design\n\nUse a cache for reads.\n" })).body.document;
+
+    const posted = await admin.post(`/api/documents/${doc.id}/comments`, { body: "Which cache?", anchor: { passage: "a cache for reads" } });
+    expect(posted.status).toBe(201);
+    expect(posted.body.comment.anchor).toEqual({ passage: "a cache for reads", version: 1, inCurrentVersion: true });
+
+    await admin.patch(`/api/documents/${doc.id}`, { baseVersion: 1, body: "# Design\n\nIntro.\n\nUse a cache for reads, Redis.\n" });
+    expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments[0].anchor).toEqual({
+      passage: "a cache for reads",
+      version: 1,
+      inCurrentVersion: true,
+    });
+
+    await admin.patch(`/api/documents/${doc.id}`, { baseVersion: 2, body: "# Design\n\nNo cache.\n" });
+    expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments[0].anchor).toEqual({
+      passage: "a cache for reads",
+      version: 1,
+      inCurrentVersion: false,
+    });
+  });
+
+  it("refuses an anchor to a passage the Document doesn't hold, and an anchor anywhere but a Document", async () => {
+    const { admin } = await delegatedSetup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "Use a cache." })).body.document;
+
+    expect((await admin.post(`/api/documents/${doc.id}/comments`, { body: "?", anchor: { passage: "a queue" } })).status).toBe(400);
+    expect((await admin.post(`/api/documents/${doc.id}/comments`, { body: "?", anchor: { passage: "" } })).status).toBe(400);
+    expect((await admin.post("/api/tickets/CRONK-1/comments", { body: "?", anchor: { passage: "a cache" } })).status).toBe(400);
+    expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments).toEqual([]);
+  });
+});
+
+describe("A Ticket's live updates", () => {
+  it("push each new Comment, and a question again once a Comment answers it", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which one?" })).body.activity;
+    const stream = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The first.", replyToActivityId: question.id })).body.comment;
+
+    expect(await stream.next()).toEqual({ event: "comment", data: { comment: answer } });
+    const answered = (await admin.get("/api/tickets/CRONK-1/activities")).body.activities[0];
+    expect(answered.answer).not.toBeNull();
+    expect(await stream.next()).toEqual({ event: "activity", data: { activity: answered } });
+  });
+});

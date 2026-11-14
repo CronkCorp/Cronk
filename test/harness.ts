@@ -260,14 +260,25 @@ export interface McpConnection {
   disconnect(): Promise<void>;
 }
 
-/** Connects a real MCP client to Cronk's MCP endpoint with `token`; closed when the test ends. */
-export async function connectMcp(cronk: Cronk, token: string): Promise<McpConnection> {
+/**
+ * Connects a real MCP client to Cronk's MCP endpoint with `token`; closed when the test ends.
+ * With `listening`, also waits until the client has opened the stream it hears notifications on.
+ */
+export async function connectMcp(cronk: Cronk, token: string, opts: { listening?: boolean } = {}): Promise<McpConnection> {
+  let listening!: () => void;
+  const listens = new Promise<void>((resolve) => (listening = resolve));
   const transport = new StreamableHTTPClientTransport(new URL("/mcp", await cronk.url()), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
+    fetch: async (url, init) => {
+      const res = await fetch(url, init);
+      if (init?.method === "GET" && res.ok) listening();
+      return res;
+    },
   });
   const client = new McpClient({ name: "cronk-tests", version: "0.0.0" });
   await client.connect(transport);
   onTestFinished(() => client.close());
+  if (opts.listening) await listens;
   return {
     client,
     transport,

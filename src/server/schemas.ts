@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -42,6 +42,8 @@ export type SharedSchemaName =
   | "Relations"
   | "RecordedChange"
   | "Activity"
+  | "Comment"
+  | "WaitingWork"
   | "Document"
   | "Report"
   | "DocumentTreeEntry"
@@ -268,6 +270,46 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       blocking: { type: "boolean", description: "True for a question the Agent waits on; only questions can be." },
       at: timestamp,
       ...writtenBy,
+      answer: {
+        ...nullable(object({ commentId: id, at: timestamp })),
+        description: "For a question, once answered: the first Comment a User replied to it with.",
+      },
+    }),
+  },
+  Comment: {
+    description: "A message an Actor posted on a Ticket or a Document: conversation, as opposed to an Agent's own Activities.",
+    ...object({
+      id,
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null on a Document." },
+      documentId: { ...nullable(id), description: "The Document it is on; null on a Ticket." },
+      replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
+      replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
+      anchor: {
+        ...nullable(
+          object({
+            passage: { type: "string", description: "The text it is about, exactly as the Document held it." },
+            version: { type: "integer", description: "The Version of the Document it was anchored in." },
+            inCurrentVersion: { type: "boolean", description: "Whether the current Version still holds the passage; it stays anchored while it does." },
+          }),
+        ),
+        description: "The passage of its Document it is anchored to; null when it isn't anchored.",
+      },
+      body: { type: "string", description: "Markdown." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who posted it." },
+    }),
+  },
+  WaitingWork: {
+    description: "A Comment waiting for an Agent (ADR 0005), with why and what it is on.",
+    ...object({
+      reason: {
+        type: "string",
+        enum: WAITING_REASONS,
+        description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
+      },
+      comment: ref("Comment"),
+      ticket: { ...nullable(ticketName), description: "The Ticket it is on; null on a Document." },
+      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document it is on; null on a Ticket." },
     }),
   },
   Document: {

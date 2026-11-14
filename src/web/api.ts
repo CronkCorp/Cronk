@@ -8,6 +8,7 @@ import type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  Comment,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -50,6 +51,7 @@ export type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  Comment,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -251,13 +253,32 @@ export const api = {
   activities: (key: string) =>
     request<{ activities: Activity[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/activities`).then((r) => r.activities),
 
+  ticketComments: (key: string) =>
+    request<{ comments: Comment[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/comments`).then((r) => r.comments),
+  /** Posts a Comment on a Ticket; a reply to a question Activity answers it. */
+  postTicketComment: (key: string, input: NewComment) =>
+    request<{ comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/comments`, input).then((r) => r.comment),
+  documentComments: (id: string) => request<{ comments: Comment[] }>("GET", `${documentPath(id)}/comments`).then((r) => r.comments),
+  /** Posts a Comment on a Document, optionally anchored to a passage its current Version holds. */
+  postDocumentComment: (id: string, input: NewComment & { anchor?: { passage: string } }) =>
+    request<{ comment: Comment }>("POST", `${documentPath(id)}/comments`, input).then((r) => r.comment),
+
   ticketHistory: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };
 
+/** A Comment to post: its Markdown, and what it replies to, if anything. */
+export interface NewComment {
+  body: string;
+  replyToCommentId?: string;
+  replyToActivityId?: string;
+}
+
 /** The events a Ticket's live-update stream pushes, by name, with their data. */
 export interface TicketEvents {
+  /** A new Activity, or one changed since (a question once answered). */
   activity: { activity: Activity };
+  comment: { comment: Comment };
   report: { report: Report };
 }
 

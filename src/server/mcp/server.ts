@@ -6,8 +6,9 @@ import { bearerToken, type AppContext } from "../context.js";
 import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
-import type { AgentSession, Welcome } from "../api-types.js";
-import { welcomeText } from "./welcome.js";
+import type { AgentSession, WaitingWork, Welcome } from "../api-types.js";
+import { agentTopic } from "../live/topics.js";
+import { waitingLines, welcomeText } from "./welcome.js";
 
 /**
  * One MCP connection: its transport and server, the hash of the token that opened it (the
@@ -18,6 +19,8 @@ interface Connection {
   server: McpServer;
   tokenHash: string;
   endsIfSilentAt: Date;
+  /** Stops pushing waiting work to it. */
+  unsubscribe: () => void;
 }
 
 
@@ -41,6 +44,7 @@ export function mcpRoutes(ctx: AppContext) {
     const drop = async (id: string) => {
       const connection = connections.get(id);
       connections.delete(id);
+      connection?.unsubscribe();
       await connection?.server.close();
     };
     // A Session that stayed silent has ended on the API's side; forget its connection too.
@@ -67,10 +71,28 @@ export function mcpRoutes(ctx: AppContext) {
         const started = await callApi(app, { token }, "POST", "/api/agent-sessions");
         if (started.status !== 201) return refuse(reply, started.status, started.body.error);
         const { session, welcome } = started.body as { session: AgentSession; welcome: Welcome };
-        const server = new McpServer({ name: "cronk", version: "0.0.0" }, { instructions: welcomeText(welcome, session.id) });
+        const server = new McpServer(
+          { name: "cronk", version: "0.0.0" },
+          { instructions: welcomeText(welcome, session.id), capabilities: { logging: {} } },
+        );
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
-        connections.set(session.id, { transport, server, tokenHash: hashToken(token), endsIfSilentAt: new Date(session.endsIfSilentAt) });
+        // Work starting to wait for the Agent reaches it as a log message. This listens to the
+        // in-process live updates the API's own stream of them (/api/agent-sessions/current/events)
+        // is made of, as the API serves no stream to in-process calls.
+        const unsubscribe = ctx.live.subscribe(agentTopic(welcome.agent.id), ({ event, data }) => {
+          if (event !== "waiting") return;
+          const { waiting } = data as { waiting: WaitingWork };
+          const text = waitingLines(waiting).join("\n");
+          void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message: `Work is waiting for you:\n${text}`, waiting } }).catch(() => {});
+        });
+        connections.set(session.id, {
+          transport,
+          server,
+          tokenHash: hashToken(token),
+          endsIfSilentAt: new Date(session.endsIfSilentAt),
+          unsubscribe,
+        });
         await server.connect(transport);
         return serve(transport, request, reply, token);
       }

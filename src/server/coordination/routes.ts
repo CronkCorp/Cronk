@@ -14,6 +14,8 @@ import { findReport, insertReport, listTicketReports } from "../knowledge/report
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
+import { takeWaitingWork } from "./waiting-work.js";
+import { agentTopic, ticketTopic } from "../live/topics.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -30,7 +32,7 @@ const WELCOME_READY_LIMIT = 20;
 /** What an Agent is told when its Agent Session starts (see `welcome`). */
 const welcomeSchema = {
   type: "object",
-  required: ["workspace", "agent", "readOnly", "projects", "readyTickets"],
+  required: ["workspace", "agent", "readOnly", "projects", "readyTickets", "waitingWork"],
   properties: {
     workspace: {
       anyOf: [
@@ -68,6 +70,14 @@ const welcomeSchema = {
         properties: { key: { type: "string" }, title: { type: "string" }, priority: { type: "string", enum: PRIORITIES }, status: ref("Status") },
       },
     },
+    waitingWork: {
+      type: "array",
+      description:
+        "Comments waiting for the Agent since its last welcome, oldest first: answers to its questions, @mentions of it, and " +
+        "Comments on Tickets delegated to it. A full token's welcome takes them, so the next one lists only newer ones; a read-only " +
+        "token's leaves them waiting. Work in places the Agent can't see right now is left out, and waits until it can.",
+      items: ref("WaitingWork"),
+    },
   },
 } as const;
 
@@ -96,7 +106,7 @@ export function coordinationRoutes(ctx: AppContext) {
       async (request, reply) => {
         const agent = requireAgent(await requireActor(ctx, request));
         const session = await startAgentSession(ctx.db, { agentId: agent.agent.id, tokenId: agent.tokenId, now: ctx.clock.now() });
-        return reply.code(201).send({ session: publicAgentSession(session), welcome: await welcome(ctx, agent) });
+        return reply.code(201).send({ session: publicAgentSession(session), welcome: await welcome(ctx, { ...agent, session }) });
       },
     );
 
@@ -305,6 +315,7 @@ export function coordinationRoutes(ctx: AppContext) {
               description:
                 "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
                 "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON, " +
+                "and arrives again once a Comment answers it. Each new Comment arrives as a `comment` event whose data is `{ comment }`, " +
                 "and each new Report as a `report` event whose data is `{ report }`, a Report as JSON.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
@@ -322,6 +333,31 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
 
+    app.get(
+      "/api/agent-sessions/current/events",
+      {
+        schema: {
+          headers: sessionHeader,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of work as it starts waiting for the Agent, for as long as the Agent Session is live. It opens " +
+                "with a `ready` event; each Comment that starts waiting for the Agent arrives as a `waiting` event whose data is " +
+                "`{ waiting }`, a WaitingWork as JSON. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(400, 401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const agent = requireAgent(await requireActor(ctx, request));
+        requireSession(agent);
+        const canSee = async () => !!requireSession(await requireActor(ctx, request, { refreshSession: false }));
+        ctx.live.stream(reply, agentTopic(agent.agent.id), canSee);
+      },
+    );
+
     app.delete(
       "/api/agent-sessions/current",
       { schema: { headers: sessionHeader, response: { 204: noContent("The Agent Session has ended"), ...errors(400, 401, 403, 410) } } },
@@ -333,9 +369,6 @@ export function coordinationRoutes(ctx: AppContext) {
     );
   };
 }
-
-/** The live-update topic of one Ticket's changes. */
-const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
 
 /** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
 async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {
@@ -357,10 +390,11 @@ function requireSession(actor: Actor): AgentSession {
 /**
  * What an Agent is told when it connects: who it is and for whom, whether it may only
  * read, the Workspace's Guidance, the Projects it can see with each one's Guidance, and its
- * Ready Tickets. The Workspace, with its name and Guidance, is left out if the Workspace's
+ * Ready Tickets, and the work waiting for it, which the welcome takes so the next one doesn't
+ * list it again. The Workspace, with its name and Guidance, is left out if the Workspace's
  * Agent Access is None.
  */
-export async function welcome(ctx: AppContext, agent: AgentActor) {
+export async function welcome(ctx: AppContext, agent: AgentActor & { session: AgentSession }) {
   const workspaceId = agent.owner.workspaceId;
   const readable = await requireWorkspaceAccess(ctx.db, agent, "read").then(
     () => true,
@@ -381,6 +415,7 @@ export async function welcome(ctx: AppContext, agent: AgentActor) {
     readOnly: agent.readOnly,
     projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access, guidance: guidance.get(p.id)! })),
     readyTickets: await readyTickets(ctx, agent),
+    waitingWork: await takeWaitingWork(ctx.db, agent, agent.session.id, ctx.clock.now()),
   };
 }
 

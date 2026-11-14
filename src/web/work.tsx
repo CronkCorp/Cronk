@@ -1,16 +1,12 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
-  watchTicket,
-  type Activity,
-  type ActivityKind,
   type AgentAccess,
   type Priority,
   type Project,
   type RecordedChange,
   type RelationKind,
-  type Report,
   type Status,
   type StatusCategory,
   type Ticket,
@@ -23,6 +19,7 @@ import {
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { GuidanceSection } from "./guidance.js";
+import { TicketTimeline } from "./timeline.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
@@ -682,7 +679,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
       )}
       <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
       <h2>Timeline</h2>
-      <TicketTimeline ticketKey={t.key} />
+      <TicketTimeline ticketKey={t.key} canWrite={canWrite} />
       <h2>History</h2>
       <Show state={history}>
         {(changes) => (
@@ -703,94 +700,6 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         )}
       </Show>
     </article>
-  );
-}
-
-const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
-
-/** One entry of a Ticket's timeline: an Activity, or a Report, kept apart from each other. */
-type TimelineEntry = { kind: "activity"; activity: Activity } | { kind: "report"; report: Report };
-
-const entryId = (e: TimelineEntry) => (e.kind === "activity" ? e.activity.id : e.report.id);
-const entryAt = (e: TimelineEntry) => (e.kind === "activity" ? e.activity.at : e.report.createdAt);
-
-/** The Activities and Reports Agent Sessions wrote on a Ticket, oldest first, kept up to date as new ones arrive. */
-function TicketTimeline(props: { ticketKey: string }) {
-  const [entries, reload] = useLoad(async (): Promise<TimelineEntry[]> => {
-    const [activities, reports] = await Promise.all([api.activities(props.ticketKey), api.ticketReports(props.ticketKey)]);
-    return [
-      ...activities.map((activity): TimelineEntry => ({ kind: "activity", activity })),
-      ...reports.map((report): TimelineEntry => ({ kind: "report", report })),
-    ];
-  }, [props.ticketKey]);
-  // Entries pushed while this page is open; the lists, loaded at any point, may or may not hold them yet.
-  const [arrived, setArrived] = useState<TimelineEntry[]>([]);
-  useEffect(() => {
-    setArrived([]);
-    return watchTicket(props.ticketKey, {
-      // Load the lists again once watching, and on every reconnect, so nothing written before the stream was
-      // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
-      ready: reload,
-      on: {
-        activity: ({ activity }) => setArrived((list) => [...list, { kind: "activity", activity }]),
-        report: ({ report }) => setArrived((list) => [...list, { kind: "report", report }]),
-      },
-    });
-  }, [props.ticketKey]);
-  const withArrived = (loaded: TimelineEntry[]) => {
-    const known = new Set(loaded.map(entryId));
-    // Stable, so entries at the same instant keep the order they were written or arrived in.
-    return [...loaded, ...arrived.filter((e) => !known.has(entryId(e)))].sort((a, b) => Date.parse(entryAt(a)) - Date.parse(entryAt(b)));
-  };
-
-  return <Show state={entries}>{(loaded) => <Timeline entries={withArrived(loaded)} />}</Show>;
-}
-
-function Timeline(props: { entries: TimelineEntry[] }) {
-  return (
-    <ol className="timeline" aria-label="Timeline">
-      {props.entries.length === 0 && <li className="muted">No Activities or Reports yet.</li>}
-      {props.entries.map((e) => (e.kind === "activity" ? <ActivityEntry key={e.activity.id} activity={e.activity} /> : <ReportEntry key={e.report.id} report={e.report} />))}
-    </ol>
-  );
-}
-
-function ActivityEntry(props: { activity: Activity }) {
-  const a = props.activity;
-  return (
-    <li className={`activity ${a.kind}${a.blocking ? " blocking" : ""}`}>
-      <div className="activity-head">
-        <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
-        <strong>{a.agent.name}</strong>
-        <span className="muted">({sessionName(a.session.id)}, for {a.agent.owner.name})</span>
-        <span className="muted">{new Date(a.at).toLocaleString()}</span>
-      </div>
-      <div className="activity-body">
-        <CronkMarkdown>{a.body}</CronkMarkdown>
-      </div>
-    </li>
-  );
-}
-
-/** A Report in a Ticket's timeline, showing its current Version. */
-function ReportEntry(props: { report: Report }) {
-  const r = props.report;
-  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
-  return (
-    <li className="activity report" aria-label={`Report: ${r.title}`}>
-      <div className="activity-head">
-        <span className="activity-kind">Report</span>
-        <strong>{r.agent.name}</strong>
-        <span className="muted">({sessionName(r.session.id)}, for {r.agent.owner.name})</span>
-        <span className="muted">{new Date(r.createdAt).toLocaleString()}</span>
-      </div>
-      <h3 className="report-title">
-        <Link to={`/documents/${r.id}`} className="link">{r.title}</Link>
-      </h3>
-      <div className="activity-body">
-        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
-      </div>
-    </li>
   );
 }
 

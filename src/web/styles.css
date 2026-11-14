@@ -124,6 +124,18 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .activity.blocking .activity-kind { color: #e8590c; }
 .activity-body > :first-child { margin-top: 4px; }
 .activity-body > :last-child { margin-bottom: 0; }
+.activity .badge.answered { color: #2f9e44; border-color: #2f9e44; }
+/* Comments are conversation, set apart from an Agent's Activities: no kind colour, a tinted background. */
+.comment { background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; }
+.comment-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; }
+.comment-kind { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--accent); }
+.comment-body > :first-child { margin-top: 4px; }
+.comment-body > :last-child { margin-bottom: 0; }
+.timeline.replies { margin: 8px 0 4px 16px; }
+.anchor { margin: 6px 0; padding: 2px 8px; border-left: 3px solid var(--accent); color: var(--muted); font-size: 13px; }
+.anchor.detached { border-left-color: var(--border); text-decoration: line-through; }
+.anchor.detached .muted { text-decoration: none; display: inline-block; }
+.comment-form { margin-top: 12px; }
 .history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .guidance .actions { margin: 12px 0; }
 .conflict { border: 1px solid var(--error); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; }

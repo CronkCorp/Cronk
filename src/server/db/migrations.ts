@@ -326,4 +326,56 @@ export const migrations: Migration[] = [
       CREATE INDEX documents_ticket ON documents (ticket_id, created_at) WHERE ticket_id IS NOT NULL;
     `,
   },
+  {
+    id: "0013_comments",
+    sql: `
+      -- A message any Actor posts on a Ticket or a Document: on exactly one of them. It may reply to
+      -- another Comment on the same Ticket or Document, or to an Activity on the same Ticket.
+      -- actor_user_id is the Agent's Owner when an Agent posted it, as history records it.
+      CREATE TABLE comments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        seq bigserial NOT NULL,
+        ticket_id uuid REFERENCES tickets(id) ON DELETE CASCADE,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        reply_to_comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        reply_to_activity_id uuid REFERENCES activities(id) ON DELETE CASCADE,
+        -- A Comment on a Document may anchor to a passage: text the Document held at Version anchor_version.
+        -- It stays anchored while the Document's current Version still holds the passage.
+        anchor_passage text,
+        anchor_version integer,
+        body text NOT NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((ticket_id IS NULL) <> (document_id IS NULL)),
+        CHECK (reply_to_comment_id IS NULL OR reply_to_activity_id IS NULL),
+        CHECK (reply_to_activity_id IS NULL OR ticket_id IS NOT NULL),
+        CHECK ((anchor_passage IS NULL) = (anchor_version IS NULL)),
+        CHECK (anchor_passage IS NULL OR document_id IS NOT NULL),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+      CREATE INDEX comments_ticket ON comments (ticket_id, seq) WHERE ticket_id IS NOT NULL;
+      CREATE INDEX comments_document ON comments (document_id, seq) WHERE document_id IS NOT NULL;
+
+      -- The Comment that answered a question: the first reply to it from a User.
+      ALTER TABLE activities ADD COLUMN answer_comment_id uuid REFERENCES comments(id) ON DELETE SET NULL
+        CHECK (answer_comment_id IS NULL OR kind = 'question');
+
+      -- A Comment waiting for an Agent it concerns (ADR 0005): it answers the Agent's question, @mentions
+      -- it, or is on a Ticket delegated to it. The welcome of the Agent's next Agent Session takes it.
+      CREATE TABLE waiting_work (
+        seq bigserial PRIMARY KEY,
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        comment_id uuid NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        reason text NOT NULL CHECK (reason IN ('answer', 'mention', 'comment')),
+        at timestamptz NOT NULL,
+        taken_at timestamptz,
+        taken_by_session_id uuid REFERENCES agent_sessions(id),
+        UNIQUE (agent_id, comment_id)
+      );
+      CREATE INDEX waiting_work_waiting ON waiting_work (agent_id, seq) WHERE taken_at IS NULL;
+    `,
+  },
 ];

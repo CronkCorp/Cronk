@@ -80,6 +80,10 @@ _Avoid_: Log line, event, comment, thought
 A message any Actor posts on a Ticket or Document, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. Conversation, as opposed to an Agent's own Activities.
 _Avoid_: Reply, note, message, discussion
 
+**Waiting Work**:
+A Comment that concerns an Agent: it answers the Agent's question, @mentions it, or is on a Ticket delegated to it. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
+_Avoid_: Notification, wake-up, Inbox (reserved for Users)
+
 **Claim**:
 An Agent Session's exclusive, temporary hold on a Ticket while it works on it. A Ticket has at most one live Claim; a Claim lapses when its Agent Session falls silent for too long.
 _Avoid_: Lock, checkout, lease
