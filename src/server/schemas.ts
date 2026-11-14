@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -55,7 +55,9 @@ export type SharedSchemaName =
   | "Guidance"
   | "GuidanceVersion"
   | "StaleGuidance"
-  | "GuidanceMerge";
+  | "GuidanceMerge"
+  | "SearchResult"
+  | "LinkedDocument";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -354,6 +356,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ...writtenBy,
     }),
   },
+  LinkedDocument: {
+    description: "A Document linked to a Ticket: one of its Reports, or a Document that mentions its key. Read it as a Document by its id.",
+    ...object({
+      id,
+      title: { type: "string" },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket a Report is on; null for any other Document." },
+      version: { type: "integer", description: "The number of its current Version." },
+      updatedAt: timestamp,
+    }),
+  },
   DocumentTreeEntry: {
     description: "A Document as its page tree lists it.",
     ...object({
@@ -398,6 +411,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       markdown: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
       conflicts: { type: "integer", description: "How many sections conflict." },
       sections: mergedSections("Markdown"),
+    }),
+  },
+  SearchResult: {
+    description: "One thing a search found, with an excerpt of its text around the match.",
+    ...object({
+      kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, or a Comment." },
+      title: { type: "string", description: "The title of the Ticket or Document; for a Comment, of the Ticket or Document it is on." },
+      excerpt: { type: "string", description: "The text around the match, as written (Markdown), without markers around the matching words." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
+      documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
     }),
   },
 };

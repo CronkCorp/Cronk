@@ -139,6 +139,11 @@ export async function listProjects(db: Queryable, workspaceId: string, archived:
   return rows.map(toProject);
 }
 
+/** All the Workspace's Projects, archived or not: those not archived first, each group by name. */
+export async function listAllProjects(db: Queryable, workspaceId: string): Promise<Project[]> {
+  return [...(await listProjects(db, workspaceId, false)), ...(await listProjects(db, workspaceId, true))];
+}
+
 /**
  * Renames a Status, or returns undefined if another Status of its Project
  * already has that name. Lock the Project first.

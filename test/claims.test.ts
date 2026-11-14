@@ -285,3 +285,43 @@ describe("Claims and access", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim.session.id).toBe(holder);
   });
 });
+
+describe("Context on claim", () => {
+  it("gives the Claimed Ticket with its parent, Sub-Tickets, related Tickets, Reports and the Documents that mention it", async () => {
+    const { cronk, admin, session } = await delegatedSetup(2);
+    await admin.post("/api/tickets/CRONK-1/sub-tickets", { title: "Wire the cache", description: "Put the cache in front of search." });
+    await admin.post("/api/tickets/CRONK-3/sub-tickets", { title: "Measure hits" });
+    await admin.post("/api/tickets/CRONK-3/relations", { kind: "relates_to", ticketKey: "CRONK-2" });
+    await admin.patch("/api/tickets/CRONK-3", { priority: "urgent" });
+
+    const earlier = await session();
+    await earlier.post("/api/tickets/CRONK-3/claim");
+    const report = (await earlier.post("/api/tickets/CRONK-3/reports", { title: "First pass", body: "Halfway." })).body.report.id;
+    await earlier.delete("/api/tickets/CRONK-3/claim");
+
+    const design = (await admin.post("/api/projects/CRONK/documents", { title: "Design", body: "The cache (CRONK-3) sits in front." })).body.document.id;
+    cronk.clock.advance(1_000);
+    const runbook = (await admin.post("/api/workspace/documents", { title: "Runbook", body: "After CRONK-3 ships, warm the cache." })).body.document.id;
+    await admin.post("/api/projects/CRONK/documents", { title: "Elsewhere", body: "CRONK-30, ACRONK-3 and cronk 3 are other things." });
+    await admin.post("/api/projects", { name: "Hidden", key: "HIDDEN" });
+    await admin.post("/api/projects/HIDDEN/documents", { title: "Hidden notes", body: "About CRONK-3." });
+    await admin.patch("/api/projects/HIDDEN", { agentAccess: "none" });
+
+    const agent = await session();
+    const claimed = (await agent.post("/api/tickets/CRONK-3/claim")).body;
+    expect(claimed.ticket).toMatchObject({ key: "CRONK-3", description: "Put the cache in front of search.", parent: { key: "CRONK-1", title: "Ticket 1" } });
+    expect(claimed.subTickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-4"]);
+    expect(claimed.relations.relatesTo.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
+    const documents = [
+      { id: report, title: "First pass", projectKey: "CRONK", ticketKey: "CRONK-3", version: 1 },
+      { id: runbook, title: "Runbook", projectKey: null, ticketKey: null, version: 1 },
+      { id: design, title: "Design", projectKey: "CRONK", ticketKey: null, version: 1 },
+    ];
+    expect(claimed.documents).toEqual(documents.map((d) => expect.objectContaining(d)));
+
+    await agent.delete("/api/tickets/CRONK-3/claim");
+    const next = (await agent.post("/api/agent-sessions/current/next")).body.next;
+    expect(next.ticket.key).toBe("CRONK-3");
+    expect(next.documents).toEqual(documents.map((d) => expect.objectContaining(d)));
+  });
+});

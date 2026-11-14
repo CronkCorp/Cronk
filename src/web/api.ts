@@ -14,6 +14,8 @@ import type {
   Guidance,
   GuidanceMerge,
   GuidanceVersion,
+  InboxItem,
+  InboxKind,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -28,6 +30,8 @@ import type {
   Relations,
   Report,
   Role,
+  SearchKind,
+  SearchResult,
   Status,
   StatusCategory,
   Ticket,
@@ -58,6 +62,8 @@ export type {
   Guidance,
   GuidanceMerge,
   GuidanceVersion,
+  InboxItem,
+  InboxKind,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -72,6 +78,8 @@ export type {
   Relations,
   Report,
   Role,
+  SearchKind,
+  SearchResult,
   Status,
   StatusCategory,
   Ticket,
@@ -157,6 +165,12 @@ export const api = {
   /** Imports a .tar.gz of a folder of Markdown files as Documents of a Project's tree, or the Workspace's. */
   importDocuments: (projectKey: string | undefined, file: File) =>
     upload<{ documents: DocumentTreeEntry[] }>(`${treePath(projectKey)}/documents/import`, file).then((r) => r.documents),
+  /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
+  search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
+    request<{ results: SearchResult[] }>(
+      "GET",
+      `/api/search?${new URLSearchParams({ q, ...(filter.kind && { kind: filter.kind }), ...(filter.project && { project: filter.project }) })}`,
+    ).then((r) => r.results),
   setupRequired: () => request<{ required: boolean }>("GET", "/api/setup").then((r) => r.required),
   setup: (input: { email: string; password: string; name: string; workspaceName?: string }) =>
     request<{ user: User }>("POST", "/api/setup", input).then((r) => r.user),
@@ -290,9 +304,25 @@ export const api = {
   postDocumentComment: (id: string, input: NewComment & { anchor?: { passage: string } }) =>
     request<{ comment: Comment }>("POST", `${documentPath(id)}/comments`, input).then((r) => r.comment),
 
+  /** The signed-in User's Inbox, narrowed by any of the filters given. */
+  inbox: (filter: InboxFilter = {}) => {
+    const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    return request<{ items: InboxItem[] }>("GET", `/api/inbox${query.size ? `?${query}` : ""}`).then((r) => r.items);
+  },
+  /** Sends a Ticket under review back to a Started Status (the Project's first, unless named), with a Comment. */
+  sendBack: (key: string, input: { comment: string; statusId?: string }) =>
+    request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
+
   ticketHistory: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };
+
+/** Narrows the Inbox: an item kind, a Project key, an Agent id. */
+export interface InboxFilter {
+  kind?: InboxKind;
+  project?: string;
+  agent?: string;
+}
 
 /** A Comment to post: its Markdown, and what it replies to, if anything. */
 export interface NewComment {
@@ -323,6 +353,9 @@ function watch<Events>(path: string, handlers: { ready: () => void; on: { [E in 
   }
   return () => source.close();
 }
+
+/** Watches the signed-in User's Inbox; `changed` arrives whenever it may have changed (see `watch`). */
+export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/inbox/events", handlers);
 
 /** Watches one Ticket's changes as they happen (see `watch`). */
 export const watchTicket = (key: string, handlers: Parameters<typeof watch<TicketEvents>>[1]) =>
