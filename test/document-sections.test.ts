@@ -263,7 +263,7 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Intro\n\nHi.\n\n## Install\n\nInstall it.\n\n## Usage\n\nUse it.\n" });
   });
 
-  it("reads an empty section one edit replaced with another and the other edit removed as removed and added, not renamed", async () => {
+  it("keeps the new empty section, not a rename, when one edit replaced an empty section and the other removed it", async () => {
     const base = "## A\n\na\n\n## Old\n\n## B\n\nb\n";
     const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n## B\n\nb\n");
 
