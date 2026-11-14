@@ -228,19 +228,28 @@ export type TicketChange =
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName };
 
-/** Who made a change in history: a User, or an Agent with the Owner it acted for. */
+/** Who made a change in history: a User, or an Agent with the Owner it acted for and the Agent Session it was in, if any. */
 export type RecordedActor =
   | { kind: "user"; id: string; name: string }
-  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string } };
+  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
 
 export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
 
 export async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
   await db.query(
-    `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, change, data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [ticketId, at, actor.kind, actingUser(actor).id, actor.kind === "agent" ? actor.agent.id : null, kind, data],
+    `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      ticketId,
+      at,
+      actor.kind,
+      actingUser(actor).id,
+      actor.kind === "agent" ? actor.agent.id : null,
+      actor.kind === "agent" ? (actor.session?.id ?? null) : null,
+      kind,
+      data,
+    ],
   );
 }
 
@@ -250,19 +259,22 @@ interface HistoryRow {
   user_name: string;
   agent_id: string | null;
   agent_name: string | null;
+  session_id: string | null;
   change: TicketChange["change"];
   data: object;
 }
 
 const toRecordedActor = (row: HistoryRow): RecordedActor => {
   const user = { id: row.user_id, name: row.user_name };
-  return row.agent_id === null ? { kind: "user", ...user } : { kind: "agent", id: row.agent_id, name: row.agent_name!, owner: user };
+  if (row.agent_id === null) return { kind: "user", ...user };
+  const session = row.session_id === null ? null : { id: row.session_id };
+  return { kind: "agent", id: row.agent_id, name: row.agent_name!, owner: user, session };
 };
 
 /** A Ticket's history, oldest first. */
 export async function listHistory(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
   const { rows } = await db.query<HistoryRow>(
-    `SELECT c.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.change, c.data
+    `SELECT c.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id, c.change, c.data
      FROM ticket_changes c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
      WHERE c.ticket_id = $1 ORDER BY c.id`,
     [ticketId],

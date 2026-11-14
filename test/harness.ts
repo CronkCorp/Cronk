@@ -32,6 +32,7 @@ export class Client {
   constructor(
     private readonly cronk: Cronk,
     private readonly token?: string,
+    private readonly headers: Record<string, string> = {},
   ) {}
 
   get<T = any>(path: string) {
@@ -55,7 +56,7 @@ export class Client {
     const res = await this.cronk.app.inject({
       method,
       url,
-      headers: { ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      headers: { ...this.headers, ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {
@@ -70,8 +71,8 @@ export class Client {
 export interface Cronk {
   app: FastifyInstance;
   clock: FakeClock;
-  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given. */
-  client(token?: string): Client;
+  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given, and any extra `headers`. */
+  client(token?: string, headers?: Record<string, string>): Client;
   /** Stops the application and starts it again on the same database. */
   restart(): Promise<void>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
@@ -98,7 +99,7 @@ export async function startCronk(): Promise<Cronk> {
   const cronk: Cronk = {
     app: await start(),
     clock,
-    client: (token?: string) => new Client(cronk, token),
+    client: (token?: string, headers?: Record<string, string>) => new Client(cronk, token, headers),
     restart: async () => {
       await cronk.app.close();
       cronk.app = await start();
