@@ -92,7 +92,7 @@ export function portabilityRoutes(ctx: AppContext) {
           description:
             "Imports an export made by GET /api/export or GET /api/projects/{key}/export, all of it or nothing. A Workspace export goes into a Workspace " +
             "with no Projects, Documents or Guidance yet, as in a fresh installation; a Project export becomes a new Project, refused if its key is taken. " +
-            "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, " +
+            "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, until an Admin invites them and they accept, " +
             "and Agents not found are created without tokens. Relations to Tickets outside the export are left out. " +
             archiveUpload,
           response: {

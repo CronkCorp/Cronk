@@ -37,5 +37,6 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   in the order they were written; replies and answers name them by that number.
 
 Not included: Ticket history, Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
-already in the installation an export is imported into come in deactivated, since they have no password there.
+already in the installation an export is imported into come in deactivated, since they have no password there; an Admin invites them, and accepting sets
+their password and reactivates them.
 `;
