@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { E2E_PORT } from "../playwright.config.js";
 
@@ -7,6 +8,7 @@ import { E2E_PORT } from "../playwright.config.js";
  * through environment variables, serving the built web client (`npm run build:web`).
  */
 export default async function globalSetup() {
+  await assertPortFree(E2E_PORT);
   const container = await new PostgreSqlContainer("postgres:17-alpine").start();
   const server = spawn(process.execPath, ["--import", "tsx", "src/server/main.ts"], {
     env: {
@@ -32,6 +34,28 @@ export default async function globalSetup() {
     server.kill("SIGTERM");
     await container.stop();
   };
+}
+
+/**
+ * Fails fast when another process (another worktree's e2e run, a leftover
+ * server) already holds the port: the spawned server could not bind it, and the
+ * smoke tests would run against the foreign one.
+ */
+async function assertPortFree(port: number): Promise<void> {
+  const probe = createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(port, "127.0.0.1", resolve);
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+    throw new Error(
+      `Port ${port} is already in use, so the smoke tests cannot start their own Cronk there. ` +
+        `Stop the process on port ${port}, or set E2E_PORT to a free port.`,
+    );
+  }
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
 }
 
 async function waitFor(url: string, timeoutMs: number, gaveUp: () => boolean): Promise<boolean> {
