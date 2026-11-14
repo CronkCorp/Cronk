@@ -91,4 +91,53 @@ describe("The Inbox", () => {
     expect(await inboxLines(admin, `?project=CRONK&agent=${codex.agentId}`)).toEqual([]);
     expect((await admin.get("/api/inbox?kind=suggestion")).status).toBe(400);
   });
+
+  it("leaves out items in Projects the User can no longer see, and is only for Users", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, statusId: await statusIn(admin, "in_review") });
+    expect(await inboxLines(bob)).toEqual(["review CRONK-1"]);
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await inboxLines(bob)).toEqual([]);
+    expect((await cronk.client(claude.secret).get("/api/inbox")).status).toBe(403);
+  });
+});
+
+describe("Sending a Ticket back", () => {
+  it("moves it from In Review to the Project's first Started Status with a Comment, which waits for the Delegate", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed it." });
+    await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") });
+
+    const sent = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Please add a test." });
+    expect(sent.status).toBe(200);
+    expect(sent.body.ticket.status.id).toBe(await statusIn(admin, "started"));
+    expect(sent.body.comment).toMatchObject({ body: "Please add a test.", actor: { kind: "user", name: "Ada" } });
+    expect((await admin.get("/api/tickets/CRONK-1/comments")).body.comments).toMatchObject([{ body: "Please add a test." }]);
+    expect(await inboxLines(admin)).toEqual([]);
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toMatchObject([
+      { reason: "comment", comment: { body: "Please add a test." }, ticket: { key: "CRONK-1" } },
+    ]);
+  });
+
+  it("takes another Started Status, but refuses one in another Status Category, a Ticket not In Review, and Agents", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const reworking = (await admin.post("/api/projects/CRONK/statuses", { name: "Reworking", category: "started" })).body.status;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") });
+
+    const unstarted = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "No.", statusId: await statusIn(admin, "unstarted") });
+    expect(unstarted.status).toBe(400);
+    expect((await cronk.client(claude.secret).post("/api/tickets/CRONK-1/send-back", { comment: "No." })).status).toBe(403);
+    expect((await admin.get("/api/tickets/CRONK-1/comments")).body.comments).toEqual([]);
+
+    const sent = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Rework it.", statusId: reworking.id });
+    expect(sent.body.ticket.status).toMatchObject({ name: "Reworking" });
+    const again = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Twice?" });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/In Review/);
+  });
 });
