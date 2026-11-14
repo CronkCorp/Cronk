@@ -2,7 +2,7 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import { api, type RecordedChange, type Project, type Status, type Ticket } from "./api.js";
 import { Link, navigate } from "./router.js";
-import { Field, messageOf, Show, TextArea, useLoad, useSubmit } from "./ui.js";
+import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
 /** The Workspace's Projects: active ones by default, or the archived ones. */
 export function ProjectsPage(props: { archived: boolean }) {
@@ -267,19 +267,10 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
 }
 
 function StatusPicker(props: { ticket: Ticket; statuses: Status[]; onChanged: (ticket: Ticket) => void }) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const move = async (statusId: string) => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      props.onChanged(await api.updateTicket(props.ticket.key, { statusId }));
-    } catch (err) {
-      setError(messageOf(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { run: move, error, busy } = useAction(
+    (statusId: string) => api.updateTicket(props.ticket.key, { statusId }),
+    props.onChanged,
+  );
   return (
     <div className="status-picker">
       <label className="field inline">

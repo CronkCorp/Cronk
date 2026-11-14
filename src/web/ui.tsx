@@ -2,21 +2,30 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 export const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Runs a form submission, showing the API's error message if it is refused. */
-export function useSubmit<T>(action: () => Promise<T>, onDone: (result: T) => void) {
+/** Runs a change against the API, tracking whether it is busy and showing its error message if it is refused. */
+export function useAction<A extends unknown[], T>(action: (...args: A) => Promise<T>, onDone: (result: T) => void) {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
-  const submit = async (event?: FormEvent) => {
-    event?.preventDefault();
+  const run = async (...args: A) => {
     setBusy(true);
     setError(undefined);
     try {
-      onDone(await action());
+      onDone(await action(...args));
     } catch (err) {
       setError(messageOf(err));
     } finally {
       setBusy(false);
     }
+  };
+  return { run, error, busy };
+}
+
+/** Runs a form submission, showing the API's error message if it is refused. */
+export function useSubmit<T>(action: () => Promise<T>, onDone: (result: T) => void) {
+  const { run, error, busy } = useAction(action, onDone);
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    return run();
   };
   return { submit, error, busy };
 }
