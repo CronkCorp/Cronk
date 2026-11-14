@@ -116,3 +116,10 @@ export async function startInstalledCronk(workspaceName = "Acme"): Promise<{ cro
   if (setup.status !== 201) throw new Error(`Setup failed: ${JSON.stringify(setup.body)}`);
   return { cronk, admin };
 }
+
+/** Creates a Project named after its key, with `count` Tickets titled "Ticket 1", "Ticket 2", … */
+export async function projectWithTickets(client: Client, key: string, count: number): Promise<void> {
+  const res = await client.post("/api/projects", { name: key, key });
+  if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
+  for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
+}

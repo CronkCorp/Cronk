@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk, type Client } from "./harness.js";
-
-async function projectWithTickets(client: Client, key: string, count: number) {
-  const res = await client.post("/api/projects", { name: key, key });
-  if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
-  for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
-}
+import { projectWithTickets, startInstalledCronk } from "./harness.js";
 
 describe("Ticket Priority", () => {
   it("starts at None and can be set and changed", async () => {
