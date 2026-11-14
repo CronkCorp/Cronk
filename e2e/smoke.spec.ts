@@ -25,6 +25,10 @@ test("set up a fresh installation, sign out, sign in and see the application she
 
   await page.reload();
   await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+
+  // The API refuses query parameters it doesn't know; the application shell takes any.
+  await page.goto("/?utm_source=bookmark");
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
 });
 
 // Runs after the test above on the same server, so the installation is already set up.
