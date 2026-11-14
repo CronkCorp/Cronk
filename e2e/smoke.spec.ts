@@ -218,16 +218,29 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(claimed.status()).toBe(200);
   await page.reload();
   await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
-  // The Session logs Activities; the open Ticket page shows them as they arrive, without a reload.
-  const activities = page.getByRole("list", { name: "Activities" });
-  await expect(activities).toContainText("No Activities yet");
+  // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  await expect(timeline).toContainText("No Activities or Reports yet");
   const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
     data: { kind: "question", body: "Should this use **Postgres**?", blocking: true },
   });
   expect(asked.status()).toBe(201);
-  await expect(activities).toContainText("Blocking question");
-  await expect(activities.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
+  await expect(timeline).toContainText("Blocking question");
+  await expect(timeline.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
+  const reported = await request.post(`/api/tickets/${ticket.key}/reports`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+    data: { title: "What I found", body: "It was the **cache**." },
+  });
+  expect(reported.status()).toBe(201);
+  const report = timeline.getByRole("listitem", { name: "Report: What I found" });
+  await expect(report.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  // The Project's Reports view lists it, and it opens as a Document of the Ticket, outside the page tree.
+  await page.getByRole("link", { name: ticket.key.split("-")[0]!, exact: true }).click();
+  await page.getByRole("link", { name: "Reports" }).click();
+  await page.getByRole("list", { name: "Reports" }).getByRole("link", { name: /What I found/ }).click();
+  await expect(page.getByRole("heading", { name: /What I found/ })).toContainText(`Report on ${ticket.key}`);
+  await expect(page.getByTestId("document-body")).toContainText("It was the cache.");
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.

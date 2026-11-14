@@ -117,6 +117,8 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .activity.blocking { border-color: #e8590c; }
 .activity.error { border-left-color: var(--error); }
 .activity.finding { border-left-color: #2f9e44; }
+.activity.report { border-left-color: #7048e8; }
+.report-title { margin: 4px 0 0; font-size: 16px; }
 .activity-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; }
 .activity-kind { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--muted); }
 .activity.blocking .activity-kind { color: #e8590c; }

@@ -10,6 +10,7 @@ import {
   type Project,
   type RecordedChange,
   type RelationKind,
+  type Report,
   type Status,
   type StatusCategory,
   type Ticket,
@@ -117,7 +118,7 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
   );
 }
 
-export type ProjectView = "list" | "board" | "statuses" | "guidance";
+export type ProjectView = "list" | "board" | "statuses" | "reports" | "guidance";
 
 /** Whether a view shows the Project's Tickets, and so takes a filter: the list and the board do. */
 const showsTickets = (view: ProjectView) => view === "list" || view === "board";
@@ -222,6 +223,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
             <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
             <Link to={`/projects/${p.key}/documents`} className="tab">Documents</Link>
+            <Link to={projectPath(p.key, "reports", {})} className={props.view === "reports" ? "tab active" : "tab"}>Reports</Link>
             <Link to={projectPath(p.key, "guidance", {})} className={props.view === "guidance" ? "tab active" : "tab"}>Guidance</Link>
           </nav>
           {props.view === "guidance" && (
@@ -239,7 +241,8 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
               onChange={(filter) => navigate(projectPath(p.key, props.view, filter))}
             />
           )}
-          {props.view !== "guidance" && (
+          {props.view === "reports" && <ReportsView projectKey={p.key} />}
+          {props.view !== "guidance" && props.view !== "reports" && (
             <Show state={tickets}>
               {(list) =>
                 props.view === "statuses" ? (
@@ -678,8 +681,8 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         </>
       )}
       <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
-      <h2>Activities</h2>
-      <ActivityTimeline ticketKey={t.key} />
+      <h2>Timeline</h2>
+      <TicketTimeline ticketKey={t.key} />
       <h2>History</h2>
       <Show state={history}>
         {(changes) => (
@@ -705,46 +708,121 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
 
 const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
 
-/** The Activities Agent Sessions logged on a Ticket, oldest first, kept up to date as new ones arrive. */
-function ActivityTimeline(props: { ticketKey: string }) {
-  const [activities, reload] = useLoad(() => api.activities(props.ticketKey), [props.ticketKey]);
-  // Activities pushed while this page is open; the list, loaded at any point, may or may not hold them yet.
-  const [arrived, setArrived] = useState<Activity[]>([]);
+/** One entry of a Ticket's timeline: an Activity, or a Report, kept apart from each other. */
+type TimelineEntry = { kind: "activity"; activity: Activity } | { kind: "report"; report: Report };
+
+const entryId = (e: TimelineEntry) => (e.kind === "activity" ? e.activity.id : e.report.id);
+const entryAt = (e: TimelineEntry) => (e.kind === "activity" ? e.activity.at : e.report.createdAt);
+
+/** The Activities and Reports Agent Sessions wrote on a Ticket, oldest first, kept up to date as new ones arrive. */
+function TicketTimeline(props: { ticketKey: string }) {
+  const [entries, reload] = useLoad(async (): Promise<TimelineEntry[]> => {
+    const [activities, reports] = await Promise.all([api.activities(props.ticketKey), api.ticketReports(props.ticketKey)]);
+    return [
+      ...activities.map((activity): TimelineEntry => ({ kind: "activity", activity })),
+      ...reports.map((report): TimelineEntry => ({ kind: "report", report })),
+    ];
+  }, [props.ticketKey]);
+  // Entries pushed while this page is open; the lists, loaded at any point, may or may not hold them yet.
+  const [arrived, setArrived] = useState<TimelineEntry[]>([]);
   useEffect(() => {
     setArrived([]);
     return watchTicket(props.ticketKey, {
-      // Load the list again once watching, and on every reconnect, so nothing logged before the stream was
+      // Load the lists again once watching, and on every reconnect, so nothing written before the stream was
       // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
       ready: reload,
-      on: { activity: ({ activity }) => setArrived((list) => [...list, activity]) },
+      on: {
+        activity: ({ activity }) => setArrived((list) => [...list, { kind: "activity", activity }]),
+        report: ({ report }) => setArrived((list) => [...list, { kind: "report", report }]),
+      },
     });
   }, [props.ticketKey]);
-  const withArrived = (loaded: Activity[]) => {
-    const known = new Set(loaded.map((a) => a.id));
-    return [...loaded, ...arrived.filter((a) => !known.has(a.id))];
+  const withArrived = (loaded: TimelineEntry[]) => {
+    const known = new Set(loaded.map(entryId));
+    // Stable, so entries at the same instant keep the order they were written or arrived in.
+    return [...loaded, ...arrived.filter((e) => !known.has(entryId(e)))].sort((a, b) => Date.parse(entryAt(a)) - Date.parse(entryAt(b)));
   };
 
-  return <Show state={activities}>{(loaded) => <ActivityList activities={withArrived(loaded)} />}</Show>;
+  return <Show state={entries}>{(loaded) => <Timeline entries={withArrived(loaded)} />}</Show>;
 }
 
-function ActivityList(props: { activities: Activity[] }) {
+function Timeline(props: { entries: TimelineEntry[] }) {
   return (
-    <ol className="timeline" aria-label="Activities">
-      {props.activities.length === 0 && <li className="muted">No Activities yet.</li>}
-      {props.activities.map((a) => (
-        <li key={a.id} className={`activity ${a.kind}${a.blocking ? " blocking" : ""}`}>
-          <div className="activity-head">
-            <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
-            <strong>{a.agent.name}</strong>
-            <span className="muted">({sessionName(a.session.id)}, for {a.agent.owner.name})</span>
-            <span className="muted">{new Date(a.at).toLocaleString()}</span>
-          </div>
-          <div className="activity-body">
-            <CronkMarkdown>{a.body}</CronkMarkdown>
-          </div>
-        </li>
-      ))}
+    <ol className="timeline" aria-label="Timeline">
+      {props.entries.length === 0 && <li className="muted">No Activities or Reports yet.</li>}
+      {props.entries.map((e) => (e.kind === "activity" ? <ActivityEntry key={e.activity.id} activity={e.activity} /> : <ReportEntry key={e.report.id} report={e.report} />))}
     </ol>
+  );
+}
+
+function ActivityEntry(props: { activity: Activity }) {
+  const a = props.activity;
+  return (
+    <li className={`activity ${a.kind}${a.blocking ? " blocking" : ""}`}>
+      <div className="activity-head">
+        <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
+        <strong>{a.agent.name}</strong>
+        <span className="muted">({sessionName(a.session.id)}, for {a.agent.owner.name})</span>
+        <span className="muted">{new Date(a.at).toLocaleString()}</span>
+      </div>
+      <div className="activity-body">
+        <CronkMarkdown>{a.body}</CronkMarkdown>
+      </div>
+    </li>
+  );
+}
+
+/** A Report in a Ticket's timeline, showing its current Version. */
+function ReportEntry(props: { report: Report }) {
+  const r = props.report;
+  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
+  return (
+    <li className="activity report" aria-label={`Report: ${r.title}`}>
+      <div className="activity-head">
+        <span className="activity-kind">Report</span>
+        <strong>{r.agent.name}</strong>
+        <span className="muted">({sessionName(r.session.id)}, for {r.agent.owner.name})</span>
+        <span className="muted">{new Date(r.createdAt).toLocaleString()}</span>
+      </div>
+      <h3 className="report-title">
+        <Link to={`/documents/${r.id}`} className="link">{r.title}</Link>
+      </h3>
+      <div className="activity-body">
+        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+      </div>
+    </li>
+  );
+}
+
+/** The Reports on a Project's Tickets, newest first. */
+function ReportsView(props: { projectKey: string }) {
+  const [reports] = useLoad(() => api.projectReports(props.projectKey), [props.projectKey]);
+  return (
+    <Show state={reports}>
+      {(list) =>
+        list.length === 0 ? (
+          <div className="empty">
+            <h2>No Reports yet</h2>
+            <p className="muted">Agents write a Report on a Ticket when they hand their work over.</p>
+          </div>
+        ) : (
+          <ul className="rows" aria-label="Reports">
+            {list.map((r) => (
+              <li key={r.id}>
+                <Link to={`/documents/${r.id}`} className="row">
+                  <span className="key">{r.ticketKey}</span>
+                  <span className="grow">
+                    {r.title} <span className="muted">on {r.ticketTitle}</span>
+                  </span>
+                  <span className="muted">{r.agent.name}</span>
+                  <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </Show>
   );
 }
 
