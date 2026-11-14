@@ -7,6 +7,7 @@ import { FORMAT } from "./format.js";
 import { accessSchema, agentAccessSchema, roleSchema } from "../schemas.js";
 import { PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { readFrontmatter } from "./frontmatter.js";
+import { recordTicketMentions } from "../knowledge/ticket-mentions.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -244,6 +245,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
       const restoredFrom = v.data.restoredFrom === undefined || v.data.restoredFrom === null ? null : integer(v.data.restoredFrom, `${v.path} restoredFrom`);
       await insertVersion(n, { title: text(v.data.title, `${v.path} title`), body: v.body, at: date(v.data.at, `${v.path} at`), by: await actor(v.data.by, `${v.path} by`), restoredFrom });
     }
+    await recordTicketMentions(db, id, { title, body: d.body });
     await importComments(`${base}.comments`, { documentId: id }, undefined, version);
     return id;
   };
