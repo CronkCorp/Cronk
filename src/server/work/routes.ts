@@ -16,18 +16,17 @@ import {
   ticketKeyParam,
   userIdParam,
 } from "../schemas.js";
-import { actingUser, userActor, type Actor } from "../actor.js";
-import { addRelation, listRelations, removeRelation, type Relations } from "./relations.js";
+import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
+import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
-import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
+import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
 import { findUserById, publicUser } from "../identity/users.js";
 import {
   countTicketsInStatus,
   deleteStatus,
   findProjectById,
-  findProjectByKey,
   findStatusToMoveInto,
   insertProject,
   insertStatus,
@@ -49,18 +48,19 @@ import {
   listHistory,
   listLabels,
   moveTicketsBetweenStatuses,
-  listSubTickets,
   wouldNestUnderItself,
   normalizeLabels,
   listTickets,
   updateTicket,
-  type RecordedChange,
   type Ticket,
   type TicketChanges,
   type TicketEdit,
-  type TicketRef,
   type UserRef,
+  type AgentRef,
 } from "./tickets.js";
+import { findAgent } from "../identity/agents.js";
+import { clearClaim, findLiveClaim } from "../coordination/claims.js";
+import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -464,17 +464,60 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { key: string }; Body: { title: string; description?: string } }>(
+      "/api/tickets/:key/sub-tickets",
+      {
+        schema: {
+          params: ticketParams,
+          body: {
+            type: "object",
+            required: ["title"],
+            additionalProperties: false,
+            properties: { title, description },
+          },
+          response: {
+            201: answer(
+              "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee and Delegate. An Agent must hold the parent's Claim.",
+              holding("ticket", "Ticket"),
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const now = ctx.clock.now();
+        const ticket = await transaction(ctx.db, async (tx) => {
+          // The Project first, as creating Tickets and removing Statuses lock it, then the parent.
+          await lockProject(tx, (await ticketFor(tx, actor, request.params.key, "write")).projectId);
+          const parent = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (actor.kind === "agent") await requireClaimHolder(tx, actor, parent, now, "splitting it into Sub-Tickets");
+          const project = (await findProjectById(tx, parent.projectId))!;
+          const [firstStatus] = await listStatuses(tx, project.id);
+          const created = await insertTicket(tx, {
+            project,
+            title: request.body.title.trim(),
+            description: request.body.description ?? "",
+            status: firstStatus!,
+            actor,
+            now,
+          });
+          return updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now);
+        });
+        return reply.code(201).send({ ticket });
+      },
+    );
+
     app.get<{ Params: { key: string } }>(
       "/api/tickets/:key",
       {
         schema: {
           params: ticketParams,
           response: {
-            200: answer("The Ticket, its Sub-Tickets in key order, and its relations to Tickets the caller can see", {
-              type: "object",
-              required: ["ticket", "subTickets", "relations"],
-              properties: { ticket: ref("Ticket"), subTickets: { type: "array", items: ref("TicketRef") }, relations: ref("Relations") },
-            }),
+            200: answer(
+              "The Ticket, its Sub-Tickets in key order, its relations to Tickets the caller can see, and its live Claim",
+              ticketDetailSchema,
+            ),
             ...errors(401, 404, 410),
           },
         },
@@ -482,11 +525,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
-        return {
-          ticket,
-          subTickets: await listSubTickets(ctx.db, ticket.id),
-          relations: await visibleRelations(ctx.db, actor, await listRelations(ctx.db, ticket.id)),
-        };
+        return ticketDetail(ctx.db, actor, ticket, ctx.clock.now());
       },
     );
 
@@ -573,6 +612,7 @@ export function workRoutes(ctx: AppContext) {
               priority: { type: "string", enum: PRIORITIES },
               labels: { type: "array", maxItems: 20, items: label },
               assigneeId: { type: ["string", "null"], format: "uuid" },
+              delegateId: { type: ["string", "null"], format: "uuid", description: "One of the Assignee's own Agents. Only Users assign and delegate." },
               parentKey: { type: ["string", "null"], maxLength: 30 },
             },
           },
@@ -581,7 +621,10 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { title, description, statusId, priority, labels, assigneeId, parentKey } = request.body;
+        const { title, description, statusId, priority, labels, assigneeId, delegateId, parentKey } = request.body;
+        if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
+          throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
+        }
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
@@ -593,10 +636,20 @@ export function workRoutes(ctx: AppContext) {
           if (statusId !== undefined) {
             const status = await findStatusToMoveInto(tx, ticket.projectId, statusId);
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
+            if (actor.kind === "agent" && status.id !== ticket.status.id) await requireAgentMayMove(tx, actor, ticket, status, ctx.clock.now());
             changes.status = status;
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
+          const assignee = changes.assignee === undefined ? ticket.assignee : changes.assignee;
+          if (delegateId !== undefined) {
+            changes.delegate = delegateId === null ? null : await delegableAgent(tx, actingUser(actor).workspaceId, assignee, delegateId);
+          } else if (assignee?.id !== ticket.assignee?.id && ticket.delegate && !(await ownsAgent(tx, actingUser(actor).workspaceId, assignee, ticket.delegate.id))) {
+            // A new Assignee doesn't take over someone else's Agent.
+            changes.delegate = null;
+          }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
+          // A new Delegate starts afresh: whoever held the Claim was working for the old one.
+          if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) await clearClaim(tx, ticket.id);
           return updateTicket(tx, ticket, changes, actor, ctx.clock.now());
         });
         return { ticket };
@@ -636,26 +689,44 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
   return { id: assignee.id, name: assignee.name };
 }
 
-/** Keys of the Projects, archived or not, that `actor` can see. */
-async function visibleProjectKeys(db: Queryable, actor: Actor): Promise<Set<string>> {
-  const projects = [...(await listProjects(db, actingUser(actor).workspaceId, false)), ...(await listProjects(db, actingUser(actor).workspaceId, true))];
-  return new Set((await visibleProjects(db, actor, projects)).map((p) => p.key));
+/** The Status Categories an Agent may move a Ticket into; only Users complete, cancel or shelve work. */
+const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
+
+/**
+ * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
+ * In Review (a 403) and the Agent calls within the Agent Session holding the Ticket's live Claim (a 409).
+ */
+async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Ticket, status: Status, now: Date): Promise<void> {
+  if (!AGENT_CATEGORIES.includes(status.category)) {
+    throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
+  }
+  await requireClaimHolder(db, agent, ticket, now, "moving it");
 }
 
-/** The Project key a Ticket key starts with. */
-const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastIndexOf("-"));
-
-/** Relations, leaving out Tickets of Projects `actor` can't see. */
-async function visibleRelations(db: Queryable, actor: Actor, relations: Relations): Promise<Relations> {
-  const keys = await visibleProjectKeys(db, actor);
-  const visible = (refs: TicketRef[]) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
-  return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
+/**
+ * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409).
+ * `refusedAction` completes the refusal "Claim CRONK-1 in your Agent Session before …", such as "moving it".
+ */
+async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
+  const claim = await findLiveClaim(db, ticket.id, now);
+  if (!agent.session || claim?.session.id !== agent.session.id) {
+    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}`);
+  }
 }
 
-/** A Ticket's history, leaving out Relation changes with Tickets of Projects `actor` can't see. */
-async function visibleHistory(db: Queryable, actor: Actor, changes: RecordedChange[]): Promise<RecordedChange[]> {
-  const keys = await visibleProjectKeys(db, actor);
-  return changes.filter((c) => !(c.change === "relation added" || c.change === "relation removed") || keys.has(projectKeyOf(c.ticket.key)));
+/** The Agent `id`, as a Ticket shows it, if it is one of `assignee`'s own; otherwise a 400. */
+async function delegableAgent(db: Queryable, workspaceId: string, assignee: UserRef | null, id: string): Promise<AgentRef> {
+  if (!assignee) throw new HttpError(400, "Assign the Ticket to a User before delegating it");
+  const agent = await findAgent(db, workspaceId, id);
+  if (!agent) throw new HttpError(400, "No such Agent");
+  if (agent.ownerId !== assignee.id) throw new HttpError(400, `The Delegate must be one of the Assignee's own Agents, and ${agent.name} isn't ${assignee.name}'s`);
+  return { id: agent.id, name: agent.name };
+}
+
+/** Whether the Agent `agentId` exists and is one of `user`'s own. */
+async function ownsAgent(db: Queryable, workspaceId: string, user: UserRef | null, agentId: string): Promise<boolean> {
+  const agent = await findAgent(db, workspaceId, agentId);
+  return !!user && agent?.ownerId === user.id;
 }
 
 /** The Ticket `key` names, if it may become the parent of `ticket`; otherwise a 400 or 409. */
@@ -683,13 +754,6 @@ async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: 
   return { ticket, other };
 }
 
-/** The Project with this key, if `actor` has at least `need` in it (see `requireProjectAccess`). */
-async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
-  const project = await findProjectByKey(db, actingUser(actor).workspaceId, key);
-  if (!project) throw new HttpError(404, "No such Project");
-  return { project, access: await requireProjectAccess(db, actor, project, need) };
-}
-
 /** The Status with this id among a Project's Statuses. */
 function statusOr404(statuses: Status[], statusId: string): Status {
   const status = statuses.find((s) => s.id === statusId);
@@ -698,15 +762,3 @@ function statusOr404(statuses: Status[], statusId: string): Status {
 }
 
 const statusNameTaken = (name: string) => new HttpError(409, `Another Status is already named ${name}`);
-
-/**
- * The Ticket with this key, if `actor` has at least `need` in its Project. A Ticket in
- * a Project they can't see answers 404, like one that doesn't exist.
- */
-async function ticketFor(db: Queryable, actor: Actor, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
-  const ticket = await findTicketByKey(db, actingUser(actor).workspaceId, key, opts);
-  const project = ticket && (await findProjectById(db, ticket.projectId));
-  if (!ticket || !project) throw new HttpError(404, "No such Ticket");
-  await requireProjectAccess(db, actor, project, need, "No such Ticket");
-  return ticket;
-}

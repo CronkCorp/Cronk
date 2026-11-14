@@ -1,7 +1,7 @@
 import { actingUser, type Actor, type AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import type { Visibility } from "../work/projects.js";
+import { findProjectByKey, type Project, type Visibility } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import type { User } from "./users.js";
 
@@ -129,4 +129,11 @@ export async function requireWorkspaceAccess(db: Queryable, actor: Actor, need: 
 export function requireAdmin(who: User | Actor, what: string): void {
   const user = "kind" in who ? (who.kind === "user" ? who.user : undefined) : who;
   if (user?.role !== "admin") throw new HttpError(403, `Only an Admin can ${what}`);
+}
+
+/** The Project with this key, if `actor` has at least `need` in it (see `requireProjectAccess`). */
+export async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
+  const project = await findProjectByKey(db, actingUser(actor).workspaceId, key);
+  if (!project) throw new HttpError(404, "No such Project");
+  return { project, access: await requireProjectAccess(db, actor, project, need) };
 }

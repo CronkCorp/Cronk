@@ -24,3 +24,31 @@ export const userActor = (user: User): Actor => ({ kind: "user", user });
 
 /** The User an Actor is or acts for. */
 export const actingUser = (actor: Actor): User => (actor.kind === "user" ? actor.user : actor.owner);
+
+/** Who did something, as history records it: a User, or an Agent with the Owner it acted for and the Agent Session it was in, if any. */
+export type RecordedActor =
+  | { kind: "user"; id: string; name: string }
+  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
+
+/** The values a history row stores for its Actor: `actor_kind`, `actor_user_id` (the Owner, for an Agent), `actor_agent_id`, `actor_session_id`. */
+export function actorColumns(actor: Actor): [kind: Actor["kind"], userId: string, agentId: string | null, sessionId: string | null] {
+  const agent = actor.kind === "agent" ? actor : undefined;
+  return [actor.kind, actingUser(actor).id, agent?.agent.id ?? null, agent?.session?.id ?? null];
+}
+
+/** The columns a history query selects for its Actor, joining `users u` on the acting User and `agents a` on the Agent. */
+export interface RecordedActorRow {
+  user_id: string;
+  user_name: string;
+  agent_id: string | null;
+  agent_name: string | null;
+  session_id: string | null;
+}
+
+/** The Actor a history row records, from the columns `RecordedActorRow` names. */
+export function toRecordedActor(row: RecordedActorRow): RecordedActor {
+  const user = { id: row.user_id, name: row.user_name };
+  if (row.agent_id === null) return { kind: "user", ...user };
+  const session = row.session_id === null ? null : { id: row.session_id };
+  return { kind: "agent", id: row.agent_id, name: row.agent_name!, owner: user, session };
+}

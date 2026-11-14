@@ -34,12 +34,21 @@ export type SharedSchemaName =
   | "Agent"
   | "AgentSession"
   | "AgentToken"
+  | "Claim"
   | "Project"
   | "Status"
   | "Ticket"
   | "TicketRef"
   | "Relations"
-  | "RecordedChange";
+  | "RecordedChange"
+  | "Document"
+  | "DocumentTreeEntry"
+  | "Version"
+  | "VersionSummary"
+  | "StaleVersion"
+  | "Guidance"
+  | "GuidanceVersion"
+  | "StaleGuidance";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -60,6 +69,30 @@ const ticketName = object({ key: { type: "string" }, title: { type: "string" } }
 const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
 
+/** Who did something, as history records it. */
+const recordedActor = {
+  description: "A User, or an Agent with the Owner it acted for and the Agent Session it was in.",
+  ...object(
+    {
+      kind: { type: "string", enum: ["user", "agent"] },
+      id,
+      name: { type: "string" },
+      owner: named,
+      session: { ...nullable(object({ id })), description: "The Agent Session an Agent acted in, if any." },
+    },
+    ["owner", "session"],
+  ),
+};
+
+/** A Version's fields, all but its body. */
+const versionFields = {
+  number: { type: "integer", description: "Counts from 1 per Document." },
+  title: { type: "string" },
+  at: timestamp,
+  actor: { ...recordedActor, description: "Who saved it." },
+  restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+};
+
 const sharedSchemas: Record<SharedSchemaName, object> = {
   Error: { description: "Every API error has this shape.", ...object({ error: { type: "string" } }) },
   User: object({
@@ -76,7 +109,27 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     createdAt: timestamp,
     expiresAt: timestamp,
   }),
-  Workspace: object({ name: { type: "string" }, agentAccess: agentAccessSchema }),
+  Workspace: object({
+    name: { type: "string" },
+    agentAccess: agentAccessSchema,
+    silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+  }),
+  Guidance: {
+    description: "Standing instructions Users write for Agents, as Markdown.",
+    ...object({
+      markdown: { type: "string" },
+      version: { type: "integer", description: "The current Version, counted from 1; 0 before anyone writes the Guidance." },
+    }),
+  },
+  GuidanceVersion: {
+    description: "One saved state of Guidance, with the User who saved it and when.",
+    ...object({
+      version: { type: "integer" },
+      markdown: { type: "string" },
+      at: timestamp,
+      actor: object({ kind: { type: "string", const: "user" }, id, name: { type: "string" } }),
+    }),
+  },
   Agent: object(
     {
       id,
@@ -104,6 +157,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
     ...object({ id, readOnly: { type: "boolean" }, createdAt: timestamp }),
   },
+  Claim: {
+    description: "An Agent Session's exclusive, temporary hold on a Ticket. It lapses when the Session stays silent too long.",
+    ...object({
+      agent: named,
+      session: object({ id }),
+      claimedAt: timestamp,
+      endsIfSilentAt: { ...timestamp, description: "When the Claim lapses if its Agent Session stays silent until then." },
+    }),
+  },
   Project: object({
     id,
     name: { type: "string" },
@@ -130,6 +192,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     priority,
     labels,
     assignee: nullable(named),
+    delegate: { ...nullable(named), description: "The Agent the Assignee handed the Ticket to; always one of the Assignee's own." },
     parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -150,23 +213,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "One change in a Ticket's history. `change` says which; the other fields depend on it.",
     ...object({
       at: timestamp,
-      actor: {
-        description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in.",
-        ...object(
-          {
-            kind: { type: "string", enum: ["user", "agent"] },
-            id,
-            name: { type: "string" },
-            owner: named,
-            session: { ...nullable(object({ id })), description: "The Agent Session an Agent's change was made in, if any." },
-          },
-          ["owner", "session"],
-        ),
-      },
+      actor: { ...recordedActor, description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in." },
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "parent"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
           ...["relation added", "relation removed"],
         ],
       },
@@ -177,7 +228,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
-      object({ change: { const: "assignee" }, from: nullable(named), to: nullable(named) }),
+      ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
@@ -185,6 +236,42 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         ticket: ticketName,
       }),
     ],
+  },
+  Document: {
+    description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",
+    ...object({
+      id,
+      projectId: { ...nullable(id), description: "Null for a Workspace Document." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+      parentId: { ...nullable(id), description: "The Document it sits under in the page tree; null at the top." },
+      title: { type: "string" },
+      body: { type: "string", description: "Markdown." },
+      version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }),
+  },
+  DocumentTreeEntry: {
+    description: "A Document as its page tree lists it.",
+    ...object({
+      id,
+      parentId: { ...nullable(id), description: "The Document it sits under; null at the top." },
+      title: { type: "string" },
+      depth: { type: "integer", description: "How deep it sits: 0 at the top." },
+    }),
+  },
+  Version: {
+    description: "One saved state of a Document, recording which Actor produced it. Never changes.",
+    ...object({ ...versionFields, body: { type: "string", description: "Markdown." } }),
+  },
+  VersionSummary: { description: "A Version without its body, as a Document's Version list shows it.", ...object(versionFields) },
+  StaleVersion: {
+    description: "A save refused because the Version it is based on is no longer current, with the current Version to merge with.",
+    ...object({ error: { type: "string" }, current: ref("Version") }),
+  },
+  StaleGuidance: {
+    description: "A save of Guidance refused because the Version it is based on is no longer current, with the current Guidance to merge with.",
+    ...object({ error: { type: "string" }, current: ref("Guidance") }),
   },
 };
 
@@ -228,6 +315,9 @@ export const projectKeyParam = { type: "string", description: "The Project's key
 
 /** A User's id. */
 export const userIdParam = { type: "string", format: "uuid", description: "The User's id." } as const;
+
+/** A Document's id. */
+export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;

@@ -18,6 +18,7 @@ import {
   sessionName,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
+import { GuidanceSection } from "./guidance.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
@@ -113,7 +114,10 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
   );
 }
 
-export type ProjectView = "list" | "board" | "statuses";
+export type ProjectView = "list" | "board" | "statuses" | "guidance";
+
+/** Whether a view shows the Project's Tickets, and so takes a filter: the list and the board do. */
+const showsTickets = (view: ProjectView) => view === "list" || view === "board";
 
 /** The filter fields a Project page keeps in its address, in the order the filter bar shows them. */
 const FILTER_FIELDS = ["status", "category", "assignee", "priority", "label"] as const;
@@ -128,11 +132,11 @@ export function filterFrom(search: URLSearchParams): TicketFilter {
   return filter as TicketFilter;
 }
 
-/** A Project page's address for a view and filter. The Statuses view takes no filter. */
+/** A Project page's address for a view and filter. Only the Ticket views (list and board) take a filter. */
 function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter): string {
   const query = new URLSearchParams();
   if (view !== "list") query.set("view", view);
-  if (view !== "statuses") for (const field of FILTER_FIELDS) if (filter[field]) query.set(field, filter[field]);
+  if (showsTickets(view)) for (const field of FILTER_FIELDS) if (filter[field]) query.set(field, filter[field]);
   return `/projects/${projectKey}${query.size ? `?${query}` : ""}`;
 }
 
@@ -141,7 +145,7 @@ function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter
  * filters in its address; or its Statuses to tailor, counting all its Tickets.
  */
 export function ProjectPage(props: { projectKey: string; view: ProjectView; filter: TicketFilter; me: User }) {
-  const filter = props.view === "statuses" ? {} : props.filter;
+  const filter = showsTickets(props.view) ? props.filter : {};
   const filterKey = JSON.stringify(filter);
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
@@ -214,8 +218,17 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             <Link to={projectPath(p.key, "list", props.filter)} className={props.view === "list" ? "tab active" : "tab"}>List</Link>
             <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
             <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
+            <Link to={`/projects/${p.key}/documents`} className="tab">Documents</Link>
+            <Link to={projectPath(p.key, "guidance", {})} className={props.view === "guidance" ? "tab active" : "tab"}>Guidance</Link>
           </nav>
-          {props.view !== "statuses" && (
+          {props.view === "guidance" && (
+            <GuidanceSection
+              projectKey={p.key}
+              canEdit={p.access === "write"}
+              intro="Standing instructions for Agents working in this Project, on top of the Workspace Guidance. Every Agent Session gets them when it connects."
+            />
+          )}
+          {showsTickets(props.view) && (
             <FilterBar
               projectKey={p.key}
               statuses={statuses}
@@ -223,51 +236,53 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
               onChange={(filter) => navigate(projectPath(p.key, props.view, filter))}
             />
           )}
-          <Show state={tickets}>
-            {(list) =>
-              props.view === "statuses" ? (
-                <StatusesView
-                  projectKey={p.key}
-                  statuses={statuses}
-                  tickets={list}
-                  canChange={p.access === "write"}
-                  onChanged={() => {
-                    reloadProject();
-                    reloadTickets();
-                  }}
-                />
-              ) : (
-                <>
-                  {list.length === 0 && filtered && (
-                    <div className="empty">
-                      <h2>No Tickets match these filters</h2>
-                      <Link to={projectPath(p.key, props.view, {})} className="link">Clear filters</Link>
-                    </div>
-                  )}
-                  {props.view === "board" ? (
-                    <Board statuses={statuses} tickets={list} />
-                  ) : list.length === 0 ? (
-                    !filtered && <div className="empty"><h2>No Tickets yet</h2></div>
-                  ) : (
-                    <ul className="rows" aria-label="Tickets">
-                      {list.map((ticket) => (
-                        <li key={ticket.key}>
-                          <Link to={`/tickets/${ticket.key}`} className="row">
-                            <PriorityIcon priority={ticket.priority} />
-                            <span className="key">{ticket.key}</span>
-                            <span className="grow">{ticket.title}</span>
-                            <LabelChips labels={ticket.labels} />
-                            {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
-                            <StatusPill status={ticket.status} />
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )
-            }
-          </Show>
+          {props.view !== "guidance" && (
+            <Show state={tickets}>
+              {(list) =>
+                props.view === "statuses" ? (
+                  <StatusesView
+                    projectKey={p.key}
+                    statuses={statuses}
+                    tickets={list}
+                    canChange={p.access === "write"}
+                    onChanged={() => {
+                      reloadProject();
+                      reloadTickets();
+                    }}
+                  />
+                ) : (
+                  <>
+                    {list.length === 0 && filtered && (
+                      <div className="empty">
+                        <h2>No Tickets match these filters</h2>
+                        <Link to={projectPath(p.key, props.view, {})} className="link">Clear filters</Link>
+                      </div>
+                    )}
+                    {props.view === "board" ? (
+                      <Board statuses={statuses} tickets={list} />
+                    ) : list.length === 0 ? (
+                      !filtered && <div className="empty"><h2>No Tickets yet</h2></div>
+                    ) : (
+                      <ul className="rows" aria-label="Tickets">
+                        {list.map((ticket) => (
+                          <li key={ticket.key}>
+                            <Link to={`/tickets/${ticket.key}`} className="row">
+                              <PriorityIcon priority={ticket.priority} />
+                              <span className="key">{ticket.key}</span>
+                              <span className="grow">{ticket.title}</span>
+                              <LabelChips labels={ticket.labels} />
+                              {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
+                              <StatusPill status={ticket.status} />
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )
+              }
+            </Show>
+          )}
         </section>
       )}
     </Show>
@@ -642,7 +657,9 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
               onChange={(priority) => void update.run({ priority: priority as Priority })}
             />
             <AssigneePicker ticket={t} disabled={update.busy || !canWrite} onChange={(assigneeId) => void update.run({ assigneeId })} />
+            <DelegatePicker ticket={t} disabled={update.busy || !canWrite} onChange={(delegateId) => void update.run({ delegateId })} />
           </div>
+          <ClaimLine claim={props.detail.claim} />
           {update.error && <p className="error" role="alert">{update.error}</p>}
           <LabelEditor ticket={t} busy={update.busy} readOnly={!canWrite} onChange={(labels) => void update.run({ labels })} />
           <div className="markdown" data-testid="ticket-description">
@@ -706,6 +723,41 @@ function AssigneePicker(props: { ticket: Ticket; disabled: boolean; onChange: (a
   ];
   return (
     <Picker label="Assignee" value={assignee?.id ?? ""} disabled={props.disabled} options={options} onChange={(id) => props.onChange(id || null)} />
+  );
+}
+
+/** Picks the Delegate among the Assignee's own Agents; the API refuses anyone else's. */
+function DelegatePicker(props: { ticket: Ticket; disabled: boolean; onChange: (delegateId: string | null) => void }) {
+  const [agents] = useLoad(() => api.agents(), []);
+  const { assignee, delegate } = props.ticket;
+  // Only the signed-in User's own Agents are listed to them, so this offers Agents only on their own Tickets.
+  const own = agents.kind === "loaded" ? agents.value.filter((a) => a.owner.id === assignee?.id) : [];
+  const options: [string, string][] = [
+    ["", "Not delegated"],
+    ...(delegate && !own.some((a) => a.id === delegate.id) ? [[delegate.id, delegate.name] as [string, string]] : []),
+    ...own.map((a): [string, string] => [a.id, a.name]),
+  ];
+  return (
+    <Picker
+      label="Delegate"
+      value={delegate?.id ?? ""}
+      disabled={props.disabled || !assignee}
+      options={options}
+      onChange={(id) => props.onChange(id || null)}
+    />
+  );
+}
+
+/** Which Agent Session holds the Ticket's Claim, if any, and until when it lasts without a call. */
+function ClaimLine(props: { claim: TicketDetail["claim"] }) {
+  const { claim } = props;
+  return (
+    <p className="muted claim" data-testid="ticket-claim">
+      {claim
+        ? `Claimed by ${claim.agent.name} (${sessionName(claim.session.id)}) since ${new Date(claim.claimedAt).toLocaleString()}; ` +
+          `lapses if silent until ${new Date(claim.endsIfSilentAt).toLocaleTimeString()}`
+        : "Not Claimed"}
+    </p>
   );
 }
 
@@ -900,6 +952,8 @@ function describe(change: RecordedChange): string {
     }
     case "assignee":
       return change.to ? `assigned it to ${change.to.name}` : "unassigned it";
+    case "delegate":
+      return change.to ? `delegated it to ${change.to.name}` : `took it back from ${change.from!.name}`;
     case "parent":
       return change.to ? `made it a Sub-Ticket of ${change.to.key}` : `took it out of ${change.from!.key}`;
     case "relation added":
