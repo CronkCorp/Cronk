@@ -1,7 +1,6 @@
-import type { Nodes } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Queryable } from "../db/database.js";
-import { NOT_LINKED, TICKET_REFERENCE } from "../../shared/ticket-references.js";
+import { replaceReferenceText, TICKET_REFERENCE } from "../../shared/ticket-references.js";
 
 /**
  * The Tickets a Document mentions, recorded by key whenever its current Version changes, so a
@@ -9,11 +8,14 @@ import { NOT_LINKED, TICKET_REFERENCE } from "../../shared/ticket-references.js"
  * Keys are kept as written, so a mention counts once a Ticket with that key exists.
  */
 
-/** The text Markdown `node` shows as prose, where the web client links Ticket keys: not code, and not inside links. */
-function linkableText(node: Nodes): string[] {
-  if (node.type === "text") return [node.value];
-  if (!("children" in node) || NOT_LINKED.has(node.type)) return [];
-  return node.children.flatMap(linkableText);
+/** The texts of Markdown `body` whose Ticket keys the web client links. */
+function referenceTexts(body: string): string[] {
+  const texts: string[] = [];
+  replaceReferenceText(fromMarkdown(body), (text) => {
+    texts.push(text);
+    return [{ type: "text", value: text }];
+  });
+  return texts;
 }
 
 /**
@@ -21,7 +23,7 @@ function linkableText(node: Nodes): string[] {
  * its Markdown body shows as links to Tickets, as the web client renders it.
  */
 export function ticketKeysIn(version: { title: string; body: string }): string[] {
-  const texts = [version.title, ...linkableText(fromMarkdown(version.body))];
+  const texts = [version.title, ...referenceTexts(version.body)];
   return [...new Set(texts.flatMap((text) => [...text.matchAll(TICKET_REFERENCE)].map((m) => m[0])))];
 }
 
