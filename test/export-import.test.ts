@@ -93,6 +93,7 @@ async function snapshot(admin: Client): Promise<unknown> {
             ticket: await get(`/api/tickets/${t.key}`),
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
+            history: await get(`/api/tickets/${t.key}/history`),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -125,7 +126,10 @@ async function busyWorkspace() {
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
   await admin.patch("/api/projects/CRONK", { visibility: "private", agentAccess: "write" });
   await admin.put(`/api/projects/CRONK/members/${graceId}`, { access: "write" });
-  await admin.post("/api/projects/CRONK/statuses", { name: "Blocked", category: "started" });
+  const blocked = (await admin.post("/api/projects/CRONK/statuses", { name: "Blocked", category: "started" })).body.status;
+  // History keeps the names it recorded: CRONK-3 moved into "Blocked", since renamed "Stuck", and to Grace.
+  await admin.patch("/api/tickets/CRONK-3", { statusId: blocked.id, assigneeId: graceId });
+  await admin.patch(`/api/projects/CRONK/statuses/${blocked.id}`, { name: "Stuck" });
   await admin.patch("/api/tickets/CRONK-2", { parentKey: "CRONK-1", priority: "urgent", labels: ["Core", "api"], description: "The *API*." });
   await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-3" });
   await admin.post("/api/tickets/CRONK-3/relations", { kind: "relates_to", ticketKey: "CRONK-2" });

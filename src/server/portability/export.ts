@@ -160,8 +160,8 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
 
   for (const p of projects) {
     const dir = `projects/${p.key}`;
-    const { rows: statuses } = await db.query<{ name: string; category: string }>(
-      `SELECT name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
+    const { rows: statuses } = await db.query<{ id: string; name: string; category: string }>(
+      `SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
       [p.id, STATUS_CATEGORIES],
     );
     const { rows: members } = await db.query<{ user_id: string; access: string }>(
@@ -176,7 +176,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
       archivedAt: iso(p.archived_at),
       createdAt: iso(p.created_at),
       nextTicketNumber: p.next_ticket_number,
-      statuses,
+      statuses: statuses.map(({ name, category }) => ({ name, category })),
       members: members.map((m) => ({ user: user(m.user_id), access: m.access })),
     });
     await writeGuidance(`${dir}/guidance`, p.id);
@@ -263,6 +263,15 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
         );
       }
 
+      const { rows: changes } = await db.query<ActorColumns & { at: Date; change: string; data: Record<string, unknown> }>(
+        "SELECT * FROM ticket_changes WHERE ticket_id = $1 ORDER BY id",
+        [t.id],
+      );
+      const statusNow = new Map(statuses.map((s) => [s.id, s.name]));
+      add(`${base}.history.md`, {
+        changes: changes.map((c) => ({ at: iso(c.at), by: actor(c), change: c.change, ...historyNames(c.change, c.data, emailOf, statusNow) })),
+      });
+
       const { rows: reports } = await db.query<{ id: string; title: string; body: string; version: number; created_at: Date; updated_at: Date; claim_id: string }>(
         "SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id",
         [t.id],
@@ -299,5 +308,22 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
   // README first, then people, so someone opening the archive reads them first.
   return new Map([...folder].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)));
 }
+
+/**
+ * A history entry's data as the export writes it: as recorded, with the names copied in at the time,
+ * plus what an import finds each record by: a User's `email`, and a Status's `current` name if it
+ * is still in the Project. Agents keep their id, which is the one `people.md` lists.
+ */
+function historyNames(change: string, data: Record<string, unknown>, emailOf: Map<string, string>, statusNow: Map<string, string>): Record<string, unknown> {
+  const user = (ref: unknown) => (isRecord(ref) ? { ...ref, email: emailOf.get(String(ref.id)) } : ref);
+  const status = (ref: unknown) => (isRecord(ref) ? { ...ref, current: statusNow.get(String(ref.id)) } : ref);
+  const mapped = { ...data };
+  if (change === "created") mapped.status = status(data.status);
+  if (change === "status") Object.assign(mapped, { from: status(data.from), to: status(data.to) });
+  if (change === "assignee") Object.assign(mapped, { from: user(data.from), to: user(data.to) });
+  return mapped;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const rank = (path: string) => (path === "README.md" ? 0 : path === "people.md" ? 1 : 2);

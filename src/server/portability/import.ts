@@ -7,6 +7,7 @@ import { FORMAT } from "./format.js";
 import { accessSchema, agentAccessSchema, roleSchema } from "../schemas.js";
 import { PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { readFrontmatter } from "./frontmatter.js";
+import type { TicketChange } from "../work/tickets.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -98,14 +99,17 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   // People: Users by email, Agents by Owner and name, and the Agent Sessions they worked in.
   const people = need("people.md");
   const userIds = new Map<string, string>();
-  const userId = async (email: unknown, where: string): Promise<string> => {
-    if (typeof email !== "string" || email.trim() === "") refuse(`${where} must name a User by email`);
+  /** The User with `email` in the export or this Workspace, if there is one. */
+  const findUser = async (email: string): Promise<string | undefined> => {
     const known = userIds.get(email.toLowerCase());
     if (known) return known;
     const { rows } = await db.query<{ id: string }>("SELECT id FROM users WHERE workspace_id = $1 AND lower(email) = lower($2)", [workspaceId, email]);
-    if (!rows[0]) refuse(`${where} names ${email}, who isn't in people.md`);
-    userIds.set(email.toLowerCase(), rows[0].id);
-    return rows[0].id;
+    if (rows[0]) userIds.set(email.toLowerCase(), rows[0].id);
+    return rows[0]?.id;
+  };
+  const userId = async (email: unknown, where: string): Promise<string> => {
+    if (typeof email !== "string" || email.trim() === "") refuse(`${where} must name a User by email`);
+    return (await findUser(email)) ?? refuse(`${where} names ${email}, who isn't in people.md`);
   };
   for (const [i, u] of list(people, "users").entries()) {
     const where = `people.md users[${i}]`;
@@ -292,6 +296,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   // Tickets by key across the imported Projects, for parents and relations.
   const ticketIds = new Map<string, string>();
   const relations: { from: string; kind: string; to: string; path: string }[] = [];
+  const histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
   const created: string[] = [];
   for (const key of projectKeys) {
     const dir = `projects/${key}`;
@@ -344,7 +349,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importTree(`${dir}/documents`, projectId);
 
     const parents: { ticketId: string; parent: string; path: string }[] = [];
-    for (const path of filesIn(`${dir}/tickets`)) {
+    for (const path of filesIn(`${dir}/tickets`).filter((p) => !p.endsWith(".history.md"))) {
       const t = need(path);
       const ticketKey = text(t.data.key, `${path} key`).toUpperCase();
       const number = Number(new RegExp(`^${projectKey}-([1-9][0-9]{0,8})$`).exec(ticketKey)?.[1]);
@@ -384,6 +389,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
       }
 
       const base = path.slice(0, -".md".length);
+      const history = read(`${base}.history.md`);
+      if (history) histories.push({ ticketId, statusIds, file: history });
       const activities = numbered(`${base}.activities`);
       const activityIds = new Map<number, string>();
       for (const [n, a] of activities) {
@@ -421,7 +428,67 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     const [a, b] = r.kind === "relates_to" && to < from ? [to, from] : [from, to];
     await db.query("INSERT INTO ticket_relations (kind, from_ticket_id, to_ticket_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [r.kind, a, b]);
   }
+
+  // History once every Ticket is in, naming records by what this installation calls them.
+  for (const { ticketId, statusIds, file } of histories) {
+    for (const [i, entry] of list(file, "changes").entries()) {
+      const where = `${file.path} changes[${i}]`;
+      const { at, by, change, ...data } = entry;
+      await db.query(
+        `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          ticketId,
+          date(at, `${where}.at`),
+          ...actorValues(await actor(by, `${where}.by`)),
+          oneOf(change, TICKET_CHANGES, `${where}.change`),
+          await historyIds(change as TicketChange["change"], data, {
+            user: findUser,
+            agent: async (id) => agentIds.get(id)?.id,
+            status: async (name) => statusIds.get(name.toLowerCase()),
+          }),
+        ],
+      );
+    }
+  }
   return { scope, projects: created };
+}
+
+const TICKET_CHANGES: readonly TicketChange["change"][] = [
+  "created",
+  "title",
+  "description",
+  "status",
+  "priority",
+  "labels",
+  "assignee",
+  "delegate",
+  "parent",
+  "relation added",
+  "relation removed",
+];
+
+/** Finds a record in this installation by what an export names it by. */
+type Lookup = (name: string) => Promise<string | undefined>;
+
+/**
+ * A history entry's data as the export wrote it (see `historyNames` in `export.ts`), with each record's id
+ * swapped for the one it has here: Users found by `email`, Agents by their `people.md` id and Statuses by
+ * their `current` name. The names recorded at the time stay; an id with nothing to map to stays as written.
+ */
+async function historyIds(change: TicketChange["change"], data: Record<string, unknown>, find: { user: Lookup; agent: Lookup; status: Lookup }): Promise<Record<string, unknown>> {
+  const swap = async (ref: unknown, lookup: Lookup, by: string) => {
+    if (ref === null || typeof ref !== "object" || Array.isArray(ref)) return ref;
+    const { [by]: name, ...rest } = ref as Record<string, unknown>;
+    const id = typeof name === "string" ? await lookup(name) : undefined;
+    return id === undefined ? rest : { ...rest, id };
+  };
+  const mapped = { ...data };
+  if (change === "created") mapped.status = await swap(data.status, find.status, "current");
+  if (change === "status") Object.assign(mapped, { from: await swap(data.from, find.status, "current"), to: await swap(data.to, find.status, "current") });
+  if (change === "assignee") Object.assign(mapped, { from: await swap(data.from, find.user, "email"), to: await swap(data.to, find.user, "email") });
+  if (change === "delegate") Object.assign(mapped, { from: await swap(data.from, find.agent, "id"), to: await swap(data.to, find.agent, "id") });
+  return mapped;
 }
 
 function refuse(message: string): never {
