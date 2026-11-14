@@ -1,3 +1,4 @@
+import { insertAgent } from "../identity/agents.js";
 import { insertUser } from "../identity/users.js";
 import { roleSchema } from "../schemas.js";
 import { iso, type ExportContext } from "./export-context.js";
@@ -85,11 +86,13 @@ async function importAgents(ctx: ImportContext, people: File): Promise<void> {
     const id =
       existing[0]?.id ??
       (
-        await ctx.db.query<{ id: string }>(
-          "INSERT INTO agents (workspace_id, owner_id, name, created_at, removed_at) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-          [ctx.workspaceId, ownerId, name, date(a.createdAt, `${where}.createdAt`), removedAt],
-        )
-      ).rows[0]!.id;
+        await insertAgent(ctx.db, {
+          owner: { id: ownerId, workspaceId: ctx.workspaceId },
+          name,
+          now: date(a.createdAt, `${where}.createdAt`),
+          removedAt,
+        })
+      ).id;
     ctx.agentIds.set(text(a.id, `${where}.id`), { id, ownerId });
   }
 }

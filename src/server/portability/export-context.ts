@@ -79,8 +79,13 @@ export class ExportContext {
 
   /** The Actor a history row records, as files name it. */
   actor(row: ActorColumns): ActorRef {
-    this.usedUsers.add(row.actor_user_id);
     if (row.actor_agent_id === null) return this.user(row.actor_user_id)!;
+    return this.agentActor({ ...row, actor_agent_id: row.actor_agent_id });
+  }
+
+  /** The Agent, and its Agent Session if any, that a history row records an Agent's act by. */
+  agentActor(row: ActorColumns & { actor_agent_id: string }): { agent: string; session: string | null } {
+    this.usedUsers.add(row.actor_user_id);
     this.usedAgents.add(row.actor_agent_id);
     if (row.actor_session_id !== null) this.usedSessions.add(row.actor_session_id);
     return { agent: row.actor_agent_id, session: row.actor_session_id };

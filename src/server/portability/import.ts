@@ -8,7 +8,7 @@ import { importTree } from "./documents.js";
 import { ImportContext } from "./import-context.js";
 import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
-import { importRelations, importTickets, type PendingRelation } from "./tickets.js";
+import { ImportedTickets, importTickets } from "./tickets.js";
 import { importWorkspaceSettings } from "./workspace.js";
 
 /**
@@ -44,17 +44,16 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importTree(ctx, "documents", null);
   }
   // Tickets by key across the imported Projects, for parents and relations.
-  const ticketIds = new Map<string, string>();
-  const relations: PendingRelation[] = [];
+  const tickets = new ImportedTickets();
   const created: string[] = [];
   for (const dirKey of projectKeys) {
     const project = await importProject(ctx, dirKey);
     created.push(project.key);
     await importGuidance(ctx, `projects/${dirKey}/guidance`, project.id);
     await importTree(ctx, `projects/${dirKey}/documents`, project.id);
-    await importTickets(ctx, dirKey, project, ticketIds, relations);
+    await importTickets(ctx, dirKey, project, tickets);
   }
-  await importRelations(ctx, ticketIds, relations);
+  await tickets.storeRelations(ctx);
   return { scope, projects: created };
 }
 
