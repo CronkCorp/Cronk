@@ -338,6 +338,11 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   await page.getByRole("button", { name: "Save" }).click();
   const usage = page.getByRole("region", { name: "## Usage" });
   await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
+  // Leaving the resolver keeps the draft; saving it again is refused and merges again.
+  await page.getByRole("button", { name: "Back to my draft" }).click();
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it hourly.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
   await usage.getByRole("button", { name: "Use both" }).click();
   await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n\nRun it weekly.\n");
   await page.getByRole("button", { name: "Use these and keep editing" }).click();

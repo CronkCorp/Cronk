@@ -279,6 +279,12 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
     setOther(undefined);
   };
 
+  // The draft is still based on the Version editing started from, so its next save is refused and merges again.
+  const backToDraft = () => {
+    setResolving(undefined);
+    setOther(undefined);
+  };
+
   return (
     <section className="panel wide">
       {other && (
@@ -299,7 +305,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
             setBase(resolving.onto.number);
             setResolving(undefined);
           }}
-          onCancel={props.onCancel}
+          onBack={backToDraft}
         />
       ) : (
         <form onSubmit={save}>
@@ -383,6 +389,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
     setComparing(pair);
   });
   const error = view.error ?? restore.error ?? compare.error;
+
   return (
     <section className="panel wide">
       <h2>Versions</h2>

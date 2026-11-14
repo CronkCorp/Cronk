@@ -80,8 +80,11 @@ interface Mergeable {
   sections: MergedSection[];
 }
 
-/** Lets the User settle each conflict of a merge, then hands back the merged title (empty without one) and body. */
-export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title: string; body: string }) => void; onCancel: () => void }) {
+/**
+ * Lets the User settle each conflict of a merge, then hands back the merged title (empty without one) and body.
+ * `onBack` leaves without settling, back to the User's own draft.
+ */
+export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title: string; body: string }) => void; onBack: () => void }) {
   const m = props.merge;
   const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
   const [kept, setKept] = useState<string[]>(m.sections.map((s) => s.text ?? s.conflict?.mine ?? ""));
@@ -100,7 +103,7 @@ export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title:
       )}
       <div className="actions">
         <button type="submit">Use these and keep editing</button>
-        <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+        <button type="button" className="secondary" onClick={props.onBack}>Back to my draft</button>
       </div>
     </form>
   );

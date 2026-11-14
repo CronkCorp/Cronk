@@ -136,6 +136,12 @@ function GuidanceEditor(props: {
     setOther(undefined);
   };
 
+  // The draft is still based on the Version editing started from, so its next save is refused and merges again.
+  const backToDraft = () => {
+    setResolving(undefined);
+    setOther(undefined);
+  };
+
   return (
     <section className="panel wide">
       {other && (
@@ -155,7 +161,7 @@ function GuidanceEditor(props: {
             setBase(resolving.onto.version);
             setResolving(undefined);
           }}
-          onCancel={props.onCancel}
+          onBack={backToDraft}
         />
       ) : (
         <form onSubmit={save}>
