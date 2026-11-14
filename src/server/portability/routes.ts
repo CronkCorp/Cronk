@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { actingUser } from "../actor.js";
-import { requireActor, requireUser, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { packFolder, unpackFolder } from "./archive.js";
 import { exportFolder } from "./export.js";
+import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 
 /** The media types an uploaded archive may come as. */
@@ -75,6 +76,46 @@ export function portabilityRoutes(ctx: AppContext) {
         requireAdmin(user, "export a Project");
         const { project } = await projectFor(ctx.db, { kind: "user", user }, request.params.key, "read");
         return sendExport(reply, user.workspaceId, project, request.query.versions ?? false);
+      },
+    );
+
+    app.post(
+      "/api/import",
+      {
+        bodyLimit: MAX_ARCHIVE_BYTES,
+        schema: {
+          description:
+            "Imports an export made by GET /api/export or GET /api/projects/{key}/export, all of it or nothing. A Workspace export goes into a Workspace " +
+            "with no Projects, Documents or Guidance yet, as in a fresh installation; a Project export becomes a new Project, refused if its key is taken. " +
+            "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, " +
+            "and Agents not found are created without tokens. Relations to Tickets outside the export are left out. " +
+            archiveUpload,
+          response: {
+            201: answer("What the import brought in", {
+              type: "object",
+              required: ["scope", "projects"],
+              properties: {
+                scope: { type: "string", enum: ["workspace", "project"], description: "Whether it was a Workspace or a Project export." },
+                projects: { type: "array", items: { type: "string" }, description: "The keys of the Projects it created." },
+              },
+            }),
+            ...errors(400, 401, 403, 409, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "import an export");
+        const folder = await unpackFolder(archiveBody(request.body));
+        try {
+          const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now()));
+          return reply.code(201).send(imported);
+        } catch (err) {
+          // The database refusing a value (a constraint or a malformed value) means the export holds data Cronk can't take.
+          const code = (err as { code?: unknown }).code;
+          if (typeof code === "string" && /^2[23]/.test(code)) throw new HttpError(400, `The export holds data Cronk can't take: ${(err as Error).message}`);
+          throw err;
+        }
       },
     );
 
