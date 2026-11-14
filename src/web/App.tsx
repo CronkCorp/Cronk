@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, type User } from "./api.js";
 import { Link, useLocation } from "./router.js";
 import { Field, messageOf, useSubmit } from "./ui.js";
-import { ProjectPage, ProjectsPage, TicketPage } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, TicketPage } from "./work.js";
 
 type State =
   | { kind: "loading" }
@@ -148,7 +148,15 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
 function Page() {
   const { path, search } = useLocation();
   const project = /^\/projects\/([^/]+)$/.exec(path);
-  if (project) return <ProjectPage projectKey={decodeURIComponent(project[1]!)} view={search.get("view") === "board" ? "board" : "list"} />;
+  if (project) {
+    return (
+      <ProjectPage
+        projectKey={decodeURIComponent(project[1]!)}
+        view={search.get("view") === "board" ? "board" : "list"}
+        filter={filterFrom(search)}
+      />
+    );
+  }
   const ticket = /^\/tickets\/([^/]+)$/.exec(path);
   if (ticket) return <TicketPage ticketKey={decodeURIComponent(ticket[1]!)} />;
   return <ProjectsPage archived={path === "/archived"} />;
