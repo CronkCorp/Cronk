@@ -76,7 +76,7 @@ export const migrations: Migration[] = [
 
       -- A Ticket's history: one row per change, oldest first by id.
       -- Statuses are copied in (not referenced) so history survives renaming or removing them.
-      CREATE TABLE ticket_events (
+      CREATE TABLE ticket_changes (
         id bigserial PRIMARY KEY,
         ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
         at timestamptz NOT NULL,
@@ -85,7 +85,7 @@ export const migrations: Migration[] = [
         change text NOT NULL,
         data jsonb NOT NULL
       );
-      CREATE INDEX ticket_events_ticket ON ticket_events (ticket_id, id);
+      CREATE INDEX ticket_changes_ticket ON ticket_changes (ticket_id, id);
     `,
   },
 ];

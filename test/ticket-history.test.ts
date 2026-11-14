@@ -18,7 +18,7 @@ describe("Ticket history", () => {
     const history = await admin.get("/api/tickets/CRONK-1/history");
     expect(history.status).toBe(200);
     const actor = { kind: "user", id: ada.id, name: "Ada" };
-    expect(history.body.entries).toEqual([
+    expect(history.body.changes).toEqual([
       { at: "2026-01-01T09:00:00.000Z", actor, change: "created", title: "Add login", description: "v1", status: backlog },
       { at: "2026-01-01T09:01:00.000Z", actor, change: "title", from: "Add login", to: "Add sign-in" },
       { at: "2026-01-01T09:01:00.000Z", actor, change: "description", from: "v1", to: "v2" },
@@ -34,7 +34,7 @@ describe("Ticket history", () => {
 
     await admin.patch("/api/tickets/CRONK-1", { title: " Same ", description: "", statusId: backlog.id });
 
-    const { entries } = (await admin.get("/api/tickets/CRONK-1/history")).body;
-    expect(entries.map((e: { change: string }) => e.change)).toEqual(["created"]);
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    expect(changes.map((c: { change: string }) => c.change)).toEqual(["created"]);
   });
 });

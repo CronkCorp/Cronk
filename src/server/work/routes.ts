@@ -4,7 +4,7 @@ import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { findProjectByKey, insertProject, listProjects, listStatuses, updateProject, type Project } from "./projects.js";
 import { userActor } from "../actor.js";
-import { findTicketByKey, insertTicket, listHistory, listTickets, updateTicket, type Ticket, type TicketChanges } from "./tickets.js";
+import { findTicketByKey, insertTicket, listHistory, listTickets, updateTicket, type Ticket, type TicketEdit } from "./tickets.js";
 
 /** A Project key: a letter then letters or digits, 2 to 10 characters. Stored upper case. */
 const projectKey = { type: "string", pattern: "^[A-Za-z][A-Za-z0-9]{1,9}$" } as const;
@@ -132,7 +132,7 @@ export function workRoutes(ctx: AppContext) {
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await findTicketByKey(tx, user.workspaceId, request.params.key, { forUpdate: true });
           if (!ticket) throw new HttpError(404, "No such Ticket");
-          const changes: TicketChanges = {
+          const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
           };
@@ -150,7 +150,7 @@ export function workRoutes(ctx: AppContext) {
     app.get<{ Params: { key: string } }>("/api/tickets/:key/history", async (request) => {
       const user = await requireUser(ctx, request);
       const ticket = await ticketOr404(ctx, user.workspaceId, request.params.key);
-      return { entries: await listHistory(ctx.db, ticket.id) };
+      return { changes: await listHistory(ctx.db, ticket.id) };
     });
   };
 }

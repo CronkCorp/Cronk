@@ -35,7 +35,7 @@ export interface Ticket {
   updatedAt: string;
 }
 
-export type HistoryEntry = { at: string; actor: { kind: "user"; id: string; name: string } } & (
+export type RecordedChange = { at: string; actor: { kind: "user"; id: string; name: string } } & (
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
@@ -91,5 +91,5 @@ export const api = {
   updateTicket: (key: string, changes: { title?: string; description?: string; statusId?: string }) =>
     request<{ ticket: Ticket }>("PATCH", `/api/tickets/${encodeURIComponent(key)}`, changes).then((r) => r.ticket),
   ticketHistory: (key: string) =>
-    request<{ entries: HistoryEntry[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.entries),
+    request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };

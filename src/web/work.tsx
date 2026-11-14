@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
-import { api, type HistoryEntry, type Project, type Status, type Ticket } from "./api.js";
+import { api, type RecordedChange, type Project, type Status, type Ticket } from "./api.js";
 import { Link, navigate } from "./router.js";
 import { Field, messageOf, Show, TextArea, useLoad, useSubmit } from "./ui.js";
 
@@ -240,9 +240,9 @@ export function TicketPage(props: { ticketKey: string }) {
           )}
           <h2>History</h2>
           <Show state={history}>
-            {(entries) => (
+            {(changes) => (
               <ol className="history" aria-label="History">
-                {entries.map((entry, i) => (
+                {changes.map((entry, i) => (
                   <li key={i}>
                     <span className="muted">{new Date(entry.at).toLocaleString()}</span> <strong>{entry.actor.name}</strong>{" "}
                     {describe(entry)}
@@ -305,7 +305,7 @@ function EditTicket(props: { ticket: Ticket; onDone: (ticket: Ticket) => void; o
   );
 }
 
-function describe(entry: HistoryEntry): string {
+function describe(entry: RecordedChange): string {
   switch (entry.change) {
     case "created":
       return `created the Ticket in ${entry.status.name}`;

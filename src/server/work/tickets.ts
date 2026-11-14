@@ -97,7 +97,7 @@ export async function findTicketByKey(
   return rows[0] && toTicket(rows[0]);
 }
 
-export interface TicketChanges {
+export interface TicketEdit {
   title?: string;
   description?: string;
   status?: Status;
@@ -107,8 +107,8 @@ export interface TicketChanges {
  * Applies the changes that differ from the Ticket as it is, recording each in
  * its history. Pass a Ticket locked with `forUpdate`, inside a transaction.
  */
-export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketChanges, actor: Actor, now: Date): Promise<Ticket> {
-  const recorded: HistoryChange[] = [];
+export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketEdit, actor: Actor, now: Date): Promise<Ticket> {
+  const recorded: TicketChange[] = [];
   if (changes.title !== undefined && changes.title !== ticket.title) {
     recorded.push({ change: "title", from: ticket.title, to: changes.title });
   }
@@ -131,32 +131,32 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
 }
 
 /** One change in a Ticket's history. */
-export type HistoryChange =
+export type TicketChange =
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
   | { change: "status"; from: Status; to: Status };
 
-export type HistoryEntry = { at: Date; actor: { kind: "user"; id: string; name: string } } & HistoryChange;
+export type RecordedChange = { at: Date; actor: { kind: "user"; id: string; name: string } } & TicketChange;
 
-async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: HistoryChange): Promise<void> {
+async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
   await db.query(
-    "INSERT INTO ticket_events (ticket_id, at, actor_kind, actor_user_id, change, data) VALUES ($1, $2, $3, $4, $5, $6)",
+    "INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, change, data) VALUES ($1, $2, $3, $4, $5, $6)",
     [ticketId, at, actor.kind, actor.user.id, kind, data],
   );
 }
 
 /** A Ticket's history, oldest first. */
-export async function listHistory(db: Queryable, ticketId: string): Promise<HistoryEntry[]> {
-  const { rows } = await db.query<{ at: Date; user_id: string; user_name: string; change: HistoryChange["change"]; data: object }>(
-    `SELECT e.at, u.id AS user_id, u.name AS user_name, e.change, e.data
-     FROM ticket_events e JOIN users u ON u.id = e.actor_user_id
-     WHERE e.ticket_id = $1 ORDER BY e.id`,
+export async function listHistory(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
+  const { rows } = await db.query<{ at: Date; user_id: string; user_name: string; change: TicketChange["change"]; data: object }>(
+    `SELECT c.at, u.id AS user_id, u.name AS user_name, c.change, c.data
+     FROM ticket_changes c JOIN users u ON u.id = c.actor_user_id
+     WHERE c.ticket_id = $1 ORDER BY c.id`,
     [ticketId],
   );
   return rows.map(
-    (row) => ({ at: row.at, actor: { kind: "user", id: row.user_id, name: row.user_name }, change: row.change, ...row.data }) as HistoryEntry,
+    (row) => ({ at: row.at, actor: { kind: "user", id: row.user_id, name: row.user_name }, change: row.change, ...row.data }) as RecordedChange,
   );
 }
 
