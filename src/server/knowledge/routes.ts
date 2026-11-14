@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
+import { requireClaimHolder } from "../coordination/claims.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
+import { findTicketByKey } from "../work/tickets.js";
 import { documentFor } from "./document-reads.js";
 import { deleteDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
@@ -21,9 +23,12 @@ const baseVersion = {
   description: "The number of the Version this write is based on. The write is refused if it is no longer the current Version.",
 } as const;
 
-const staleVersionAnswer = {
-  description: "The save is based on a Version that is no longer current; the answer carries the current Version",
-  ...ref("StaleVersion"),
+/** A save's conflict: a stale base Version, or an Agent rewriting a Report without its Ticket's Claim. */
+const saveConflictAnswer = {
+  description:
+    "The save is based on a Version that is no longer current, and the answer carries the current Version; " +
+    "or the Document is a Report and the Agent doesn't call from the Agent Session holding its Ticket's live Claim",
+  anyOf: [ref("StaleVersion"), ref("Error")],
 };
 
 /** A page tree: its Documents depth first, each followed by those under it. */
@@ -61,6 +66,16 @@ export function knowledgeRoutes(ctx: AppContext) {
       const created = await insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
       if (created === "no such parent") throw notInTree();
       return created;
+    };
+
+    /**
+     * Refuses an Agent's edit or restore of a Report unless it calls from the Agent Session holding
+     * the live Claim on the Report's Ticket (a 409), so a Report stays the record of its hand-over.
+     */
+    const requireReportRewriter = async (tx: Queryable, actor: Actor, document: Document) => {
+      if (document.ticketKey === null || actor.kind !== "agent") return;
+      const ticket = (await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey))!;
+      await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "changing its Report");
     };
 
     app.get<{ Params: { key: string } }>(
@@ -175,7 +190,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           response: {
             200: answer("The Document at its new Version; unchanged if the save changed nothing", holding("document", "Document")),
             ...errors(400, 401, 403, 404, 410),
-            409: staleVersionAnswer,
+            409: saveConflictAnswer,
           },
         },
       },
@@ -183,6 +198,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireReportRewriter(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           return saveVersion(tx, current, {
             title: request.body.title?.trim() ?? current.title,
@@ -230,7 +246,7 @@ export function knowledgeRoutes(ctx: AppContext) {
               ...ref("SectionRefused"),
             },
             404: { description: "There is no such Document, or it has no section with that heading, in which case its headings are listed", ...ref("SectionRefused") },
-            409: staleVersionAnswer,
+            409: saveConflictAnswer,
           },
         },
       },
@@ -238,6 +254,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireReportRewriter(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           const replaced = replaceSection(current.body, request.body.heading, request.body.body);
           if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
@@ -338,6 +355,14 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await transaction(ctx.db, async (tx) => {
+          const found = await documentFor(tx, actor, request.params.id, "write");
+          if (found.ticketKey !== null) {
+            if (actor.kind === "agent") {
+              throw new HttpError(403, `A Report records the work handed over on ${found.ticketKey}, so only a User may delete it`);
+            }
+            // Lock the Report's Ticket before the Report, as a move into In Review does before checking for a Report.
+            await findTicketByKey(tx, actingUser(actor).workspaceId, found.ticketKey, { forUpdate: true });
+          }
           const document = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           await requireCurrent(tx, document, request.query.baseVersion, "delete");
           if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
@@ -390,7 +415,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           response: {
             200: answer("The Document at a new Version holding the restored Version's title and body", holding("document", "Document")),
             ...errors(400, 401, 403, 404, 410),
-            409: staleVersionAnswer,
+            409: saveConflictAnswer,
           },
         },
       },
@@ -398,6 +423,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireReportRewriter(tx, actor, current);
           const earlier = await requireVersion(tx, current, request.params.number);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           return saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
