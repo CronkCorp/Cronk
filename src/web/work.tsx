@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
-import { api, type RecordedChange, type Project, type Status, type Ticket, type User } from "./api.js";
+import { AgentAccessSelect } from "./agents.js";
+import { api, type AgentAccess, type RecordedChange, type Project, type Status, type Ticket, type User } from "./api.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
@@ -85,6 +86,13 @@ export function ProjectPage(props: { projectKey: string; view: "list" | "board";
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey), [props.projectKey]);
   const [creating, setCreating] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
+  const agentAccess = useAction(
+    async (access: AgentAccess) => {
+      if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
+      return { ...project.value, project: await api.updateProject(props.projectKey, { agentAccess: access }) };
+    },
+    setProject,
+  );
   const archive = useSubmit(
     async () => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -107,6 +115,9 @@ export function ProjectPage(props: { projectKey: string; view: "list" | "board";
               </h1>
             </div>
             <div className="actions">
+              {p.access === "write" && (
+                <AgentAccessSelect value={p.agentAccess} disabled={agentAccess.busy} onChange={(a) => void agentAccess.run(a)} />
+              )}
               {props.me.role === "admin" && (
                 <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
               )}
@@ -120,7 +131,7 @@ export function ProjectPage(props: { projectKey: string; view: "list" | "board";
               )}
             </div>
           </div>
-          {archive.error && <p className="error" role="alert">{archive.error}</p>}
+          {(archive.error ?? agentAccess.error) && <p className="error" role="alert">{archive.error ?? agentAccess.error}</p>}
           {showAccess && (
             <ProjectAccessPanel
               project={p}
@@ -277,7 +288,8 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
           <ol className="history" aria-label="History">
             {changes.map((change, i) => (
               <li key={i}>
-                <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>{" "}
+                <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>
+                {change.actor.kind === "agent" && <span className="muted"> (Agent of {change.actor.owner.name})</span>}{" "}
                 {describe(change)}
               </li>
             ))}

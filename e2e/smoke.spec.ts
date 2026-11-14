@@ -86,3 +86,28 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await expect(bob.getByRole("heading", { name: "No Projects yet" })).toBeVisible();
   await bobContext.close();
 });
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("register an Agent, issue it a token, and see its change in a Ticket's history", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await page.getByRole("link", { name: "Agents" }).click();
+  await page.getByLabel("Agent name").fill("claude-laptop");
+  await page.getByRole("button", { name: "Register Agent" }).click();
+  await page.getByRole("button", { name: "Issue full token" }).click();
+  const token = await page.getByLabel("New token").inputValue();
+  await expect(page.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+
+  const created = await request.post("/api/projects/CRONK/tickets", {
+    headers: { authorization: `Bearer ${token}` },
+    data: { title: "Filed by an Agent" },
+  });
+  expect(created.status()).toBe(201);
+  const { ticket } = await created.json();
+
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop (Agent of Ada) created the Ticket");
+});
