@@ -37,10 +37,12 @@ interface GuidanceResource<Params> {
   params?: object;
   /** Whose Guidance it is, as in "The Workspace's Guidance". */
   whose: string;
+  /** Whether a caller may be told it doesn't exist (404), as for a Project they can't see. */
+  mayBeHidden: boolean;
   /** The Guidance's owner, if `actor` may read it; otherwise throws. */
-  toRead: (actor: Actor, params: Params) => Promise<GuidanceOwner>;
+  ownerToRead: (actor: Actor, params: Params) => Promise<GuidanceOwner>;
   /** The Guidance's owner, if `user` may write it; otherwise throws. */
-  toWrite: (user: User, params: Params) => Promise<GuidanceOwner>;
+  ownerToWrite: (user: User, params: Params) => Promise<GuidanceOwner>;
 }
 
 /**
@@ -53,11 +55,12 @@ export function guidanceRoutes(ctx: AppContext) {
     guidanceResource<object>(app, ctx, {
       url: "/api/workspace/guidance",
       whose: "The Workspace's",
-      toRead: async (actor) => {
+      mayBeHidden: false,
+      ownerToRead: async (actor) => {
         await requireWorkspaceAccess(ctx.db, actor, "read");
         return { workspaceId: actingUser(actor).workspaceId, projectId: null };
       },
-      toWrite: async (user) => {
+      ownerToWrite: async (user) => {
         requireAdmin(user, "write the Workspace's Guidance");
         return { workspaceId: user.workspaceId, projectId: null };
       },
@@ -67,8 +70,9 @@ export function guidanceRoutes(ctx: AppContext) {
       url: "/api/projects/:key/guidance",
       params: pathParams({ key: projectKeyParam }),
       whose: "The Project's",
-      toRead: async (actor, { key }) => projectGuidance(actingUser(actor), await projectFor(ctx.db, actor, key, "read")),
-      toWrite: async (user, { key }) => projectGuidance(user, await projectFor(ctx.db, userActor(user), key, "write")),
+      mayBeHidden: true,
+      ownerToRead: async (actor, { key }) => projectGuidance(actingUser(actor), await projectFor(ctx.db, actor, key, "read")),
+      ownerToWrite: async (user, { key }) => projectGuidance(user, await projectFor(ctx.db, userActor(user), key, "write")),
     });
   };
 }
@@ -80,13 +84,13 @@ const projectGuidance = (user: User, { project }: { project: Project }): Guidanc
 function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resource: GuidanceResource<Params>) {
   const { url, whose } = resource;
   const params = resource.params ? { params: resource.params } : {};
-  const readErrors = resource.params ? errors(401, 403, 404, 410) : errors(401, 403, 410);
+  const readErrors = resource.mayBeHidden ? errors(401, 403, 404, 410) : errors(401, 403, 410);
 
   app.get<{ Params: Params }>(
     url,
     { schema: { ...params, response: { 200: answer(`${whose} Guidance`, holding("guidance", "Guidance")), ...readErrors } } },
     async (request) => {
-      const owner = await resource.toRead(await requireActor(ctx, request), request.params as Params);
+      const owner = await resource.ownerToRead(await requireActor(ctx, request), request.params as Params);
       return { guidance: await getGuidance(ctx.db, owner) };
     },
   );
@@ -100,7 +104,7 @@ function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resourc
       },
     },
     async (request) => {
-      const owner = await resource.toRead(await requireActor(ctx, request), request.params as Params);
+      const owner = await resource.ownerToRead(await requireActor(ctx, request), request.params as Params);
       return { versions: await listGuidanceVersions(ctx.db, owner) };
     },
   );
@@ -116,7 +120,7 @@ function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resourc
     },
     async (request) => {
       const user = await requireUser(ctx, request);
-      const owner = await resource.toWrite(user, request.params as Params);
+      const owner = await resource.ownerToWrite(user, request.params as Params);
       return { guidance: await save(ctx, owner, request.body, user.id) };
     },
   );
