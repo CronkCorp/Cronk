@@ -33,10 +33,11 @@ interface ActivityRow {
   session_id: string;
 }
 
-const SELECT = `
+/** Selects Activities, with their Ticket's key, Agent and Owner, from `source` (the table, or a CTE of new rows) as `v`. */
+const selectFrom = (source: string) => `
   SELECT v.id, v.ticket_id, p.key || '-' || t.number AS ticket_key, v.kind, v.body, v.blocking, v.at,
     a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id
-  FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN projects p ON p.id = t.project_id
+  FROM ${source} v JOIN tickets t ON t.id = v.ticket_id JOIN projects p ON p.id = t.project_id
     JOIN agents a ON a.id = v.actor_agent_id JOIN users u ON u.id = v.actor_user_id`;
 
 const toActivity = (row: ActivityRow): Activity => ({
@@ -60,10 +61,10 @@ export async function insertActivity(
   at: Date,
 ): Promise<Activity> {
   const { rows } = await db.query<ActivityRow>(
-    `WITH v AS (
+    `WITH inserted AS (
        INSERT INTO activities (ticket_id, kind, body, blocking, at, actor_user_id, actor_agent_id, actor_session_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *)
-     ${SELECT.replace("FROM activities v", "FROM v")}`,
+     ${selectFrom("inserted")}`,
     [ticketId, input.kind, input.body, input.blocking, at, agent.owner.id, agent.agent.id, agent.session.id],
   );
   return toActivity(rows[0]!);
@@ -71,7 +72,7 @@ export async function insertActivity(
 
 /** A Ticket's Activities, oldest first. */
 export async function listActivities(db: Queryable, ticketId: string): Promise<Activity[]> {
-  const { rows } = await db.query<ActivityRow>(`${SELECT} WHERE v.ticket_id = $1 ORDER BY v.seq`, [ticketId]);
+  const { rows } = await db.query<ActivityRow>(`${selectFrom("activities")} WHERE v.ticket_id = $1 ORDER BY v.seq`, [ticketId]);
   return rows.map(toActivity);
 }
 
