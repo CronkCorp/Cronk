@@ -1,11 +1,7 @@
 import { actingUser, type Actor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
-import type { RelationKind } from "./relations.js";
-import { PROJECT_KEY_PATTERN, type Project, type Status, type StatusCategory } from "./projects.js";
-
-/** A Ticket's Priority, most urgent first. */
-export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
-export type Priority = (typeof PRIORITIES)[number];
+import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
+import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
 /** A User as a Ticket shows them. */
 export interface UserRef {
@@ -141,6 +137,20 @@ export async function findTicketByKey(
     [workspaceId, match[1]!.toUpperCase(), Number(match[2])],
   );
   return rows[0] && toTicket(rows[0]);
+}
+
+/**
+ * A Ticket update as the API takes it: Status, assignee and parent by id or key, and null to clear them.
+ * Routes resolve it into a `TicketEdit`, which carries the records themselves.
+ */
+export interface TicketChanges {
+  title?: string;
+  description?: string;
+  statusId?: string;
+  priority?: Priority;
+  labels?: string[];
+  assigneeId?: string | null;
+  parentKey?: string | null;
 }
 
 export interface TicketEdit {
