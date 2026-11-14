@@ -170,3 +170,12 @@ export async function listTickets(db: Queryable, projectId: string): Promise<Tic
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.project_id = $1 ORDER BY t.number`, [projectId]);
   return rows.map(toTicket);
 }
+
+/**
+ * Moves every Ticket in one Status to another, recording the move in each
+ * Ticket's history. Locks those Tickets; run inside a transaction.
+ */
+export async function moveTicketsBetweenStatuses(db: Queryable, from: Status, to: Status, actor: Actor, now: Date): Promise<void> {
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.status_id = $1 ORDER BY t.number FOR UPDATE OF t`, [from.id]);
+  for (const row of rows) await updateTicket(db, toTicket(row), { status: to }, actor, now);
+}

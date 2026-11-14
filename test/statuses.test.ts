@@ -134,4 +134,63 @@ describe("Statuses", () => {
     expect((await admin.delete(`/api/projects/CRONK/statuses/${shipped.id}`)).status).toBe(409);
     expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In Review", "Shipped", "Canceled"]);
   });
+
+  it("in use are removed only by moving their Tickets to another Status, which their history records", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
+    const review = await statusNamed(admin, "In Review");
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add sign-in" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add sign-out" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Stay put" });
+    await admin.patch("/api/tickets/CRONK-1", { statusId: qa.id });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: qa.id });
+
+    const asked = await admin.delete(`/api/projects/CRONK/statuses/${qa.id}`);
+    expect(asked.status).toBe(409);
+    expect(asked.body.error).toMatch(/2 Tickets/);
+    expect(names(await statuses(admin))).toContain("In QA");
+
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${qa.id}`)).status).toBe(400);
+    const webReview = (await admin.post("/api/projects", { name: "WEB", key: "WEB" }), await statusNamed(admin, "In Review", "WEB"));
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${webReview.id}`)).status).toBe(400);
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=not-a-uuid`)).status).toBe(400);
+
+    const removed = await admin.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${review.id}`);
+    expect(removed.status).toBe(204);
+    expect(names(await statuses(admin))).not.toContain("In QA");
+    const tickets = (await admin.get("/api/projects/CRONK/tickets")).body.tickets;
+    expect(tickets.map((t: { key: string; status: Status }) => [t.key, t.status.name])).toEqual([
+      ["CRONK-1", "In Review"],
+      ["CRONK-2", "In Review"],
+      ["CRONK-3", "Backlog"],
+    ]);
+    const history = (await admin.get("/api/tickets/CRONK-1/history")).body.changes;
+    expect(history.at(-1)).toMatchObject({
+      change: "status",
+      actor: { name: "Ada" },
+      from: { name: "In QA", category: "started" },
+      to: { name: "In Review", category: "in_review" },
+    });
+  });
+
+  it("leave no Ticket behind when Tickets move into a Status while it is removed", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
+    const review = await statusNamed(admin, "In Review");
+    for (let i = 0; i < 20; i++) await admin.post("/api/projects/CRONK/tickets", { title: `T${i}` });
+
+    const move = (n: number) => admin.patch(`/api/tickets/CRONK-${n}`, { statusId: qa.id });
+    const results = await Promise.all([
+      ...Array.from({ length: 10 }, (_, i) => move(i + 1)),
+      admin.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${review.id}`),
+      ...Array.from({ length: 10 }, (_, i) => move(i + 11)),
+    ]);
+    expect(results[10]!.status).toBe(204);
+    for (const result of results) expect([200, 204, 400]).toContain(result.status);
+
+    const tickets = (await admin.get("/api/projects/CRONK/tickets")).body.tickets;
+    expect(tickets.filter((t: { status: Status }) => t.status.id === qa.id)).toEqual([]);
+  });
 });

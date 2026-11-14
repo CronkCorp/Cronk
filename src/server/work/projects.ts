@@ -156,6 +156,33 @@ export async function moveStatus(db: Queryable, projectId: string, status: Statu
   return true;
 }
 
+/**
+ * One of a Project's Statuses, locked against removal until the transaction
+ * ends so a Ticket can move into it. Waits out a removal in progress, then
+ * returns undefined if the Status is gone.
+ */
+export async function findStatusToMoveInto(db: Queryable, projectId: string, statusId: string): Promise<Status | undefined> {
+  const { rows } = await db.query<Status>(
+    "SELECT id, name, category FROM statuses WHERE project_id = $1 AND id = $2 FOR KEY SHARE",
+    [projectId, statusId],
+  );
+  return rows[0];
+}
+
+/**
+ * Locks a Status so no Ticket can move into it until the transaction ends.
+ * Take it before checking which Tickets are in a Status you are removing.
+ */
+export async function lockStatus(db: Queryable, statusId: string): Promise<void> {
+  await db.query("SELECT 1 FROM statuses WHERE id = $1 FOR UPDATE", [statusId]);
+}
+
+/** How many Tickets are in a Status. */
+export async function countTicketsInStatus(db: Queryable, statusId: string): Promise<number> {
+  const { rows } = await db.query<{ count: number }>("SELECT count(*)::int AS count FROM tickets WHERE status_id = $1", [statusId]);
+  return rows[0]!.count;
+}
+
 /** Removes a Status no Ticket is in. Lock the Project first. */
 export async function deleteStatus(db: Queryable, statusId: string): Promise<void> {
   await db.query("DELETE FROM statuses WHERE id = $1", [statusId]);
