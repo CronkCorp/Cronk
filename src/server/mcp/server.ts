@@ -78,8 +78,8 @@ export function mcpRoutes(ctx: AppContext) {
       const connection = connections.get(sessionId);
       if (!connection) {
         // Not one this server holds (it restarted, say), so it can't go on: end it if it is the caller's.
-        await callApi(app, { token, sessionId }, "DELETE", "/api/agent-sessions/current");
-        return refuse(reply, 404, SESSION_ENDED);
+        const ended = await callApi(app, { token, sessionId }, "DELETE", "/api/agent-sessions/current");
+        return ended.status === 401 ? refuse(reply, 401, ended.body.error) : refuse(reply, 404, SESSION_ENDED);
       }
       // Anyone else naming the session is told it doesn't exist, and changes nothing.
       if (hashToken(token) !== connection.tokenHash) return refuse(reply, 404, SESSION_ENDED);
