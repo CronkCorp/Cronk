@@ -75,6 +75,25 @@ describe("An @mention of an Agent", () => {
     expect(await mentionedIn(cronk, bobsDesktop)).toHaveLength(1);
   });
 
+  it("doesn't count mentions inside code spans, code blocks or block quotes", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+
+    for (const body of [
+      "Run `@codex review` later.",
+      "```\n@codex review\n```",
+      "~~~sh\nnotify @codex\n~~~",
+      "Example:\n\n    @codex review",
+      "> @codex said this was fine.",
+      "> quoting\n> - @codex in a list",
+    ]) {
+      await admin.post("/api/tickets/CRONK-1/comments", { body });
+    }
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "> quoted\n\nBut **@codex**, look." });
+
+    expect(await mentionedIn(cronk, codex)).toEqual(["> quoted\n\nBut **@codex**, look."]);
+  });
+
   it("leaves out Agents that can't see where it was posted", async () => {
     const { cronk, admin } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");

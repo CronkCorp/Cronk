@@ -1,3 +1,5 @@
+import type { Nodes } from "mdast";
+import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
 import type { Queryable } from "../db/database.js";
@@ -47,17 +49,32 @@ export interface Mention {
  * The @mentions in a Comment's Markdown, without repeats: each `@name` or `@owner/name` not
  * preceded by a word character. A bare name runs of letters, digits, `_`, `-` and inner dots;
  * a name that contains anything else, such as spaces, goes in double quotes: `@"claude laptop"`.
+ * Mentions inside code spans, code blocks and block quotes don't count.
  */
 export function mentionsIn(body: string): Mention[] {
   const part = String.raw`"([^"\n]+)"|([\w-]+(?:\.[\w-]+)*)`;
   const pattern = new RegExp(String.raw`(?<![\w@])@(?:(?:${part})/)?(?:${part})`, "gu");
   const seen = new Map<string, Mention>();
-  for (const m of body.matchAll(pattern)) {
+  for (const m of proseOf(fromMarkdown(body)).matchAll(pattern)) {
     const owner = m[1] ?? m[2];
     const mention = { owner: owner?.trim().toLowerCase() ?? null, name: (m[3] ?? m[4])!.trim().toLowerCase() };
     seen.set(JSON.stringify(mention), mention);
   }
   return [...seen.values()];
+}
+
+/** Markdown nodes whose text is never prose: code, quotes of someone else, and raw HTML. */
+const NOT_PROSE = new Set(["code", "inlineCode", "blockquote", "html"]);
+
+/** Markdown nodes whose children run together on one line. */
+const INLINE = new Set(["paragraph", "heading", "tableCell", "emphasis", "strong", "delete", "link", "linkReference"]);
+
+/** The prose text of Markdown `node`, leaving out code and quotes; blocks go on lines of their own. */
+function proseOf(node: Nodes): string {
+  if (NOT_PROSE.has(node.type)) return " ";
+  if (node.type === "text") return node.value;
+  if (!("children" in node)) return "";
+  return node.children.map(proseOf).join(INLINE.has(node.type) ? "" : "\n");
 }
 
 /**
