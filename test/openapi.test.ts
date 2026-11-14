@@ -64,13 +64,16 @@ describe("the OpenAPI description", () => {
   it("describes the errors each operation can answer with the shared error shape", async () => {
     const doc = await openapi();
     const errorBody = { $ref: "#/components/schemas/Error" };
+    const staleBody = { $ref: "#/components/schemas/StaleVersion" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
       // Every operation that needs a sign-in or token can be refused without one, or for an ended Agent Session.
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        expect(op.responses[code].content["application/json"].schema, `${label} ${code}`).toEqual(errorBody);
+        // A stale save's refusal is the error shape plus the current Version.
+        const allowed = code === "409" ? [errorBody, staleBody] : [errorBody];
+        expect(allowed, `${label} ${code}`).toContainEqual(op.responses[code].content["application/json"].schema);
       }
     }
     const errorsOf = (path: string, method: string) => Object.keys(doc.paths[path][method].responses).filter((c) => c.startsWith("4"));
@@ -78,6 +81,7 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
     expect(errorsOf("/api/invitations/{token}", "get")).toEqual(["404"]);
+    expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toEqual(staleBody);
   });
 
   it("declares and describes every path parameter", async () => {

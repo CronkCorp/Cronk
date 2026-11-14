@@ -685,7 +685,7 @@ async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: 
 }
 
 /** The Project with this key, if `actor` has at least `need` in it (see `requireProjectAccess`). */
-async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
+export async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
   const project = await findProjectByKey(db, actingUser(actor).workspaceId, key);
   if (!project) throw new HttpError(404, "No such Project");
   return { project, access: await requireProjectAccess(db, actor, project, need) };
