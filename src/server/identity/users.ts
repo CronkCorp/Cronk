@@ -17,7 +17,7 @@ export function publicUser(user: User) {
   return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active };
 }
 
-interface UserRow {
+export interface UserRow {
   id: string;
   workspace_id: string;
   email: string;
@@ -27,7 +27,7 @@ interface UserRow {
   deactivated_at: Date | null;
 }
 
-function toUser(row: UserRow): User {
+export function toUser(row: UserRow): User {
   return {
     id: row.id,
     workspaceId: row.workspace_id,

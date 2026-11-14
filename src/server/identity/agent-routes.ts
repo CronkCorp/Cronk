@@ -37,8 +37,7 @@ export function agentRoutes(ctx: AppContext) {
     app.post<{ Body: { name: string } }>("/api/agents", { schema: { body: agentBody } }, async (request, reply) => {
       const user = await requireUser(ctx, request);
       const name = request.body.name.trim();
-      const agent = await insertAgent(ctx.db, { owner: user, name, now: ctx.clock.now() });
-      if (!agent) throw new HttpError(409, `You already have an Agent called ${name}`);
+      const agent = await refusingTakenName(name, insertAgent(ctx.db, { owner: user, name, now: ctx.clock.now() }));
       return reply.code(201).send({ agent: publicAgent(agent, user) });
     });
 
@@ -49,12 +48,7 @@ export function agentRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
         const name = request.body.name.trim();
-        try {
-          return { agent: publicAgent(await renameAgent(ctx.db, agent, name), user) };
-        } catch (err) {
-          if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new HttpError(409, `You already have an Agent called ${name}`);
-          throw err;
-        }
+        return { agent: publicAgent(await refusingTakenName(name, renameAgent(ctx.db, agent, name)), user) };
       },
     );
 
@@ -112,4 +106,14 @@ async function ownAgent(ctx: AppContext, user: User, id: string): Promise<Agent>
   if (!agent || (agent.ownerId !== user.id && user.role !== "admin")) throw new HttpError(404, "No such Agent");
   if (agent.ownerId !== user.id) throw new HttpError(403, "Only an Agent's Owner can change it");
   return agent;
+}
+
+/** Answers 409 when the Owner already has another Agent called `name`. */
+async function refusingTakenName(name: string, saving: Promise<Agent>): Promise<Agent> {
+  try {
+    return await saving;
+  } catch (err) {
+    if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new HttpError(409, `You already have an Agent called ${name}`);
+    throw err;
+  }
 }

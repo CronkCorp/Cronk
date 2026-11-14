@@ -1,4 +1,4 @@
-import { actingUser, type Actor } from "../actor.js";
+import { actingUser, type Actor, type AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import type { Visibility } from "../work/projects.js";
@@ -14,7 +14,7 @@ import type { User } from "./users.js";
 export type Access = "read" | "write";
 
 /** The most a Project (or the Workspace) lets Agents do in it. */
-export type AgentAccess = "none" | Access;
+export type AgentAccess = Level;
 
 /** The part of a Project access depends on. */
 export interface AccessTarget {
@@ -27,19 +27,28 @@ export interface AccessTarget {
  * What a User has in a Project. Admins have Write everywhere. A Member listed in a Project
  * has the access listed; otherwise an open Project gives them Write and a private one nothing.
  */
-function userAccess(user: User, project: AccessTarget, listed: Access | undefined): AgentAccess {
+function userAccess(user: User, project: AccessTarget, listed: Access | undefined): Level {
   if (user.role === "admin") return "write";
   if (listed) return listed;
   return project.visibility === "open" ? "write" : "none";
 }
 
-const RANK: Record<AgentAccess, number> = { none: 0, read: 1, write: 2 };
+/** How much an Actor may do somewhere: nothing, or some Access. */
+type Level = "none" | Access;
+
+const RANK: Record<Level, number> = { none: 0, read: 1, write: 2 };
 
 /** One thing limiting an Actor's access, with why it stops a write when it is Read. */
 interface Limit {
-  access: AgentAccess;
+  access: Level;
   readOnlyBecause: string;
 }
+
+/** An Agent's token: Write unless it is read-only. */
+const tokenLimit = (agent: AgentActor): Limit => ({
+  access: agent.readOnly ? "read" : "write",
+  readOnlyBecause: "This Agent's token is read-only",
+});
 
 /**
  * Everything limiting what `actor` may do in a Project; their access is the lowest. A User
@@ -50,14 +59,19 @@ function limitsOf(actor: Actor, project: AccessTarget, listed: Access | undefine
   const own = userAccess(actingUser(actor), project, listed);
   if (actor.kind === "user") return [{ access: own, readOnlyBecause: "You have Read access in this Project" }];
   return [
-    { access: actor.readOnly ? "read" : "write", readOnlyBecause: "This Agent's token is read-only" },
+    tokenLimit(actor),
     { access: project.agentAccess, readOnlyBecause: "This Project's Agent Access is Read" },
     { access: own, readOnlyBecause: "This Agent's Owner has Read access in this Project" },
   ];
 }
 
-const lowest = (limits: Limit[]): AgentAccess =>
-  limits.reduce<AgentAccess>((low, l) => (RANK[l.access] < RANK[low] ? l.access : low), "write");
+const lowest = (limits: Limit[]): Level => limits.reduce<Level>((low, l) => (RANK[l.access] < RANK[low] ? l.access : low), "write");
+
+/** Refuses a write when any limit is Read, saying which. */
+function requireWritable(limits: Limit[], need: Access): void {
+  const blocking = need === "write" && limits.find((l) => l.access === "read");
+  if (blocking) throw new HttpError(403, `${blocking.readOnlyBecause}, so you can't change anything in it`);
+}
 
 /**
  * Checks that `actor` has at least `need` in `project` and returns what they have.
@@ -78,8 +92,7 @@ export async function requireProjectAccess(
   const limits = limitsOf(actor, project, rows[0]?.access);
   const access = lowest(limits);
   if (access === "none") throw new HttpError(404, hiddenAs);
-  const blocking = need === "write" && limits.find((l) => l.access === "read");
-  if (blocking) throw new HttpError(403, `${blocking.readOnlyBecause}, so you can't change anything in it`);
+  requireWritable(limits, need);
   return access;
 }
 
@@ -105,12 +118,11 @@ export async function requireWorkspaceAccess(db: Queryable, actor: Actor, need: 
   if (actor.kind === "user") return;
   const workspace = await getWorkspace(db, actor.owner.workspaceId);
   const limits: Limit[] = [
-    { access: actor.readOnly ? "read" : "write", readOnlyBecause: "This Agent's token is read-only" },
+    tokenLimit(actor),
     { access: workspace.agentAccess, readOnlyBecause: "The Workspace's Agent Access is Read" },
   ];
   if (lowest(limits) === "none") throw new HttpError(403, "The Workspace's Agent Access is None, so Agents can't use it");
-  const blocking = need === "write" && limits.find((l) => l.access === "read");
-  if (blocking) throw new HttpError(403, `${blocking.readOnlyBecause}, so you can't change anything in it`);
+  requireWritable(limits, need);
 }
 
 /** Refuses anyone but an Admin; an Agent never is one, even if its Owner is. `what` completes "Only an Admin can …". */
