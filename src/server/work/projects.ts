@@ -156,6 +156,11 @@ export async function moveStatus(db: Queryable, projectId: string, status: Statu
   return true;
 }
 
+/** Removes a Status no Ticket is in. Lock the Project first. */
+export async function deleteStatus(db: Queryable, statusId: string): Promise<void> {
+  await db.query("DELETE FROM statuses WHERE id = $1", [statusId]);
+}
+
 /** Renames and/or archives or restores a Project. Its key never changes, since Ticket keys are built from it. */
 export async function updateProject(
   db: Queryable,

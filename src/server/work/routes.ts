@@ -5,6 +5,7 @@ import { nameSchema } from "../schemas.js";
 import { userActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import {
+  deleteStatus,
   findProjectByKey,
   insertProject,
   insertStatus,
@@ -147,6 +148,21 @@ export function workRoutes(ctx: AppContext) {
         return { status };
       },
     );
+
+    app.delete<{ Params: { key: string; statusId: string } }>("/api/projects/:key/statuses/:statusId", async (request, reply) => {
+      const user = await requireUser(ctx, request);
+      await transaction(ctx.db, async (tx) => {
+        const project = await projectOr404(tx, user.workspaceId, request.params.key);
+        await lockProject(tx, project.id);
+        const all = await listStatuses(tx, project.id);
+        const status = await statusOr404(tx, project, request.params.statusId);
+        if (!all.some((s) => s.category === status.category && s.id !== status.id)) {
+          throw new HttpError(409, `${status.name} is the last Status of its Status Category, which needs at least one`);
+        }
+        await deleteStatus(tx, status.id);
+      });
+      return reply.code(204).send();
+    });
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/tickets", async (request) => {
       const user = await requireUser(ctx, request);

@@ -108,4 +108,30 @@ describe("Statuses", () => {
     expect((await admin.patch(`/api/projects/CRONK/statuses/${triage.id}`, { position: -1 })).status).toBe(400);
     expect(names(await statuses(admin)).slice(0, 4)).toEqual(["Backlog", "Icebox", "Triage", "Todo"]);
   });
+
+  it("can be removed when no Ticket is in them", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
+
+    const removed = await admin.delete(`/api/projects/CRONK/statuses/${qa.id}`);
+    expect(removed.status).toBe(204);
+    expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled"]);
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${qa.id}`)).status).toBe(404);
+  });
+
+  it("can't remove the last Status of a Status Category", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const done = await statusNamed(admin, "Done");
+
+    const refused = await admin.delete(`/api/projects/CRONK/statuses/${done.id}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/last/);
+
+    const shipped = (await admin.post("/api/projects/CRONK/statuses", { name: "Shipped", category: "completed" })).body.status;
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${done.id}`)).status).toBe(204);
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${shipped.id}`)).status).toBe(409);
+    expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In Review", "Shipped", "Canceled"]);
+  });
 });
