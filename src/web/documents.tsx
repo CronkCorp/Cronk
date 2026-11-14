@@ -22,19 +22,30 @@ function useCanWrite(projectKey: string | null | undefined): boolean {
   return project.kind === "loaded" && project.value?.project.access === "write";
 }
 
-function Breadcrumb(props: { projectKey: string | null | undefined; children?: ReactNode }) {
+/** The way back to a Project, optionally followed by more crumbs. */
+function ProjectCrumbs(props: { projectKey: string; children?: ReactNode }) {
   return (
     <div className="muted">
-      {props.projectKey ? (
-        <>
-          <Link to="/" className="link">Projects</Link> / <Link to={`/projects/${props.projectKey}`} className="link">{props.projectKey}</Link> /{" "}
-          <Link to={treeAddress(props.projectKey)} className="link">Documents</Link>
-        </>
-      ) : (
-        <Link to="/documents" className="link">Workspace Documents</Link>
-      )}
+      <Link to="/" className="link">Projects</Link> / <Link to={`/projects/${props.projectKey}`} className="link">{props.projectKey}</Link>
       {props.children}
     </div>
+  );
+}
+
+/** The way back to the page tree a Document sits in. */
+function Breadcrumb(props: { projectKey: string | null }) {
+  if (!props.projectKey) {
+    return (
+      <div className="muted">
+        <Link to="/documents" className="link">Workspace Documents</Link>
+      </div>
+    );
+  }
+  return (
+    <ProjectCrumbs projectKey={props.projectKey}>
+      {" / "}
+      <Link to={treeAddress(props.projectKey)} className="link">Documents</Link>
+    </ProjectCrumbs>
   );
 }
 
@@ -47,11 +58,7 @@ export function DocumentsPage(props: { projectKey?: string }) {
     <section>
       <div className="page-head">
         <div>
-          {props.projectKey && (
-            <div className="muted">
-              <Link to="/" className="link">Projects</Link> / <Link to={`/projects/${props.projectKey}`} className="link">{props.projectKey}</Link>
-            </div>
-          )}
+          {props.projectKey && <ProjectCrumbs projectKey={props.projectKey} />}
           <h1>{props.projectKey ? "Documents" : "Workspace Documents"}</h1>
         </div>
         {canWrite && !creating && (
@@ -90,7 +97,7 @@ function NewDocument(props: { projectKey: string | undefined; parentId?: string;
   );
   return (
     <section className="panel">
-      <h2>{props.parentId ? "New sub-Document" : "New Document"}</h2>
+      <h2>{props.parentId ? "New Document under this one" : "New Document"}</h2>
       <form onSubmit={submit}>
         <Field label="Title" value={title} onChange={setTitle} />
         {error && <p className="error" role="alert">{error}</p>}
@@ -103,6 +110,7 @@ function NewDocument(props: { projectKey: string | undefined; parentId?: string;
   );
 }
 
+/** One Document at its current Version, to read, edit, move, delete, and see or restore its Versions. */
 export function DocumentPage(props: { id: string; edit: boolean }) {
   const [document, reload, setDocument] = useLoad(() => api.document(props.id), [props.id]);
   return (
@@ -150,7 +158,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               {canWrite && (
                 <>
                   <button className="secondary" onClick={() => toggle("move")}>Move</button>
-                  <button className="secondary" onClick={() => toggle("new")}>New sub-Document</button>
+                  <button className="secondary" onClick={() => toggle("new")}>New Document under this one</button>
                   <button className="secondary" onClick={() => void remove.run()} disabled={remove.busy}>Delete</button>
                   <button onClick={() => setPanel("edit")}>Edit</button>
                 </>

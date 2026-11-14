@@ -41,6 +41,7 @@ export type SharedSchemaName =
   | "Relations"
   | "RecordedChange"
   | "Document"
+  | "DocumentTreeEntry"
   | "Version"
   | "VersionSummary"
   | "StaleVersion";
@@ -214,6 +215,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
       createdAt: timestamp,
       updatedAt: timestamp,
+    }),
+  },
+  DocumentTreeEntry: {
+    description: "A Document as its page tree lists it.",
+    ...object({
+      id,
+      parentId: { ...nullable(id), description: "The Document it sits under; null at the top." },
+      title: { type: "string" },
+      depth: { type: "integer", description: "How deep it sits: 0 at the top." },
     }),
   },
   Version: {

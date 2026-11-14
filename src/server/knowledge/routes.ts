@@ -2,10 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
-import { projectFor } from "../work/routes.js";
 import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 
 /** A Document title: non-blank, at most 500 characters. */
@@ -26,16 +25,7 @@ const staleVersionAnswer = {
 };
 
 /** A page tree: its Documents depth first, each followed by those under it. */
-const treeAnswer = listing("documents", {
-  type: "object",
-  required: ["id", "parentId", "title", "depth"],
-  properties: {
-    id: { type: "string", format: "uuid" },
-    parentId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
-    title: { type: "string" },
-    depth: { type: "integer", description: "How deep it sits: 0 at the top." },
-  },
-});
+const treeAnswer = listing("documents", ref("DocumentTreeEntry"));
 
 const projectParams = pathParams({ key: projectKeyParam });
 const documentParams = pathParams({ id: documentIdParam });
@@ -269,7 +259,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const document = await documentFor(ctx.db, actor, request.params.id, "read");
-        return { version: await versionOr404(ctx.db, document, request.params.number) };
+        return { version: await requireVersion(ctx.db, document, request.params.number) };
       },
     );
 
@@ -290,7 +280,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
-          const earlier = await versionOr404(tx, current, request.params.number);
+          const earlier = await requireVersion(tx, current, request.params.number);
           await requireCurrent(tx, current, request.body.baseVersion);
           return saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
         });
@@ -305,7 +295,8 @@ const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId
 
 const notInTree = () => new HttpError(400, "The parent must be a Document of the same page tree");
 
-async function versionOr404(db: Queryable, document: Document, number: string): Promise<Version> {
+/** One of a Document's Versions by its number in the path; a 404 if it has no such Version. */
+async function requireVersion(db: Queryable, document: Document, number: string): Promise<Version> {
   const version = await findVersion(db, document.id, Number(number));
   if (!version) throw new HttpError(404, "No such Version");
   return version;

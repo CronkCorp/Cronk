@@ -45,6 +45,7 @@ export interface RecordedActorRow {
   session_id: string | null;
 }
 
+/** The Actor a history row records, from the columns `RecordedActorRow` names. */
 export function toRecordedActor(row: RecordedActorRow): RecordedActor {
   const user = { id: row.user_id, name: row.user_name };
   if (row.agent_id === null) return { kind: "user", ...user };
