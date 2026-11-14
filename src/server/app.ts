@@ -28,6 +28,10 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     throw err;
   });
   await app.register(cookie);
+  app.get("/api/health", async () => {
+    await db.query("SELECT 1");
+    return { status: "ok" };
+  });
   await app.register(identityRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   return app;
