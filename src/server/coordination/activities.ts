@@ -1,0 +1,73 @@
+import type { AgentActor } from "../actor.js";
+import type { Queryable } from "../db/database.js";
+import type { ActivityKind } from "../../shared/values.js";
+
+/**
+ * One timestamped entry an Agent Session writes on a Ticket while holding its Claim: a plan,
+ * progress, finding, question or error. Only a question may be blocking. The body is Markdown.
+ */
+export interface Activity {
+  id: string;
+  ticketKey: string;
+  kind: ActivityKind;
+  body: string;
+  blocking: boolean;
+  at: Date;
+  agent: { id: string; name: string; owner: { id: string; name: string } };
+  session: { id: string };
+}
+
+interface ActivityRow {
+  id: string;
+  ticket_key: string;
+  kind: ActivityKind;
+  body: string;
+  blocking: boolean;
+  at: Date;
+  agent_id: string;
+  agent_name: string;
+  owner_id: string;
+  owner_name: string;
+  session_id: string;
+}
+
+const SELECT = `
+  SELECT v.id, p.key || '-' || t.number AS ticket_key, v.kind, v.body, v.blocking, v.at,
+    a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id
+  FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN projects p ON p.id = t.project_id
+    JOIN agents a ON a.id = v.actor_agent_id JOIN users u ON u.id = v.actor_user_id`;
+
+const toActivity = (row: ActivityRow): Activity => ({
+  id: row.id,
+  ticketKey: row.ticket_key,
+  kind: row.kind,
+  body: row.body,
+  blocking: row.blocking,
+  at: row.at,
+  agent: { id: row.agent_id, name: row.agent_name, owner: { id: row.owner_id, name: row.owner_name } },
+  session: { id: row.session_id },
+});
+
+/** Records an Activity the Agent Session `agent.session` wrote on the Ticket. Callers check it holds the Claim. */
+export async function insertActivity(
+  db: Queryable,
+  ticketId: string,
+  agent: AgentActor & { session: { id: string } },
+  input: { kind: ActivityKind; body: string; blocking: boolean },
+  at: Date,
+): Promise<Activity> {
+  const { rows } = await db.query<ActivityRow>(
+    `WITH v AS (
+       INSERT INTO activities (ticket_id, kind, body, blocking, at, actor_user_id, actor_agent_id, actor_session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *)
+     ${SELECT.replace("FROM activities v", "FROM v")}`,
+    [ticketId, input.kind, input.body, input.blocking, at, agent.owner.id, agent.agent.id, agent.session.id],
+  );
+  return toActivity(rows[0]!);
+}
+
+/** A Ticket's Activities, oldest first. */
+export async function listActivities(db: Queryable, ticketId: string): Promise<Activity[]> {
+  const { rows } = await db.query<ActivityRow>(`${SELECT} WHERE v.ticket_id = $1 ORDER BY v.seq`, [ticketId]);
+  return rows.map(toActivity);
+}
