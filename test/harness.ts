@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 import tar from "tar-stream";
 import { inject, onTestFinished } from "vitest";
@@ -425,6 +425,56 @@ export async function startSession(cronk: Cronk, secret: string): Promise<Client
   if (started.status !== 201) throw new Error(`Starting a Session failed: ${JSON.stringify(started.body)}`);
   const sessionId: string = started.body.session.id;
   return Object.assign(cronk.client(secret, { "cronk-agent-session": sessionId }), { sessionId });
+}
+
+/**
+ * A zip archive holding `files` (path to text; a path ending in `/` is a folder entry), as a file manager's
+ * "Compress" makes of a folder: each file deflated, or stored when `stored` is set.
+ */
+export function zip(files: Record<string, string>, { stored = false } = {}): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const nameBytes = Buffer.from(name, "utf8");
+    const data = Buffer.from(text, "utf8");
+    const method = stored || name.endsWith("/") ? 0 : 8;
+    const packed = method === 8 ? deflateRawSync(data) : data;
+    const header = (signature: number, size: number) => {
+      const b = Buffer.alloc(size);
+      b.writeUInt32LE(signature, 0);
+      return b;
+    };
+    const local = header(0x04034b50, 30);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(0x0800, 6); // UTF-8 names
+    local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(crc32(data), 14);
+    local.writeUInt32LE(packed.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    const central = header(0x02014b50, 46);
+    central.writeUInt16LE(20, 4); // version made by
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(method, 10);
+    central.writeUInt32LE(crc32(data), 16);
+    central.writeUInt32LE(packed.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, nameBytes, packed);
+    centrals.push(central, nameBytes);
+    offset += local.length + nameBytes.length + packed.length;
+  }
+  const directory = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(centrals.length / 2, 8);
+  end.writeUInt16LE(centrals.length / 2, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, directory, end]);
 }
 
 /** A gzipped tar archive holding `files` (path to text), as `tar czf` makes of a folder. */

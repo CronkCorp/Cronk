@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, startInstalledCronk, tarGz } from "./harness.js";
+import { joinAs, startInstalledCronk, tarGz, zip } from "./harness.js";
 
 /** A page tree as `title` (depth by indentation), for comparing arrangements at a glance. */
 const outline = (documents: { title: string; depth: number }[]) => documents.map((d) => `${"  ".repeat(d.depth)}${d.title}`);
@@ -30,6 +30,35 @@ describe("importing a folder of Markdown files", () => {
     expect((await admin.get(`/api/documents/${byTitle("notes")}`)).body.document.body).toBe("");
   });
 
+  it("takes the same folder as a zip, as a file manager compresses it", async () => {
+    const files = {
+      "docs/handbook/README.md": "# Handbook\n\nWelcome aboard.",
+      "docs/handbook/setup.md": "---\ntitle: Setting up\n---\nInstall it.\n",
+      "docs/notes/2-later.md": "# Later",
+      "docs/notes/10-much-later.md": "# Much later",
+    };
+    const asTar = await startInstalledCronk();
+    const fromTar = await asTar.admin.upload("/api/workspace/documents/import", await tarGz(files));
+    const { admin } = await startInstalledCronk();
+
+    const res = await admin.upload(
+      "/api/workspace/documents/import",
+      zip({
+        "docs/": "",
+        "docs/handbook/": "",
+        ...files,
+        "docs/.DS_Store": "clutter",
+        "__MACOSX/docs/._README.md": "clutter",
+      }),
+      "application/zip",
+    );
+    expect(res.status).toBe(201);
+    expect(outline(res.body.documents)).toEqual(outline(fromTar.body.documents));
+    expect(outline(res.body.documents)).toEqual(["Handbook", "  Setting up", "notes", "  Later", "  Much later"]);
+    const handbook = res.body.documents.find((d: { title: string }) => d.title === "Handbook").id;
+    expect((await admin.get(`/api/documents/${handbook}`)).body.document.body).toBe("# Handbook\n\nWelcome aboard.");
+  });
+
   it("imports into the Workspace's page tree too", async () => {
     const { admin } = await startInstalledCronk();
 
@@ -48,6 +77,9 @@ describe("importing a folder of Markdown files", () => {
     expect((await member.upload("/api/projects/CRONK/documents/import", await tarGz({ "a.md": "A" }))).status).toBe(403);
     const garbage = await admin.upload("/api/projects/CRONK/documents/import", Buffer.from("this is not a tarball"));
     expect(garbage.status).toBe(400);
+    const damaged = zip({ "a.md": "A".repeat(1000) });
+    const cut = await admin.upload("/api/projects/CRONK/documents/import", Buffer.concat([damaged.subarray(0, 40), damaged.subarray(-22)]), "application/zip");
+    expect(cut.status).toBe(400);
     expect(outline((await admin.get("/api/projects/CRONK/documents")).body.documents)).toEqual([]);
   });
 });
