@@ -19,6 +19,8 @@ import {
   insertTicket,
   listHistory,
   listLabels,
+  listSubTickets,
+  wouldNestUnderItself,
   normalizeLabels,
   listTickets,
   PRIORITIES,
@@ -144,10 +146,11 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key", async (request) => {
       const user = await requireUser(ctx, request);
-      return { ticket: await ticketOr404(ctx, user.workspaceId, request.params.key) };
+      const ticket = await ticketOr404(ctx, user.workspaceId, request.params.key);
+      return { ticket, subTickets: await listSubTickets(ctx.db, ticket.id) };
     });
 
-    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[]; assigneeId?: string | null } }>(
+    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[]; assigneeId?: string | null; parentKey?: string | null } }>(
       "/api/tickets/:key",
       {
         schema: {
@@ -161,13 +164,14 @@ export function workRoutes(ctx: AppContext) {
               priority: { type: "string", enum: PRIORITIES },
               labels: { type: "array", maxItems: 20, items: label },
               assigneeId: { type: ["string", "null"], format: "uuid" },
+              parentKey: { type: ["string", "null"], maxLength: 30 },
             },
           },
         },
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const { title, description, statusId, priority, labels, assigneeId } = request.body;
+        const { title, description, statusId, priority, labels, assigneeId, parentKey } = request.body;
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await findTicketByKey(tx, user.workspaceId, request.params.key, { forUpdate: true });
           if (!ticket) throw new HttpError(404, "No such Ticket");
@@ -183,6 +187,7 @@ export function workRoutes(ctx: AppContext) {
             changes.status = status;
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await workspaceUser(tx, user.workspaceId, assigneeId);
+          if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, user.workspaceId, ticket, parentKey);
           return updateTicket(tx, ticket, changes, userActor(user), ctx.clock.now());
         });
         return { ticket };
@@ -202,6 +207,17 @@ async function workspaceUser(db: Queryable, workspaceId: string, id: string): Pr
   const found = await findUserById(db, id);
   if (!found || found.workspaceId !== workspaceId) throw new HttpError(400, "No such User");
   return { id: found.id, name: found.name };
+}
+
+/** The Ticket `key` names, if it may become the parent of `ticket`; otherwise a 400 or 409. */
+async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key: string): Promise<Ticket> {
+  const parent = await findTicketByKey(tx, workspaceId, key);
+  if (!parent || parent.projectId !== ticket.projectId) throw new HttpError(400, "The parent must be a Ticket of the same Project");
+  if (parent.id === ticket.id) throw new HttpError(400, "A Ticket can't be its own parent");
+  if (await wouldNestUnderItself(tx, ticket, parent)) {
+    throw new HttpError(409, `${parent.key} is a Sub-Ticket of ${ticket.key}, so it can't be its parent`);
+  }
+  return parent;
 }
 
 async function projectOr404(db: Queryable, workspaceId: string, key: string): Promise<Project> {

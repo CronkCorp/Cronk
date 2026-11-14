@@ -12,6 +12,19 @@ export interface UserRef {
   name: string;
 }
 
+/** A Ticket's parent, as the Sub-Ticket shows it. */
+export interface ParentRef {
+  key: string;
+  title: string;
+}
+
+/** Another Ticket, as a Ticket lists it among its Sub-Tickets or relations. */
+export interface TicketRef {
+  key: string;
+  title: string;
+  status: Status;
+}
+
 export interface Ticket {
   id: string;
   projectId: string;
@@ -24,6 +37,8 @@ export interface Ticket {
   priority: Priority;
   labels: string[];
   assignee: UserRef | null;
+  /** Set on a Sub-Ticket. */
+  parent: ParentRef | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +57,8 @@ interface TicketRow {
   labels: string[];
   assignee_id: string | null;
   assignee_name: string | null;
+  parent_number: number | null;
+  parent_title: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -58,6 +75,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   priority: row.priority,
   labels: row.labels,
   assignee: row.assignee_id === null ? null : { id: row.assignee_id, name: row.assignee_name! },
+  parent: row.parent_number === null ? null : { key: `${row.project_key}-${row.parent_number}`, title: row.parent_title! },
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -65,9 +83,9 @@ const toTicket = (row: TicketRow): Ticket => ({
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
-         a.id AS assignee_id, a.name AS assignee_name
+         a.id AS assignee_id, a.name AS assignee_name, pt.number AS parent_number, pt.title AS parent_title
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
-  LEFT JOIN users a ON a.id = t.assignee_id`;
+  LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN tickets pt ON pt.id = t.parent_id`;
 
 /**
  * Creates a Ticket with the Project's next number and records it in the history.
@@ -132,6 +150,8 @@ export interface TicketEdit {
   labels?: string[];
   /** A User of the Ticket's Workspace, or null to leave it unassigned. */
   assignee?: UserRef | null;
+  /** A Ticket of the same Project that isn't this one or below it (see `wouldNestUnderItself`), or null. */
+  parent?: Ticket | null;
 }
 
 /**
@@ -164,6 +184,11 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
   if (changes.assignee !== undefined && changes.assignee?.id !== ticket.assignee?.id) {
     recorded.push({ change: "assignee", from: ticket.assignee, to: changes.assignee });
     columns.push(["assignee_id", changes.assignee?.id ?? null]);
+  }
+  if (changes.parent !== undefined && changes.parent?.key !== ticket.parent?.key) {
+    const to = changes.parent && { key: changes.parent.key, title: changes.parent.title };
+    recorded.push({ change: "parent", from: ticket.parent, to });
+    columns.push(["parent_id", changes.parent?.id ?? null]);
   }
   if (recorded.length === 0) return ticket;
 
@@ -198,7 +223,8 @@ export type TicketChange =
   | { change: "status"; from: Status; to: Status }
   | { change: "priority"; from: Priority; to: Priority }
   | { change: "labels"; from: string[]; to: string[] }
-  | { change: "assignee"; from: UserRef | null; to: UserRef | null };
+  | { change: "assignee"; from: UserRef | null; to: UserRef | null }
+  | { change: "parent"; from: ParentRef | null; to: ParentRef | null };
 
 export type RecordedChange = { at: Date; actor: { kind: "user"; id: string; name: string } } & TicketChange;
 
@@ -238,3 +264,29 @@ export async function listLabels(db: Queryable, projectId: string): Promise<stri
   );
   return rows.map((r) => r.label);
 }
+
+/**
+ * Whether making `parent` the parent of `ticket` would put the Ticket below
+ * itself. Takes a lock on the Project's parents first, so concurrent moves
+ * can't make a loop between them. Run inside a transaction.
+ */
+export async function wouldNestUnderItself(db: Queryable, ticket: Ticket, parent: Ticket): Promise<boolean> {
+  await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`ticket-parents:${ticket.projectId}`]);
+  const { rows } = await db.query(
+    `WITH RECURSIVE ancestors(id) AS (
+       SELECT $1::uuid
+       UNION SELECT t.parent_id FROM tickets t JOIN ancestors a ON t.id = a.id WHERE t.parent_id IS NOT NULL
+     )
+     SELECT 1 FROM ancestors WHERE id = $2`,
+    [parent.id, ticket.id],
+  );
+  return rows.length > 0;
+}
+
+/** A Ticket's Sub-Tickets in key order. */
+export async function listSubTickets(db: Queryable, ticketId: string): Promise<TicketRef[]> {
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.parent_id = $1 ORDER BY t.number`, [ticketId]);
+  return rows.map(toTicket).map(toRef);
+}
+
+export const toRef = (ticket: Ticket): TicketRef => ({ key: ticket.key, title: ticket.title, status: ticket.status });

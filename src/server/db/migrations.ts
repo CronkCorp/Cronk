@@ -95,7 +95,10 @@ export const migrations: Migration[] = [
         ADD COLUMN priority text NOT NULL DEFAULT 'none' CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
         -- Free-form, in the order given; never two that differ only in case.
         ADD COLUMN labels text[] NOT NULL DEFAULT '{}',
-        ADD COLUMN assignee_id uuid REFERENCES users(id);
+        ADD COLUMN assignee_id uuid REFERENCES users(id),
+        -- Set on a Sub-Ticket: its parent, always in the same Project.
+        ADD COLUMN parent_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      CREATE INDEX tickets_parent ON tickets (parent_id);
     `,
   },
 ];
