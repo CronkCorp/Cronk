@@ -5,7 +5,7 @@ import { visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listTicketReports, type Report } from "../knowledge/reports.js";
-import { listProjects } from "../work/projects.js";
+import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, type Ticket, type TicketRef } from "../work/tickets.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 
@@ -30,8 +30,10 @@ export interface QuestionItem {
   ticket: TicketRef;
 }
 
+/** One item waiting on a User. */
 export type InboxItem = ReviewItem | QuestionItem;
 
+/** The kinds of Inbox item, which the Inbox filters by. */
 export const INBOX_KINDS = ["review", "question"] as const;
 
 /** Narrows the Inbox: an item matches when, for every field given, it has one of that field's values. */
@@ -92,7 +94,7 @@ export function inboxesChanged(live: LiveUpdates, userIds: (string | null | unde
 /** Ids of the Projects, archived or not, `user` can see; only those with one of `keys`, if given. */
 async function visibleProjectIds(db: Queryable, user: User, keys?: string[]): Promise<string[]> {
   const wanted = keys?.length ? new Set(keys.map((k) => k.toUpperCase())) : undefined;
-  const projects = [...(await listProjects(db, user.workspaceId, false)), ...(await listProjects(db, user.workspaceId, true))].filter(
+  const projects = (await listAllProjects(db, user.workspaceId)).filter(
     (p) => !wanted || wanted.has(p.key),
   );
   return (await visibleProjects(db, userActor(user), projects)).map((p) => p.id);

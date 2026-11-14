@@ -11,7 +11,7 @@ const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "
 export function inboxFilterFrom(search: URLSearchParams): InboxFilter {
   const kind = search.get("kind");
   return {
-    ...(kind === "question" || kind === "review" ? { kind } : {}),
+    ...(kind && kind in KIND_NAMES ? { kind: kind as InboxKind } : {}),
     ...(search.get("project") ? { project: search.get("project")! } : {}),
     ...(search.get("agent") ? { agent: search.get("agent")! } : {}),
   };
