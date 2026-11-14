@@ -6,6 +6,7 @@ import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access }
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -175,6 +176,89 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { id: string }; Body: { baseVersion: number; heading: string; body: string } }>(
+      "/api/documents/:id/replace-section",
+      {
+        schema: {
+          params: documentParams,
+          body: {
+            type: "object",
+            required: ["baseVersion", "heading", "body"],
+            additionalProperties: false,
+            properties: {
+              baseVersion,
+              heading: {
+                type: "string",
+                minLength: 1,
+                maxLength: 500,
+                pattern: "\\S",
+                description: "The section's heading text, such as `Setup`; put its `#` marks first, such as `## Setup`, to pick one of several headings with that text.",
+              },
+              body: {
+                ...body,
+                description:
+                  "The Markdown to put under the heading, replacing everything down to the next heading of the same or a higher level; the heading itself stays. " +
+                  "It may hold lower-level headings, but none of the section's level or higher, and must close any code block it opens.",
+              },
+            },
+          },
+          response: {
+            200: answer("The Document at its new Version; unchanged if the replacement changed nothing", holding("document", "Document")),
+            ...errors(401, 403, 410),
+            400: {
+              description:
+                "The request is invalid: several sections have that heading (the Document's headings are listed), or the new body would end the section or leave a code block open",
+              ...ref("SectionRefused"),
+            },
+            404: { description: "There is no such Document, or it has no section with that heading, in which case its headings are listed", ...ref("SectionRefused") },
+            409: staleVersionAnswer,
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await transaction(ctx.db, async (tx) => {
+          const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireCurrent(tx, current, request.body.baseVersion, "save");
+          const replaced = replaceSection(current.body, request.body.heading, request.body.body);
+          if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
+          return saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
+        });
+        return { document };
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: { baseVersion: number; title?: string; body?: string } }>(
+      "/api/documents/:id/merge",
+      {
+        schema: {
+          params: documentParams,
+          body: {
+            type: "object",
+            required: ["baseVersion"],
+            additionalProperties: false,
+            properties: {
+              baseVersion: { ...baseVersion, description: "The number of the Version the edit started from." },
+              title: { ...title, description: "The edited title; the base Version's if left out." },
+              body: { ...body, description: "The edited Markdown; the base Version's if left out." },
+            },
+          },
+          response: {
+            200: answer("The edit merged section by section with the current Version; nothing is saved", holding("merge", "Merge")),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await documentFor(ctx.db, actor, request.params.id, "read");
+        const base = await requireVersion(ctx.db, document, String(request.body.baseVersion));
+        const onto = (await findVersion(ctx.db, document.id, document.version))!;
+        const mine = { title: request.body.title?.trim() ?? base.title, body: request.body.body ?? base.body };
+        return { merge: { onto, ...mergeEdits(base, mine, onto) } };
+      },
+    );
+
     app.post<{ Params: { id: string }; Body: { parentId: string | null; position?: number } }>(
       "/api/documents/:id/move",
       {
@@ -306,6 +390,24 @@ export function knowledgeRoutes(ctx: AppContext) {
 
 /** The page tree of a Project in the Actor's Workspace, or the Workspace's own with a null `projectId`. */
 const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId });
+
+/** Refuses a section replacement, listing the Document's headings so the caller can pick one. */
+function sectionRefused(document: Document, heading: string, refusal: SectionRefusal): HttpError {
+  const headings = headingsIn(document.body);
+  if (refusal.refused === "open code block") {
+    return new HttpError(400, "The new body leaves a code block open, which would swallow the rest of the Document; close it");
+  }
+  if (refusal.refused === "ends the section") {
+    return new HttpError(
+      400,
+      `The new body has the heading “${refusal.heading}”, which would end the section “${heading.trim()}” and start another; use update to change more than one section`,
+    );
+  }
+  if (refusal.refused === "ambiguous") {
+    return new HttpError(400, `${refusal.matches} sections of ${document.title} are headed “${heading.trim()}”; put the heading's # marks first to pick one`, { headings });
+  }
+  return new HttpError(404, `${document.title} has no section headed “${heading.trim()}”`, { headings });
+}
 
 const notInTree = () => new HttpError(400, "The parent must be a Document of the same page tree");
 

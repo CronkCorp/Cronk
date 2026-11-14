@@ -67,6 +67,7 @@ describe("the OpenAPI description", () => {
     const errorBody = { $ref: "#/components/schemas/Error" };
     const staleBody = { $ref: "#/components/schemas/StaleVersion" };
     const staleGuidanceBody = { $ref: "#/components/schemas/StaleGuidance" };
+    const sectionBody = { $ref: "#/components/schemas/SectionRefused" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
       // Every operation that needs a sign-in or token can be refused without one, or for an ended Agent Session.
@@ -76,9 +77,15 @@ describe("the OpenAPI description", () => {
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
         // A stale save's refusal is the error shape plus the current Version (of a Document or of Guidance);
-        // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons.
+        // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons;
+        // a refused section heading's is the error shape plus the Document's headings.
+        const refusesSections = label === "POST /api/documents/{id}/replace-section" && ["400", "404"].includes(code);
         const allowed =
-          code === "409" ? [errorBody, staleBody, staleGuidanceBody, expect.objectContaining({ anyOf: [staleBody, errorBody] })] : [errorBody];
+          code === "409"
+            ? [errorBody, staleBody, staleGuidanceBody, expect.objectContaining({ anyOf: [staleBody, errorBody] })]
+            : refusesSections
+              ? [errorBody, sectionBody]
+              : [errorBody];
         expect(allowed, `${label} ${code}`).toContainEqual(op.responses[code].content["application/json"].schema);
       }
     }
