@@ -12,6 +12,7 @@ import type {
   Document,
   DocumentTreeEntry,
   Guidance,
+  GuidanceMerge,
   GuidanceVersion,
   IssuedAgentToken,
   Invitation,
@@ -55,6 +56,7 @@ export type {
   Document,
   DocumentTreeEntry,
   Guidance,
+  GuidanceMerge,
   GuidanceVersion,
   IssuedAgentToken,
   Invitation,
@@ -150,6 +152,9 @@ export const api = {
   /** Refused with a 409 whose body holds the `current` Guidance if someone saved since `baseVersion`. */
   saveGuidance: (projectKey: string | undefined, input: { markdown: string; baseVersion: number }) =>
     request<{ guidance: Guidance }>("PUT", guidancePath(projectKey), input).then((r) => r.guidance),
+  /** Merges an edit started from `baseVersion` with the current Guidance, section by section, without saving. */
+  mergeGuidance: (projectKey: string | undefined, input: { markdown: string; baseVersion: number }) =>
+    request<{ merge: GuidanceMerge }>("POST", `${guidancePath(projectKey)}/merge`, input).then((r) => r.merge),
 
   agents: (all = false) => request<{ agents: Agent[] }>("GET", `/api/agents${all ? "?all=true" : ""}`).then((r) => r.agents),
   createAgent: (name: string) => request<{ agent: Agent }>("POST", "/api/agents", { name }).then((r) => r.agent),
