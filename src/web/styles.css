@@ -45,6 +45,8 @@ button { font: inherit; cursor: pointer; border: none; border-radius: 6px; paddi
 button:disabled { opacity: 0.6; cursor: default; }
 button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 button.link { background: none; color: var(--accent); padding: 4px 6px; }
+.button { display: inline-block; cursor: pointer; border-radius: 6px; padding: 8px 14px; text-decoration: none; }
+.button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 form button[type="submit"] { width: 100%; }
 .actions { display: flex; gap: 8px; }
 .actions button[type="submit"] { width: auto; }
