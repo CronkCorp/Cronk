@@ -27,7 +27,7 @@ import {
   publicInvitation,
 } from "./invitations.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { claimUserWithoutPassword, countUsers, findUserByEmail, insertUser, listUsers, NO_PASSWORD, publicUser, updateUser, type Role } from "./users.js";
+import { claimUserWithoutPassword, countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -153,9 +153,11 @@ export function identityRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "invite Users");
         const inviteeEmail = request.body.email.trim();
-        // A User an import brought in has no password yet; an invitation is how they get one.
-        const existing = await findUserByEmail(ctx.db, inviteeEmail);
-        if (existing && existing.passwordHash !== NO_PASSWORD) throw new HttpError(409, `${inviteeEmail} is already a User`);
+        // A User an import brought in to this Workspace hasn't joined yet; an invitation is how they do.
+        const existing = (await findUserByEmail(ctx.db, inviteeEmail))?.user;
+        if (existing && (existing.joined || existing.workspaceId !== user.workspaceId)) {
+          throw new HttpError(409, `${inviteeEmail} is already a User`);
+        }
         const { invitation, token } = await createInvitation(ctx.db, {
           workspaceId: user.workspaceId,
           email: inviteeEmail,

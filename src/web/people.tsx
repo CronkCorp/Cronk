@@ -118,11 +118,12 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
         <option value="member">Member</option>
         <option value="admin">Admin</option>
       </select>
-      {u.joined ? (
+      {(u.joined || u.active) && (
         <button className="link" disabled={change.busy} onClick={() => void change.run({ active: !u.active })}>
           {u.active ? "Deactivate" : "Reactivate"}
         </button>
-      ) : (
+      )}
+      {!u.joined && (
         <button className="link" disabled={invite.busy} onClick={() => void invite.run()}>
           Invite
         </button>
