@@ -156,7 +156,9 @@ function similarity(a: Chunk, b: Chunk): number {
 /** How well a side's section pairs with a base section: sharing the heading counts most, then alike content; 0 when they don't pair. */
 function pairScore(base: Chunk, side: Chunk): number {
   if (base.heading === side.heading) return 2 + similarity(base, side);
-  return 0;
+  // A renamed heading still pairs with the section it came from, if its content mostly stayed.
+  const alike = similarity(base, side);
+  return alike >= 0.5 ? alike : 0;
 }
 
 /**
@@ -212,6 +214,27 @@ function mergePart<T extends { text: string }>(base: T | undefined, mine: T | un
   if (same(mine?.text, base?.text)) return { merged: theirs };
   if (same(theirs?.text, base?.text)) return { merged: mine };
   return "conflict";
+}
+
+/** A section cut into its heading line (with its line break) and what follows it. */
+function split(chunk: Chunk): { head: Chunk; rest: Chunk } {
+  const cut = chunk.heading === null ? 0 : chunk.text.indexOf("\n") + 1 || chunk.text.length;
+  return { head: { ...chunk, text: chunk.text.slice(0, cut) }, rest: { ...chunk, text: chunk.text.slice(cut) } };
+}
+
+/**
+ * The three-way merge of one section: as `mergePart`, but when both sides changed it, its heading
+ * line and its content merge apart, so a rename on one side and a content edit on the other combine.
+ */
+function mergeSection(base: Chunk | undefined, mine: Chunk | undefined, theirs: Chunk | undefined): { merged: Chunk | undefined } | "conflict" {
+  const whole = mergePart(base, mine, theirs);
+  if (whole !== "conflict" || !base || !mine || !theirs) return whole;
+  const [b, m, t] = [base, mine, theirs].map(split) as [ReturnType<typeof split>, ReturnType<typeof split>, ReturnType<typeof split>];
+  const head = mergePart(b.head, m.head, t.head);
+  const rest = mergePart(b.rest, m.rest, t.rest);
+  if (head === "conflict" || rest === "conflict") return "conflict";
+  const [h, r] = [head.merged!, rest.merged!];
+  return { merged: { key: base.key, heading: h.heading, text: h.text + r.text, last: r.last } };
 }
 
 /** Whether `a` and `b` put the sections they share in the same order. */
@@ -286,9 +309,9 @@ function mergeBodies(base: string, mine: string, theirs: string): MergedSection[
   for (const key of order) {
     const sides = { base: find(b, key), mine: find(m, key), theirs: find(t, key) };
     const heading = (sides.mine ?? sides.theirs ?? sides.base)!.heading;
-    const part = mergePart(sides.base, sides.mine, sides.theirs);
+    const part = mergeSection(sides.base, sides.mine, sides.theirs);
     if (part === "conflict") merged.push({ heading, conflict: sides });
-    else if (part.merged && !(key === "" && part.merged.text === "")) merged.push({ heading, chunk: part.merged });
+    else if (part.merged && !(key === "" && part.merged.text === "")) merged.push({ heading: part.merged.heading, chunk: part.merged });
   }
   // A section that ended its Version's body may now have one after it: keep a blank line between them.
   const spaced = (chunk: Chunk | undefined, last: boolean) => {

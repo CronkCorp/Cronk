@@ -196,6 +196,19 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\na\n\n## Notes\n\nb changed\n" });
   });
 
+  it("combines a renamed heading with an edit to that section's content", async () => {
+    const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nUse it.\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("Install it.", "Download it."));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Setup", "## Install") });
+
+    expect(res.body.merge).toMatchObject({
+      conflicts: 0,
+      body: "## Install\n\nDownload it.\nThen run it.\n\n## Usage\n\nUse it.\n",
+    });
+    expect(res.body.merge.sections.map((s: { heading: string }) => s.heading)).toEqual(["## Install", "## Usage"]);
+  });
+
   it("refuses a base Version the Document never had", async () => {
     const { admin, id } = await documentWith(plan);
     expect((await admin.post(`/api/documents/${id}/merge`, { baseVersion: 5, body: "x" })).status).toBe(404);
