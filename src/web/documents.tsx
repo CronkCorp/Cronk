@@ -191,7 +191,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   );
 }
 
-/** Someone else's edit that refused a save: the Version the edit started from, and theirs. */
+/** Someone else's save that refused this one: the Version this edit started from, and the Version they saved. */
 interface OtherEdit {
   base: Version;
   theirs: Version;
@@ -293,21 +293,9 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
   );
 }
 
-/** What the User settles a conflict with: mine, theirs, or both one after the other under the heading they share. */
-function choices(c: Conflict) {
-  const mine = c.mine ?? "";
-  const theirs = c.theirs ?? "";
-  if (!mine || !theirs) return { mine, theirs, both: mine + theirs };
-  const [mineHeading] = mine.split("\n", 1);
-  const [theirHeading] = theirs.split("\n", 1);
-  const rest = mineHeading === theirHeading && c.base !== null ? theirs.slice(theirHeading!.length + 1) : `\n${theirs}`;
-  return { mine, theirs, both: mine.replace(/\n*$/, "\n") + rest };
-}
-
 /** One conflicting part: base, mine and theirs side by side, and the text to keep, which starts as mine. */
 function ConflictChoice(props: { label: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
   const c = props.conflict;
-  const pick = choices(c);
   const side = (name: string, text: string | null) => (
     <div className="side">
       <span className="muted">{name}</span>
@@ -323,9 +311,9 @@ function ConflictChoice(props: { label: string; conflict: Conflict; value: strin
         {side("Theirs", c.theirs)}
       </div>
       <div className="actions">
-        <button type="button" className="secondary" onClick={() => props.onChange(pick.mine)}>Use mine</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(pick.theirs)}>Use theirs</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(pick.both)}>Use both</button>
+        <button type="button" className="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</button>
+        <button type="button" className="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</button>
+        <button type="button" className="secondary" onClick={() => props.onChange(c.both)}>Use both</button>
       </div>
       <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
     </section>

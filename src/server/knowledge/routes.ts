@@ -25,44 +25,6 @@ const staleVersionAnswer = {
   ...ref("StaleVersion"),
 };
 
-/** Both sides' text of a part they changed differently, and the base's; null where a side has no such part. */
-const conflict = {
-  type: "object",
-  required: ["base", "mine", "theirs"],
-  properties: Object.fromEntries(["base", "mine", "theirs"].map((side) => [side, { type: ["string", "null"] }])),
-} as const;
-
-const mergeAnswer = {
-  type: "object",
-  required: ["merge"],
-  properties: {
-    merge: {
-      type: "object",
-      required: ["onto", "title", "titleConflict", "body", "sections", "conflicts"],
-      properties: {
-        onto: { ...ref("Version"), description: "The current Version merged onto; save the result with its number as `baseVersion`." },
-        title: { type: ["string", "null"], description: "The merged title; null when it conflicts." },
-        titleConflict: { anyOf: [conflict, { type: "null" }] },
-        body: { type: ["string", "null"], description: "The merged Markdown; null while any section conflicts." },
-        conflicts: { type: "integer", description: "How many sections conflict, plus one if the title does." },
-        sections: {
-          type: "array",
-          description: "The merged sections in order, each from one heading to the next; joined, their texts make the body.",
-          items: {
-            type: "object",
-            required: ["heading", "text", "conflict"],
-            properties: {
-              heading: { type: ["string", "null"], description: "Its heading line, such as `## Setup`; null for the text before the first heading." },
-              text: { type: ["string", "null"], description: "The merged text, heading line included; null when it conflicts." },
-              conflict: { anyOf: [conflict, { type: "null" }] },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
-
 /** A page tree: its Documents depth first, each followed by those under it. */
 const treeAnswer = listing("documents", ref("DocumentTreeEntry"));
 
@@ -282,7 +244,7 @@ export function knowledgeRoutes(ctx: AppContext) {
             },
           },
           response: {
-            200: answer("The edit merged section by section with the current Version; nothing is saved", mergeAnswer),
+            200: answer("The edit merged section by section with the current Version; nothing is saved", holding("merge", "Merge")),
             ...errors(400, 401, 403, 404, 410),
           },
         },

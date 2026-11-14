@@ -84,11 +84,22 @@ export function replaceSection(markdown: string, heading: string, content: strin
   return (lineEnd < 0 ? `${before}\n` : before) + replacement + markdown.slice(end);
 }
 
-/** One side's text of a part both sides changed differently; null where that side has no such part. */
+/** Each side's text of a part both sides changed differently; null where that side has no such part. */
 export interface Conflict {
   base: string | null;
   mine: string | null;
   theirs: string | null;
+  /** Mine followed by theirs, for a User who wants to keep both; a section heading they share appears once. */
+  both: string;
+}
+
+/** A section conflict, with both sides kept one after the other under the heading they share. */
+function sectionConflict(base: string | null, mine: string | null, theirs: string | null): Conflict {
+  if (mine === null || theirs === null) return { base, mine, theirs, both: mine ?? theirs ?? "" };
+  const [heading] = mine.split("\n", 1);
+  const shared = base !== null && heading !== "" && theirs.startsWith(`${heading}\n`);
+  const rest = shared ? theirs.slice(heading!.length + 1) : `\n${theirs}`;
+  return { base, mine, theirs, both: mine.replace(/\n*$/, "\n") + rest };
 }
 
 /** A section of a merged body: its merged text, or the conflict a User must settle. */
@@ -97,6 +108,7 @@ export interface MergedSection {
   heading: string | null;
   /** The merged text, heading line included; null when it conflicts. */
   text: string | null;
+  /** Set when both sides changed the section differently. */
   conflict: Conflict | null;
 }
 
@@ -165,6 +177,7 @@ function mergedOrder(base: string[], mine: string[], theirs: string[]): string[]
 export interface Merge {
   /** The merged title; null when it conflicts. */
   title: string | null;
+  /** Set when both sides changed the title differently. */
   titleConflict: Conflict | null;
   /** The merged body; null while any section conflicts. */
   body: string | null;
@@ -182,7 +195,7 @@ export interface Merge {
  */
 export function mergeEdits(base: { title: string; body: string }, mine: { title: string; body: string }, theirs: { title: string; body: string }): Merge {
   const title = mergePart({ text: base.title }, { text: mine.title }, { text: theirs.title });
-  const titleConflict = title === "conflict" ? { base: base.title, mine: mine.title, theirs: theirs.title } : null;
+  const titleConflict = title === "conflict" ? { base: base.title, mine: mine.title, theirs: theirs.title, both: `${mine.title} ${theirs.title}` } : null;
   const sections = mergeBodies(base.body, mine.body, theirs.body);
   const conflicts = sections.filter((s) => s.conflict).length + (titleConflict ? 1 : 0);
   const clean = sections.every((s) => s.text !== null);
@@ -195,10 +208,11 @@ export function mergeEdits(base: { title: string; body: string }, mine: { title:
   };
 }
 
+/** The sections of a three-way merge of bodies, in their merged order; see `mergeEdits`. */
 function mergeBodies(base: string, mine: string, theirs: string): MergedSection[] {
   const [b, m, t] = [base, mine, theirs].map(chunksOf) as [Chunk[], Chunk[], Chunk[]];
   const order = mergedOrder(...([b, m, t].map((chunks) => chunks.map((c) => c.key)) as [string[], string[], string[]]));
-  if (!order) return [{ heading: null, text: null, conflict: { base, mine, theirs } }];
+  if (!order) return [{ heading: null, text: null, conflict: sectionConflict(base, mine, theirs) }];
   const find = (chunks: Chunk[], key: string) => chunks.find((c) => c.key === key);
   const merged: { heading: string | null; chunk?: Chunk; conflict?: { base?: Chunk; mine?: Chunk; theirs?: Chunk } }[] = [];
   for (const key of order) {
@@ -218,6 +232,6 @@ function mergeBodies(base: string, mine: string, theirs: string): MergedSection[
     const last = i === merged.length - 1;
     if (s.chunk) return { heading: s.heading, text: spaced(s.chunk, last), conflict: null };
     const c = s.conflict!;
-    return { heading: s.heading, text: null, conflict: { base: spaced(c.base, last), mine: spaced(c.mine, last), theirs: spaced(c.theirs, last) } };
+    return { heading: s.heading, text: null, conflict: sectionConflict(spaced(c.base, last), spaced(c.mine, last), spaced(c.theirs, last)) };
   });
 }

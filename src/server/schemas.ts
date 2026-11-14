@@ -47,6 +47,7 @@ export type SharedSchemaName =
   | "VersionSummary"
   | "StaleVersion"
   | "SectionRefused"
+  | "Merge"
   | "Guidance"
   | "GuidanceVersion"
   | "StaleGuidance";
@@ -92,6 +93,17 @@ const versionFields = {
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
   restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+};
+
+/** Each side's text of a part both sides of a merge changed differently. */
+const conflict = {
+  description: "Each side's text of a part both sides changed differently; null where a side has no such part (it removed the section).",
+  ...object({
+    base: nullable({ type: "string" }),
+    mine: nullable({ type: "string" }),
+    theirs: nullable({ type: "string" }),
+    both: { type: "string", description: "Mine followed by theirs, for keeping both; a section heading they share appears once." },
+  }),
 };
 
 const sharedSchemas: Record<SharedSchemaName, object> = {
@@ -273,6 +285,25 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   SectionRefused: {
     description: "A section replacement refused because no section, or more than one, has that heading, with the Document's headings to pick from.",
     ...object({ error: { type: "string" }, headings: { type: "array", items: { type: "string" }, description: "Its heading lines, such as `## Setup`, in order." } }, ["headings"]),
+  },
+  Merge: {
+    description: "An edit merged section by section with the current Version. Only conflicts need a User's choice.",
+    ...object({
+      onto: { ...ref("Version"), description: "The current Version merged onto; save the result with its number as `baseVersion`." },
+      title: { ...nullable({ type: "string" }), description: "The merged title; null when it conflicts." },
+      titleConflict: { ...nullable(conflict), description: "Set when both sides changed the title differently." },
+      body: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
+      conflicts: { type: "integer", description: "How many sections conflict, plus one if the title does." },
+      sections: {
+        type: "array",
+        description: "The merged sections in order, each from one heading to the next; joined, their texts (or the chosen text of each conflict) make the body.",
+        items: object({
+          heading: { ...nullable({ type: "string" }), description: "Its heading line, such as `## Setup`; null for the text before the first heading." },
+          text: { ...nullable({ type: "string" }), description: "The merged text, heading line included; null when it conflicts." },
+          conflict: { ...nullable(conflict), description: "Set when both sides changed the section differently." },
+        }),
+      },
+    }),
   },
   StaleGuidance: {
     description: "A save of Guidance refused because the Version it is based on is no longer current, with the current Guidance to merge with.",

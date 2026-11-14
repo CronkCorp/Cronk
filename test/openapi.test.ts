@@ -77,7 +77,8 @@ describe("the OpenAPI description", () => {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
         // A stale save's refusal is the error shape plus the current Version (of a Document or of Guidance);
         // a refused section heading's is the error shape plus the Document's headings.
-        const allowed = code === "409" ? [errorBody, staleBody, staleGuidanceBody] : ["400", "404"].includes(code) ? [errorBody, sectionBody] : [errorBody];
+        const refusesSections = label === "POST /api/documents/{id}/replace-section" && ["400", "404"].includes(code);
+        const allowed = code === "409" ? [errorBody, staleBody, staleGuidanceBody] : refusesSections ? [errorBody, sectionBody] : [errorBody];
         expect(allowed, `${label} ${code}`).toContainEqual(op.responses[code].content["application/json"].schema);
       }
     }

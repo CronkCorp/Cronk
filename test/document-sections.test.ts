@@ -139,7 +139,12 @@ describe("merging an edit with the current Version", () => {
       {
         heading: "## Usage",
         text: null,
-        conflict: { base: "## Usage\n\nRun it.\n", mine: "## Usage\n\nRun it weekly.\n", theirs: "## Usage\n\nRun it daily.\n" },
+        conflict: {
+          base: "## Usage\n\nRun it.\n",
+          mine: "## Usage\n\nRun it weekly.\n",
+          theirs: "## Usage\n\nRun it daily.\n",
+          both: "## Usage\n\nRun it weekly.\n\nRun it daily.\n",
+        },
       },
     ]);
   });
@@ -159,7 +164,7 @@ describe("merging an edit with the current Version", () => {
 
     const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## A\n\na\n" });
 
-    expect(res.body.merge.sections[1]).toEqual({ heading: "## B", text: null, conflict: { base: "## B\n\nb\n", mine: null, theirs: "## B\n\nb changed\n" } });
+    expect(res.body.merge.sections[1]).toEqual({ heading: "## B", text: null, conflict: { base: "## B\n\nb\n", mine: null, theirs: "## B\n\nb changed\n", both: "## B\n\nb changed\n" } });
   });
 
   it("reports a title both edits changed differently as a conflict", async () => {
@@ -168,7 +173,7 @@ describe("merging an edit with the current Version", () => {
 
     const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, title: "My plan", body: "Body." });
 
-    expect(res.body.merge).toMatchObject({ conflicts: 1, title: null, titleConflict: { base: "Plan", mine: "My plan", theirs: "Their plan" }, body: "Body." });
+    expect(res.body.merge).toMatchObject({ conflicts: 1, title: null, titleConflict: { base: "Plan", mine: "My plan", theirs: "Their plan", both: "My plan Their plan" }, body: "Body." });
   });
 
   it("reports the whole body as one conflict when both edits rearranged the sections differently", async () => {
