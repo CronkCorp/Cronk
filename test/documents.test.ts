@@ -58,6 +58,17 @@ describe("saving a Document", () => {
     expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "theirs", version: 2 });
   });
 
+  it("lets only one of two simultaneous saves on the same Version through", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { id } = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "v1" })).body.document;
+
+    const results = await Promise.all(["a", "b", "c"].map((body) => admin.patch(`/api/documents/${id}`, { baseVersion: 1, body })));
+
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409, 409]);
+    expect((await admin.get(`/api/documents/${id}/versions`)).body.versions.map((v: { number: number }) => v.number)).toEqual([2, 1]);
+  });
+
   it("must name the Version it is based on", async () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
