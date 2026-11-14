@@ -311,4 +311,17 @@ describe("a User an import brought in", () => {
     expect((await grace.post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
     expect((await grace.get(`/api/projects/CRONK/tickets?assignee=${imported.id}`)).body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1"]);
   });
+
+  it("can't be invited again once they have a password, so no invitation can take their account", async () => {
+    const { cronk, admin } = await importedGrace();
+    const first = (await admin.post("/api/invitations", { email: "grace@example.com" })).body.token;
+    const replaced = (await admin.post("/api/invitations", { email: "GRACE@example.com" })).body.token;
+    expect((await cronk.client().post(`/api/invitations/by-token/${first}/accept`, { name: "Eve", password: "eves password" })).status).toBe(404);
+    expect((await cronk.client().post(`/api/invitations/by-token/${replaced}/accept`, { name: "Grace", password: "graces password" })).status).toBe(201);
+
+    const again = await admin.post("/api/invitations", { email: "grace@example.com" });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already a User/);
+    expect((await cronk.client().post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
+  });
 });
