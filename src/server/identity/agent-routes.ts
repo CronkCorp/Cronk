@@ -25,7 +25,7 @@ export function agentRoutes(ctx: AppContext) {
     // Each User's own Agents; with `all`, an Admin sees every User's.
     app.get<{ Querystring: { all?: boolean } }>(
       "/api/agents",
-      { schema: { querystring: { type: "object", properties: { all: { type: "boolean" } } } } },
+      { schema: { querystring: { type: "object", additionalProperties: false, properties: { all: { type: "boolean" } } } } },
       async (request) => {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");

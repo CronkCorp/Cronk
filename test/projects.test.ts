@@ -74,9 +74,19 @@ describe("Projects", () => {
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     const renamed = await admin.patch("/api/projects/CRONK", { name: " Cronk app " });
     expect(renamed.body.project).toMatchObject({ name: "Cronk app", key: "CRONK" });
-    await admin.patch("/api/projects/CRONK", { key: "APP" });
-    expect((await admin.get("/api/projects/CRONK")).body.project.key).toBe("CRONK");
+    const rekeyed = await admin.patch("/api/projects/CRONK", { key: "APP" });
+    expect(rekeyed.status).toBe(400);
+    expect(rekeyed.body.error).toBe('body has unknown field "key"');
+    expect((await admin.get("/api/projects/CRONK")).body.project).toMatchObject({ name: "Cronk app", key: "CRONK" });
     expect((await admin.get("/api/projects/APP")).status).toBe(404);
+  });
+
+  it("name a misspelt field when refusing it, even while a required field is missing", async () => {
+    const { admin } = await startInstalledCronk();
+    const res = await admin.post("/api/projects", { name: "Cronk", kee: "CRONK" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('body has unknown field "kee"');
+    expect((await admin.get("/api/projects")).body.projects).toEqual([]);
   });
 
   it("are only shown to signed-in Users", async () => {

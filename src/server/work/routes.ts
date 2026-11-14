@@ -72,7 +72,7 @@ export function workRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     app.get<{ Querystring: { archived?: boolean } }>(
       "/api/projects",
-      { schema: { querystring: { type: "object", properties: { archived: { type: "boolean" } } } } },
+      { schema: { querystring: { type: "object", additionalProperties: false, properties: { archived: { type: "boolean" } } } } },
       async (request) => {
         const actor = await requireActor(ctx, request);
         const projects = await listProjects(ctx.db, actingUser(actor).workspaceId, request.query.archived ?? false);
@@ -256,7 +256,7 @@ export function workRoutes(ctx: AppContext) {
     app.delete<{ Params: { key: string; statusId: string }; Querystring: { moveTo?: string } }>(
       "/api/projects/:key/statuses/:statusId",
       // `moveTo`: the Status the removed Status's Tickets move to. Required while any Ticket is in it.
-      { schema: { querystring: { type: "object", properties: { moveTo: { type: "string" } } } } },
+      { schema: { querystring: { type: "object", additionalProperties: false, properties: { moveTo: { type: "string" } } } } },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { moveTo } = request.query;
@@ -293,6 +293,7 @@ export function workRoutes(ctx: AppContext) {
         schema: {
           querystring: {
             type: "object",
+            additionalProperties: false,
             properties: {
               status: { type: "array", items: { type: "string", format: "uuid" } },
               category: { type: "array", items: { type: "string", enum: STATUS_CATEGORIES } },
