@@ -9,6 +9,7 @@ import {
   insertProject,
   insertStatus,
   lockProject,
+  moveStatus,
   renameStatus,
   listProjects,
   listStatuses,
@@ -113,11 +114,16 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.patch<{ Params: { key: string; statusId: string }; Body: { name?: string } }>(
+    app.patch<{ Params: { key: string; statusId: string }; Body: { name?: string; position?: number } }>(
       "/api/projects/:key/statuses/:statusId",
       {
         schema: {
-          body: { type: "object", additionalProperties: false, properties: { name: nameSchema } },
+          body: {
+            type: "object",
+            additionalProperties: false,
+            // `position` counts from 0 among the Statuses of the same Status Category.
+            properties: { name: nameSchema, position: { type: "integer", minimum: 0 } },
+          },
         },
       },
       async (request) => {
@@ -131,6 +137,10 @@ export function workRoutes(ctx: AppContext) {
             const renamed = await renameStatus(tx, project.id, status.id, name);
             if (!renamed) throw new HttpError(409, `Another Status is already named ${name}`);
             status = renamed;
+          }
+          const { position } = request.body;
+          if (position !== undefined && !(await moveStatus(tx, project.id, status, position))) {
+            throw new HttpError(400, `${status.name} can't move to position ${position}: its Status Category isn't that long`);
           }
           return status;
         });

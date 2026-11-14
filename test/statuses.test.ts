@@ -83,4 +83,29 @@ describe("Statuses", () => {
     expect((await admin.patch("/api/projects/CRONK/statuses/not-a-uuid", { name: "Mine" })).status).toBe(404);
     expect((await statusNamed(admin, "Backlog", "WEB")).id).toBe(webBacklog.id);
   });
+
+  it("can be reordered within their Status Category, and new Tickets start in the first", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    await admin.post("/api/projects/CRONK/statuses", { name: "Icebox", category: "backlog" });
+    await admin.post("/api/projects/CRONK/statuses", { name: "Triage", category: "backlog" });
+    const triage = await statusNamed(admin, "Triage");
+
+    const moved = await admin.patch(`/api/projects/CRONK/statuses/${triage.id}`, { position: 0 });
+    expect(moved.status).toBe(200);
+    expect(names(await statuses(admin)).slice(0, 4)).toEqual(["Triage", "Backlog", "Icebox", "Todo"]);
+    const created = await admin.post("/api/projects/CRONK/tickets", { title: "Look at this" });
+    expect(created.body.ticket.status.name).toBe("Triage");
+
+    await admin.patch(`/api/projects/CRONK/statuses/${triage.id}`, { position: 1 });
+    expect(names(await statuses(admin)).slice(0, 4)).toEqual(["Backlog", "Triage", "Icebox", "Todo"]);
+    await admin.patch(`/api/projects/CRONK/statuses/${triage.id}`, { position: 2 });
+    expect(names(await statuses(admin)).slice(0, 4)).toEqual(["Backlog", "Icebox", "Triage", "Todo"]);
+
+    // Positions count within the Status Category; Categories keep their fixed order.
+    const outside = await admin.patch(`/api/projects/CRONK/statuses/${triage.id}`, { position: 3 });
+    expect(outside.status).toBe(400);
+    expect((await admin.patch(`/api/projects/CRONK/statuses/${triage.id}`, { position: -1 })).status).toBe(400);
+    expect(names(await statuses(admin)).slice(0, 4)).toEqual(["Backlog", "Icebox", "Triage", "Todo"]);
+  });
 });

@@ -138,6 +138,24 @@ export async function renameStatus(db: Queryable, projectId: string, statusId: s
   return rows[0]!;
 }
 
+/**
+ * Moves a Status to `position` (counted from 0) among the Statuses of its
+ * Status Category. Returns false, changing nothing, if there is no such
+ * position. Lock the Project first.
+ */
+export async function moveStatus(db: Queryable, projectId: string, status: Status, position: number): Promise<boolean> {
+  const order = (await listStatuses(db, projectId)).filter((s) => s.category === status.category).map((s) => s.id);
+  if (position >= order.length) return false;
+  order.splice(order.indexOf(status.id), 1);
+  order.splice(position, 0, status.id);
+  await db.query(
+    `UPDATE statuses SET position = ordered.position - 1
+     FROM unnest($1::uuid[]) WITH ORDINALITY AS ordered(id, position) WHERE statuses.id = ordered.id`,
+    [order],
+  );
+  return true;
+}
+
 /** Renames and/or archives or restores a Project. Its key never changes, since Ticket keys are built from it. */
 export async function updateProject(
   db: Queryable,
