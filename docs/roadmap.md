@@ -36,7 +36,6 @@ Decided so far (beyond the glossary and ADRs):
 - Artifacts belong to a Project or the Workspace, never to a Ticket or chat; they record the Ticket or Agent Session they came from and can be embedded in many places.
 - Each Artifact publish creates a new Version; the Artifact's address shows the latest Version, and a link can name a specific Version. A publish based on an outdated Version is refused, so the publisher merges first.
 - Artifact pages may load scripts only from a short CDN allow-list by default; anything more is declared when publishing, kept minimal.
-- Comments on Artifacts and Documents can be anchored and are routed to the Agent that produced them through the usual waiting-work path.
 
 Open questions to grill before writing the spec:
 
@@ -46,7 +45,7 @@ Open questions to grill before writing the spec:
 - **Protected**: who may mark or unmark; does Protected apply per item only, or also to a whole page-tree branch.
 - **Autonomous Delegation**: is it set per Ticket, per parent Ticket (covering its Sub-Tickets), as a Project default, or all three; what Reopen does to dependents that already continued on the Unverified completion.
 - **Discovered Tickets**: may an Agent mark a Discovered Ticket as blocking queued Tickets on its own; which Inbox or Triage it lands in when the source Ticket's Assignee is known.
-- **Artifacts**: what an Agent publishes (one HTML page or a folder of files); the default CDN allow-list and how a publish declares more; links to a specific Version; how Artifacts embed in Documents and Reports; size limits.
+- **Artifacts**: what an Agent publishes (one HTML page or a folder of files); the default CDN allow-list and how a publish declares more; links to a specific Version; how Artifacts embed in Documents and Reports; whether Artifacts take Comments and whether those reach the producing Agent; size limits.
 - **Attachments**: size limits; local disk versus S3-compatible storage defaults; video handling.
 
 ## Phase 3: Code and reach
