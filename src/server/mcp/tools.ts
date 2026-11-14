@@ -52,9 +52,13 @@ function required<T>(value: T | undefined, what: string, action: string): T {
 
 const error = (message: string): CallToolResult => ({ isError: true, content: [{ type: "text", text: message }] });
 
-/** The API's answer as a tool result: its JSON, or its error message. */
+/** The API's answer as a tool result: its JSON, or its error message followed by any details it carries as JSON. */
 function toResult(res: ApiResponse): CallToolResult {
-  if (res.status >= 400) return error(res.body?.error ?? `The API answered ${res.status}`);
+  if (res.status >= 400) {
+    const { error: message, ...details } = res.body ?? {};
+    const text = message ?? `The API answered ${res.status}`;
+    return error(Object.keys(details).length > 0 ? `${text}\n\n${JSON.stringify(details)}` : text);
+  }
   return { content: [{ type: "text", text: JSON.stringify(res.body ?? {}) }] };
 }
 
@@ -97,4 +101,55 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
     },
   });
+
+  registerGroupedTool(server, ctx, {
+    name: "documents",
+    description:
+      "Documents: Markdown knowledge belonging to a Project or, without a project, the Workspace, arranged in a page tree. " +
+      "Every update names the Version it is based on (`baseVersion`, the Document's `version`) and is refused if that is no " +
+      "longer current; the refusal carries the current Version, so merge your change into it and update again.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
+      id: z.string().optional().describe("Document id (get, update)"),
+      parentId: z.string().optional().describe("The Document to create it under; at the top if left out (create)"),
+      title: z.string().optional().describe("Title (create, update)"),
+      body: z.string().optional().describe("Markdown body; Ticket keys such as CRONK-12 become links (create, update)"),
+      baseVersion: z.number().int().optional().describe("The Version this update is based on (update)"),
+    },
+    actions: {
+      get: {
+        description: "one Document with its Markdown body and current Version",
+        writes: false,
+        run: (api, a) => api("GET", `/api/documents/${encodeURIComponent(required(a.id, "an id", "get"))}`),
+      },
+      tree: {
+        description: "a Project's (or the Workspace's) page tree, depth first, each Document with its depth",
+        writes: false,
+        run: (api, a) => api("GET", `${treePath(a.project)}/documents`),
+      },
+      create: {
+        description: "a new Document at Version 1, last among its siblings",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `${treePath(a.project)}/documents`, {
+            title: required(a.title, "a title", "create"),
+            ...(a.body !== undefined && { body: a.body }),
+            ...(a.parentId !== undefined && { parentId: a.parentId }),
+          }),
+      },
+      update: {
+        description: "saves a new Version with a new title and/or body",
+        writes: true,
+        run: (api, a) =>
+          api("PATCH", `/api/documents/${encodeURIComponent(required(a.id, "an id", "update"))}`, {
+            baseVersion: required(a.baseVersion, "a baseVersion", "update"),
+            ...(a.title !== undefined && { title: a.title }),
+            ...(a.body !== undefined && { body: a.body }),
+          }),
+      },
+    },
+  });
 }
+
+/** Where a page tree's API lives: a Project's, or the Workspace's when no Project is named. */
+const treePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);
