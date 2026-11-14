@@ -25,6 +25,14 @@ test("set up a fresh installation, sign out, sign in and see the application she
 
   await page.reload();
   await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  // The Admin tunes how long a silent Agent Session keeps its Claims.
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("5");
+  await page.getByLabel("Silence threshold (minutes)").fill("10");
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("10");
+  await page.getByRole("button", { name: "Cancel" }).click();
 });
 
 // Runs after the test above on the same server, so the installation is already set up.
@@ -194,6 +202,18 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await expect(page.getByRole("list", { name: "History" })).toContainText(`claude-laptop (session ${session.slice(0, 4)}, for Ada) renamed it`);
   await page.getByRole("link", { name: "Agents" }).click();
   await expect(page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" })).toContainText(`Connected, session ${session.slice(0, 4)}`);
+  // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByTestId("ticket-claim")).toHaveText("Not Claimed");
+  await page.getByLabel("Assignee").selectOption({ label: "Ada" });
+  await page.getByLabel("Delegate").selectOption({ label: "claude-laptop" });
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada delegated it to claude-laptop");
+  const claimed = await request.post(`/api/tickets/${ticket.key}/claim`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+  });
+  expect(claimed.status()).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.

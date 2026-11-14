@@ -34,6 +34,7 @@ export type SharedSchemaName =
   | "Agent"
   | "AgentSession"
   | "AgentToken"
+  | "Claim"
   | "Project"
   | "Status"
   | "Ticket"
@@ -105,7 +106,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     createdAt: timestamp,
     expiresAt: timestamp,
   }),
-  Workspace: object({ name: { type: "string" }, agentAccess: agentAccessSchema }),
+  Workspace: object({
+    name: { type: "string" },
+    agentAccess: agentAccessSchema,
+    silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+  }),
   Agent: object(
     {
       id,
@@ -133,6 +138,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
     ...object({ id, readOnly: { type: "boolean" }, createdAt: timestamp }),
   },
+  Claim: {
+    description: "An Agent Session's exclusive, temporary hold on a Ticket. It lapses when the Session stays silent too long.",
+    ...object({
+      agent: named,
+      session: object({ id }),
+      claimedAt: timestamp,
+      endsIfSilentAt: { ...timestamp, description: "When the Claim lapses if its Agent Session stays silent until then." },
+    }),
+  },
   Project: object({
     id,
     name: { type: "string" },
@@ -159,6 +173,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     priority,
     labels,
     assignee: nullable(named),
+    delegate: { ...nullable(named), description: "The Agent the Assignee handed the Ticket to; always one of the Assignee's own." },
     parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -183,7 +198,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "parent"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
           ...["relation added", "relation removed"],
         ],
       },
@@ -194,7 +209,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
-      object({ change: { const: "assignee" }, from: nullable(named), to: nullable(named) }),
+      ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },

@@ -5,8 +5,15 @@ import { requireWorkspaceAccess, visibleProjects } from "../identity/access.js";
 import { publicAgent } from "../identity/agents.js";
 import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
-import { accessSchema, answer, errors, holding, noContent, ref } from "../schemas.js";
+import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { transaction } from "../db/database.js";
+import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
+import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, setClaim, type ReadyScope } from "./claims.js";
+import { findTicketById, findTicketsByIds } from "../work/tickets.js";
+import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
+
+const ticketParams = pathParams({ key: ticketKeyParam });
 
 const sessionHeader = {
   type: "object",
@@ -14,10 +21,13 @@ const sessionHeader = {
   properties: { [AGENT_SESSION_HEADER]: { type: "string", description: "The id of one of the Agent's live Agent Sessions" } },
 } as const;
 
+/** How many Ready Tickets the welcome lists. */
+const WELCOME_READY_LIMIT = 20;
+
 /** What an Agent is told when its Agent Session starts (see `welcome`). */
 const welcomeSchema = {
   type: "object",
-  required: ["workspace", "agent", "readOnly", "projects"],
+  required: ["workspace", "agent", "readOnly", "projects", "readyTickets"],
   properties: {
     workspace: {
       anyOf: [{ type: "object", required: ["name"], properties: { name: { type: "string" } } }, { type: "null" }],
@@ -32,6 +42,15 @@ const welcomeSchema = {
         type: "object",
         required: ["key", "name", "access"],
         properties: { key: { type: "string" }, name: { type: "string" }, access: accessSchema },
+      },
+    },
+    readyTickets: {
+      type: "array",
+      description: `The Agent's Ready Tickets in the order \`next\` offers them, at most ${WELCOME_READY_LIMIT}.`,
+      items: {
+        type: "object",
+        required: ["key", "title", "priority", "status"],
+        properties: { key: { type: "string" }, title: { type: "string" }, priority: { type: "string", enum: PRIORITIES }, status: ref("Status") },
       },
     },
   },
@@ -80,6 +99,83 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
 
+    app.post(
+      "/api/agent-sessions/current/next",
+      {
+        schema: {
+          headers: sessionHeader,
+          response: {
+            200: answer("The Agent's next Ready Ticket, now Claimed by the Agent Session, with the Tickets around it", {
+              type: "object",
+              required: ["next"],
+              properties: { next: { anyOf: [ticketDetailSchema, { type: "null" }], description: "Null when none of the Agent's Tickets is Ready." } },
+            }),
+            ...errors(400, 401, 403, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        const now = ctx.clock.now();
+        const scope = await readyScope(ctx, actor);
+        const id = await transaction(ctx.db, (tx) => claimNextReady(tx, scope, session.id, now));
+        return { next: id ? await ticketDetail(ctx.db, actor, (await findTicketById(ctx.db, id))!, now) : null };
+      },
+    );
+
+    app.post<{ Params: { key: string } }>(
+      "/api/tickets/:key/claim",
+      {
+        schema: {
+          params: ticketParams,
+          headers: sessionHeader,
+          response: {
+            200: answer("The Ticket, now Claimed by the Agent Session, with the Tickets around it", ticketDetailSchema),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        const now = ctx.clock.now();
+        return transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (ticket.delegate?.id !== actor.agent.id) throw new HttpError(409, `${ticket.key} isn't delegated to ${actor.agent.name}`);
+          if (FINISHED_CATEGORIES.includes(ticket.status.category)) {
+            throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`);
+          }
+          const held = await findLiveClaim(tx, ticket.id, now);
+          if (held && held.session.id !== session.id) throw new HttpError(409, `${ticket.key} is Claimed by another Agent Session`);
+          await setClaim(tx, ticket.id, session.id, now);
+          return ticketDetail(tx, actor, ticket, now);
+        });
+      },
+    );
+
+    app.delete<{ Params: { key: string } }>(
+      "/api/tickets/:key/claim",
+      {
+        schema: {
+          params: ticketParams,
+          headers: sessionHeader,
+          response: { 204: noContent("The Claim is released; the Ticket keeps its Delegate"), ...errors(400, 401, 403, 404, 409, 410) },
+        },
+      },
+      async (request, reply) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          const held = await findLiveClaim(tx, ticket.id, ctx.clock.now());
+          if (held?.session.id !== session.id) throw new HttpError(409, `This Agent Session doesn't hold ${ticket.key}'s Claim`);
+          await clearClaim(tx, ticket.id);
+        });
+        return reply.code(204).send();
+      },
+    );
+
     app.delete(
       "/api/agent-sessions/current",
       { schema: { headers: sessionHeader, response: { 204: noContent("The Agent Session has ended"), ...errors(400, 401, 403, 410) } } },
@@ -90,6 +186,12 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
   };
+}
+
+/** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
+async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {
+  const projects = await visibleProjects(ctx.db, agent, await listProjects(ctx.db, agent.owner.workspaceId, false));
+  return { agentId: agent.agent.id, projectIds: projects.filter((p) => p.access === "write").map((p) => p.id) };
 }
 
 function requireAgent(actor: Actor): AgentActor {
@@ -105,8 +207,8 @@ function requireSession(actor: Actor): AgentSession {
 
 /**
  * What an Agent is told when it connects: who it is and for whom, whether it may only
- * read, and the Projects it can see. The Workspace's name is left out if the Workspace's
- * Agent Access is None.
+ * read, the Projects it can see, and its Ready Tickets. The Workspace's name is left out
+ * if the Workspace's Agent Access is None.
  */
 export async function welcome(ctx: AppContext, agent: AgentActor) {
   const workspaceId = agent.owner.workspaceId;
@@ -123,5 +225,13 @@ export async function welcome(ctx: AppContext, agent: AgentActor) {
     agent: publicAgent(agent.agent, agent.owner),
     readOnly: agent.readOnly,
     projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access })),
+    readyTickets: await readyTickets(ctx, agent),
   };
+}
+
+/** The first of the Agent's Ready Tickets, as the welcome lists them. */
+async function readyTickets(ctx: AppContext, agent: AgentActor) {
+  const ids = await listReadyTicketIds(ctx.db, await readyScope(ctx, agent), ctx.clock.now(), WELCOME_READY_LIMIT);
+  const tickets = await findTicketsByIds(ctx.db, ids);
+  return tickets.map((t) => ({ key: t.key, title: t.title, priority: t.priority, status: t.status }));
 }

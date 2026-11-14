@@ -255,4 +255,19 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    id: "0009_delegation_claims",
+    sql: `
+      -- IF NOT EXISTS: this ran as 0008_delegation_claims on databases from the unmerged branch.
+      -- The Agent the Assignee handed the Ticket to: always one of the Assignee's own Agents (ADR 0001).
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS delegate_id uuid REFERENCES agents(id);
+      CREATE INDEX IF NOT EXISTS tickets_delegate ON tickets (delegate_id) WHERE delegate_id IS NOT NULL;
+
+      -- The Agent Session holding the Ticket's Claim. Being one column, a Ticket has at most one Claim;
+      -- it is live while that Session is (see coordination/claims.ts) and lapses with it.
+      ALTER TABLE tickets
+        ADD COLUMN IF NOT EXISTS claim_session_id uuid REFERENCES agent_sessions(id),
+        ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+    `,
+  },
 ];
