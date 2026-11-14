@@ -73,3 +73,23 @@ describe("Ticket Delegate", () => {
     expect((await asAgent.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId })).status).toBe(403);
   });
 });
+
+describe("Ticket Delegate, further", () => {
+  it("is kept on unrelated edits even after its Agent is removed", async () => {
+    const { admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const claude = await registerAgent(admin, "claude-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: await userId(admin, "Ada"), delegateId: claude.agentId });
+    await admin.delete(`/api/agents/${claude.agentId}`);
+
+    const edited = await admin.patch("/api/tickets/CRONK-1", { title: "Renamed" });
+    expect(edited.body.ticket.delegate).toEqual({ id: claude.agentId, name: "claude-laptop" });
+  });
+
+  it("refuses an Agent as Assignee", async () => {
+    const { admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const claude = await registerAgent(admin, "claude-laptop");
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: claude.agentId })).status).toBe(400);
+  });
+});

@@ -647,7 +647,7 @@ export function workRoutes(ctx: AppContext) {
           const assignee = changes.assignee === undefined ? ticket.assignee : changes.assignee;
           if (delegateId !== undefined) {
             changes.delegate = delegateId === null ? null : await delegableAgent(tx, actingUser(actor).workspaceId, assignee, delegateId);
-          } else if (ticket.delegate && !(await ownsAgent(tx, actingUser(actor).workspaceId, assignee, ticket.delegate.id))) {
+          } else if (assignee?.id !== ticket.assignee?.id && ticket.delegate && !(await ownsAgent(tx, actingUser(actor).workspaceId, assignee, ticket.delegate.id))) {
             // A new Assignee doesn't take over someone else's Agent.
             changes.delegate = null;
           }
