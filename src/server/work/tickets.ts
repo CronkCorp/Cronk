@@ -192,6 +192,7 @@ export interface TicketEdit {
 /**
  * Applies the changes that differ from the Ticket as it is, recording each in
  * its history. Pass a Ticket locked with `forUpdate`, inside a transaction.
+ * Returns the Ticket as changed, or `ticket` itself when nothing differs.
  */
 export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketEdit, actor: Actor, now: Date): Promise<Ticket> {
   const recorded: TicketChange[] = [];
@@ -373,9 +374,11 @@ export async function listTicketRefs(db: Queryable, where: string, params: unkno
 
 /**
  * Moves every Ticket in one Status to another, recording the move in each
- * Ticket's history. Locks those Tickets; run inside a transaction.
+ * Ticket's history, and returns them as moved. Locks those Tickets; run inside a transaction.
  */
-export async function moveTicketsBetweenStatuses(db: Queryable, from: Status, to: Status, actor: Actor, now: Date): Promise<void> {
+export async function moveTicketsBetweenStatuses(db: Queryable, from: Status, to: Status, actor: Actor, now: Date): Promise<Ticket[]> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.status_id = $1 ORDER BY t.number FOR UPDATE OF t`, [from.id]);
-  for (const row of rows) await updateTicket(db, toTicket(row), { status: to }, actor, now);
+  const moved: Ticket[] = [];
+  for (const row of rows) moved.push(await updateTicket(db, toTicket(row), { status: to }, actor, now));
+  return moved;
 }
