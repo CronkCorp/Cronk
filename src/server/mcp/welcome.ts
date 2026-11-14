@@ -1,10 +1,4 @@
-/** The welcome the API returns when an Agent Session starts. */
-export interface Welcome {
-  workspace: { name: string } | null;
-  agent: { id: string; name: string; owner: { id: string; name: string } };
-  readOnly: boolean;
-  projects: { key: string; name: string; access: "read" | "write" }[];
-}
+import type { Welcome } from "../api-types.js";
 
 /** The welcome as the Markdown an MCP client hands its model as the server's instructions. */
 export function welcomeText(welcome: Welcome, sessionId: string): string {

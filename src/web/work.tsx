@@ -3,8 +3,6 @@ import { AgentAccessSelect } from "./agents.js";
 import {
   api,
   type AgentAccess,
-  PRIORITIES,
-  STATUS_CATEGORIES,
   type Priority,
   type Project,
   type RecordedChange,
@@ -19,6 +17,7 @@ import {
   type User,
   sessionName,
 } from "./api.js";
+import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
@@ -364,12 +363,12 @@ function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
 function StatusesView(props: { projectKey: string; statuses: Status[]; tickets: Ticket[]; canChange: boolean; onChanged: () => void }) {
   return (
     <div className="status-categories">
-      {STATUS_CATEGORIES.map(([category, label]) => (
+      {STATUS_CATEGORIES.map((category) => (
         <StatusCategorySection
           key={category}
           {...props}
           category={category}
-          label={label}
+          label={CATEGORY_NAMES[category]}
           inCategory={props.statuses.filter((s) => s.category === category)}
         />
       ))}

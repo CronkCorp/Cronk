@@ -56,7 +56,7 @@ function requireSession(actor: Actor): AgentSession {
  * read, and the Projects it can see. The Workspace's name is left out if the Workspace's
  * Agent Access is None.
  */
-async function welcome(ctx: AppContext, agent: AgentActor) {
+export async function welcome(ctx: AppContext, agent: AgentActor) {
   const workspaceId = agent.owner.workspaceId;
   const readable = await requireWorkspaceAccess(ctx.db, agent, "read").then(
     () => true,

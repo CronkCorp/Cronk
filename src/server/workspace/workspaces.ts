@@ -8,6 +8,9 @@ export interface Workspace {
   agentAccess: AgentAccess;
 }
 
+/** The shape of the Workspace the API returns. */
+export const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess });
+
 interface WorkspaceRow {
   id: string;
   name: string;

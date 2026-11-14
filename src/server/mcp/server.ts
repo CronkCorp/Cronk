@@ -6,7 +6,8 @@ import { bearerToken, type AppContext } from "../context.js";
 import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
-import { welcomeText, type Welcome } from "./welcome.js";
+import type { AgentSession, Welcome } from "../api-types.js";
+import { welcomeText } from "./welcome.js";
 
 /**
  * One MCP connection: its transport and server, the hash of the token that opened it (the
@@ -19,11 +20,6 @@ interface Connection {
   endsIfSilentAt: Date;
 }
 
-/** The parts of an Agent Session, as the API returns it, that the MCP server uses. */
-interface PublicSession {
-  id: string;
-  endsIfSilentAt: string;
-}
 
 /** How often connections whose Agent Session went silent are forgotten. */
 const SWEEP_INTERVAL_MS = 60_000;
@@ -70,7 +66,7 @@ export function mcpRoutes(ctx: AppContext) {
         }
         const started = await callApi(app, { token }, "POST", "/api/agent-sessions");
         if (started.status !== 201) return refuse(reply, started.status, started.body.error);
-        const { session, welcome } = started.body as { session: PublicSession; welcome: Welcome };
+        const { session, welcome } = started.body as { session: AgentSession; welcome: Welcome };
         const server = new McpServer({ name: "cronk", version: "0.0.0" }, { instructions: welcomeText(welcome, session.id) });
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
@@ -97,7 +93,7 @@ export function mcpRoutes(ctx: AppContext) {
         await serve(connection.transport, request, reply, token);
         return drop(sessionId);
       }
-      connection.endsIfSilentAt = new Date((current.body.session as PublicSession).endsIfSilentAt);
+      connection.endsIfSilentAt = new Date((current.body.session as AgentSession).endsIfSilentAt);
       return serve(connection.transport, request, reply, token);
     };
 

@@ -1,140 +1,66 @@
 /** A thin client for the Cronk HTTP API. The UI holds no rules; the API decides. */
 
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: Role;
-  active: boolean;
-}
+import type {
+  Access,
+  Agent,
+  AgentAccess,
+  AgentSession,
+  AgentToken,
+  IssuedAgentToken,
+  Invitation,
+  Member,
+  Priority,
+  Project,
+  RecordedActor,
+  RecordedChange,
+  RelationKind,
+  Relations,
+  Role,
+  Status,
+  StatusCategory,
+  Ticket,
+  TicketChanges,
+  TicketDetail,
+  TicketName,
+  TicketRef,
+  User,
+  UserRef,
+  Visibility,
+  Workspace,
+} from "../server/api-types.js";
 
-export type Role = "admin" | "member";
-export type Access = "read" | "write";
-export type Visibility = "open" | "private";
-/** The most a Project (or the Workspace) lets Agents do in it. */
-export type AgentAccess = "none" | Access;
-
-export interface Agent {
-  id: string;
-  name: string;
-  owner: { id: string; name: string };
-  createdAt: string;
-  /** The Agent's live Agent Sessions, oldest first. */
-  sessions: AgentSession[];
-}
-
-/** One continuous connection of an Agent, from connect to disconnect. */
-export interface AgentSession {
-  id: string;
-  startedAt: string;
-  lastSeenAt: string;
-  /** When the Session ends if the Agent stays silent until then. */
-  endsIfSilentAt: string;
-}
+// The API's types are declared once, by the server; the UI's modules take them from here.
+export type {
+  Access,
+  Agent,
+  AgentAccess,
+  AgentSession,
+  AgentToken,
+  IssuedAgentToken,
+  Invitation,
+  Member,
+  Priority,
+  Project,
+  RecordedActor,
+  RecordedChange,
+  RelationKind,
+  Relations,
+  Role,
+  Status,
+  StatusCategory,
+  Ticket,
+  TicketChanges,
+  TicketDetail,
+  TicketName,
+  TicketRef,
+  User,
+  UserRef,
+  Visibility,
+  Workspace,
+};
 
 /** How the UI names an Agent Session: by the start of its id, e.g. "session a3f2". */
 export const sessionName = (id: string) => `session ${id.slice(0, 4)}`;
-
-export interface AgentToken {
-  id: string;
-  readOnly: boolean;
-  createdAt: string;
-}
-
-export interface Invitation {
-  id: string;
-  email: string;
-  role: Role;
-  createdAt: string;
-  expiresAt: string;
-}
-
-export interface Member {
-  user: User;
-  access: Access;
-}
-
-export interface Workspace {
-  name: string;
-  agentAccess: AgentAccess;
-}
-
-/** The fixed Status Categories, in workflow order, with their display names. */
-export const STATUS_CATEGORIES = [
-  ["backlog", "Backlog"],
-  ["unstarted", "Unstarted"],
-  ["started", "Started"],
-  ["in_review", "In Review"],
-  ["completed", "Completed"],
-  ["canceled", "Canceled"],
-] as const;
-
-export type StatusCategory = (typeof STATUS_CATEGORIES)[number][0];
-
-export interface Status {
-  id: string;
-  name: string;
-  category: StatusCategory;
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  key: string;
-  archived: boolean;
-  visibility: Visibility;
-  agentAccess: AgentAccess;
-  /** What the signed-in User may do in the Project. */
-  access: Access;
-}
-
-export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
-export type Priority = (typeof PRIORITIES)[number];
-
-export interface UserRef {
-  id: string;
-  name: string;
-}
-
-/** Another Ticket as a parent or history entry names it. */
-export interface TicketName {
-  key: string;
-  title: string;
-}
-
-/** Another Ticket as a Ticket lists it among its Sub-Tickets or relations. */
-export interface TicketRef extends TicketName {
-  status: Status;
-}
-
-export interface Ticket {
-  key: string;
-  projectKey: string;
-  title: string;
-  description: string;
-  status: Status;
-  priority: Priority;
-  labels: string[];
-  assignee: UserRef | null;
-  parent: TicketName | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type RelationKind = "blocks" | "blocked_by" | "relates_to";
-
-export interface Relations {
-  blocks: TicketRef[];
-  blockedBy: TicketRef[];
-  relatesTo: TicketRef[];
-}
-
-/** A Ticket with the Tickets around it, as its page shows it. */
-export interface TicketDetail {
-  ticket: Ticket;
-  subTickets: TicketRef[];
-  relations: Relations;
-}
 
 /** Narrows a Project's Ticket list; `assignee` takes a User id or `none`. */
 export interface TicketFilter {
@@ -144,35 +70,6 @@ export interface TicketFilter {
   priority?: Priority;
   label?: string;
 }
-
-export interface TicketChanges {
-  title?: string;
-  description?: string;
-  statusId?: string;
-  priority?: Priority;
-  labels?: string[];
-  assigneeId?: string | null;
-  parentKey?: string | null;
-}
-
-
-/** Who made a change: a User, or an Agent with the Owner it acted for and the Agent Session it was in, if any. */
-export type RecordedActor =
-  | { kind: "user"; id: string; name: string }
-  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
-
-
-export type RecordedChange = { at: string; actor: RecordedActor } & (
-  | { change: "created"; title: string; description: string; status: Status }
-  | { change: "title"; from: string; to: string }
-  | { change: "description"; from: string; to: string }
-  | { change: "status"; from: Status; to: Status }
-  | { change: "priority"; from: Priority; to: Priority }
-  | { change: "labels"; from: string[]; to: string[] }
-  | { change: "assignee"; from: UserRef | null; to: UserRef | null }
-  | { change: "parent"; from: TicketName | null; to: TicketName | null }
-  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
-);
 
 export class ApiError extends Error {
   constructor(
@@ -215,7 +112,7 @@ export const api = {
   agentTokens: (id: string) =>
     request<{ tokens: AgentToken[] }>("GET", `/api/agents/${encodeURIComponent(id)}/tokens`).then((r) => r.tokens),
   issueAgentToken: (id: string, readOnly: boolean) =>
-    request<{ token: AgentToken; secret: string }>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
+    request<IssuedAgentToken>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
   revokeAgentToken: (id: string, tokenId: string) =>
     request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`),
 

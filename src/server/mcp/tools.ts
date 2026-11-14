@@ -1,8 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { PRIORITIES } from "../work/tickets.js";
-import { STATUS_CATEGORIES } from "../work/projects.js";
+import { PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
