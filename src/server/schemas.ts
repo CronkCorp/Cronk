@@ -56,7 +56,8 @@ export type SharedSchemaName =
   | "GuidanceVersion"
   | "StaleGuidance"
   | "GuidanceMerge"
-  | "SearchResult";
+  | "SearchResult"
+  | "LinkedDocument";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -353,6 +354,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       createdAt: timestamp,
       updatedAt: timestamp,
       ...writtenBy,
+    }),
+  },
+  LinkedDocument: {
+    description: "A Document linked to a Ticket: one of its Reports, or a Document that mentions its key. Read it as a Document by its id.",
+    ...object({
+      id,
+      title: { type: "string" },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket a Report is on; null for any other Document." },
+      version: { type: "integer", description: "The number of its current Version." },
+      updatedAt: timestamp,
     }),
   },
   DocumentTreeEntry: {

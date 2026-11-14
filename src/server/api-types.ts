@@ -25,7 +25,7 @@ import type {
   UserRef,
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
-import type { Document as StoredDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
+import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
 
@@ -79,11 +79,15 @@ export type Relations = Serialized<StoredRelations>;
 /** An Agent Session's hold on a Ticket. */
 export type Claim = Serialized<StoredClaim>;
 
-/** A Ticket with the Tickets around it and its live Claim, as its page shows it. */
+/** A Document linked to a Ticket: one of its Reports, or a Document mentioning its key. */
+export type LinkedDocument = Serialized<StoredLinkedDocument>;
+
+/** A Ticket with the Tickets and Documents around it and its live Claim, as its page shows it. */
 export interface TicketDetail {
   ticket: Ticket;
   subTickets: TicketRef[];
   relations: Relations;
+  documents: LinkedDocument[];
   claim: Claim | null;
 }
 

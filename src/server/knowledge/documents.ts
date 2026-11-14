@@ -279,3 +279,43 @@ export async function deleteDocument(db: Queryable, tree: Tree, document: Docume
   await db.query("DELETE FROM documents WHERE id = $1", [document.id]);
   return true;
 }
+
+/** A Document as a Ticket lists it among its linked Documents, without its body; read it by its id. */
+export interface LinkedDocument {
+  id: string;
+  title: string;
+  /** Null for a Workspace Document. */
+  projectKey: string | null;
+  /** The Ticket a Report is on; null for any other Document. */
+  ticketKey: string | null;
+  version: number;
+  updatedAt: Date;
+}
+
+/** How many Documents mentioning a Ticket it lists, besides its Reports. */
+const MENTIONS_LIMIT = 20;
+
+/**
+ * The Documents linked to a Ticket: its own Reports, oldest first, then the Documents (other Tickets'
+ * Reports included) whose current Version mentions its key, as Markdown links Ticket keys, most
+ * recently changed first. Only those in `readable` places are listed; the Ticket's Reports always are,
+ * as they share its Project.
+ */
+export async function listLinkedDocuments(
+  db: Queryable,
+  ticket: { id: string; key: string },
+  readable: { projectIds: string[]; workspace: boolean },
+): Promise<LinkedDocument[]> {
+  const select = `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt"
+                  FROM (${SELECT_DOCUMENTS}) d`;
+  const reports = await db.query<LinkedDocument>(`${select} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
+  // The key is letters, digits and one hyphen, so it reads literally in a regular expression; \m and \M keep CRONK-3 from matching CRONK-30.
+  const mentions = await db.query<LinkedDocument>(
+    `${select}
+     WHERE d.ticket_id IS DISTINCT FROM $1 AND (d.title || ' ' || d.body) ~ ('\\m' || $2 || '\\M')
+       AND (d.project_id = ANY($3::uuid[]) OR (d.project_id IS NULL AND $4))
+     ORDER BY d.updated_at DESC, d.id LIMIT ${MENTIONS_LIMIT}`,
+    [ticket.id, ticket.key, readable.projectIds, readable.workspace],
+  );
+  return [...reports.rows, ...mentions.rows];
+}

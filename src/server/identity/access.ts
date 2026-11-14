@@ -1,7 +1,7 @@
 import { actingUser, type Actor, type AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { findProjectById, findProjectByKey, type Project, type Visibility } from "../work/projects.js";
+import { findProjectById, findProjectByKey, listProjects, type Project, type Visibility } from "../work/projects.js";
 import type { Agent } from "./agents.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import type { User } from "./users.js";
@@ -139,6 +139,19 @@ export async function canRead(db: Queryable, actor: Actor, projectId: string | n
     if (err instanceof HttpError) return false;
     throw err;
   }
+}
+
+/** Where an Actor may read: the ids of the Projects, archived or not, and whether the Workspace outside any Project. */
+export interface Readable {
+  projectIds: string[];
+  workspace: boolean;
+}
+
+/** Where `actor` may read, for finding things across the Workspace (see `Readable`). */
+export async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {
+  const workspaceId = actingUser(actor).workspaceId;
+  const projects = [...(await listProjects(db, workspaceId, false)), ...(await listProjects(db, workspaceId, true))];
+  return { projectIds: (await visibleProjects(db, actor, projects)).map((p) => p.id), workspace: await canRead(db, actor, null) };
 }
 
 /**

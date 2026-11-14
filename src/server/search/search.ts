@@ -1,7 +1,6 @@
-import { actingUser, type Actor } from "../actor.js";
+import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { canRead, visibleProjects } from "../identity/access.js";
-import { listProjects } from "../work/projects.js";
+import { readablePlaces, type Readable } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { SearchKind } from "../../shared/values.js";
 
@@ -23,18 +22,6 @@ export interface SearchResult {
   projectKey: string | null;
   ticketKey: string | null;
   documentId: string | null;
-}
-
-/** Where `actor` may read: the Projects, archived or not, and whether the Workspace outside any Project. */
-interface Readable {
-  projectIds: string[];
-  workspace: boolean;
-}
-
-async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {
-  const workspaceId = actingUser(actor).workspaceId;
-  const projects = [...(await listProjects(db, workspaceId, false)), ...(await listProjects(db, workspaceId, true))];
-  return { projectIds: (await visibleProjects(db, actor, projects)).map((p) => p.id), workspace: await canRead(db, actor, null) };
 }
 
 /** The text-search configuration everything is indexed and searched with. */
