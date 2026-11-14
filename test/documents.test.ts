@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk } from "./harness.js";
+import { registerAgent, startInstalledCronk } from "./harness.js";
 
 describe("Documents", () => {
   it("are created in a Project as Markdown, at Version 1", async () => {
@@ -66,5 +66,60 @@ describe("saving a Document", () => {
     const res = await admin.patch(`/api/documents/${id}`, { body: "no base" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/baseVersion/);
+  });
+});
+
+describe("Versions", () => {
+  it("are listed newest first with the Actor who saved each, and the Agent Session an Agent saved in", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ada = (await admin.get("/api/me")).body.user;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { id } = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "v1" })).body.document;
+    const claude = await registerAgent(admin, "claude-laptop");
+    const session = (await cronk.client(claude.secret).post("/api/agent-sessions")).body.session;
+    cronk.clock.advance(60_000);
+
+    const inSession = cronk.client(claude.secret, { "cronk-agent-session": session.id });
+    expect((await inSession.patch(`/api/documents/${id}`, { baseVersion: 1, body: "v2" })).status).toBe(200);
+    await cronk.client(claude.secret).patch(`/api/documents/${id}`, { baseVersion: 2, body: "v3" });
+
+    const res = await admin.get(`/api/documents/${id}/versions`);
+    expect(res.status).toBe(200);
+    const agent = { kind: "agent", id: claude.agentId, name: "claude-laptop", owner: { id: ada.id, name: "Ada" } };
+    expect(res.body.versions).toEqual([
+      { number: 3, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { ...agent, session: null }, restoredFrom: null },
+      { number: 2, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { ...agent, session: { id: session.id } }, restoredFrom: null },
+      { number: 1, title: "Plan", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null },
+    ]);
+    expect((await admin.get(`/api/documents/${id}/versions/2`)).body.version).toMatchObject({ number: 2, body: "v2" });
+    expect((await admin.get(`/api/documents/${id}/versions/9`)).status).toBe(404);
+  });
+
+  it("leave out saves that change nothing", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { id } = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "v1" })).body.document;
+
+    const res = await admin.patch(`/api/documents/${id}`, { baseVersion: 1, title: " Plan ", body: "v1" });
+    expect(res.body.document.version).toBe(1);
+    expect((await admin.get(`/api/documents/${id}/versions`)).body.versions).toHaveLength(1);
+  });
+
+  it("can be restored, which saves a new Version with the earlier title and body", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { id } = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "v1" })).body.document;
+    await admin.patch(`/api/documents/${id}`, { baseVersion: 1, title: "Plan B", body: "v2" });
+
+    const restored = await admin.post(`/api/documents/${id}/versions/1/restore`, { baseVersion: 2 });
+    expect(restored.status).toBe(200);
+    expect(restored.body.document).toMatchObject({ title: "Plan", body: "v1", version: 3 });
+    const [latest] = (await admin.get(`/api/documents/${id}/versions`)).body.versions;
+    expect(latest).toMatchObject({ number: 3, title: "Plan", restoredFrom: 1 });
+
+    const stale = await admin.post(`/api/documents/${id}/versions/2/restore`, { baseVersion: 2 });
+    expect(stale.status).toBe(409);
+    expect(stale.body.current).toMatchObject({ number: 3, body: "v1" });
+    expect((await admin.post(`/api/documents/${id}/versions/7/restore`, { baseVersion: 3 })).status).toBe(404);
   });
 });

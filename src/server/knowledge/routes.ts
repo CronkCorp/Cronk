@@ -3,10 +3,10 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, documentIdParam, errors, holding, pathParams, projectKeyParam, ref } from "../schemas.js";
+import { answer, documentIdParam, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { projectFor } from "../work/routes.js";
-import { findDocument, findVersion, insertDocument, saveVersion, type Document, type Tree } from "./documents.js";
+import { findDocument, findVersion, insertDocument, listVersions, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 
 /** A Document title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -27,6 +27,10 @@ const staleVersionAnswer = {
 
 const projectParams = pathParams({ key: projectKeyParam });
 const documentParams = pathParams({ id: documentIdParam });
+const versionParams = pathParams({
+  id: documentIdParam,
+  number: { type: "string", pattern: "^[1-9][0-9]{0,8}$", description: "The Version's number, counting from 1." },
+});
 
 interface NewDocument {
   title: string;
@@ -126,7 +130,71 @@ export function knowledgeRoutes(ctx: AppContext) {
         return { document };
       },
     );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/documents/:id/versions",
+      {
+        schema: {
+          params: documentParams,
+          response: {
+            200: answer("The Document's Versions, newest first, without their bodies", listing("versions", ref("VersionSummary"))),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await documentFor(ctx.db, actor, request.params.id, "read");
+        return { versions: await listVersions(ctx.db, document.id) };
+      },
+    );
+
+    app.get<{ Params: { id: string; number: string } }>(
+      "/api/documents/:id/versions/:number",
+      {
+        schema: {
+          params: versionParams,
+          response: { 200: answer("The Version, with its body", holding("version", "Version")), ...errors(400, 401, 403, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await documentFor(ctx.db, actor, request.params.id, "read");
+        return { version: await versionOr404(ctx.db, document, request.params.number) };
+      },
+    );
+
+    app.post<{ Params: { id: string; number: string }; Body: { baseVersion: number } }>(
+      "/api/documents/:id/versions/:number/restore",
+      {
+        schema: {
+          params: versionParams,
+          body: { type: "object", required: ["baseVersion"], additionalProperties: false, properties: { baseVersion } },
+          response: {
+            200: answer("The Document at a new Version holding the restored Version's title and body", holding("document", "Document")),
+            ...errors(400, 401, 403, 404, 410),
+            409: staleVersionAnswer,
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await transaction(ctx.db, async (tx) => {
+          const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          const earlier = await versionOr404(tx, current, request.params.number);
+          await requireCurrent(tx, current, request.body.baseVersion);
+          return saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
+        });
+        return { document };
+      },
+    );
   };
+}
+
+async function versionOr404(db: Queryable, document: Document, number: string): Promise<Version> {
+  const version = await findVersion(db, document.id, Number(number));
+  if (!version) throw new HttpError(404, "No such Version");
+  return version;
 }
 
 /** Refuses a save based on a Version that is no longer current, answering with the current Version. */

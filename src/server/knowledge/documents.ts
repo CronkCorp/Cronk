@@ -150,6 +150,12 @@ export async function findVersion(db: Queryable, documentId: string, number: num
   return rows[0] && toVersion(rows[0]);
 }
 
+/** A Document's Versions, newest first, without their bodies. */
+export async function listVersions(db: Queryable, documentId: string): Promise<Omit<Version, "body">[]> {
+  const { rows } = await db.query<VersionRow>(`${SELECT_VERSIONS} WHERE v.document_id = $1 ORDER BY v.number DESC`, [documentId]);
+  return rows.map(toVersion).map(({ body: _, ...summary }) => summary);
+}
+
 /**
  * Saves a new Version of a Document, unless it would change nothing (and isn't a restore).
  * Pass a Document locked with `forUpdate` whose Version the save was based on, inside a transaction.
