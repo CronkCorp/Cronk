@@ -37,22 +37,36 @@ export interface CommentPlace {
   delegateId: string | null;
 }
 
-/**
- * The @mentions in a Comment's Markdown: each `@name` not preceded by a word character, where
- * the name runs of letters, digits, `_`, `-` and inner dots. Lower-cased, without repeats.
- */
-export function mentionedNames(body: string): string[] {
-  const names = [...body.matchAll(/(?<![\w@])@([\w-]+(?:\.[\w-]+)*)/gu)].map((m) => m[1]!.toLowerCase());
-  return [...new Set(names)];
+/** An @mention of an Agent: its name, and the name of the Owner it picks, if it picks one. Both lower-cased. */
+export interface Mention {
+  owner: string | null;
+  name: string;
 }
 
 /**
- * The Agents the writer `writerId` means by each mentioned name: their own Agent of that name
- * if they have one, otherwise every other Owner's Agent of that name.
+ * The @mentions in a Comment's Markdown, without repeats: each `@name` or `@owner/name` not
+ * preceded by a word character, where a name runs of letters, digits, `_`, `-` and inner dots.
  */
-function mentionedAgents(agents: { agent: Agent; owner: User }[], writerId: string, names: string[]): string[] {
-  return names.flatMap((name) => {
+export function mentionsIn(body: string): Mention[] {
+  const part = String.raw`[\w-]+(?:\.[\w-]+)*`;
+  const pattern = new RegExp(String.raw`(?<![\w@])@(?:(${part})/)?(${part})`, "gu");
+  const seen = new Map<string, Mention>();
+  for (const m of body.matchAll(pattern)) {
+    const mention = { owner: m[1]?.toLowerCase() ?? null, name: m[2]!.toLowerCase() };
+    seen.set(JSON.stringify(mention), mention);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * The Agents the writer `writerId` means by each mention. `@owner/name` is that Owner's Agent
+ * of that name. `@name` is the writer's own Agent of that name if they have one, otherwise
+ * every other Owner's Agent of that name.
+ */
+function mentionedAgents(agents: { agent: Agent; owner: User }[], writerId: string, mentions: Mention[]): string[] {
+  return mentions.flatMap(({ owner, name }) => {
     const named = agents.filter((a) => a.agent.name.toLowerCase() === name);
+    if (owner !== null) return named.filter((a) => a.owner.name.toLowerCase() === owner).map((a) => a.agent.id);
     const own = named.filter((a) => a.owner.id === writerId);
     return (own.length > 0 ? own : named).map((a) => a.agent.id);
   });
@@ -75,7 +89,7 @@ export async function markWaiting(
   const agents = await listAgents(db, actingUser(actor).workspaceId);
   const candidates: Record<WaitingReason, string[]> = {
     answer: answered ? [answered.agentId] : [],
-    mention: mentionedAgents(agents, actingUser(actor).id, mentionedNames(comment.body)),
+    mention: mentionedAgents(agents, actingUser(actor).id, mentionsIn(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;

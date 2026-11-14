@@ -51,6 +51,18 @@ describe("An @mention of an Agent", () => {
     expect(await mentionedIn(cronk, carolsCodex)).toEqual(["@codex, look."]);
   });
 
+  it("picks another Owner's Agent with @owner/name, the Owner by name ignoring case", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const codex = await registerAgent(admin, "codex");
+    const bobsCodex = await registerAgent(bob, "codex");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "@Bob/codex, look." });
+
+    expect(await mentionedIn(cronk, bobsCodex)).toEqual(["@Bob/codex, look."]);
+    expect(await mentionedIn(cronk, codex)).toEqual([]);
+  });
+
   it("leaves out Agents that can't see where it was posted", async () => {
     const { cronk, admin } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");
