@@ -22,7 +22,10 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
             <GuidanceEditor
               projectKey={props.projectKey}
               current={current}
-              onCurrentChanged={setGuidance}
+              onCurrentChanged={(theirs) => {
+                setGuidance(theirs);
+                reloadVersions();
+              }}
               onDone={(saved) => {
                 setGuidance(saved);
                 setEditing(false);
