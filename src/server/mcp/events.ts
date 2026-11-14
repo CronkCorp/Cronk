@@ -25,19 +25,21 @@ const MAX_REOPEN_DELAY_MS = 30_000;
 
 /**
  * Follows one of the API's server-sent event streams over real HTTP as `caller`, calling
- * `onEvent` for each event after the opening `ready`, until the returned function is called.
- * Resolves once the stream is first ready, or first fails to open.
+ * `onEvent` for each event but `ready`, until the returned function is called. Resolves once
+ * the stream is first ready, or first fails to open.
  *
  * A stream the API ends, or that couldn't be opened, is opened again after a short delay,
  * backing off while it keeps failing. The API ends a stream when the caller loses access, but
  * also when it can't check that access (a database blip), so opening it again is what tells the
  * two apart: the API refusing it with a client error (a revoked token, an ended Agent Session)
- * stops it for good.
+ * stops it for good. A stream is opened again from the id of the last event that had one
+ * (`Last-Event-ID`), so the API can first send what was missed meanwhile, before its `ready`.
  */
 export async function followEvents(baseUrl: string, caller: Caller, path: string, onEvent: (event: LiveEvent) => void): Promise<() => void> {
   let stopped = false;
   let closeStream = () => {};
   let reopening: NodeJS.Timeout | undefined;
+  const last: { id?: string } = {};
   const stop = () => {
     stopped = true;
     clearTimeout(reopening);
@@ -47,7 +49,7 @@ export async function followEvents(baseUrl: string, caller: Caller, path: string
   let delay = REOPEN_DELAY_MS;
   // Opens the stream, and settles once it is open or has failed to; after either, it is opened again once it ends.
   const follow = async (): Promise<void> => {
-    const opened = await openStream(baseUrl, caller, path, onEvent, (close) => (closeStream = close));
+    const opened = await openStream(baseUrl, caller, path, last, onEvent, (close) => (closeStream = close));
     if (stopped || opened === "refused") return;
     if (opened === "failed") return reopenLater();
     const openedAt = Date.now();
@@ -67,7 +69,8 @@ export async function followEvents(baseUrl: string, caller: Caller, path: string
 }
 
 /**
- * Opens the stream once, handing `setClose` a function that closes it as soon as there is one.
+ * Opens the stream once from `last.id`, if there is one, keeping it up to date with the id of
+ * each event that has one, and handing `setClose` a function that closes it as soon as there is one.
  * Answers how it went: open, with a promise that settles when the stream ends; refused by the
  * API with a client error, so opening it again would be refused too; or failed otherwise (the API
  * answered with a server error, couldn't be reached, or wasn't ready in time).
@@ -76,11 +79,13 @@ async function openStream(
   baseUrl: string,
   caller: Caller,
   path: string,
+  last: { id?: string },
   onEvent: (event: LiveEvent) => void,
   setClose: (close: () => void) => void,
 ): Promise<{ ended: Promise<void> } | "refused" | "failed"> {
   // A connection of its own, closed with the stream.
-  const req: ClientRequest = request(new URL(path, baseUrl), { agent: false, headers: { accept: "text/event-stream", ...callerHeaders(caller) } });
+  const headers = { accept: "text/event-stream", ...callerHeaders(caller), ...(last.id !== undefined && { "last-event-id": last.id }) };
+  const req: ClientRequest = request(new URL(path, baseUrl), { agent: false, headers });
   const close = () => void req.destroy();
   setClose(close);
   // A stream that doesn't get ready in time is given up, so the caller isn't held up waiting for it.
@@ -94,13 +99,20 @@ async function openStream(
       return status >= 400 && status < 500 && status !== 408 && status !== 429 ? "refused" : "failed";
     }
     const events = readEvents(res)[Symbol.asyncIterator]();
-    const first = await events.next();
-    if (first.done || first.value.event !== "ready") {
+    const take = (event: LiveEvent) => {
+      if (event.id !== undefined) last.id = event.id;
+      if (event.event !== "ready") onEvent(event);
+    };
+    // What was missed while the stream was down comes first, then `ready`.
+    let e = await events.next();
+    for (; !e.done && e.value.event !== "ready"; e = await events.next()) take(e.value);
+    if (e.done) {
       close();
       return "failed";
     }
+    take(e.value);
     const ended = (async () => {
-      for (let e = await events.next(); !e.done; e = await events.next()) onEvent(e.value);
+      for (let next = await events.next(); !next.done; next = await events.next()) take(next.value);
     })()
       .catch(() => {})
       .finally(close);
@@ -113,7 +125,7 @@ async function openStream(
   }
 }
 
-/** The events of a server-sent event stream, as the API writes them: an `event` line, a JSON `data` line, a blank line. */
+/** The events of a server-sent event stream, as the API writes them: an `event` line, an optional `id` line, a JSON `data` line, a blank line. */
 async function* readEvents(body: AsyncIterable<Buffer>): AsyncGenerator<LiveEvent> {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -124,12 +136,14 @@ async function* readEvents(body: AsyncIterable<Buffer>): AsyncGenerator<LiveEven
       const block = buffer.slice(0, end);
       buffer = buffer.slice(end + 2);
       let event = "message";
+      let id: string | undefined;
       const data: string[] = [];
       for (const line of block.split("\n")) {
         if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("id:")) id = line.slice(3).trim();
         else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
       }
-      if (data.length > 0) yield { event, data: JSON.parse(data.join("\n")) };
+      if (data.length > 0) yield { event, data: JSON.parse(data.join("\n")), ...(id !== undefined && { id }) };
     }
   }
 }

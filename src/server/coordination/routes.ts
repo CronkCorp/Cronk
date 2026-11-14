@@ -337,13 +337,21 @@ export function coordinationRoutes(ctx: AppContext) {
       "/api/agent-sessions/current/events",
       {
         schema: {
-          headers: sessionHeader,
+          headers: {
+            ...sessionHeader,
+            properties: {
+              ...sessionHeader.properties,
+              "last-event-id": { type: "string", description: "The id of the last event a stream got, to send what it missed since" },
+            },
+          },
           response: {
             200: {
               description:
                 "A server-sent event stream of work as it starts waiting for the Agent, for as long as the Agent Session is live. It opens " +
                 "with a `ready` event; each Comment that starts waiting for the Agent arrives as a `waiting` event whose data is " +
-                "`{ waiting }`, a WaitingWork as JSON. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
+                "`{ waiting }`, a WaitingWork as JSON, with an `id`; `ready` carries one too. Reopened with the last id it got as " +
+                "`Last-Event-ID`, the stream first sends, before `ready`, each `waiting` event it missed meanwhile whose work no welcome " +
+                "has taken since. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(400, 401, 403, 410),
