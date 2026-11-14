@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A Markdown file's frontmatter and body. */
@@ -148,6 +148,11 @@ async function busyWorkspace() {
   // History keeps the names it recorded: CRONK-3 moved into "Blocked", since renamed "Stuck", and to Grace.
   await admin.patch("/api/tickets/CRONK-3", { statusId: blocked.id, assigneeId: graceId });
   await admin.patch(`/api/projects/CRONK/statuses/${blocked.id}`, { name: "Stuck" });
+  // ...and CRONK-2 through "Parked", since deleted: its id names no Status in either installation.
+  const parked = (await admin.post("/api/projects/CRONK/statuses", { name: "Parked", category: "backlog" })).body.status;
+  await admin.patch("/api/tickets/CRONK-2", { statusId: parked.id });
+  await admin.patch("/api/tickets/CRONK-2", { statusId: blocked.id });
+  expect((await admin.delete(`/api/projects/CRONK/statuses/${parked.id}`)).status).toBe(204);
   await admin.patch("/api/tickets/CRONK-2", { parentKey: "CRONK-1", priority: "urgent", labels: ["Core", "api"], description: "The *API*." });
   await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-3" });
   await admin.post("/api/tickets/CRONK-3/relations", { kind: "relates_to", ticketKey: "CRONK-2" });
@@ -294,6 +299,29 @@ describe("importing a Project export", () => {
     const plain = await admin.upload("/api/import", await tarGz({ "notes/a.md": "# A" }));
     expect(plain.status).toBe(400);
     expect(plain.body.error).toMatch(/isn't a Cronk export/);
+  });
+});
+
+describe("a Ticket's history in an export", () => {
+  it("is refused when a change in it isn't one Cronk records", async () => {
+    const before = await busyWorkspace();
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    const path = "projects/CRONK/tickets/CRONK-1.history.md";
+    const { changes } = markdown(files[path]).data;
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    for (const broken of [
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "relation added", kind: "blocks" },
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "priority", from: "none", to: "soon" },
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "assignee", from: null, to: "ada@example.com" },
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "renamed", from: "a", to: "b" },
+    ]) {
+      const edited = { ...files, [path]: `---\n${stringify({ changes: [...changes, broken] })}---\n` };
+      const imported = await admin.upload("/api/import", await tarGz(edited));
+      expect(imported.status).toBe(400);
+      expect(imported.body.error).toMatch(/CRONK-1\.history\.md changes\[\d+\]/);
+    }
+    expect((await admin.get("/api/tickets/CRONK-1")).status).toBe(404);
   });
 });
 

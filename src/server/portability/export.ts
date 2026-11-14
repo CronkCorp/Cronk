@@ -3,7 +3,8 @@ import { STATUS_CATEGORIES } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { Folder } from "./archive.js";
 import { writeFrontmatter } from "./frontmatter.js";
-import { FORMAT, README, slug, type ActorRef } from "./format.js";
+import { CHANGE_FIELDS, FORMAT, README, isRecord, slug, type ActorRef } from "./format.js";
+import type { TicketChange } from "../work/tickets.js";
 
 /**
  * Exporting the Workspace or one Project as a folder of Markdown files with YAML frontmatter
@@ -164,6 +165,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
       `SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
       [p.id, STATUS_CATEGORIES],
     );
+    const statusNow = new Map(statuses.map((s) => [s.id, s.name]));
     const { rows: members } = await db.query<{ user_id: string; access: string }>(
       "SELECT m.user_id, m.access FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY lower(u.email)",
       [p.id],
@@ -263,13 +265,12 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
         );
       }
 
-      const { rows: changes } = await db.query<ActorColumns & { at: Date; change: string; data: Record<string, unknown> }>(
+      const { rows: changes } = await db.query<ActorColumns & { at: Date; change: TicketChange["change"]; data: Record<string, unknown> }>(
         "SELECT * FROM ticket_changes WHERE ticket_id = $1 ORDER BY id",
         [t.id],
       );
-      const statusNow = new Map(statuses.map((s) => [s.id, s.name]));
       add(`${base}.history.md`, {
-        changes: changes.map((c) => ({ at: iso(c.at), by: actor(c), change: c.change, ...historyNames(c.change, c.data, emailOf, statusNow) })),
+        changes: changes.map((c) => ({ at: iso(c.at), by: actor(c), change: c.change, ...changeToExport(c.change, c.data, emailOf, statusNow) })),
       });
 
       const { rows: reports } = await db.query<{ id: string; title: string; body: string; version: number; created_at: Date; updated_at: Date; claim_id: string }>(
@@ -309,21 +310,16 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
   return new Map([...folder].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-/**
- * A history entry's data as the export writes it: as recorded, with the names copied in at the time,
- * plus what an import finds each record by: a User's `email`, and a Status's `current` name if it
- * is still in the Project. Agents keep their id, which is the one `people.md` lists.
- */
-function historyNames(change: string, data: Record<string, unknown>, emailOf: Map<string, string>, statusNow: Map<string, string>): Record<string, unknown> {
-  const user = (ref: unknown) => (isRecord(ref) ? { ...ref, email: emailOf.get(String(ref.id)) } : ref);
-  const status = (ref: unknown) => (isRecord(ref) ? { ...ref, current: statusNow.get(String(ref.id)) } : ref);
-  const mapped = { ...data };
-  if (change === "created") mapped.status = status(data.status);
-  if (change === "status") Object.assign(mapped, { from: status(data.from), to: status(data.to) });
-  if (change === "assignee") Object.assign(mapped, { from: user(data.from), to: user(data.to) });
-  return mapped;
+/** A Ticket change's fields as the export writes them (see `CHANGE_FIELDS`): a User with their `email`, a Status with its `current` name. */
+function changeToExport(change: TicketChange["change"], data: Record<string, unknown>, emailOf: Map<string, string>, statusNow: Map<string, string>): Record<string, unknown> {
+  const written = { ...data };
+  for (const [field, { holds }] of Object.entries(CHANGE_FIELDS[change])) {
+    const ref = data[field];
+    if (!isRecord(ref)) continue;
+    if (holds === "user") written[field] = { ...ref, email: emailOf.get(String(ref.id)) };
+    if (holds === "status") written[field] = { ...ref, current: statusNow.get(String(ref.id)) };
+  }
+  return written;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const rank = (path: string) => (path === "README.md" ? 0 : path === "people.md" ? 1 : 2);

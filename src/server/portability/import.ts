@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../context.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
-import { ACTIVITY_KINDS, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import { unwrapFolder, type Folder } from "./archive.js";
-import { FORMAT } from "./format.js";
+import { CHANGE_FIELDS, FORMAT, isRecord } from "./format.js";
 import { accessSchema, agentAccessSchema, roleSchema } from "../schemas.js";
 import { PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { readFrontmatter } from "./frontmatter.js";
@@ -431,9 +431,15 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
 
   // History once every Ticket is in, naming records by what this installation calls them.
   for (const { ticketId, statusIds, file } of histories) {
+    const find: Finders = {
+      user: findUser,
+      agent: async (id) => agentIds.get(id)?.id,
+      status: async (name) => statusIds.get(name.toLowerCase()),
+    };
     for (const [i, entry] of list(file, "changes").entries()) {
       const where = `${file.path} changes[${i}]`;
-      const { at, by, change, ...data } = entry;
+      const { at, by, change, ...fields } = entry;
+      const kind = oneOf(change, Object.keys(CHANGE_FIELDS) as TicketChange["change"][], `${where}.change`);
       await db.query(
         `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -441,12 +447,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
           ticketId,
           date(at, `${where}.at`),
           ...actorValues(await actor(by, `${where}.by`)),
-          oneOf(change, TICKET_CHANGES, `${where}.change`),
-          await historyIds(change as TicketChange["change"], data, {
-            user: findUser,
-            agent: async (id) => agentIds.get(id)?.id,
-            status: async (name) => statusIds.get(name.toLowerCase()),
-          }),
+          kind,
+          await importedChange(kind, fields, find, where),
         ],
       );
     }
@@ -454,41 +456,44 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   return { scope, projects: created };
 }
 
-const TICKET_CHANGES: readonly TicketChange["change"][] = [
-  "created",
-  "title",
-  "description",
-  "status",
-  "priority",
-  "labels",
-  "assignee",
-  "delegate",
-  "parent",
-  "relation added",
-  "relation removed",
-];
-
-/** Finds a record in this installation by what an export names it by. */
-type Lookup = (name: string) => Promise<string | undefined>;
+/** Finds a record in this installation by what an export names it by, if it is here. */
+type Finder = (name: string) => Promise<string | undefined>;
+interface Finders {
+  user: Finder;
+  agent: Finder;
+  status: Finder;
+}
 
 /**
- * A history entry's data as the export wrote it (see `historyNames` in `export.ts`), with each record's id
- * swapped for the one it has here: Users found by `email`, Agents by their `people.md` id and Statuses by
- * their `current` name. The names recorded at the time stay; an id with nothing to map to stays as written.
+ * A Ticket change's fields as Cronk records them, from those the export wrote (see `CHANGE_FIELDS`), refusing any
+ * that isn't what its kind holds. Users, Agents and Statuses get the id they have here, keeping the names recorded
+ * at the time; one with nothing here to map to keeps the id it was written with.
  */
-async function historyIds(change: TicketChange["change"], data: Record<string, unknown>, find: { user: Lookup; agent: Lookup; status: Lookup }): Promise<Record<string, unknown>> {
-  const swap = async (ref: unknown, lookup: Lookup, by: string) => {
-    if (ref === null || typeof ref !== "object" || Array.isArray(ref)) return ref;
-    const { [by]: name, ...rest } = ref as Record<string, unknown>;
-    const id = typeof name === "string" ? await lookup(name) : undefined;
-    return { ...rest, id: id ?? (ref as Record<string, unknown>).id };
-  };
-  const mapped = { ...data };
-  if (change === "created") mapped.status = await swap(data.status, find.status, "current");
-  if (change === "status") Object.assign(mapped, { from: await swap(data.from, find.status, "current"), to: await swap(data.to, find.status, "current") });
-  if (change === "assignee") Object.assign(mapped, { from: await swap(data.from, find.user, "email"), to: await swap(data.to, find.user, "email") });
-  if (change === "delegate") Object.assign(mapped, { from: await swap(data.from, find.agent, "id"), to: await swap(data.to, find.agent, "id") });
-  return mapped;
+async function importedChange(change: TicketChange["change"], fields: Record<string, unknown>, find: Finders, where: string): Promise<Record<string, unknown>> {
+  const recorded: Record<string, unknown> = {};
+  for (const [field, { holds, nullable }] of Object.entries(CHANGE_FIELDS[change])) {
+    const value = fields[field];
+    const at = `${where}.${field}`;
+    if (nullable && value === null) recorded[field] = null;
+    else if (holds === "title") recorded[field] = text(value, at);
+    else if (holds === "text") recorded[field] = typeof value === "string" ? value : refuse(`${at} must be text`);
+    else if (holds === "priority") recorded[field] = oneOf(value, PRIORITIES, at);
+    else if (holds === "relation kind") recorded[field] = oneOf(value, RELATION_KINDS, at);
+    else if (holds === "labels") {
+      if (!Array.isArray(value) || !value.every((l) => typeof l === "string")) refuse(`${at} must be a list of text`);
+      recorded[field] = value;
+    } else {
+      if (!isRecord(value)) refuse(`${at} must be a mapping${nullable ? " or null" : ""}`);
+      if (holds === "ticket") recorded[field] = { key: text(value.key, `${at}.key`), title: text(value.title, `${at}.title`) };
+      else {
+        const foundBy = { user: value.email, agent: value.id, status: value.current }[holds];
+        const id = (typeof foundBy === "string" ? await find[holds](foundBy) : undefined) ?? (isUuid(value.id) ? value.id : refuse(`${at} names no record here and has no id`));
+        const named = { id, name: text(value.name, `${at}.name`) };
+        recorded[field] = holds === "status" ? { ...named, category: oneOf(value.category, STATUS_CATEGORIES, `${at}.category`) } : named;
+      }
+    }
+  }
+  return recorded;
 }
 
 function refuse(message: string): never {
