@@ -213,3 +213,35 @@ describe("The Claim holder", () => {
     expect((await holder.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(200);
   });
 });
+
+describe("Sub-Tickets", () => {
+  it("can be created by the Claim holder, inheriting the parent's Assignee and Delegate", async () => {
+    const { admin, adaId, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const created = await agent.post("/api/tickets/CRONK-1/sub-tickets", { title: "Write the migration", description: "First step" });
+    expect(created.status).toBe(201);
+    expect(created.body.ticket).toMatchObject({
+      key: "CRONK-2",
+      title: "Write the migration",
+      description: "First step",
+      parent: { key: "CRONK-1" },
+      assignee: { id: adaId, name: "Ada" },
+      delegate: { id: claude.agentId, name: "claude-laptop" },
+    });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.subTickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
+  });
+
+  it("are refused to Agent Sessions not holding the parent's Claim, but open to Users with Write", async () => {
+    const { admin, session } = await delegatedSetup();
+    const holder = await session();
+    const other = await session();
+
+    expect((await holder.post("/api/tickets/CRONK-1/sub-tickets", { title: "Too early" })).status).toBe(409);
+    await holder.post("/api/tickets/CRONK-1/claim");
+    expect((await other.post("/api/tickets/CRONK-1/sub-tickets", { title: "Not mine" })).status).toBe(409);
+    expect((await admin.post("/api/tickets/CRONK-1/sub-tickets", { title: "Split by Ada" })).status).toBe(201);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.subTickets.map((t: { title: string }) => t.title)).toEqual(["Split by Ada"]);
+  });
+});

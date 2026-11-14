@@ -468,6 +468,50 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { key: string }; Body: { title: string; description?: string } }>(
+      "/api/tickets/:key/sub-tickets",
+      {
+        schema: {
+          params: ticketParams,
+          body: {
+            type: "object",
+            required: ["title"],
+            additionalProperties: false,
+            properties: { title, description },
+          },
+          response: {
+            201: answer(
+              "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee and Delegate. An Agent must hold the parent's Claim.",
+              holding("ticket", "Ticket"),
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const now = ctx.clock.now();
+        const ticket = await transaction(ctx.db, async (tx) => {
+          // The Project first, as creating Tickets and removing Statuses lock it, then the parent.
+          await lockProject(tx, (await ticketFor(tx, actor, request.params.key, "write")).projectId);
+          const parent = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (actor.kind === "agent") await requireClaimHolder(tx, actor, parent, now, "splitting it into Sub-Tickets");
+          const project = (await findProjectById(tx, parent.projectId))!;
+          const [firstStatus] = await listStatuses(tx, project.id);
+          const created = await insertTicket(tx, {
+            project,
+            title: request.body.title.trim(),
+            description: request.body.description ?? "",
+            status: firstStatus!,
+            actor,
+            now,
+          });
+          return updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now);
+        });
+        return reply.code(201).send({ ticket });
+      },
+    );
+
     app.get<{ Params: { key: string } }>(
       "/api/tickets/:key",
       {
@@ -680,9 +724,14 @@ async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Tic
   if (!AGENT_CATEGORIES.includes(status.category)) {
     throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
   }
+  await requireClaimHolder(db, agent, ticket, now, "moving it");
+}
+
+/** Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409). `doing` ends "Claim … before …". */
+async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, doing: string): Promise<void> {
   const claim = await findLiveClaim(db, ticket.id, now);
   if (!agent.session || claim?.session.id !== agent.session.id) {
-    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before moving it`);
+    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${doing}`);
   }
 }
 
