@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection } from "./harness.js";
 import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
@@ -339,5 +340,30 @@ describe("the comments tool", () => {
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
     const { tools } = await mcp.client.listTools();
     expect(tools.find((t) => t.name === "comments")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
+  });
+});
+
+describe("work waiting for an Agent over MCP", () => {
+  it("is listed in the welcome of its next Agent Session", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." });
+
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect(mcp.client.getInstructions()).toMatch(/Work waiting for you[\s\S]*CRONK-1: Ticket 1[\s\S]*Ada[\s\S]*Please also update the docs\./);
+  });
+
+  it("is pushed to a connected Agent Session as a notification", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const notified = new Promise<unknown>((resolve) => mcp.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => resolve(n.params)));
+
+    const posted = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." })).body.comment;
+
+    expect(await notified).toMatchObject({
+      level: "notice",
+      logger: "cronk",
+      data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1" } } },
+    });
   });
 });
