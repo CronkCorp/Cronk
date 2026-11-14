@@ -230,11 +230,11 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
     const moved = unpaired(pairedBase, n).find((i) => base[i]!.heading === side[j]!.heading);
     if (moved !== undefined) pair(moved, j);
   }
-  for (const j of unpaired(pairedSide, m)) {
-    let bestBase: number | undefined;
-    for (const i of unpaired(pairedBase, n)) if (scores[i]![j]! > (bestBase === undefined ? 0 : scores[bestBase]![j]!)) bestBase = i;
-    if (bestBase !== undefined) pair(bestBase, j);
-  }
+  const renames = unpaired(pairedBase, n)
+    .flatMap((i) => unpaired(pairedSide, m).map((j) => ({ i, j, score: scores[i]![j]! })))
+    .filter((p) => p.score > 0)
+    .sort((a, b) => b.score - a.score);
+  for (const { i, j } of renames) if (!pairedBase.has(i) && !pairedSide.has(j)) pair(i, j);
   // A renamed empty section has no content to pair on: pair it when it is the only empty section of
   // its level, on each side, between the same two paired sections.
   const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {

@@ -245,6 +245,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Usage\n\nUse it.\n\n## Install\n\nDownload it.\nThen run it.\n" });
   });
 
+  it("pairs a moved section with the renamed section most alike it, not the first one alike enough", async () => {
+    const base = "## X\n\n1\n2\n3\n4\n\n## U\n\nu\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("4", "four"));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## U\n\nu\n\n## P\n\n1\n2\n3\nnew\n\n## Q\n\n1\n2\n3\n4\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## U\n\nu\n\n## P\n\n1\n2\n3\nnew\n\n## Q\n\n1\n2\n3\nfour\n" });
+  });
+
   it("combines a renamed empty section with content added to it", async () => {
     const base = "## Intro\n\nHi.\n\n## Setup\n\n## Usage\n\nUse it.\n";
     const { admin, id } = await editedUnderneath(base, base.replace("## Setup\n", "## Setup\n\nInstall it.\n"));
