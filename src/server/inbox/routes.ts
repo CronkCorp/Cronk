@@ -3,6 +3,7 @@ import { requireUser, type AppContext } from "../context.js";
 import { answer, errors, ref } from "../schemas.js";
 import { INBOX_KINDS, listInbox, type InboxItem } from "./inbox.js";
 import { publicActivity } from "../coordination/activities.js";
+import { inboxTopic } from "../live/topics.js";
 
 const timestamp = { type: "string", format: "date-time" } as const;
 
@@ -59,6 +60,28 @@ export function inboxRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const { kind, project, agent } = request.query;
         return { items: (await listInbox(ctx.db, user, { kinds: kind, projectKeys: project, agentIds: agent })).map((item) => (item.kind === "question" ? { ...item, question: publicActivity(item.question) } : item)) };
+      },
+    );
+
+    app.get(
+      "/api/inbox/events",
+      {
+        schema: {
+          response: {
+            200: {
+              description:
+                "A server-sent event stream for the signed-in User's Inbox, for as long as they stay signed in. It opens with a `ready` " +
+                "event, then sends a `changed` event, with empty data, whenever the Inbox may have changed; fetch it again then.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const canSee = async () => (await requireUser(ctx, request)).id === user.id;
+        ctx.live.stream(reply, inboxTopic(user.id), canSee);
       },
     );
   };

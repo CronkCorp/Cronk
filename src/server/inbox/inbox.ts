@@ -1,4 +1,6 @@
 import type { Queryable } from "../db/database.js";
+import type { LiveUpdates } from "../live/live-updates.js";
+import { inboxTopic } from "../live/topics.js";
 import { visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
@@ -77,6 +79,14 @@ async function reviews(db: Queryable, user: User, projectIds: string[]): Promise
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
   const at = new Map(rows.map((r) => [r.id, r.at]));
   return Promise.all(tickets.map(async (ticket) => ({ kind: "review" as const, at: at.get(ticket.id)!, ticket, reports: await listTicketReports(db, ticket.id) })));
+}
+
+/**
+ * Tells each of these Users that their Inbox may have changed, so open Inbox views fetch it
+ * again. Skips missing ids and repeats. Call once the change is committed.
+ */
+export function inboxesChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
+  for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
 }
 
 /** Ids of the Projects, archived or not, `user` can see; only those with one of `keys`, if given. */

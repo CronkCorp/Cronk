@@ -105,6 +105,17 @@ describe("The Inbox", () => {
   });
 });
 
+describe("Completing a Ticket from the Inbox", () => {
+  it("takes it out of the Inbox", async () => {
+    const { admin } = await delegatedSetup();
+    await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") });
+    expect(await inboxLines(admin)).toEqual(["review CRONK-1"]);
+
+    expect((await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") })).status).toBe(200);
+    expect(await inboxLines(admin)).toEqual([]);
+  });
+});
+
 describe("Sending a Ticket back", () => {
   it("moves it from In Review to the Project's first Started Status with a Comment, which waits for the Delegate", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
@@ -139,5 +150,40 @@ describe("Sending a Ticket back", () => {
     const again = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Twice?" });
     expect(again.status).toBe(409);
     expect(again.body.error).toMatch(/In Review/);
+  });
+});
+
+describe("The Inbox's live updates", () => {
+  it("tell the User whenever their Inbox may have changed, so they can fetch it again", async () => {
+    const { cronk, admin, session } = await delegatedSetup(3);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const stream = await admin.events("/api/inbox/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    const asked = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which cache?" })).body.activity;
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "The page cache.", replyToActivityId: asked.id });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed it." });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+
+    // A Ticket leaving the User's hands changes their Inbox too.
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobsStream = await bob.events("/api/inbox/events");
+    expect((await bobsStream.next())?.event).toBe("ready");
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: (await bob.get("/api/me")).body.user.id });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect(await bobsStream.next()).toMatchObject({ event: "changed" });
+  });
+
+  it("are only for Users", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    expect((await cronk.client(claude.secret).events("/api/inbox/events")).status).toBe(403);
   });
 });

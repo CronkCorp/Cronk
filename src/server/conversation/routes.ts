@@ -10,6 +10,7 @@ import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, type CommentPlace, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
@@ -120,7 +121,10 @@ export function conversationRoutes(ctx: AppContext) {
           return { ticket, posted: await post(tx, actor, { ticketId: ticket.id }, place, request.body) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
-        if (posted.answered) ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
+        if (posted.answered) {
+          ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
+          inboxesChanged(ctx.live, [posted.answered.agent.owner.id]);
+        }
         pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
         return reply.code(201).send({ comment: publicComment(posted.comment) });
       },
@@ -167,6 +171,7 @@ export function conversationRoutes(ctx: AppContext) {
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
         pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+        inboxesChanged(ctx.live, [ticket.assignee?.id]);
         return { ticket, comment: publicComment(posted.comment) };
       },
     );

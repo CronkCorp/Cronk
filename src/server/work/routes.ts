@@ -1,3 +1,4 @@
+import { inboxesChanged } from "../inbox/inbox.js";
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
@@ -626,7 +627,7 @@ export function workRoutes(ctx: AppContext) {
         if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
           throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
         }
-        const ticket = await transaction(ctx.db, async (tx) => {
+        const { before, ticket } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
@@ -651,8 +652,10 @@ export function workRoutes(ctx: AppContext) {
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
           if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) await clearClaim(tx, ticket.id);
-          return updateTicket(tx, ticket, changes, actor, ctx.clock.now());
+          return { before: ticket, ticket: await updateTicket(tx, ticket, changes, actor, ctx.clock.now()) };
         });
+        // Any change may show in the Inbox of whoever was or is now its Assignee.
+        if (ticket !== before) inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
         return { ticket };
       },
     );
