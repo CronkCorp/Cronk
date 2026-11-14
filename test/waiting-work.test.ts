@@ -63,6 +63,18 @@ describe("An @mention of an Agent", () => {
     expect(await mentionedIn(cronk, codex)).toEqual([]);
   });
 
+  it("takes names that contain spaces in quotes, for the Agent and for its Owner", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const laptop = await registerAgent(admin, "claude laptop");
+    const bob = await joinAs(cronk, admin, "bob@example.com", "member", "Bob Smith");
+    const bobsDesktop = await registerAgent(bob, "claude desktop");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: `@"Claude Laptop" and @"bob smith"/"claude desktop", look.` });
+
+    expect(await mentionedIn(cronk, laptop)).toHaveLength(1);
+    expect(await mentionedIn(cronk, bobsDesktop)).toHaveLength(1);
+  });
+
   it("leaves out Agents that can't see where it was posted", async () => {
     const { cronk, admin } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");

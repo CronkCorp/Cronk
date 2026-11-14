@@ -45,14 +45,16 @@ export interface Mention {
 
 /**
  * The @mentions in a Comment's Markdown, without repeats: each `@name` or `@owner/name` not
- * preceded by a word character, where a name runs of letters, digits, `_`, `-` and inner dots.
+ * preceded by a word character. A bare name runs of letters, digits, `_`, `-` and inner dots;
+ * a name that contains anything else, such as spaces, goes in double quotes: `@"claude laptop"`.
  */
 export function mentionsIn(body: string): Mention[] {
-  const part = String.raw`[\w-]+(?:\.[\w-]+)*`;
-  const pattern = new RegExp(String.raw`(?<![\w@])@(?:(${part})/)?(${part})`, "gu");
+  const part = String.raw`"([^"\n]+)"|([\w-]+(?:\.[\w-]+)*)`;
+  const pattern = new RegExp(String.raw`(?<![\w@])@(?:(?:${part})/)?(?:${part})`, "gu");
   const seen = new Map<string, Mention>();
   for (const m of body.matchAll(pattern)) {
-    const mention = { owner: m[1]?.toLowerCase() ?? null, name: m[2]!.toLowerCase() };
+    const owner = m[1] ?? m[2];
+    const mention = { owner: owner?.trim().toLowerCase() ?? null, name: (m[3] ?? m[4])!.trim().toLowerCase() };
     seen.set(JSON.stringify(mention), mention);
   }
   return [...seen.values()];
