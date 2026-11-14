@@ -1,17 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { startCronk, type Cronk } from "./harness.js";
-
-const admin = { email: "ada@example.com", password: "correct horse battery", name: "Ada" };
-
-async function installed(): Promise<Cronk> {
-  const cronk = await startCronk();
-  await cronk.client().post("/api/setup", admin);
-  return cronk;
-}
+import { ada as admin, startInstalledCronk } from "./harness.js";
 
 describe("signing in and out", () => {
   it("signs a User in with email and password, then out again", async () => {
-    const cronk = await installed();
+    const { cronk } = await startInstalledCronk();
     const browser = cronk.client();
     expect((await browser.get("/api/me")).status).toBe(401);
 
@@ -25,7 +17,7 @@ describe("signing in and out", () => {
   });
 
   it("refuses a wrong password or unknown email with the same answer", async () => {
-    const cronk = await installed();
+    const { cronk } = await startInstalledCronk();
     const wrongPassword = await cronk.client().post("/api/sign-in", { email: admin.email, password: "not the password" });
     const unknownEmail = await cronk.client().post("/api/sign-in", { email: "nobody@example.com", password: admin.password });
     expect(wrongPassword.status).toBe(401);
@@ -33,7 +25,7 @@ describe("signing in and out", () => {
   });
 
   it("signing out in one browser leaves other sign-ins alone", async () => {
-    const cronk = await installed();
+    const { cronk } = await startInstalledCronk();
     const laptop = cronk.client();
     const phone = cronk.client();
     await laptop.post("/api/sign-in", { email: admin.email, password: admin.password });
@@ -45,7 +37,7 @@ describe("signing in and out", () => {
   });
 
   it("ends a sign-in after 30 days", async () => {
-    const cronk = await installed();
+    const { cronk } = await startInstalledCronk();
     const browser = cronk.client();
     await browser.post("/api/sign-in", { email: admin.email, password: admin.password });
 

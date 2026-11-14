@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
+import { nameSchema } from "../schemas.js";
 import { insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
@@ -11,7 +12,6 @@ const SETUP_LOCK = 0x7365747570;
 
 const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]+@[^@\\s]+$" } as const;
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
-const name = { type: "string", minLength: 1, maxLength: 200, pattern: "\\S" } as const;
 
 const dummyHash = hashPassword("dummy password for unknown emails");
 
@@ -27,7 +27,7 @@ export function identityRoutes(ctx: AppContext) {
             type: "object",
             required: ["email", "password", "name"],
             additionalProperties: false,
-            properties: { email, password, name, workspaceName: name },
+            properties: { email, password, name: nameSchema, workspaceName: nameSchema },
           },
         },
       },

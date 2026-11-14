@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
+import { nameSchema } from "../schemas.js";
 import { getWorkspace, renameWorkspace } from "./workspaces.js";
 
 export function workspaceRoutes(ctx: AppContext) {
@@ -18,7 +19,7 @@ export function workspaceRoutes(ctx: AppContext) {
             type: "object",
             required: ["name"],
             additionalProperties: false,
-            properties: { name: { type: "string", minLength: 1, maxLength: 200, pattern: "\\S" } },
+            properties: { name: nameSchema },
           },
         },
       },

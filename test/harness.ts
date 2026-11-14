@@ -104,3 +104,15 @@ export async function startCronk(): Promise<Cronk> {
   });
   return cronk;
 }
+
+/** The first User in most tests: the Admin created at setup. */
+export const ada = { email: "ada@example.com", password: "correct horse battery", name: "Ada" } as const;
+
+/** Cronk after first-run setup, with Ada signed in as the Admin on `admin`. */
+export async function startInstalledCronk(workspaceName = "Acme"): Promise<{ cronk: Cronk; admin: Client }> {
+  const cronk = await startCronk();
+  const admin = cronk.client();
+  const setup = await admin.post("/api/setup", { ...ada, workspaceName });
+  if (setup.status !== 201) throw new Error(`Setup failed: ${JSON.stringify(setup.body)}`);
+  return { cronk, admin };
+}

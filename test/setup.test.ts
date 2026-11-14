@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startCronk } from "./harness.js";
-
-const admin = { email: "ada@example.com", password: "correct horse battery", name: "Ada" };
+import { ada as admin, startCronk } from "./harness.js";
 
 describe("first-run setup", () => {
   it("makes the first account on a fresh installation the Admin and signs it in", async () => {
