@@ -12,7 +12,7 @@ Cronk is built in three phases. Vocabulary follows `GLOSSARY.md`; decisions are 
 A session starting a later phase should read, in order:
 
 1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
-2. `docs/adr/`: decisions that are hard to reverse (0001–0011).
+2. `docs/adr/`: decisions that are hard to reverse (0001–0012).
 3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
 4. The Phase 1 spec, GitHub issue #1 (`gh issue view 1`): the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
 5. `docs/testing.md`: the test seams every phase uses.

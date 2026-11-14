@@ -14,6 +14,7 @@ import { guidanceRoutes } from "./knowledge/guidance-routes.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
+import { LiveUpdates } from "./live/live-updates.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -46,8 +47,10 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     await db.end();
     throw err;
   }
-  const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure };
+  const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure, live: new LiveUpdates() };
 
+  // Open live-update streams would otherwise keep the server from closing.
+  app.addHook("preClose", async () => ctx.live.close());
   app.addHook("onClose", async () => db.end());
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
   // so a new route can't forget to. The web shell and the OpenAPI document take any query string.

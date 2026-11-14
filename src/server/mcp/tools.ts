@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
@@ -140,6 +140,46 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           const title = required(a.title, "a title", "create_sub_ticket");
           return api("POST", `/api/tickets/${encodeURIComponent(key)}/sub-tickets`, { title, ...(a.description !== undefined && { description: a.description }) });
         },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "activities",
+    description:
+      "Activities: the timestamped entries you write on a Ticket while you work on it, shown live to Users on its page. Write one while you hold the Ticket's Claim, " +
+      "whenever you plan, make progress, find something or hit an error; each one keeps your Claim alive. " +
+      "Ask a question as an Activity too, marking it blocking when you must wait for the answer.",
+    parameters: {
+      key: z.string().optional().describe("Ticket key, such as CRONK-12 (list, log, ask)"),
+      kind: z.enum(ACTIVITY_KINDS.filter((k) => k !== "question") as [string, ...string[]]).optional().describe("What the Activity is (log)"),
+      body: z.string().optional().describe("Markdown text of the Activity or question (log, ask)"),
+      blocking: z.boolean().optional().describe("Whether you wait for the answer before carrying on; false if left out (ask)"),
+    },
+    actions: {
+      list: {
+        description: "a Ticket's Activities, oldest first",
+        writes: false,
+        run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "list"))}/activities`),
+      },
+      log: {
+        description: "log a plan, progress, finding or error on a Ticket you hold the Claim on",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "log"))}/activities`, {
+            kind: required(a.kind, "a kind", "log"),
+            body: required(a.body, "a body", "log"),
+          }),
+      },
+      ask: {
+        description: "ask a question on a Ticket you hold the Claim on; blocking if you wait for the answer",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "ask"))}/activities`, {
+            kind: "question",
+            body: required(a.body, "a body", "ask"),
+            ...(a.blocking !== undefined && { blocking: a.blocking }),
+          }),
       },
     },
   });

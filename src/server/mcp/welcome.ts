@@ -26,5 +26,8 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
   if (welcome.readyTickets.length === 0) lines.push("None right now.");
   else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.", "");
   for (const t of welcome.readyTickets) lines.push(`- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`);
+  if (!welcome.readOnly) {
+    lines.push("", "While you hold a Ticket's Claim, log your plan, progress, findings and errors with the `activities` tool; each Activity keeps your Claim alive.");
+  }
   return lines.join("\n");
 }

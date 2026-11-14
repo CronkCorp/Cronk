@@ -1,26 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Client, type Cronk, joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
-
-/**
- * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
- * delegated to her Agent claude-laptop. `session()` starts a new Agent Session of that Agent.
- */
-async function delegatedSetup(tickets = 1) {
-  const { cronk, admin } = await startInstalledCronk();
-  await projectWithTickets(admin, "CRONK", tickets);
-  const claude = await registerAgent(admin, "claude-laptop");
-  const adaId = (await admin.get("/api/users")).body.users[0].id;
-  for (let i = 1; i <= tickets; i++) await admin.patch(`/api/tickets/CRONK-${i}`, { assigneeId: adaId, delegateId: claude.agentId });
-  return { cronk, admin, claude, adaId, session: () => startSession(cronk, claude.secret) };
-}
-
-/** Starts an Agent Session with `secret` and returns a client calling within it, with the Session's id. */
-async function startSession(cronk: Cronk, secret: string): Promise<Client & { sessionId: string }> {
-  const started = await cronk.client(secret).post("/api/agent-sessions");
-  if (started.status !== 201) throw new Error(`Starting a Session failed: ${JSON.stringify(started.body)}`);
-  const sessionId: string = started.body.session.id;
-  return Object.assign(cronk.client(secret, { "cronk-agent-session": sessionId }), { sessionId });
-}
+import { delegatedSetup, joinAs, startSession } from "./harness.js";
 
 describe("Claiming a Ticket", () => {
   it("gives the Agent Session the Ticket's Claim, shown on the Ticket", async () => {

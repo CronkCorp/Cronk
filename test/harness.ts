@@ -51,6 +51,21 @@ export class Client {
     return this.request<T>("DELETE", path);
   }
 
+  /**
+   * Opens a server-sent event stream at `path` over real HTTP, as a browser's EventSource
+   * does, sending this caller's cookies and headers. Closed when the test ends.
+   */
+  async events(path: string): Promise<EventStream> {
+    const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const abort = new AbortController();
+    const res = await fetch(new URL(path, await this.cronk.url()), {
+      headers: { ...this.headers, accept: "text/event-stream", ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      signal: abort.signal,
+    });
+    onTestFinished(() => abort.abort());
+    return new EventStream(res, () => abort.abort());
+  }
+
   private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
     const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const res = await this.cronk.app.inject({
@@ -65,6 +80,52 @@ export class Client {
     }
     const text = res.body;
     return { status: res.statusCode, body: (text ? JSON.parse(text) : undefined) as T };
+  }
+}
+
+/** One server-sent event: its name and parsed JSON data. */
+export interface ServerEvent {
+  event: string;
+  data: any;
+}
+
+/** A server-sent event stream being read, one event at a time. */
+export class EventStream {
+  readonly status: number;
+  private buffer = "";
+  private readonly reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  private readonly decoder = new TextDecoder();
+
+  constructor(
+    res: globalThis.Response,
+    readonly close: () => void,
+  ) {
+    this.status = res.status;
+    this.reader = res.ok ? res.body!.getReader() : undefined;
+  }
+
+  /** The next event, skipping comments; null once the server ends the stream. Fails if none comes within `timeoutMs`. */
+  async next(timeoutMs = 5_000): Promise<ServerEvent | null> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const end = this.buffer.indexOf("\n\n");
+      if (end >= 0) {
+        const block = this.buffer.slice(0, end);
+        this.buffer = this.buffer.slice(end + 2);
+        const fields = block.split("\n").filter((line) => !line.startsWith(":"));
+        if (fields.length === 0) continue;
+        const field = (name: string) => fields.find((l) => l.startsWith(`${name}:`))?.slice(name.length + 1).trim();
+        const data = field("data");
+        return { event: field("event") ?? "message", data: data === undefined ? undefined : JSON.parse(data) };
+      }
+      if (!this.reader) return null;
+      const read = await Promise.race([
+        this.reader.read().catch(() => ({ done: true as const, value: undefined })),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("No server-sent event came in time")), Math.max(0, deadline - Date.now()))),
+      ]);
+      if (read.done) return null;
+      this.buffer += this.decoder.decode(read.value, { stream: true });
+    }
   }
 }
 
@@ -222,4 +283,25 @@ export async function projectWithTickets(client: Client, key: string, count: num
   const res = await client.post("/api/projects", { name: key, key });
   if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
   for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
+}
+
+/**
+ * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
+ * delegated to her Agent claude-laptop. `session()` starts a new Agent Session of that Agent.
+ */
+export async function delegatedSetup(tickets = 1) {
+  const { cronk, admin } = await startInstalledCronk();
+  await projectWithTickets(admin, "CRONK", tickets);
+  const claude = await registerAgent(admin, "claude-laptop");
+  const adaId = (await admin.get("/api/users")).body.users[0].id;
+  for (let i = 1; i <= tickets; i++) await admin.patch(`/api/tickets/CRONK-${i}`, { assigneeId: adaId, delegateId: claude.agentId });
+  return { cronk, admin, claude, adaId, session: () => startSession(cronk, claude.secret) };
+}
+
+/** Starts an Agent Session with `secret` and returns a client calling within it, with the Session's id. */
+export async function startSession(cronk: Cronk, secret: string): Promise<Client & { sessionId: string }> {
+  const started = await cronk.client(secret).post("/api/agent-sessions");
+  if (started.status !== 201) throw new Error(`Starting a Session failed: ${JSON.stringify(started.body)}`);
+  const sessionId: string = started.body.session.id;
+  return Object.assign(cronk.client(secret, { "cronk-agent-session": sessionId }), { sessionId });
 }

@@ -2,6 +2,8 @@
 
 import type {
   Access,
+  Activity,
+  ActivityKind,
   Agent,
   AgentAccess,
   AgentSession,
@@ -38,6 +40,8 @@ import type {
 // The API's types are declared once, by the server; the UI's modules take them from here.
 export type {
   Access,
+  Activity,
+  ActivityKind,
   Agent,
   AgentAccess,
   AgentSession,
@@ -228,6 +232,33 @@ export const api = {
   restoreVersion: (id: string, number: number, baseVersion: number) =>
     request<{ document: Document }>("POST", `${documentPath(id)}/versions/${number}/restore`, { baseVersion }).then((r) => r.document),
 
+  activities: (key: string) =>
+    request<{ activities: Activity[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/activities`).then((r) => r.activities),
+
   ticketHistory: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };
+
+/** The events a Ticket's live-update stream pushes, by name, with their data. */
+export interface TicketEvents {
+  activity: { activity: Activity };
+}
+
+/**
+ * Watches a live-update stream (server-sent events) until the returned function is called.
+ * `ready` is called each time the stream (re)connects, so whatever it shows can be loaded
+ * again to catch up on what happened while it was away; `on` maps event names to handlers
+ * of their JSON data. The browser reconnects by itself after the connection drops.
+ */
+function watch<Events>(path: string, handlers: { ready: () => void; on: { [E in keyof Events]?: (data: Events[E]) => void } }): () => void {
+  const source = new EventSource(path, { withCredentials: true });
+  source.addEventListener("ready", () => handlers.ready());
+  for (const [event, handle] of Object.entries(handlers.on) as [string, (data: unknown) => void][]) {
+    source.addEventListener(event, (e) => handle(JSON.parse((e as MessageEvent<string>).data)));
+  }
+  return () => source.close();
+}
+
+/** Watches one Ticket's changes as they happen (see `watch`). */
+export const watchTicket = (key: string, handlers: Parameters<typeof watch<TicketEvents>>[1]) =>
+  watch<TicketEvents>(`/api/tickets/${encodeURIComponent(key)}/events`, handlers);

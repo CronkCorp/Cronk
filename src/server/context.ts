@@ -1,11 +1,12 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { userActor, type Actor } from "./actor.js";
 import type { Clock } from "./clock.js";
-import { touchAgentSession } from "./coordination/agent-sessions.js";
+import { findLiveAgentSession, touchAgentSession } from "./coordination/agent-sessions.js";
 import type { Database } from "./db/database.js";
 import { agentForToken } from "./identity/agents.js";
 import { userForSignIn } from "./identity/sign-ins.js";
 import type { User } from "./identity/users.js";
+import type { LiveUpdates } from "./live/live-updates.js";
 
 export const SIGN_IN_COOKIE = "cronk_sign_in";
 
@@ -17,6 +18,7 @@ export interface AppContext {
   db: Database;
   clock: Clock;
   cookieSecure: boolean;
+  live: LiveUpdates;
 }
 
 export class HttpError extends Error {
@@ -38,16 +40,19 @@ export const bearerToken = (request: FastifyRequest): string | undefined =>
  * Who is making the request, or a 401: the Agent whose token is sent as
  * `Authorization: Bearer <token>`, or else the signed-in User. An Agent that also
  * sends the Cronk-Agent-Session header calls within that Agent Session, which the
- * call refreshes; a Session that isn't the Agent's or has ended answers 410.
+ * call refreshes; a Session that isn't the Agent's or has ended answers 410. With
+ * `refreshSession: false` the Session is only checked, not refreshed, as when a live-update
+ * stream re-checks who is watching: being told of others' changes isn't the Agent's own call.
  */
-export async function requireActor(ctx: AppContext, request: FastifyRequest): Promise<Actor> {
+export async function requireActor(ctx: AppContext, request: FastifyRequest, opts: { refreshSession?: boolean } = {}): Promise<Actor> {
   const bearer = bearerToken(request);
   if (bearer) {
     const found = await agentForToken(ctx.db, bearer);
     if (!found) throw new HttpError(401, "This token is unknown or was revoked");
     const sessionId = request.headers[AGENT_SESSION_HEADER];
     if (typeof sessionId !== "string") return { kind: "agent", session: null, ...found };
-    const session = await touchAgentSession(ctx.db, found.agent.id, sessionId, ctx.clock.now());
+    const lookUp = opts.refreshSession === false ? findLiveAgentSession : touchAgentSession;
+    const session = await lookUp(ctx.db, found.agent.id, sessionId, ctx.clock.now());
     if (!session) throw new HttpError(410, "This Agent Session has ended; start a new one");
     return { kind: "agent", session, ...found };
   }

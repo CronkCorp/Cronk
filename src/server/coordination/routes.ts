@@ -6,12 +6,13 @@ import { publicAgent } from "../identity/agents.js";
 import { getGuidance, projectGuidanceMarkdown } from "../knowledge/guidance.js";
 import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
-import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
-import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, setClaim, type ReadyScope } from "./claims.js";
+import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
+import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
-import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -189,6 +190,84 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { key: string }; Body: { kind: ActivityKind; body: string; blocking?: boolean } }>(
+      "/api/tickets/:key/activities",
+      {
+        schema: {
+          params: ticketParams,
+          headers: sessionHeader,
+          body: {
+            type: "object",
+            required: ["kind", "body"],
+            additionalProperties: false,
+            properties: {
+              kind: { type: "string", enum: ACTIVITY_KINDS },
+              body: { type: "string", minLength: 1, maxLength: 100_000, pattern: "\\S", description: "Markdown." },
+              blocking: { type: "boolean", description: "Only for a question: the Agent waits for the answer. False if left out." },
+            },
+          },
+          response: {
+            201: answer("The Activity, logged on the Ticket; the call refreshes the Agent Session and so its Claim", holding("activity", "Activity")),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        const { kind, body, blocking = false } = request.body;
+        if (blocking && kind !== "question") throw new HttpError(400, "Only a question can be blocking");
+        const now = ctx.clock.now();
+        const activity = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          await requireClaimHolder(tx, actor, ticket, now, "logging Activities on it");
+          return insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
+        });
+        ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
+        return reply.code(201).send({ activity: publicActivity(activity) });
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/tickets/:key/activities",
+      {
+        schema: {
+          params: ticketParams,
+          response: { 200: answer("The Ticket's Activities, oldest first", listing("activities", ref("Activity"))), ...errors(401, 404, 410) },
+        },
+      },
+      async (request) => {
+        const ticket = await ticketFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        return { activities: (await listActivities(ctx.db, ticket.id)).map(publicActivity) };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/tickets/:key/events",
+      {
+        schema: {
+          params: ticketParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
+                "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const ticket = await ticketFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await ticketFor(ctx.db, actor, ticket.key, "read"));
+        };
+        ctx.live.stream(reply, ticketTopic(ticket.id), canSee);
+      },
+    );
+
     app.delete(
       "/api/agent-sessions/current",
       { schema: { headers: sessionHeader, response: { 204: noContent("The Agent Session has ended"), ...errors(400, 401, 403, 410) } } },
@@ -200,6 +279,9 @@ export function coordinationRoutes(ctx: AppContext) {
     );
   };
 }
+
+/** The live-update topic of one Ticket's changes. */
+const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
 
 /** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
 async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {

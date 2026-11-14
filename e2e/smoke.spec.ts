@@ -218,6 +218,16 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(claimed.status()).toBe(200);
   await page.reload();
   await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
+  // The Session logs Activities; the open Ticket page shows them as they arrive, without a reload.
+  const activities = page.getByRole("list", { name: "Activities" });
+  await expect(activities).toContainText("No Activities yet");
+  const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+    data: { kind: "question", body: "Should this use **Postgres**?", blocking: true },
+  });
+  expect(asked.status()).toBe(201);
+  await expect(activities).toContainText("Blocking question");
+  await expect(activities.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.
