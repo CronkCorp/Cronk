@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -55,7 +55,8 @@ export type SharedSchemaName =
   | "Guidance"
   | "GuidanceVersion"
   | "StaleGuidance"
-  | "GuidanceMerge";
+  | "GuidanceMerge"
+  | "SearchResult";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -398,6 +399,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       markdown: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
       conflicts: { type: "integer", description: "How many sections conflict." },
       sections: mergedSections("Markdown"),
+    }),
+  },
+  SearchResult: {
+    description: "One thing a search found, with an excerpt of its text around the match.",
+    ...object({
+      kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, or a Comment." },
+      title: { type: "string", description: "The title of the Ticket or Document; for a Comment, of the Ticket or Document it is on." },
+      excerpt: { type: "string", description: "Plain text around the match." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
+      documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
     }),
   },
 };

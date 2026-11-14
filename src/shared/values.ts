@@ -38,3 +38,7 @@ export const MENTION_SYNTAX =
   "`@name` mentions the writer's own Agent of that name (for an Agent, its Owner's), or else every other Owner's Agent " +
   'of that name; `@owner/name` picks another Owner\'s Agent; quote names with spaces, as in `@"claude laptop"` or ' +
   '`@"Ada Lovelace"/codex`. Mentions inside code and block quotes don\'t count.';
+
+/** What a search can find: Tickets, Documents in a page tree, Reports, and Comments. */
+export const SEARCH_KINDS = ["ticket", "document", "report", "comment"] as const;
+export type SearchKind = (typeof SEARCH_KINDS)[number];
