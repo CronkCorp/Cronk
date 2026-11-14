@@ -8,7 +8,8 @@ import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/routes.js";
-import { clearClaim, findLiveClaim, setClaim } from "./claims.js";
+import { claimNextReady, clearClaim, findLiveClaim, setClaim, type ReadyScope } from "./claims.js";
+import { findTicketById } from "../work/tickets.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -85,6 +86,29 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
 
+    app.post(
+      "/api/agent-sessions/current/next",
+      {
+        schema: {
+          headers: sessionHeader,
+          response: {
+            200: answer("The Agent's next Ready Ticket, now Claimed by the Agent Session, with the Tickets around it", ticketDetailSchema),
+            204: noContent("None of the Agent's Tickets is Ready"),
+            ...errors(400, 401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        const now = ctx.clock.now();
+        const scope = await readyScope(ctx, actor);
+        const id = await transaction(ctx.db, (tx) => claimNextReady(tx, scope, session.id, now));
+        if (!id) return reply.code(204).send();
+        return ticketDetail(ctx.db, actor, (await findTicketById(ctx.db, id))!, now);
+      },
+    );
+
     app.post<{ Params: { key: string } }>(
       "/api/tickets/:key/claim",
       {
@@ -147,6 +171,12 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
   };
+}
+
+/** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
+async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {
+  const projects = await visibleProjects(ctx.db, agent, await listProjects(ctx.db, agent.owner.workspaceId, false));
+  return { agentId: agent.agent.id, projectIds: projects.filter((p) => p.access === "write").map((p) => p.id) };
 }
 
 function requireAgent(actor: Actor): AgentActor {
