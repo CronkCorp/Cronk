@@ -58,10 +58,13 @@ export class LiveUpdates {
    * access before calling this, so a caller who can't see the topic gets an ordinary error
    * answer instead.
    *
-   * With `catchUp`, the stream first sends the events it answers as missed, each behind the
-   * same access check, then a `ready` carrying the id it answers. It is called once the stream
-   * is watching, so nothing published meanwhile is lost; a published event with the id of one
-   * it already sent as missed isn't sent again. The stream ends if it fails.
+   * With `catchUp`, the stream first sends the events it answers as missed, then the events
+   * published while it ran, each behind the same access check, and then a `ready`. It is called
+   * once the stream is watching, so nothing published meanwhile is lost; an event with the id
+   * of one already sent isn't sent again. The stream ends if it fails. Ids on such a stream are
+   * positions, decimal integers: `ready` carries the furthest of the id `catchUp` answers and
+   * every id sent, so every event published before `ready` is sent before it, and a stream
+   * reopened from `ready`'s id misses nothing published later that has a further position.
    */
   stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>, catchUp?: () => Promise<CatchUp>): void {
     reply.hijack();
@@ -90,8 +93,12 @@ export class LiveUpdates {
         else end();
       });
     };
+    // Ids already sent, so an event both replayed and published is sent once.
     const sent = new Set<string>();
-    const unsubscribe = this.subscribe(topic, (event) => checked(() => (event.id === undefined || !sent.has(event.id)) && write(event)));
+    const fresh = (event: LiveEvent) => event.id === undefined || !sent.has(event.id);
+    // While catching up, live events wait here instead, to be sent before `ready`.
+    let held: LiveEvent[] | null = catchUp ? [] : null;
+    const unsubscribe = this.subscribe(topic, (event) => (held ? held.push(event) : checked(() => fresh(event) && write(event))));
     const heartbeat = setInterval(() => checked(() => res.write(": keep-alive\n\n")), HEARTBEAT_MS).unref();
     this.streams.add(end);
     res.on("close", end);
@@ -99,16 +106,26 @@ export class LiveUpdates {
       write({ event: "ready", data: {} });
       return;
     }
-    // Live events wait in the queue behind the catch-up.
     queue = (async () => {
       try {
         const { missed, readyId } = await catchUp();
-        for (const event of missed) {
-          if (!(await allowed())) return end();
-          if (event.id !== undefined) sent.add(event.id);
+        let furthest = BigInt(readyId);
+        // Sends `event` unless it was sent already; false once the stream has ended.
+        const send = async (event: LiveEvent) => {
+          if (!fresh(event)) return true;
+          if (!(await allowed())) return false;
+          if (event.id !== undefined) {
+            sent.add(event.id);
+            if (BigInt(event.id) > furthest) furthest = BigInt(event.id);
+          }
           write(event);
-        }
-        if (open) write({ event: "ready", id: readyId, data: {} });
+          return true;
+        };
+        for (const event of missed) if (!(await send(event))) return end();
+        // Then what was published meanwhile, including while these are being sent.
+        for (let event = held!.shift(); event; event = held!.shift()) if (!(await send(event))) return end();
+        held = null;
+        if (open) write({ event: "ready", id: String(furthest), data: {} });
       } catch {
         end();
       }
