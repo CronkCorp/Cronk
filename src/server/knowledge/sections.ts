@@ -190,9 +190,11 @@ function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
 
 /**
  * Keys `base` by position, then keys each section of `side` after the base section it came from:
- * first by a best-scoring alignment that keeps both orders, then by heading among what is left (a
- * section moved elsewhere). Sections `side` added are keyed by their heading and how often it was
- * added, so both sides adding the same section pair too.
+ * first by a best-scoring alignment that keeps both orders; then, among what is left (a section
+ * moved elsewhere), by heading, then by the best-scoring renames; last, a renamed empty section by
+ * being the only empty one of its level between the same two paired sections. Sections `side`
+ * added are keyed by their heading and how often it was added, so both sides adding the same
+ * section pair too.
  */
 function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
@@ -210,22 +212,20 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   }
   const pairedBase = new Set<number>();
   const pairedSide = new Set<number>([0]);
-  for (let i = 1, j = 1; i < n && j < m; ) {
-    const score = scores[i]![j]!;
-    if (score > 0 && best[i]![j] === score + best[i + 1]![j + 1]!) {
-      side[j]!.key = base[i]!.key;
-      pairedBase.add(i);
-      pairedSide.add(j);
-      i++;
-      j++;
-    } else if (best[i]![j] === best[i + 1]![j]) i++;
-    else j++;
-  }
   const pair = (i: number, j: number) => {
     side[j]!.key = base[i]!.key;
     pairedBase.add(i);
     pairedSide.add(j);
   };
+  for (let i = 1, j = 1; i < n && j < m; ) {
+    const score = scores[i]![j]!;
+    if (score > 0 && best[i]![j] === score + best[i + 1]![j + 1]!) {
+      pair(i, j);
+      i++;
+      j++;
+    } else if (best[i]![j] === best[i + 1]![j]) i++;
+    else j++;
+  }
   const unpaired = (paired: Set<number>, length: number) => Array.from({ length }, (_, k) => k).filter((k) => k > 0 && !paired.has(k));
   // A section moved elsewhere: first by its heading, then (renamed too) by its content.
   for (const j of unpaired(pairedSide, m)) {
