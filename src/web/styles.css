@@ -102,3 +102,10 @@ a.link:hover { text-decoration: underline; }
 .markdown { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px; overflow-wrap: anywhere; }
 .markdown pre { overflow-x: auto; }
 .history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+
+.copy { width: 100%; font: inherit; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.rows li.row:hover { background: none; }
+.row select, .add-member select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.add-member { margin-top: 12px; align-items: center; flex-wrap: wrap; }
+.panel h3 { font-size: 15px; margin: 16px 0 8px; }
+.badge + .badge { margin-left: 4px; }
