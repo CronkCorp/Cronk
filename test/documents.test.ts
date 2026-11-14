@@ -159,3 +159,57 @@ describe("the page tree", () => {
     expect(across.status).toBe(400);
   });
 });
+
+describe("arranging the page tree", () => {
+  async function tree() {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const ids: Record<string, string> = {};
+    for (const [title, parent] of [["A"], ["B"], ["C"], ["A1", "A"], ["A2", "A"]] as [string, string?][]) {
+      const res = await admin.post("/api/projects/CRONK/documents", { title, ...(parent && { parentId: ids[parent] }) });
+      ids[title] = res.body.document.id;
+    }
+    const current = async () => outline((await admin.get("/api/projects/CRONK/documents")).body.documents);
+    return { cronk, admin, ids, current };
+  }
+
+  it("moves a Document, with what sits under it, to another parent and place without a new Version", async () => {
+    const { admin, ids, current } = await tree();
+
+    const moved = await admin.post(`/api/documents/${ids.A}/move`, { parentId: ids.C, position: 0 });
+    expect(moved.status).toBe(200);
+    expect(moved.body.document).toMatchObject({ parentId: ids.C, version: 1 });
+    expect(await current()).toEqual(["B", "C", "  A", "    A1", "    A2"]);
+
+    await admin.post(`/api/documents/${ids.A2}/move`, { parentId: null, position: 0 });
+    expect(await current()).toEqual(["A2", "B", "C", "  A", "    A1"]);
+    await admin.post(`/api/documents/${ids.A2}/move`, { parentId: null });
+    expect(await current()).toEqual(["B", "C", "  A", "    A1", "A2"]);
+    await admin.post(`/api/documents/${ids.A2}/move`, { parentId: null, position: 1 });
+    expect(await current()).toEqual(["B", "A2", "C", "  A", "    A1"]);
+  });
+
+  it("refuses to move a Document under itself, to another tree, or past the end of its siblings", async () => {
+    const { admin, ids, current } = await tree();
+    const handbook = (await admin.post("/api/workspace/documents", { title: "Handbook" })).body.document.id;
+
+    expect((await admin.post(`/api/documents/${ids.A}/move`, { parentId: ids.A })).status).toBe(409);
+    expect((await admin.post(`/api/documents/${ids.A}/move`, { parentId: ids.A1 })).status).toBe(409);
+    expect((await admin.post(`/api/documents/${ids.A}/move`, { parentId: handbook })).status).toBe(400);
+    expect((await admin.post(`/api/documents/${ids.A}/move`, { parentId: null, position: 3 })).status).toBe(400);
+    expect(await current()).toEqual(["A", "  A1", "  A2", "B", "C"]);
+  });
+
+  it("deletes a Document with its Versions, but not one with Documents under it", async () => {
+    const { admin, ids, current } = await tree();
+
+    const refused = await admin.delete(`/api/documents/${ids.A}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/under it/);
+
+    expect((await admin.delete(`/api/documents/${ids.A1}`)).status).toBe(204);
+    expect(await current()).toEqual(["A", "  A2", "B", "C"]);
+    expect((await admin.get(`/api/documents/${ids.A1}`)).status).toBe(404);
+    expect((await admin.get(`/api/documents/${ids.A1}/versions`)).status).toBe(404);
+  });
+});

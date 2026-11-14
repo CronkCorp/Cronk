@@ -202,3 +202,57 @@ export async function saveVersion(
   ]);
   return { ...document, title: save.title, body: save.body, version: number, updatedAt: save.now };
 }
+
+/** Why a Document can't move where it was asked to. */
+export type MoveRefusal = "under itself" | "no such position";
+
+/**
+ * Moves a Document, with what sits under it, under `parentId` (null for the top) at `position`
+ * among its new siblings, counted from 0, or last if left out. `parentId` must be a Document of
+ * the same tree. Changes no Version. Run inside a transaction.
+ */
+export async function moveDocument(
+  db: Queryable,
+  tree: Tree,
+  document: Document,
+  to: { parentId: string | null; position?: number | undefined },
+): Promise<Document | MoveRefusal> {
+  await lockTree(db, tree);
+  if (to.parentId !== null) {
+    const { rows } = await db.query(
+      `WITH RECURSIVE ancestors(id) AS (
+         SELECT $1::uuid
+         UNION SELECT d.parent_id FROM documents d JOIN ancestors a ON d.id = a.id WHERE d.parent_id IS NOT NULL
+       )
+       SELECT 1 FROM ancestors WHERE id = $2`,
+      [to.parentId, document.id],
+    );
+    if (rows.length > 0) return "under itself";
+  }
+  const { rows: siblings } = await db.query<{ id: string }>(
+    `SELECT id FROM documents
+     WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NOT DISTINCT FROM $3 AND id <> $4
+     ORDER BY position`,
+    [tree.workspaceId, tree.projectId, to.parentId, document.id],
+  );
+  const order = siblings.map((s) => s.id);
+  const position = to.position ?? order.length;
+  if (position > order.length) return "no such position";
+  order.splice(position, 0, document.id);
+  await db.query("UPDATE documents SET parent_id = $2 WHERE id = $1", [document.id, to.parentId]);
+  await db.query(
+    `UPDATE documents SET position = ordered.position - 1
+     FROM unnest($1::uuid[]) WITH ORDINALITY AS ordered(id, position) WHERE documents.id = ordered.id`,
+    [order],
+  );
+  return { ...document, parentId: to.parentId };
+}
+
+/** Deletes a Document and its Versions, or returns false if any Document sits under it. Run inside a transaction. */
+export async function deleteDocument(db: Queryable, tree: Tree, document: Document): Promise<boolean> {
+  await lockTree(db, tree);
+  const { rows } = await db.query("SELECT 1 FROM documents WHERE parent_id = $1 LIMIT 1", [document.id]);
+  if (rows.length > 0) return false;
+  await db.query("DELETE FROM documents WHERE id = $1", [document.id]);
+  return true;
+}

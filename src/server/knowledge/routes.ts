@@ -3,10 +3,10 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, documentIdParam, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
+import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { projectFor } from "../work/routes.js";
-import { findDocument, findVersion, insertDocument, listTree, listVersions, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 
 /** A Document title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -188,6 +188,65 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { id: string }; Body: { parentId: string | null; position?: number } }>(
+      "/api/documents/:id/move",
+      {
+        schema: {
+          params: documentParams,
+          body: {
+            type: "object",
+            required: ["parentId"],
+            additionalProperties: false,
+            properties: {
+              parentId: { type: ["string", "null"], format: "uuid", description: "The Document to put it under, in the same page tree; null for the top." },
+              position: { type: "integer", minimum: 0, description: "Its place among its new siblings, counted from 0; last if left out." },
+            },
+          },
+          response: {
+            200: answer("The Document in its new place, at the same Version", holding("document", "Document")),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { parentId, position } = request.body;
+        const document = await transaction(ctx.db, async (tx) => {
+          const document = await documentFor(tx, actor, request.params.id, "write");
+          const tree = treeOf(actor, document);
+          if (parentId !== null) {
+            const parent = await findDocument(tx, tree.workspaceId, parentId);
+            if (!parent || parent.projectId !== document.projectId) throw new HttpError(400, "The parent must be a Document of the same page tree");
+          }
+          const moved = await moveDocument(tx, tree, document, { parentId, position });
+          if (moved === "under itself") throw new HttpError(409, "A Document can't move under itself or a Document under it");
+          if (moved === "no such position") throw new HttpError(400, `There is no position ${position} among those Documents`);
+          return moved;
+        });
+        return { document };
+      },
+    );
+
+    app.delete<{ Params: { id: string } }>(
+      "/api/documents/:id",
+      {
+        schema: {
+          params: documentParams,
+          response: { 204: noContent("The Document and its Versions are deleted"), ...errors(400, 401, 403, 404, 409, 410) },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        await transaction(ctx.db, async (tx) => {
+          const document = await documentFor(tx, actor, request.params.id, "write");
+          if (!(await deleteDocument(tx, treeOf(actor, document), document))) {
+            throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
+          }
+        });
+        return reply.code(204).send();
+      },
+    );
+
     app.get<{ Params: { id: string } }>(
       "/api/documents/:id/versions",
       {
@@ -247,6 +306,9 @@ export function knowledgeRoutes(ctx: AppContext) {
     );
   };
 }
+
+/** The page tree a Document sits in. */
+const treeOf = (actor: Actor, document: Document): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId: document.projectId });
 
 async function versionOr404(db: Queryable, document: Document, number: string): Promise<Version> {
   const version = await findVersion(db, document.id, Number(number));
