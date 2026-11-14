@@ -26,7 +26,8 @@ export const migrations: Migration[] = [
         role text NOT NULL CHECK (role IN ('admin', 'member')),
         created_at timestamptz NOT NULL
       );
-      CREATE UNIQUE INDEX users_email_unique ON users (workspace_id, lower(email));
+      -- Email identifies a User across the installation: sign-in has no Workspace to scope by (ADR 0008).
+      CREATE UNIQUE INDEX users_email_unique ON users (lower(email));
 
       CREATE TABLE sign_ins (
         token_hash text PRIMARY KEY,
