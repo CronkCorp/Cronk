@@ -241,6 +241,87 @@ describe("An Agent Session's live updates", () => {
     expect((await reopened.next())?.event).toBe("ready");
   });
 
+  it("replay, from the furthest id seen, work whose post committed after a later post for the same Agent was pushed", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design" })).body.document;
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    const seen = [(await stream.next())!];
+
+    // The first post starts waiting for claude, then is held before it can wait for codex.
+    const held = await cronk.holdRow("agents", codex.agentId);
+    const first = admin.post(`/api/documents/${doc.id}/comments`, { body: "@claude-laptop @codex, first." });
+    await held.waiters(1);
+    const second = admin.post("/api/tickets/CRONK-1/comments", { body: "Second." });
+    // The second post waits for the first to commit; if it overtook it instead, its event is the furthest id seen.
+    if ((await Promise.race([second.then(() => "posted"), held.waiters(2)])) === "posted") seen.push((await stream.next())!);
+    stream.close();
+    await held.release();
+    await Promise.all([first, second]);
+
+    const reopened = await agent.events("/api/agent-sessions/current/events", { "last-event-id": seen.at(-1)!.id! });
+    for (let event = await reopened.next(); event?.event === "waiting"; event = await reopened.next()) seen.push(event);
+    expect(seen.filter((e) => e.event === "waiting").map((e) => e.data.waiting.comment.body).sort()).toEqual(["@claude-laptop @codex, first.", "Second."]);
+  });
+
+  it("replay, from `ready`'s id, work whose post was still uncommitted when the stream opened", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design" })).body.document;
+    const agent = await session();
+
+    const held = await cronk.holdRow("agents", codex.agentId);
+    const first = admin.post(`/api/documents/${doc.id}/comments`, { body: "@claude-laptop @codex, first." });
+    await held.waiters(1);
+    const second = admin.post("/api/tickets/CRONK-1/comments", { body: "Second." });
+    await Promise.race([second, held.waiters(2)]);
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    const ready = await stream.next();
+    stream.close();
+    await held.release();
+    await Promise.all([first, second]);
+
+    const reopened = await agent.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! });
+    const replayed = [];
+    for (let event = await reopened.next(); event?.event === "waiting"; event = await reopened.next()) replayed.push(event.data.waiting.comment.body);
+    expect(replayed.sort()).toEqual(["@claude-laptop @codex, first.", "Second."]);
+  });
+
+  it("push work for one Agent while a post for another Agent is still uncommitted", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design" })).body.document;
+    const stream = await (await session()).events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const held = await cronk.holdRow("agents", codex.agentId);
+    const forCodex = admin.post(`/api/documents/${doc.id}/comments`, { body: "@codex, held." });
+    await held.waiters(1);
+    expect((await admin.post("/api/tickets/CRONK-1/comments", { body: "Not held." })).status).toBe(201);
+    expect((await stream.next())?.data.waiting.comment.body).toBe("Not held.");
+    await held.release();
+    expect((await forCodex).status).toBe(201);
+  });
+
+  it("push work for Agents that two concurrent posts name in opposite orders", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Design" })).body.document;
+
+    const held = await cronk.holdRow("agents", codex.agentId);
+    // The first post starts waiting for codex and is held there; the second then starts waiting for claude.
+    const first = admin.post(`/api/documents/${doc.id}/comments`, { body: "@codex @claude-laptop, first." });
+    await held.waiters(1);
+    const second = admin.post(`/api/documents/${doc.id}/comments`, { body: "@claude-laptop @codex, second." });
+    await held.waiters(2);
+    await held.release();
+
+    expect((await first).status).toBe(201);
+    expect((await second).status).toBe(201);
+    expect((await mentionedIn(cronk, codex)).sort()).toEqual(["@claude-laptop @codex, second.", "@codex @claude-laptop, first."]);
+  });
+
   it("replay none of an Agent's work to another Agent", async () => {
     const { cronk, admin } = await delegatedSetup();
     const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);

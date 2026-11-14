@@ -173,8 +173,36 @@ export interface Cronk {
    * blip, and lets the rest through.
    */
   interruptQueriesOn(table: string, cause: () => Promise<unknown>): Promise<void>;
+  /**
+   * Locks the row of `table` with this id, as a transaction updating it would, so writes that
+   * reference it (such as rows with a foreign key to it) wait until it is released.
+   */
+  holdRow(table: string, id: string): Promise<HeldRow>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
+}
+
+/** A row held by `Cronk.holdRow`. */
+export interface HeldRow {
+  /** Resolves once at least `n` queries on this test's database are waiting on a lock. */
+  waiters(n: number): Promise<void>;
+  /** Lets the writes waiting on the row through. */
+  release(): Promise<void>;
+}
+
+/** Checks `done` every 10ms until it holds, failing with `failure` (or what it answers) after five seconds. */
+async function pollUntil(done: () => Promise<boolean>, failure: string | (() => Promise<string>)): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!(await done())) {
+    if (Date.now() > deadline) throw new Error(typeof failure === "string" ? failure : await failure());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** How many queries on database `dbName` are waiting on a lock, asked through `client`. */
+async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
+  const { rows } = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'", [dbName]);
+  return rows[0]!.n;
 }
 
 /**
@@ -208,13 +236,9 @@ export async function startCronk(): Promise<Cronk> {
       await admin.connect();
       try {
         await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1", [dbName]);
-        const deadline = Date.now() + 5_000;
-        for (;;) {
-          const { rows } = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [dbName]);
-          if (rows[0]!.n === 0) break;
-          if (Date.now() > deadline) throw new Error(`${rows[0]!.n} connections to ${dbName} outlived pg_terminate_backend`);
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+        const connections = async () =>
+          (await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [dbName])).rows[0]!.n;
+        await pollUntil(async () => (await connections()) === 0, async () => `${await connections()} connections to ${dbName} outlived pg_terminate_backend`);
       } finally {
         await admin.end();
       }
@@ -228,20 +252,46 @@ export async function startCronk(): Promise<Cronk> {
         await admin.query("BEGIN");
         await admin.query(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
         await cause();
-        const deadline = Date.now() + 5_000;
-        for (;;) {
-          const { rows } = await admin.query<{ n: number }>(
-            "SELECT count(pg_terminate_backend(pid))::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
-            [dbName],
-          );
-          if (rows[0]!.n > 0) break;
-          if (Date.now() > deadline) throw new Error(`No query waited on ${table}`);
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+        // Terminates the connections whose queries wait on a lock, once there are any.
+        const terminated = async () =>
+          (
+            await admin.query<{ n: number }>(
+              "SELECT count(pg_terminate_backend(pid))::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
+              [dbName],
+            )
+          ).rows[0]!.n > 0;
+        await pollUntil(terminated, `No query waited on ${table}`);
       } finally {
         await admin.query("ROLLBACK").catch(() => {});
         await admin.end();
       }
+    },
+    holdRow: async (table, id) => {
+      const holder = new pg.Client({ connectionString: databaseUrl });
+      await holder.connect();
+      await holder.query("BEGIN");
+      await holder.query(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
+      let released = false;
+      const release = async () => {
+        if (released) return;
+        released = true;
+        await holder.query("ROLLBACK").catch(() => {});
+        await holder.end();
+      };
+      onTestFinished(release);
+      return {
+        waiters: async (n) => {
+          // Asked outside the holding transaction, as pg_stat_activity stays the same within one.
+          const watcher = new pg.Client({ connectionString: databaseUrl });
+          await watcher.connect();
+          try {
+            await pollUntil(async () => (await lockWaiters(watcher, dbName)) >= n, `Fewer than ${n} queries waited on a lock`);
+          } finally {
+            await watcher.end();
+          }
+        },
+        release,
+      };
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
