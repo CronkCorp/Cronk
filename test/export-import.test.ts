@@ -265,3 +265,17 @@ describe("an export without Versions", () => {
     expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Be kind. Be brief.", version: 1 });
   });
 });
+
+describe("an export taken apart and archived again", () => {
+  it("imports with its folder around it, as `tar czf` of the extracted folder makes", async () => {
+    const before = await busyWorkspace();
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    files["projects/CRONK/tickets/CRONK-2.md"] = files["projects/CRONK/tickets/CRONK-2.md"]!.replace("title: Ticket 2", "title: Edited by hand");
+    const wrapped = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [`cronk-export/${path}`, text])));
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    const imported = await admin.upload("/api/import", wrapped);
+    expect(imported.status).toBe(201);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.title).toBe("Edited by hand");
+  });
+});

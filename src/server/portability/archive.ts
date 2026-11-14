@@ -79,3 +79,14 @@ function relativePath(name: string): string | undefined {
   if (parts.length === 0 || parts.some((part) => part === ".." || part.startsWith(".") || part === "__MACOSX")) return undefined;
   return parts.join("/");
 }
+
+/** `folder` with any single folder holding all of it taken off, as archiving a folder (`tar czf x.tgz folder/`) adds one. */
+export function unwrapFolder(folder: Folder): Folder {
+  let current = folder;
+  for (;;) {
+    const paths = [...current.keys()];
+    const tops = new Set(paths.map((p) => p.split("/")[0]));
+    if (tops.size !== 1 || paths.some((p) => !p.includes("/"))) return current;
+    current = new Map([...current].map(([path, text]) => [path.slice(path.indexOf("/") + 1), text]));
+  }
+}

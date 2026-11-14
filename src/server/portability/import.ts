@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { HttpError } from "../context.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ACTIVITY_KINDS, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
-import type { Folder } from "./archive.js";
+import { unwrapFolder, type Folder } from "./archive.js";
 import { FORMAT } from "./format.js";
 import { readFrontmatter } from "./frontmatter.js";
 
@@ -38,7 +38,8 @@ const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeri
 const isUuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 /** Imports `folder`, an export, into the Workspace for `importer`. Run inside a transaction. */
-export async function importExport(db: Queryable, workspaceId: string, folder: Folder, now: Date): Promise<Imported> {
+export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date): Promise<Imported> {
+  const folder = unwrapFolder(archived);
   const read = (path: string): File | undefined => {
     const text = folder.get(path);
     if (text === undefined) return undefined;

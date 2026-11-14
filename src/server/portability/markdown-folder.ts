@@ -2,7 +2,7 @@ import type { Actor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { insertDocument, type Tree, type TreeEntry } from "../knowledge/documents.js";
-import type { Folder } from "./archive.js";
+import { unwrapFolder, type Folder } from "./archive.js";
 import { readFrontmatter } from "./frontmatter.js";
 
 /**
@@ -27,7 +27,8 @@ const FOLDER_PAGE = /^(readme|index)\.(md|markdown)$/i;
  * holding only one folder is that folder's archive, so its contents go at the top. Run inside a transaction.
  */
 export async function importMarkdownFolder(db: Queryable, tree: Tree, folder: Folder, actor: Actor, now: Date): Promise<TreeEntry[]> {
-  const pages = pagesIn(unwrap([...folder.keys()].filter((path) => MARKDOWN.test(path))), folder);
+  const markdown = unwrapFolder(new Map([...folder].filter(([path]) => MARKDOWN.test(path))));
+  const pages = pagesIn([...markdown.keys()].map((path) => ({ path, relative: path })), markdown);
   const created: TreeEntry[] = [];
   const create = async (page: Page, parentId: string | null, depth: number) => {
     const document = await insertDocument(db, { tree, parentId, title: page.title, body: page.body, actor, now });
@@ -37,16 +38,6 @@ export async function importMarkdownFolder(db: Queryable, tree: Tree, folder: Fo
   };
   for (const page of pages) await create(page, null, 0);
   return created;
-}
-
-/** The paths with a single folder holding all of them stripped off, as archiving a folder adds it. */
-function unwrap(paths: string[]): { path: string; relative: string }[] {
-  let entries = paths.map((path) => ({ path, relative: path }));
-  for (;;) {
-    const tops = new Set(entries.map((e) => e.relative.split("/")[0]));
-    if (tops.size !== 1 || entries.some((e) => !e.relative.includes("/"))) return entries;
-    entries = entries.map((e) => ({ ...e, relative: e.relative.slice(e.relative.indexOf("/") + 1) }));
-  }
 }
 
 /** The pages of one folder's `entries` (paths relative to it), files and folders in natural name order. */
