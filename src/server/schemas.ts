@@ -39,7 +39,9 @@ export type SharedSchemaName =
   | "Ticket"
   | "TicketRef"
   | "Relations"
-  | "RecordedChange";
+  | "RecordedChange"
+  | "Guidance"
+  | "GuidanceVersion";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -77,6 +79,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     expiresAt: timestamp,
   }),
   Workspace: object({ name: { type: "string" }, agentAccess: agentAccessSchema }),
+  Guidance: {
+    description: "Standing instructions Users write for Agents, as Markdown.",
+    ...object({
+      markdown: { type: "string" },
+      version: { type: "integer", description: "The current Version, counted from 1; 0 before anyone writes the Guidance." },
+    }),
+  },
+  GuidanceVersion: {
+    description: "One saved state of Guidance, with the User who saved it and when.",
+    ...object({
+      version: { type: "integer" },
+      markdown: { type: "string" },
+      at: timestamp,
+      actor: object({ kind: { type: "string", const: "user" }, id, name: { type: "string" } }),
+    }),
+  },
   Agent: object(
     {
       id,

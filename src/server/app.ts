@@ -9,6 +9,7 @@ import { addSharedSchemas, answer, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { mcpRoutes } from "./mcp/server.js";
+import { guidanceRoutes } from "./knowledge/routes.js";
 import { identityRoutes } from "./identity/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
@@ -47,7 +48,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   app.addHook("onClose", async () => db.end());
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
-    if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
+    if (err instanceof HttpError) return reply.code(err.statusCode).send({ ...err.details, error: err.message });
     const fastifyError = err as Partial<FastifyError>;
     if (fastifyError.validation) return reply.code(400).send({ error: validationMessage(fastifyError as FastifyError) });
     if (fastifyError.statusCode && fastifyError.statusCode < 500) {
@@ -96,6 +97,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
+  await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 

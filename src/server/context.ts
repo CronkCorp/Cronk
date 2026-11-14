@@ -23,6 +23,8 @@ export class HttpError extends Error {
   constructor(
     readonly statusCode: number,
     message: string,
+    /** More fields for the error's body, beside `error`, such as the current Version a stale edit is refused for. */
+    readonly details: Record<string, unknown> = {},
   ) {
     super(message);
   }
