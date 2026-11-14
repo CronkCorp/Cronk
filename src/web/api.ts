@@ -148,8 +148,8 @@ async function upload<T>(path: string, file: File): Promise<T> {
   return data as T;
 }
 
-/** Where the whole Workspace's export downloads from, with every Version. */
-export const workspaceExportUrl = "/api/export?versions=true";
+/** Where the whole Workspace's export downloads from; it holds every Version. */
+export const workspaceExportUrl = "/api/export";
 
 export const api = {
   /** Imports an export of the Workspace or a Project; Admins only. */

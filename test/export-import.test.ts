@@ -28,7 +28,7 @@ describe("exporting a Project", () => {
     expect(res.headers["content-disposition"]).toMatch(/attachment; filename="cronk-CRONK-.*\.tar\.gz"/);
     const files = await untarGz(res.body);
 
-    expect(markdown(files["README.md"]).data.cronk).toMatchObject({ format: 1, scope: "project", versions: false });
+    expect(markdown(files["README.md"]).data.cronk).toMatchObject({ format: 1, scope: "project", versions: true });
     expect(markdown(files["projects/CRONK/project.md"]).data).toMatchObject({
       key: "CRONK",
       name: "Cronk",
@@ -172,7 +172,7 @@ async function busyWorkspace() {
 describe("importing an export", () => {
   it("recreates the same data in a fresh installation, Versions and all", async () => {
     const before = await busyWorkspace();
-    const exported = await before.admin.download("/api/export?versions=true");
+    const exported = await before.admin.download("/api/export");
     expect(exported.status).toBe(200);
 
     const { admin } = await startInstalledCronk("Elsewhere");
@@ -247,7 +247,7 @@ describe("importing a Project export", () => {
 describe("an export without Versions", () => {
   it("imports each Document and Report at a single Version holding what it says now, by whoever first wrote it", async () => {
     const before = await busyWorkspace();
-    const exported = await before.admin.download("/api/export");
+    const exported = await before.admin.download("/api/export?versions=false");
     const files = await untarGz(exported.body);
     expect(Object.keys(files).filter((path) => path.includes(".versions/"))).toEqual([]);
 

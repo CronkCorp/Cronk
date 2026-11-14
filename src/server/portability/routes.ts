@@ -60,7 +60,7 @@ export function portabilityRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "export the Workspace");
-        return sendExport(reply, user.workspaceId, null, request.query.versions ?? false);
+        return sendExport(reply, user.workspaceId, null, request.query.versions ?? true);
       },
     );
 
@@ -78,7 +78,7 @@ export function portabilityRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "export a Project");
         const { project } = await projectFor(ctx.db, { kind: "user", user }, request.params.key, "read");
-        return sendExport(reply, user.workspaceId, project, request.query.versions ?? false);
+        return sendExport(reply, user.workspaceId, project, request.query.versions ?? true);
       },
     );
 
@@ -177,7 +177,7 @@ const EXPORT_FORMAT =
 const versionsQuery = {
   type: "object",
   properties: {
-    versions: { type: "boolean", default: false, description: "Include every Version of Documents, Reports and Guidance, not only the current one." },
+    versions: { type: "boolean", default: true, description: "Include every Version of Documents, Reports and Guidance; false exports only the current one, which imports as Version 1." },
   },
 } as const;
 
