@@ -192,11 +192,11 @@ function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
  * Keys `base` by position, then keys each section of `side` after the base section it came from:
  * first by a best-scoring alignment that keeps both orders; then, among what is left (a section
  * moved elsewhere), by heading, then by the best-scoring renames; last, a renamed empty section by
- * being the only empty one of its level between the same two paired sections. Sections `side`
- * added are keyed by their heading and how often it was added, so both sides adding the same
- * section pair too.
+ * being the only empty one of its level between the same two paired sections, if its base section
+ * is among `kept` (the keys the other side still has). Sections `side` added are keyed by their
+ * heading and how often it was added, so both sides adding the same section pair too.
  */
-function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
+function keyAgainstBase(base: Chunk[], side: Chunk[], kept: Set<string>): void {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
   const [n, m] = [base.length, side.length];
@@ -238,7 +238,8 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
     .sort((a, b) => b.score - a.score);
   for (const { i, j } of renames) if (!pairedBase.has(i) && !pairedSide.has(j)) pair(i, j);
   // A renamed empty section has no content to pair on: pair it when it is the only empty section of
-  // its level, on each side, between the same two paired sections.
+  // its level, on each side, between the same two paired sections. When the other side no longer has
+  // that base section, it was removed (or replaced) there: read this one as added, not renamed.
   const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
     const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
     const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
@@ -249,7 +250,7 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   const [emptyBase, emptySide] = [emptyIn(base, pairedBase, n), emptyIn(side, pairedSide, m)];
   for (const s of emptySide) {
     const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
-    if (bases.length === 1 && sides.length === 1) pair(bases[0]!.k, s.k);
+    if (bases.length === 1 && sides.length === 1 && kept.has(base[bases[0]!.k]!.key)) pair(bases[0]!.k, s.k);
   }
   const added = new Map<string, number>();
   side.forEach((chunk, j) => {
@@ -355,8 +356,15 @@ export function mergeEdits(base: { title: string; body: string }, mine: { title:
 /** The sections of a three-way merge of bodies, in their merged order; see `mergeEdits`. */
 function mergeBodies(base: string, mine: string, theirs: string): MergedSection[] {
   const [b, m, t] = [base, mine, theirs].map(chunksOf) as [Chunk[], Chunk[], Chunk[]];
-  keyAgainstBase(b, m);
-  keyAgainstBase(b, t);
+  // The keys of base sections a side still has, before any empty section is read as renamed.
+  const keptBy = (side: Chunk[]) => {
+    const copy = side.map((c) => ({ ...c }));
+    keyAgainstBase(b, copy, new Set());
+    return new Set(copy.map((c) => c.key));
+  };
+  const [keptByMine, keptByTheirs] = [keptBy(m), keptBy(t)];
+  keyAgainstBase(b, m, keptByTheirs);
+  keyAgainstBase(b, t, keptByMine);
   const order = mergedOrder(...([b, m, t].map((chunks) => chunks.map((c) => c.key)) as [string[], string[], string[]]));
   if (!order) return [{ heading: null, text: null, conflict: sectionConflict(base, mine, theirs) }];
   const find = (chunks: Chunk[], key: string) => chunks.find((c) => c.key === key);

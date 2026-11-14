@@ -263,6 +263,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Intro\n\nHi.\n\n## Install\n\nInstall it.\n\n## Usage\n\nUse it.\n" });
   });
 
+  it("reads an empty section one edit replaced with another and the other edit removed as removed and added, not renamed", async () => {
+    const base = "## A\n\na\n\n## Old\n\n## B\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n## B\n\nb\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Old", "## Notes") });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na\n\n## Notes\n\n## B\n\nb\n" });
+  });
+
   it("does not pair sections as a rename when their content shares only a line many sections have", async () => {
     const base = "## A\n\n- [ ] TODO\nalpha\n\n## B\n\n- [ ] TODO\nbeta\n\n## C\n\n- [ ] TODO\ngamma\n";
     const { admin, id } = await editedUnderneath(base, "## A\n\n- [ ] TODO\nalpha\n\n## C\n\n- [ ] TODO\ngamma\n");
