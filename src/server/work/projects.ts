@@ -64,19 +64,9 @@ export async function insertProject(
   );
   if (!rows[0]) return undefined;
   const project = toProject(rows[0]);
-  for (const [position, status] of DEFAULT_STATUSES.entries()) await insertStatusAt(db, project.id, { ...status, position });
+  // Each goes last in its Status Category, so they keep the order listed.
+  for (const status of DEFAULT_STATUSES) await insertStatus(db, project.id, status);
   return project;
-}
-
-/** Adds a Status at `position` within its Status Category and returns its id. Run inside the transaction that creates the Project. */
-export async function insertStatusAt(db: Queryable, projectId: string, status: { name: string; category: StatusCategory; position: number }): Promise<string> {
-  const { rows } = await db.query<{ id: string }>("INSERT INTO statuses (project_id, name, category, position) VALUES ($1, $2, $3, $4) RETURNING id", [
-    projectId,
-    status.name,
-    status.category,
-    status.position,
-  ]);
-  return rows[0]!.id;
 }
 
 export async function findProjectByKey(db: Queryable, workspaceId: string, key: string): Promise<Project | undefined> {

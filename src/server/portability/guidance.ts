@@ -1,3 +1,4 @@
+import { writeGuidance } from "../knowledge/guidance.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, refuse, type File } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -16,10 +17,7 @@ export async function exportGuidance(ctx: ExportContext, base: string, projectId
   if (ctx.scope.versions) for (const v of rows) ctx.add(`${base}.versions/${v.version}.md`, { at: iso(v.at), by: ctx.user(v.actor_user_id) }, v.markdown);
 }
 
-/**
- * Imports Guidance from `${base}.md`, with its Versions from `${base}.versions/` if the export has
- * them. Versions keep their numbers, so this writes them as they are rather than as saves.
- */
+/** Imports Guidance from `${base}.md`, with its Versions from `${base}.versions/` if the export has them, each saved on the one before. */
 export async function importGuidance(ctx: ImportContext, base: string, projectId: string | null): Promise<void> {
   const current = ctx.read(`${base}.md`);
   if (!current) return;
@@ -28,13 +26,11 @@ export async function importGuidance(ctx: ImportContext, base: string, projectId
   for (const [n, v] of saved) {
     const by = await ctx.actor(v.data.by, `${v.path} by`);
     if (by.kind !== "user") refuse(`${v.path} by must name a User: only Users write Guidance`);
-    await ctx.db.query("INSERT INTO guidance_versions (workspace_id, project_id, version, markdown, at, actor_user_id) VALUES ($1, $2, $3, $4, $5, $6)", [
-      ctx.workspaceId,
-      projectId,
-      n,
-      v.body,
-      date(v.data.at, `${v.path} at`),
-      by.userId,
-    ]);
+    const written = await writeGuidance(
+      ctx.db,
+      { workspaceId: ctx.workspaceId, projectId },
+      { markdown: v.body, baseVersion: n - 1, userId: by.userId, now: date(v.data.at, `${v.path} at`) },
+    );
+    if (!written) refuse(`${v.path} must follow Version ${n - 1}: Guidance Versions are numbered 1, 2, 3 and so on, with none missing`);
   }
 }

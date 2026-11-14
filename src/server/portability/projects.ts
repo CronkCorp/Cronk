@@ -1,7 +1,7 @@
 import { STATUS_CATEGORIES } from "../../shared/values.js";
 import { setMembership } from "../identity/memberships.js";
 import { accessSchema, agentAccessSchema } from "../schemas.js";
-import { insertStatusAt, PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
+import { insertStatus, PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, integer, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -75,8 +75,11 @@ export async function importProject(ctx: ImportContext, dirKey: string): Promise
   );
   const id = rows[0]!.id;
   const statusIds = await importStatuses(ctx, p, id);
+  const members = new Set<string>();
   for (const [i, m] of list(p, "members").entries()) {
     const userId = await ctx.userId(m.user, `${p.path} members[${i}].user`);
+    if (members.has(userId)) refuse(`${p.path} lists ${String(m.user)} as a member twice`);
+    members.add(userId);
     await setMembership(ctx.db, id, userId, oneOf(m.access, accessSchema.enum, `${p.path} members[${i}].access`));
   }
   return { id, key, path: p.path, statusIds };
@@ -85,14 +88,12 @@ export async function importProject(ctx: ImportContext, dirKey: string): Promise
 /** Imports the Statuses `project.md` lists, in its order within each Status Category; returns their ids by lower-case name. */
 async function importStatuses(ctx: ImportContext, p: File, projectId: string): Promise<Map<string, string>> {
   const statusIds = new Map<string, string>();
-  const positions = new Map<string, number>();
   for (const [i, s] of list(p, "statuses").entries()) {
     const name = text(s.name, `${p.path} statuses[${i}].name`);
     const category = oneOf(s.category, STATUS_CATEGORIES, `${p.path} statuses[${i}].category`);
-    const position = positions.get(category) ?? 0;
-    positions.set(category, position + 1);
-    if (statusIds.has(name.toLowerCase())) refuse(`${p.path} has two Statuses named ${name}`);
-    statusIds.set(name.toLowerCase(), await insertStatusAt(ctx.db, projectId, { name, category, position }));
+    // Each goes last in its Status Category, so they keep the order project.md lists.
+    const status = (await insertStatus(ctx.db, projectId, { name, category })) ?? refuse(`${p.path} has two Statuses named ${name}`);
+    statusIds.set(name.toLowerCase(), status.id);
   }
   if (statusIds.size === 0) refuse(`${p.path} has no statuses`);
   return statusIds;

@@ -215,7 +215,7 @@ async function importActivitiesAndComments(ctx: ImportContext, base: string, tic
   for (const [n, a] of activities) {
     if (a.data.answer === undefined || a.data.answer === null) continue;
     const answer = commentIds.get(Number(a.data.answer)) ?? refuse(`${a.path} answer names a Comment that isn't on its Ticket`);
-    await markAnswered(ctx.db, imported.get(n)!, answer);
+    if (!(await markAnswered(ctx.db, imported.get(n)!, answer))) refuse(`${a.path} answer is only for a question`);
   }
 }
 

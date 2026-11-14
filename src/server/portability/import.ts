@@ -1,6 +1,5 @@
 import { HttpError } from "../context.js";
-import { lockUntilCommit } from "../db/database.js";
-import type { Queryable } from "../db/database.js";
+import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { unwrapFolder, type Folder } from "./archive.js";
 import { natural, refuse } from "./fields.js";
 import { FORMAT } from "./format.js";

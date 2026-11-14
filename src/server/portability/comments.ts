@@ -64,19 +64,16 @@ export async function importComments(
         ? null
         : (activities.get(Number(c.data.replyToActivity)) ?? refuse(`${c.path} replies to an Activity that isn't on its Ticket`));
     const anchor = c.data.anchor as { passage?: unknown; version?: unknown } | undefined;
+    const version = anchor ? Math.min(integer(anchor.version, `${c.path} anchor.version`), documentVersion) : null;
+    const passage = anchor ? text(anchor.passage, `${c.path} anchor.passage`) : null;
+    const at = date(c.data.at, `${c.path} at`);
+    const by = await ctx.actor(c.data.by, `${c.path} by`);
     const comment = await insertComment(
       ctx.db,
       target,
-      await ctx.actor(c.data.by, `${c.path} by`),
-      {
-        body: c.body,
-        replyToCommentId,
-        replyToActivityId,
-        anchor: anchor
-          ? { passage: text(anchor.passage, `${c.path} anchor.passage`), version: Math.min(integer(anchor.version, `${c.path} anchor.version`), documentVersion) }
-          : null,
-      },
-      date(c.data.at, `${c.path} at`),
+      by,
+      { body: c.body, replyToCommentId, replyToActivityId, anchor: passage === null ? null : { passage, version: version! } },
+      at,
     );
     ids.set(n, comment.id);
   }
