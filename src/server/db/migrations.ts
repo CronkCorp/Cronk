@@ -104,6 +104,9 @@ export const migrations: Migration[] = [
       );
       -- One pending invitation per email; inviting again replaces it.
       CREATE UNIQUE INDEX invitations_email_unique ON invitations (lower(email));
+
+      -- A deactivated User can't sign in; their history stays.
+      ALTER TABLE users ADD COLUMN deactivated_at timestamptz;
     `,
   },
 ];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, startInstalledCronk } from "./harness.js";
+import { joinAs, memberPassword, startInstalledCronk } from "./harness.js";
 
 describe("inviting Users", () => {
   it("lets an Admin invite a User by email, who sets a password and signs in", async () => {
@@ -71,5 +71,77 @@ describe("invitations", () => {
     const { cronk, admin } = await startInstalledCronk();
     const bob = await joinAs(cronk, admin, "bob@example.com", "admin");
     expect((await bob.get("/api/me")).body.user.role).toBe("admin");
+  });
+});
+
+describe("managing Users", () => {
+  it("lists the Workspace's Users", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const listed = await bob.get("/api/users");
+    expect(listed.status).toBe(200);
+    expect(listed.body.users).toEqual([
+      expect.objectContaining({ name: "Ada", role: "admin", active: true }),
+      expect.objectContaining({ name: "bob", role: "member", active: true }),
+    ]);
+  });
+
+  it("lets an Admin promote a Member to Admin and demote them again", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+
+    const promoted = await admin.patch(`/api/users/${bobId}`, { role: "admin" });
+    expect(promoted.status).toBe(200);
+    expect(promoted.body.user).toMatchObject({ id: bobId, role: "admin" });
+    expect((await bob.get("/api/me")).body.user.role).toBe("admin");
+
+    await admin.patch(`/api/users/${bobId}`, { role: "member" });
+    expect((await bob.get("/api/me")).body.user.role).toBe("member");
+  });
+
+  it("refuses role changes and deactivation from Members", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const adaId = (await admin.get("/api/me")).body.user.id;
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    expect((await bob.patch(`/api/users/${bobId}`, { role: "admin" })).status).toBe(403);
+    expect((await bob.patch(`/api/users/${adaId}`, { active: false })).status).toBe(403);
+  });
+
+  it("deactivates a User, who is signed out and can no longer sign in, until reactivated", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+
+    const deactivated = await admin.patch(`/api/users/${bobId}`, { active: false });
+    expect(deactivated.status).toBe(200);
+    expect(deactivated.body.user).toMatchObject({ active: false });
+
+    expect((await bob.get("/api/me")).status).toBe(401);
+    expect((await bob.get("/api/projects")).status).toBe(401);
+    const signIn = await cronk.client().post("/api/sign-in", { email: "bob@example.com", password: memberPassword });
+    expect(signIn.status).toBe(403);
+    expect(signIn.body.error).toMatch(/deactivated/);
+
+    await admin.patch(`/api/users/${bobId}`, { active: true });
+    expect((await cronk.client().post("/api/sign-in", { email: "bob@example.com", password: memberPassword })).status).toBe(200);
+  });
+
+  it("keeps at least one active Admin", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const adaId = (await admin.get("/api/me")).body.user.id;
+    expect((await admin.patch(`/api/users/${adaId}`, { role: "member" })).status).toBe(409);
+    expect((await admin.patch(`/api/users/${adaId}`, { active: false })).status).toBe(409);
+
+    const bob = await joinAs(cronk, admin, "bob@example.com", "admin");
+    expect((await admin.patch(`/api/users/${adaId}`, { role: "member" })).status).toBe(200);
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    expect((await bob.patch(`/api/users/${bobId}`, { active: false })).status).toBe(409);
+  });
+
+  it("answers 404 for a User that doesn't exist", async () => {
+    const { admin } = await startInstalledCronk();
+    expect((await admin.patch("/api/users/00000000-0000-4000-8000-000000000000", { role: "admin" })).status).toBe(404);
   });
 });

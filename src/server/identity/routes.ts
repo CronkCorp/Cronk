@@ -13,7 +13,7 @@ import {
   publicInvitation,
 } from "./invitations.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { countUsers, findUserByEmail, insertUser, publicUser, type Role } from "./users.js";
+import { countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
@@ -83,6 +83,7 @@ export function identityRoutes(ctx: AppContext) {
         // Check a password even for unknown emails so response time doesn't reveal which emails exist.
         const ok = await verifyPassword(request.body.password, found?.passwordHash ?? (await dummyHash));
         if (!found || !ok) throw new HttpError(401, "Email or password is incorrect");
+        if (!found.user.active) throw new HttpError(403, "This account has been deactivated");
         const signIn = await createSignIn(ctx.db, ctx.clock, found.user.id);
         setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
         return { user: publicUser(found.user) };
@@ -176,6 +177,31 @@ export function identityRoutes(ctx: AppContext) {
         const signIn = await createSignIn(ctx.db, ctx.clock, user.id);
         setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
         return reply.code(201).send({ user: publicUser(user) });
+      },
+    );
+
+    app.get("/api/users", async (request) => {
+      const user = await requireUser(ctx, request);
+      return { users: (await listUsers(ctx.db, user.workspaceId)).map(publicUser) };
+    });
+
+    app.patch<{ Params: { id: string }; Body: { role?: Role; active?: boolean } }>(
+      "/api/users/:id",
+      {
+        schema: {
+          params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
+          body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "change Users");
+        const updated = await transaction(ctx.db, (tx) =>
+          updateUser(tx, user.workspaceId, request.params.id, request.body, ctx.clock.now()),
+        );
+        if (updated === "last admin") throw new HttpError(409, "The Workspace needs at least one active Admin");
+        if (!updated) throw new HttpError(404, "No such User");
+        return { user: publicUser(updated) };
       },
     );
 

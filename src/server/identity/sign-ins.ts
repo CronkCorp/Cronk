@@ -22,13 +22,14 @@ export async function createSignIn(db: Queryable, clock: Clock, userId: string):
   return { token, expiresAt };
 }
 
-/** The User a sign-in token belongs to, if the sign-in exists and has not expired. */
+/** The User a sign-in token belongs to, if the sign-in exists and has not expired and the User is active. */
 export async function userForSignIn(db: Queryable, clock: Clock, token: string): Promise<User | undefined> {
   const { rows } = await db.query<{ user_id: string }>(
     "SELECT user_id FROM sign_ins WHERE token_hash = $1 AND expires_at > $2",
     [hash(token), clock.now()],
   );
-  return rows[0] && findUserById(db, rows[0].user_id);
+  const user = rows[0] && (await findUserById(db, rows[0].user_id));
+  return user?.active ? user : undefined;
 }
 
 export async function deleteSignIn(db: Queryable, token: string): Promise<void> {
