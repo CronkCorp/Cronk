@@ -190,7 +190,7 @@ function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
 /** One Version's sections while `keyAgainstBase` pairs them, and which of them are paired so far. */
 interface PairingSide {
   chunks: Chunk[];
-  /** Indexes into `chunks` already paired; the preamble (0) always counts as paired. */
+  /** Indexes into `chunks` already paired. The preamble (0) is never paired by a pass, whether or not the set holds it. */
   paired: Set<number>;
 }
 
