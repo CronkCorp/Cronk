@@ -206,6 +206,45 @@ describe("The Inbox's live updates", () => {
     expect(await stream.next()).toMatchObject({ event: "changed" });
   });
 
+  it("tell a User when their access to a Project changes", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const stream = await bob.events("/api/inbox/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.put(`/api/projects/CRONK/members/${bobId}`, { access: "read" });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.delete(`/api/projects/CRONK/members/${bobId}`);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.patch(`/api/users/${bobId}`, { role: "admin" });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+  });
+
+  it("tell the Users with items in a Project when it becomes private or open", async () => {
+    const { cronk, admin } = await delegatedSetup(2);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: (await bob.get("/api/me")).body.user.id, statusId: await statusIn(admin, "in_review") });
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const carolsAgent = await startSession(cronk, (await registerAgent(carol, "carols-agent")).secret);
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: (await carol.get("/api/me")).body.user.id, delegateId: (await carolsAgent.get("/api/me")).body.agent.id });
+    await carolsAgent.post("/api/tickets/CRONK-2/claim");
+    await carolsAgent.post("/api/tickets/CRONK-2/activities", { kind: "question", body: "Which cache?" });
+    const bobsStream = await bob.events("/api/inbox/events");
+    const carolsStream = await carol.events("/api/inbox/events");
+    expect((await bobsStream.next())?.event).toBe("ready");
+    expect((await carolsStream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await bobsStream.next()).toMatchObject({ event: "changed" });
+    expect(await carolsStream.next()).toMatchObject({ event: "changed" });
+    expect(await inboxLines(bob)).toEqual([]);
+    await admin.patch("/api/projects/CRONK", { visibility: "open" });
+    expect(await bobsStream.next()).toMatchObject({ event: "changed" });
+    expect(await carolsStream.next()).toMatchObject({ event: "changed" });
+    expect(await inboxLines(bob)).toEqual(["review CRONK-1"]);
+  });
+
   it("are only for Users", async () => {
     const { cronk, claude } = await delegatedSetup();
     expect((await cronk.client(claude.secret).events("/api/inbox/events")).status).toBe(403);

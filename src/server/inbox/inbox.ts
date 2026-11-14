@@ -91,6 +91,22 @@ export function inboxesChanged(live: LiveUpdates, userIds: (string | null | unde
   for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
 }
 
+/**
+ * Ids of the Users with items in Project `projectId`: the Assignees of its Tickets in an In Review
+ * Status, and the Owners of Agents with open questions on its Tickets.
+ */
+export async function usersWithItemsIn(db: Queryable, projectId: string): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.assignee_id AS id FROM tickets t JOIN statuses s ON s.id = t.status_id
+     WHERE t.project_id = $1 AND s.category = 'in_review' AND t.assignee_id IS NOT NULL
+     UNION
+     SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
+     WHERE t.project_id = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL`,
+    [projectId],
+  );
+  return rows.map((r) => r.id);
+}
+
 /** Ids of the Projects, archived or not, `user` can see; only those with one of `keys`, if given. */
 async function visibleProjectIds(db: Queryable, user: User, keys?: string[]): Promise<string[]> {
   const wanted = keys?.length ? new Set(keys.map((k) => k.toUpperCase())) : undefined;
