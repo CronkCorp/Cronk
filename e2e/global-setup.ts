@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import { E2E_PORT } from "../playwright.config.js";
+import { E2E_HOST, E2E_PORT } from "../playwright.config.js";
 
 /**
  * Starts a disposable Postgres and the real server process, configured only
@@ -14,7 +14,7 @@ export default async function globalSetup() {
     env: {
       ...process.env,
       DATABASE_URL: container.getConnectionUri(),
-      HOST: "127.0.0.1",
+      HOST: E2E_HOST,
       PORT: String(E2E_PORT),
       WEB_ROOT: "dist/web",
     },
@@ -23,7 +23,7 @@ export default async function globalSetup() {
 
   let exited = false;
   server.once("exit", () => (exited = true));
-  const healthy = await waitFor(`http://127.0.0.1:${E2E_PORT}/api/health`, 30_000, () => exited);
+  const healthy = await waitFor(`http://${E2E_HOST}:${E2E_PORT}/api/health`, 30_000, () => exited);
   if (!healthy) {
     server.kill();
     await container.stop();
@@ -46,7 +46,7 @@ async function assertPortFree(port: number): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       probe.once("error", reject);
-      probe.listen(port, "127.0.0.1", resolve);
+      probe.listen(port, E2E_HOST, resolve);
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
