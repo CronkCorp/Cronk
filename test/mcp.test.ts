@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { McpConnection } from "./harness.js";
-import { connectMcp, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
 /** Calls a tool and returns its result: the API's answer parsed from the text, and whether it is an error. */
 async function callTool(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: any }> {
@@ -221,11 +221,7 @@ describe("working a delegated Ticket over MCP", () => {
 
 describe("the activities tool", () => {
   it("logs Activities and asks questions on the Ticket the Agent Session holds, and lists them", async () => {
-    const { cronk, admin } = await startInstalledCronk();
-    await projectWithTickets(admin, "CRONK", 1);
-    const claude = await registerAgent(admin, "claude-laptop");
-    const adaId = (await admin.get("/api/users")).body.users[0].id;
-    await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: claude.agentId });
+    const { cronk, admin, claude } = await delegatedSetup();
     const mcp = await connectMcp(cronk, claude.secret);
 
     expect(await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "plan", body: "First" })).toEqual({
