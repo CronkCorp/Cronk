@@ -26,7 +26,7 @@ import type {
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
 import type { Document as StoredDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
-import type { Merge as StoredMerge } from "./knowledge/sections.js";
+import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
@@ -110,4 +110,6 @@ export type DocumentTreeEntry = TreeEntry;
 export type Report = Serialized<StoredReport>;
 /** An edit merged section by section with the Version it is merged `onto`. */
 export type Merge = StoredMerge & { onto: Version };
+/** An edit of Guidance merged section by section with the Guidance it is merged `onto`. */
+export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";

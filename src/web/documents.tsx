@@ -3,15 +3,13 @@ import {
   api,
   sessionName,
   staleVersionOf,
-  type Conflict,
   type Document,
   type DocumentTreeEntry,
   type Merge,
-  type MergedSection,
   type RecordedActor,
   type Version,
 } from "./api.js";
-import { diffLines } from "./diff.js";
+import { ResolveMerge, StaleSaveNotice, VersionDiff } from "./merge.js";
 import { DocumentComments } from "./timeline.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
@@ -226,6 +224,8 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
 interface OtherEdit {
   base: Version;
   theirs: Version;
+  /** Whether the merge left conflicts for the User to settle. */
+  conflicted: boolean;
 }
 
 /**
@@ -256,7 +256,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
       }
       try {
         const [merge, started] = await Promise.all([api.mergeDocument(id, { baseVersion: base, title, body }), api.version(id, base)]);
-        setOther({ base: started, theirs: merge.onto });
+        setOther({ base: started, theirs: merge.onto, conflicted: merge.conflicts > 0 });
         if (merge.conflicts === 0) {
           setTitle(merge.title!);
           setBody(merge.body!);
@@ -282,21 +282,13 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
   return (
     <section className="panel wide">
       {other && (
-        <div className={resolving ? "conflict" : "merged"} role="alert">
-          <p>
-            <strong>{actorName(other.theirs.actor)}</strong> saved Version {other.theirs.number} while you were editing, so your save was not made.{" "}
-            {resolving
-              ? "You both changed the same part; choose or combine below, then save."
-              : "Their changes touched other sections and are merged into yours below; check them and save again."}
-          </p>
-          <details open={!!resolving}>
-            <summary>Their changes (Version {other.base.number} to {other.theirs.number})</summary>
-            <VersionDiff before={other.base} after={other.theirs} label={`Their changes, Version ${other.base.number} to ${other.theirs.number}`} />
-          </details>
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => takeTheirs(other.theirs)}>Discard mine and edit theirs</button>
-          </div>
-        </div>
+        <StaleSaveNotice
+          by={actorName(other.theirs.actor)}
+          base={other.base}
+          theirs={other.theirs}
+          stage={resolving ? "conflict" : other.conflicted ? "resolved" : "merged"}
+          onDiscardMine={() => takeTheirs(other.theirs)}
+        />
       )}
       {resolving ? (
         <ResolveMerge
@@ -321,97 +313,6 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
         </form>
       )}
     </section>
-  );
-}
-
-/** One conflicting part: base, mine and theirs side by side, and the text to keep, which starts as mine. */
-function ConflictChoice(props: { label: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
-  const c = props.conflict;
-  const side = (name: string, text: string | null) => (
-    <div className="side">
-      <span className="muted">{name}</span>
-      <pre className="theirs">{text ?? "(removed)"}</pre>
-    </div>
-  );
-  return (
-    <section className="merge-conflict" aria-label={props.label}>
-      <h3>{props.label}</h3>
-      <div className="sides">
-        {side("Before", c.base)}
-        {side("Mine", c.mine)}
-        {side("Theirs", c.theirs)}
-      </div>
-      <div className="actions">
-        <button type="button" className="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(c.both)}>Use both</button>
-      </div>
-      <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
-    </section>
-  );
-}
-
-/** Lets the User settle each conflict of a merge, then hands back the merged title and body. */
-function ResolveMerge(props: { merge: Merge; onResolved: (r: { title: string; body: string }) => void; onCancel: () => void }) {
-  const m = props.merge;
-  const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
-  const [kept, setKept] = useState<string[]>(m.sections.map((s) => s.text ?? s.conflict?.mine ?? ""));
-  const keep = (i: number, text: string) => setKept(kept.map((k, at) => (at === i ? text : k)));
-  const sectionName = (s: MergedSection) => s.heading ?? (m.sections.length === 1 ? "The whole body" : "Before the first heading");
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        props.onResolved({ title, body: kept.join("") });
-      }}
-    >
-      {m.titleConflict && <ConflictChoice label="Title" conflict={m.titleConflict} value={title} onChange={setTitle} rows={1} />}
-      {m.sections.map((s, i) =>
-        s.conflict ? <ConflictChoice key={i} label={sectionName(s)} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} /> : null,
-      )}
-      <div className="actions">
-        <button type="submit">Use these and keep editing</button>
-        <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
-      </div>
-    </form>
-  );
-}
-
-/** How many unchanged lines around a change stay visible; longer unchanged runs fold. */
-const CONTEXT = 3;
-
-/** What changed from one Version (or edit) to another, line by line. */
-function VersionDiff(props: { before: { title: string; body: string }; after: { title: string; body: string }; label: string }) {
-  const lines = diffLines(props.before.body, props.after.body);
-  const changed = lines.map((l) => l.kind !== "same");
-  const near = (i: number) => changed.slice(Math.max(0, i - CONTEXT), i + CONTEXT + 1).some(Boolean);
-  const rows: ReactNode[] = [];
-  let folded = 0;
-  const flush = (key: string) => {
-    if (folded > 0) rows.push(<li key={key} className="diff-fold muted">{folded} unchanged {folded === 1 ? "line" : "lines"}</li>);
-    folded = 0;
-  };
-  lines.forEach((line, i) => {
-    if (line.kind === "same" && !near(i)) {
-      folded++;
-      return;
-    }
-    flush(`fold-${i}`);
-    const mark = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
-    rows.push(<li key={i} className={`diff-${line.kind}`}>{`${mark} ${line.text}`}</li>);
-  });
-  flush("fold-end");
-  return (
-    <div className="diff">
-      {props.before.title !== props.after.title && (
-        <p>Title: <del>{props.before.title}</del> → <ins>{props.after.title}</ins></p>
-      )}
-      {changed.some(Boolean) ? (
-        <ol className="diff-lines" aria-label={props.label}>{rows}</ol>
-      ) : (
-        <p className="muted">The bodies are the same.</p>
-      )}
-    </div>
   );
 }
 
