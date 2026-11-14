@@ -340,16 +340,25 @@ export interface Merge {
 export function mergeEdits(base: { title: string; body: string }, mine: { title: string; body: string }, theirs: { title: string; body: string }): Merge {
   const title = mergePart({ text: base.title }, { text: mine.title }, { text: theirs.title });
   const titleConflict = title === "conflict" ? { base: base.title, mine: mine.title, theirs: theirs.title, both: `${mine.title} ${theirs.title}` } : null;
-  const sections = mergeBodies(base.body, mine.body, theirs.body);
-  const conflicts = sections.filter((s) => s.conflict).length + (titleConflict ? 1 : 0);
+  const { markdown: body, sections, conflicts } = mergeMarkdown(base.body, mine.body, theirs.body);
+  return { title: title === "conflict" ? null : title.merged!.text, titleConflict, body, sections, conflicts: conflicts + (titleConflict ? 1 : 0) };
+}
+
+/** A merge of Markdown alone, such as Guidance. */
+export interface MarkdownMerge {
+  /** The merged Markdown; null while any section conflicts. */
+  markdown: string | null;
+  /** Its sections, in order; joined, the texts (with the chosen side of each conflict) make the Markdown. */
+  sections: MergedSection[];
+  /** How many sections conflict. */
+  conflicts: number;
+}
+
+/** Three-way merges two edits of Markdown made from `base`, section by section, as `mergeEdits` merges a body. */
+export function mergeMarkdown(base: string, mine: string, theirs: string): MarkdownMerge {
+  const sections = mergeBodies(base, mine, theirs);
   const clean = sections.every((s) => s.text !== null);
-  return {
-    title: title === "conflict" ? null : title.merged!.text,
-    titleConflict,
-    body: clean ? sections.map((s) => s.text).join("") : null,
-    sections,
-    conflicts,
-  };
+  return { markdown: clean ? sections.map((s) => s.text).join("") : null, sections, conflicts: sections.filter((s) => s.conflict).length };
 }
 
 /** The sections of a three-way merge of bodies, in their merged order; see `mergeEdits`. */
