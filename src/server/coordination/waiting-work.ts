@@ -100,16 +100,24 @@ async function canSee(db: Queryable, agent: AgentActor, projectId: string | null
 }
 
 /**
- * Takes the work waiting for the Agent, oldest first, for its Agent Session `sessionId`'s
- * welcome: once taken it no longer waits. Leaves out what the Agent can no longer see.
+ * The work waiting for the Agent, oldest first, for the welcome of its Agent Session
+ * `sessionId`, leaving out what the Agent can't see right now (it keeps waiting until it can).
+ * A full token's welcome takes what it lists, so it no longer waits; a read-only token, which
+ * can't act on it, leaves it waiting.
  */
 export async function takeWaitingWork(db: Queryable, agent: AgentActor, sessionId: string, now: Date): Promise<WaitingWork[]> {
   const { rows } = await db.query<{ comment_id: string; reason: WaitingReason }>(
-    `UPDATE waiting_work SET taken_at = $2, taken_by_session_id = $3 WHERE agent_id = $1 AND taken_at IS NULL
-     RETURNING comment_id, reason, seq`,
-    [agent.agent.id, now, sessionId],
+    "SELECT comment_id, reason FROM waiting_work WHERE agent_id = $1 AND taken_at IS NULL",
+    [agent.agent.id],
   );
-  return waitingWorkFor(db, agent, rows.map((r) => ({ commentId: r.comment_id, reason: r.reason })));
+  const work = await waitingWorkFor(db, agent, rows.map((r) => ({ commentId: r.comment_id, reason: r.reason })));
+  if (!agent.readOnly && work.length > 0) {
+    await db.query(
+      "UPDATE waiting_work SET taken_at = $2, taken_by_session_id = $3 WHERE agent_id = $1 AND comment_id = ANY($4) AND taken_at IS NULL",
+      [agent.agent.id, now, sessionId, work.map((w) => w.comment.id)],
+    );
+  }
+  return work;
 }
 
 /** The waiting work for these Comments, in the order they were posted, leaving out those `agent` can't see. */

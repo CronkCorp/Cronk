@@ -80,6 +80,28 @@ describe("An answer to an Agent's question", () => {
   });
 });
 
+describe("Taking waiting work", () => {
+  it("is left to a full token: a read-only token's welcome lists the work but leaves it waiting", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const readOnly = (await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret;
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." });
+
+    expect((await cronk.client(readOnly).post("/api/agent-sessions")).body.welcome.waitingWork).toHaveLength(1);
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toHaveLength(1);
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);
+  });
+
+  it("leaves work the Agent can't see right now waiting until it can again", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." });
+    await admin.patch("/api/projects/CRONK", { agentAccess: "none" });
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);
+
+    await admin.patch("/api/projects/CRONK", { agentAccess: "write" });
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toHaveLength(1);
+  });
+});
+
 describe("An Agent Session's live updates", () => {
   it("push work as it starts waiting for the Agent, to each of its connected Sessions, and only its own", async () => {
     const { cronk, admin, session } = await delegatedSetup();
