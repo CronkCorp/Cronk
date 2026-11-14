@@ -16,6 +16,7 @@ import {
   type User,
 } from "./api.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
+import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -74,7 +75,9 @@ export function ProjectsPage(props: { archived: boolean }) {
                 <li key={project.id}>
                   <Link to={`/projects/${project.key}`} className="row">
                     <span className="key">{project.key}</span>
-                    <span>{project.name}</span>
+                    <span className="grow">{project.name}</span>
+                    {project.visibility === "private" && <span className="badge">Private</span>}
+                    {project.access === "read" && <span className="badge">Read only</span>}
                   </Link>
                 </li>
               ))}
@@ -129,11 +132,12 @@ function projectPath(projectKey: string, view: "list" | "board", filter: TicketF
 }
 
 /** One Project's Tickets, as a list or as a board grouped by Status, narrowed by the filters in its address. */
-export function ProjectPage(props: { projectKey: string; view: "list" | "board"; filter: TicketFilter }) {
+export function ProjectPage(props: { projectKey: string; view: "list" | "board"; filter: TicketFilter; me: User }) {
   const filterKey = JSON.stringify(props.filter);
   const [project, , setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, props.filter), [props.projectKey, filterKey]);
   const [creating, setCreating] = useState(false);
+  const [showAccess, setShowAccess] = useState(false);
   const archive = useSubmit(
     async () => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -151,17 +155,32 @@ export function ProjectPage(props: { projectKey: string; view: "list" | "board";
             <div>
               <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
               <h1>
-                {p.name} {p.archived && <span className="badge">Archived</span>}
+                {p.name} {p.archived && <span className="badge">Archived</span>}{" "}
+                {p.visibility === "private" && <span className="badge">Private</span>}{" "}
+                {p.access === "read" && <span className="badge">Read only</span>}
               </h1>
             </div>
             <div className="actions">
-              <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
-                {p.archived ? "Restore Project" : "Archive Project"}
-              </button>
-              {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+              {props.me.role === "admin" && (
+                <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
+              )}
+              {p.access === "write" && (
+                <>
+                  <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
+                    {p.archived ? "Restore Project" : "Archive Project"}
+                  </button>
+                  {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+                </>
+              )}
             </div>
           </div>
           {archive.error && <p className="error" role="alert">{archive.error}</p>}
+          {showAccess && (
+            <ProjectAccessPanel
+              project={p}
+              onProjectChanged={(updated) => setProject({ project: updated, statuses })}
+            />
+          )}
           {creating && (
             <NewTicket
               projectKey={p.key}
@@ -366,6 +385,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
   const [history, reloadHistory] = useLoad(() => api.ticketHistory(t.key), [t.key]);
   const [editing, setEditing] = useState(false);
   const archived = project.kind === "loaded" && project.value.project.archived;
+  const canWrite = project.kind === "loaded" && project.value.project.access === "write";
 
   const changed = () => {
     props.onChanged();
@@ -392,7 +412,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         <>
           <div className="page-head">
             <h1>{t.title}</h1>
-            <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
+            {canWrite && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
           </div>
           <div className="ticket-fields">
             <Show state={project}>
@@ -400,7 +420,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
                 <Picker
                   label="Status"
                   value={t.status.id}
-                  busy={update.busy}
+                  disabled={update.busy || !canWrite}
                   options={statuses.map((s) => [s.id, s.name])}
                   onChange={(statusId) => void update.run({ statusId })}
                 />
@@ -409,27 +429,27 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
             <Picker
               label="Priority"
               value={t.priority}
-              busy={update.busy}
+              disabled={update.busy || !canWrite}
               options={PRIORITIES.map((p) => [p, PRIORITY_NAMES[p]])}
               onChange={(priority) => void update.run({ priority: priority as Priority })}
             />
-            <AssigneePicker ticket={t} busy={update.busy} onChange={(assigneeId) => void update.run({ assigneeId })} />
+            <AssigneePicker ticket={t} disabled={update.busy || !canWrite} onChange={(assigneeId) => void update.run({ assigneeId })} />
           </div>
           {update.error && <p className="error" role="alert">{update.error}</p>}
-          <LabelEditor ticket={t} busy={update.busy} onChange={(labels) => void update.run({ labels })} />
+          <LabelEditor ticket={t} busy={update.busy} readOnly={!canWrite} onChange={(labels) => void update.run({ labels })} />
           <div className="markdown" data-testid="ticket-description">
             {t.description.trim() ? <CronkMarkdown>{t.description}</CronkMarkdown> : <p className="muted">No description.</p>}
           </div>
         </>
       )}
-      <ParentEditor ticket={t} onChanged={changed} />
+      <ParentEditor ticket={t} readOnly={!canWrite} onChanged={changed} />
       {props.detail.subTickets.length > 0 && (
         <>
           <h2>Sub-Tickets</h2>
           <TicketRefList name="Sub-Tickets" refs={props.detail.subTickets} />
         </>
       )}
-      <RelationsEditor detail={props.detail} onChanged={changed} />
+      <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
       <h2>History</h2>
       <Show state={history}>
         {(changes) => (
@@ -447,11 +467,11 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
   );
 }
 
-function Picker(props: { label: string; value: string; busy: boolean; options: [string, string][]; onChange: (value: string) => void }) {
+function Picker(props: { label: string; value: string; disabled: boolean; options: [string, string][]; onChange: (value: string) => void }) {
   return (
     <label className="field inline">
       <span>{props.label}</span>
-      <select value={props.value} disabled={props.busy} onChange={(e) => props.onChange(e.target.value)}>
+      <select value={props.value} disabled={props.disabled} onChange={(e) => props.onChange(e.target.value)}>
         {props.options.map(([value, name]) => (
           <option key={value} value={value}>{name}</option>
         ))}
@@ -460,7 +480,7 @@ function Picker(props: { label: string; value: string; busy: boolean; options: [
   );
 }
 
-function AssigneePicker(props: { ticket: Ticket; busy: boolean; onChange: (assigneeId: string | null) => void }) {
+function AssigneePicker(props: { ticket: Ticket; disabled: boolean; onChange: (assigneeId: string | null) => void }) {
   const [users] = useLoad(api.users, []);
   const known = users.kind === "loaded" ? users.value : [];
   const assignee = props.ticket.assignee;
@@ -468,14 +488,14 @@ function AssigneePicker(props: { ticket: Ticket; busy: boolean; onChange: (assig
   const options: [string, string][] = [
     ["", "Unassigned"],
     ...(assignee && !known.some((u) => u.id === assignee.id) ? [[assignee.id, assignee.name] as [string, string]] : []),
-    ...known.map((u): [string, string] => [u.id, u.name]),
+    ...known.filter((u) => u.active).map((u): [string, string] => [u.id, u.name]),
   ];
   return (
-    <Picker label="Assignee" value={assignee?.id ?? ""} busy={props.busy} options={options} onChange={(id) => props.onChange(id || null)} />
+    <Picker label="Assignee" value={assignee?.id ?? ""} disabled={props.disabled} options={options} onChange={(id) => props.onChange(id || null)} />
   );
 }
 
-function LabelEditor(props: { ticket: Ticket; busy: boolean; onChange: (labels: string[]) => void }) {
+function LabelEditor(props: { ticket: Ticket; busy: boolean; readOnly: boolean; onChange: (labels: string[]) => void }) {
   const [adding, setAdding] = useState("");
   const labels = props.ticket.labels;
   const add = (event: FormEvent) => {
@@ -491,27 +511,31 @@ function LabelEditor(props: { ticket: Ticket; busy: boolean; onChange: (labels: 
           {labels.map((label) => (
             <li key={label} className="chip">
               {label}
-              <button
-                type="button"
-                className="chip-remove"
-                aria-label={`Remove ${label}`}
-                disabled={props.busy}
-                onClick={() => props.onChange(labels.filter((l) => l !== label))}
-              >
-                ×
-              </button>
+              {!props.readOnly && (
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`Remove ${label}`}
+                  disabled={props.busy}
+                  onClick={() => props.onChange(labels.filter((l) => l !== label))}
+                >
+                  ×
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
-      <form onSubmit={add} className="inline-form">
-        <input aria-label="Add Label" placeholder="Add Label" value={adding} onChange={(e) => setAdding(e.target.value)} />
-      </form>
+      {!props.readOnly && (
+        <form onSubmit={add} className="inline-form">
+          <input aria-label="Add Label" placeholder="Add Label" value={adding} onChange={(e) => setAdding(e.target.value)} />
+        </form>
+      )}
     </div>
   );
 }
 
-function ParentEditor(props: { ticket: Ticket; onChanged: () => void }) {
+function ParentEditor(props: { ticket: Ticket; readOnly: boolean; onChanged: () => void }) {
   const [key, setKey] = useState("");
   const set = useAction((parentKey: string | null) => api.updateTicket(props.ticket.key, { parentKey }), () => {
     setKey("");
@@ -524,25 +548,27 @@ function ParentEditor(props: { ticket: Ticket; onChanged: () => void }) {
         <p data-testid="ticket-parent">
           Sub-Ticket of{" "}
           <Link to={`/tickets/${parent.key}`} className="link">{parent.key} {parent.title}</Link>{" "}
-          <button className="link" onClick={() => void set.run(null)} disabled={set.busy}>Clear</button>
+          {!props.readOnly && <button className="link" onClick={() => void set.run(null)} disabled={set.busy}>Clear</button>}
         </p>
       )}
-      <form
-        className="inline-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void set.run(key.trim());
-        }}
-      >
-        <input aria-label="Parent" placeholder="Parent Ticket, e.g. CRONK-1" value={key} onChange={(e) => setKey(e.target.value)} required />
-        <button type="submit" className="secondary" disabled={set.busy}>Set parent</button>
-      </form>
+      {!props.readOnly && (
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void set.run(key.trim());
+          }}
+        >
+          <input aria-label="Parent" placeholder="Parent Ticket, e.g. CRONK-1" value={key} onChange={(e) => setKey(e.target.value)} required />
+          <button type="submit" className="secondary" disabled={set.busy}>Set parent</button>
+        </form>
+      )}
       {set.error && <p className="error" role="alert">{set.error}</p>}
     </section>
   );
 }
 
-function RelationsEditor(props: { detail: TicketDetail; onChanged: () => void }) {
+function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean; onChanged: () => void }) {
   const t = props.detail.ticket;
   const [kind, setKind] = useState<RelationKind>("blocks");
   const [other, setOther] = useState("");
@@ -567,27 +593,29 @@ function RelationsEditor(props: { detail: TicketDetail; onChanged: () => void })
               <TicketRefList
                 name={RELATION_NAMES[listKind]}
                 refs={refs}
-                onRemove={(ref) => void remove.run(listKind, ref.key)}
+                onRemove={props.readOnly ? undefined : (ref) => void remove.run(listKind, ref.key)}
                 busy={remove.busy}
               />
             </div>
           ),
       )}
-      <form
-        className="inline-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void add.run();
-        }}
-      >
-        <select aria-label="Relation" value={kind} onChange={(e) => setKind(e.target.value as RelationKind)}>
-          {Object.entries(RELATION_NAMES).map(([value, name]) => (
-            <option key={value} value={value}>{name}</option>
-          ))}
-        </select>
-        <input aria-label="Related Ticket" placeholder="e.g. CRONK-1" value={other} onChange={(e) => setOther(e.target.value)} required />
-        <button type="submit" className="secondary" disabled={add.busy}>Add relation</button>
-      </form>
+      {!props.readOnly && (
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void add.run();
+          }}
+        >
+          <select aria-label="Relation" value={kind} onChange={(e) => setKind(e.target.value as RelationKind)}>
+            {Object.entries(RELATION_NAMES).map(([value, name]) => (
+              <option key={value} value={value}>{name}</option>
+            ))}
+          </select>
+          <input aria-label="Related Ticket" placeholder="e.g. CRONK-1" value={other} onChange={(e) => setOther(e.target.value)} required />
+          <button type="submit" className="secondary" disabled={add.busy}>Add relation</button>
+        </form>
+      )}
       {(add.error ?? remove.error) && <p className="error" role="alert">{add.error ?? remove.error}</p>}
     </section>
   );

@@ -4,7 +4,25 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "member";
+  role: Role;
+  active: boolean;
+}
+
+export type Role = "admin" | "member";
+export type Access = "read" | "write";
+export type Visibility = "open" | "private";
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface Member {
+  user: User;
+  access: Access;
 }
 
 export interface Workspace {
@@ -24,6 +42,9 @@ export interface Project {
   name: string;
   key: string;
   archived: boolean;
+  visibility: Visibility;
+  /** What the signed-in User may do in the Project. */
+  access: Access;
 }
 
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
@@ -138,15 +159,32 @@ export const api = {
   workspace: () => request<Workspace>("GET", "/api/workspace"),
   renameWorkspace: (name: string) => request<Workspace>("PATCH", "/api/workspace", { name }),
 
+  users: () => request<{ users: User[] }>("GET", "/api/users").then((r) => r.users),
+  updateUser: (id: string, changes: { role?: Role; active?: boolean }) =>
+    request<{ user: User }>("PATCH", `/api/users/${encodeURIComponent(id)}`, changes).then((r) => r.user),
+  invitations: () => request<{ invitations: Invitation[] }>("GET", "/api/invitations").then((r) => r.invitations),
+  invite: (input: { email: string; role: Role }) =>
+    request<{ invitation: Invitation; token: string }>("POST", "/api/invitations", input),
+  withdrawInvitation: (id: string) => request<void>("DELETE", `/api/invitations/${encodeURIComponent(id)}`),
+  invitation: (token: string) =>
+    request<{ email: string; role: Role; workspaceName: string }>("GET", `/api/invitations/${encodeURIComponent(token)}`),
+  acceptInvitation: (token: string, input: { name: string; password: string }) =>
+    request<{ user: User }>("POST", `/api/invitations/${encodeURIComponent(token)}/accept`, input).then((r) => r.user),
+
   projects: (archived = false) =>
     request<{ projects: Project[] }>("GET", `/api/projects${archived ? "?archived=true" : ""}`).then((r) => r.projects),
   createProject: (input: { name: string; key: string }) =>
     request<{ project: Project }>("POST", "/api/projects", input).then((r) => r.project),
   project: (key: string) => request<{ project: Project; statuses: Status[] }>("GET", `/api/projects/${encodeURIComponent(key)}`),
-  updateProject: (key: string, changes: { name?: string; archived?: boolean }) =>
+  updateProject: (key: string, changes: { name?: string; archived?: boolean; visibility?: Visibility }) =>
     request<{ project: Project }>("PATCH", `/api/projects/${encodeURIComponent(key)}`, changes).then((r) => r.project),
+  members: (key: string) =>
+    request<{ members: Member[] }>("GET", `/api/projects/${encodeURIComponent(key)}/members`).then((r) => r.members),
+  setMember: (key: string, userId: string, access: Access) =>
+    request<{ member: Member }>("PUT", `/api/projects/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`, { access }),
+  removeMember: (key: string, userId: string) =>
+    request<void>("DELETE", `/api/projects/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`),
 
-  users: () => request<{ users: User[] }>("GET", "/api/users").then((r) => r.users),
   labels: (projectKey: string) =>
     request<{ labels: string[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/labels`).then((r) => r.labels),
   tickets: (projectKey: string, filter: TicketFilter = {}) => {

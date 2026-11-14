@@ -126,3 +126,9 @@ a.link:hover { text-decoration: underline; }
 .relation-group h3 { font-size: 14px; margin: 12px 0 6px; color: var(--muted); }
 .relation-group + .inline-form, .relation-group .rows { margin-bottom: 8px; }
 .row-link { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.copy { width: 100%; font: inherit; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.rows li.row:hover { background: none; }
+.row select, .add-member select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.add-member { margin-top: 12px; align-items: center; flex-wrap: wrap; }
+.panel h3 { font-size: 15px; margin: 16px 0 8px; }
+.badge + .badge { margin-left: 4px; }

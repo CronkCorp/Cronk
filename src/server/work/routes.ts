@@ -3,10 +3,13 @@ import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { userActor } from "../actor.js";
-import { findUserById } from "../identity/users.js";
-import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind } from "./relations.js";
+import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
 import type { Queryable } from "../db/database.js";
+import { requireAdmin, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
+import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
+import { findUserById, publicUser, type User } from "../identity/users.js";
 import {
+  findProjectById,
   findProjectByKey,
   insertProject,
   listProjects,
@@ -16,6 +19,7 @@ import {
   updateProject,
   type Project,
   type StatusCategory,
+  type Visibility,
 } from "./projects.js";
 import {
   findTicketByKey,
@@ -29,8 +33,10 @@ import {
   PRIORITIES,
   updateTicket,
   type Priority,
+  type RecordedChange,
   type Ticket,
   type TicketEdit,
+  type TicketRef,
   type UserRef,
 } from "./tickets.js";
 
@@ -61,7 +67,8 @@ export function workRoutes(ctx: AppContext) {
       { schema: { querystring: { type: "object", properties: { archived: { type: "boolean" } } } } },
       async (request) => {
         const user = await requireUser(ctx, request);
-        return { projects: await listProjects(ctx.db, user.workspaceId, request.query.archived ?? false) };
+        const projects = await listProjects(ctx.db, user.workspaceId, request.query.archived ?? false);
+        return { projects: await visibleProjects(ctx.db, user, projects) };
       },
     );
 
@@ -84,33 +91,87 @@ export function workRoutes(ctx: AppContext) {
           insertProject(tx, { workspaceId: user.workspaceId, name: request.body.name.trim(), key, now: ctx.clock.now() }),
         );
         if (!project) throw new HttpError(409, `Another Project already has the key ${key}`);
-        return reply.code(201).send({ project });
+        return reply.code(201).send({ project: { ...project, access: "write" } });
       },
     );
 
     app.get<{ Params: { key: string } }>("/api/projects/:key", async (request) => {
       const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
-      return { project, statuses: await listStatuses(ctx.db, project.id) };
+      const { project, access } = await projectFor(ctx.db, user, request.params.key, "read");
+      return { project: { ...project, access }, statuses: await listStatuses(ctx.db, project.id) };
     });
 
-    app.patch<{ Params: { key: string }; Body: { name?: string; archived?: boolean } }>(
+    app.patch<{ Params: { key: string }; Body: { name?: string; archived?: boolean; visibility?: Visibility } }>(
       "/api/projects/:key",
       {
         schema: {
           body: {
             type: "object",
             additionalProperties: false,
-            properties: { name: nameSchema, archived: { type: "boolean" } },
+            properties: { name: nameSchema, archived: { type: "boolean" }, visibility: { type: "string", enum: ["open", "private"] } },
           },
         },
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
-        const { name, archived } = request.body;
-        const changes = { ...(name !== undefined && { name: name.trim() }), ...(archived !== undefined && { archived }) };
-        return { project: await updateProject(ctx.db, project.id, changes, ctx.clock.now()) };
+        const { project, access } = await projectFor(ctx.db, user, request.params.key, "write");
+        const { name, archived, visibility } = request.body;
+        if (visibility !== undefined) requireAdmin(user, "make a Project open or private");
+        const changes = {
+          ...(name !== undefined && { name: name.trim() }),
+          ...(archived !== undefined && { archived }),
+          ...(visibility !== undefined && { visibility }),
+        };
+        return { project: { ...(await updateProject(ctx.db, project.id, changes, ctx.clock.now())), access } };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>("/api/projects/:key/members", async (request) => {
+      const user = await requireUser(ctx, request);
+      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+      const members = await listMemberships(ctx.db, project.id);
+      return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
+    });
+
+    const memberParams = {
+      type: "object",
+      properties: { key: { type: "string" }, userId: { type: "string", format: "uuid" } },
+    } as const;
+
+    app.put<{ Params: { key: string; userId: string }; Body: { access: Access } }>(
+      "/api/projects/:key/members/:userId",
+      {
+        schema: {
+          params: memberParams,
+          body: {
+            type: "object",
+            required: ["access"],
+            additionalProperties: false,
+            properties: { access: { type: "string", enum: ["read", "write"] } },
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+        requireAdmin(user, "change who is in a Project");
+        const member = await findUserById(ctx.db, request.params.userId);
+        if (!member || member.workspaceId !== user.workspaceId) throw new HttpError(404, "No such User");
+        if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
+        await setMembership(ctx.db, project.id, member.id, request.body.access);
+        return { member: { user: publicUser(member), access: request.body.access } };
+      },
+    );
+
+    app.delete<{ Params: { key: string; userId: string } }>(
+      "/api/projects/:key/members/:userId",
+      { schema: { params: memberParams } },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+        requireAdmin(user, "change who is in a Project");
+        await removeMembership(ctx.db, project.id, request.params.userId);
+        return reply.code(204).send();
       },
     );
 
@@ -132,7 +193,7 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
         const q = request.query;
         return {
           tickets: await listTickets(ctx.db, project.id, {
@@ -148,7 +209,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/labels", async (request) => {
       const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
+      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
       return { labels: await listLabels(ctx.db, project.id) };
     });
 
@@ -167,7 +228,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const ticket = await transaction(ctx.db, async (tx) => {
-          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          const { project } = await projectFor(tx, user, request.params.key, "write");
           // New Tickets start in the Project's first Status.
           const [firstStatus] = await listStatuses(tx, project.id);
           return insertTicket(tx, {
@@ -185,8 +246,12 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key", async (request) => {
       const user = await requireUser(ctx, request);
-      const ticket = await ticketOr404(ctx, user.workspaceId, request.params.key);
-      return { ticket, subTickets: await listSubTickets(ctx.db, ticket.id), relations: await listRelations(ctx.db, ticket.id) };
+      const ticket = await ticketFor(ctx.db, user, request.params.key, "read");
+      return {
+        ticket,
+        subTickets: await listSubTickets(ctx.db, ticket.id),
+        relations: await visibleRelations(ctx.db, user, await listRelations(ctx.db, ticket.id)),
+      };
     });
 
     app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string } }>(
@@ -204,7 +269,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const relations = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, user.workspaceId, request.params.key, request.body.ticketKey);
+          const { ticket, other } = await relationEnds(tx, user, request.params.key, request.body.ticketKey);
           const added = await addRelation(tx, user.workspaceId, {
             ticket,
             kind: request.body.kind,
@@ -215,7 +280,7 @@ export function workRoutes(ctx: AppContext) {
           if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
           }
-          return listRelations(tx, ticket.id);
+          return visibleRelations(tx, user, await listRelations(tx, ticket.id));
         });
         return reply.code(201).send({ relations });
       },
@@ -234,10 +299,10 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         const relations = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, user.workspaceId, request.params.key, request.params.otherKey);
+          const { ticket, other } = await relationEnds(tx, user, request.params.key, request.params.otherKey);
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: userActor(user), now: ctx.clock.now() });
           if (!removed) throw new HttpError(404, "No such relation");
-          return listRelations(tx, ticket.id);
+          return visibleRelations(tx, user, await listRelations(tx, ticket.id));
         });
         return { relations };
       },
@@ -266,8 +331,7 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const { title, description, statusId, priority, labels, assigneeId, parentKey } = request.body;
         const ticket = await transaction(ctx.db, async (tx) => {
-          const ticket = await findTicketByKey(tx, user.workspaceId, request.params.key, { forUpdate: true });
-          if (!ticket) throw new HttpError(404, "No such Ticket");
+          const ticket = await ticketFor(tx, user, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
@@ -279,7 +343,7 @@ export function workRoutes(ctx: AppContext) {
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
             changes.status = status;
           }
-          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await workspaceUser(tx, user.workspaceId, assigneeId);
+          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, user, ticket, assigneeId);
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, user.workspaceId, ticket, parentKey);
           return updateTicket(tx, ticket, changes, userActor(user), ctx.clock.now());
         });
@@ -289,17 +353,42 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key/history", async (request) => {
       const user = await requireUser(ctx, request);
-      const ticket = await ticketOr404(ctx, user.workspaceId, request.params.key);
-      return { changes: await listHistory(ctx.db, ticket.id) };
+      const ticket = await ticketFor(ctx.db, user, request.params.key, "read");
+      return { changes: await visibleHistory(ctx.db, user, await listHistory(ctx.db, ticket.id)) };
     });
   };
 }
 
-/** A User of the Workspace, as a Ticket shows them, or a 400. */
-async function workspaceUser(db: Queryable, workspaceId: string, id: string): Promise<UserRef> {
-  const found = await findUserById(db, id);
-  if (!found || found.workspaceId !== workspaceId) throw new HttpError(400, "No such User");
-  return { id: found.id, name: found.name };
+/** The User `id`, as a Ticket shows them, if they are active and can see the Ticket's Project; otherwise a 400. */
+async function assignableUser(db: Queryable, user: User, ticket: Ticket, id: string): Promise<UserRef> {
+  const assignee = await findUserById(db, id);
+  if (!assignee || assignee.workspaceId !== user.workspaceId) throw new HttpError(400, "No such User");
+  if (!assignee.active) throw new HttpError(400, `${assignee.name} is deactivated`);
+  const project = (await findProjectById(db, ticket.projectId))!;
+  if ((await visibleProjects(db, assignee, [project])).length === 0) throw new HttpError(400, `${assignee.name} can't see this Project`);
+  return { id: assignee.id, name: assignee.name };
+}
+
+/** Keys of the Projects, archived or not, that `user` can see. */
+async function visibleProjectKeys(db: Queryable, user: User): Promise<Set<string>> {
+  const projects = [...(await listProjects(db, user.workspaceId, false)), ...(await listProjects(db, user.workspaceId, true))];
+  return new Set((await visibleProjects(db, user, projects)).map((p) => p.key));
+}
+
+/** The Project key a Ticket key starts with. */
+const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastIndexOf("-"));
+
+/** Relations, leaving out Tickets of Projects `user` can't see. */
+async function visibleRelations(db: Queryable, user: User, relations: Relations): Promise<Relations> {
+  const keys = await visibleProjectKeys(db, user);
+  const visible = (refs: TicketRef[]) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
+  return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
+}
+
+/** A Ticket's history, leaving out Relation changes with Tickets of Projects `user` can't see. */
+async function visibleHistory(db: Queryable, user: User, changes: RecordedChange[]): Promise<RecordedChange[]> {
+  const keys = await visibleProjectKeys(db, user);
+  return changes.filter((c) => !(c.change === "relation added" || c.change === "relation removed") || keys.has(projectKeyOf(c.ticket.key)));
 }
 
 /** The Ticket `key` names, if it may become the parent of `ticket`; otherwise a 400 or 409. */
@@ -313,24 +402,35 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
   return parent;
 }
 
-/** The Ticket a relation is changed from (or a 404) and the other Ticket (or a 400). */
-async function relationEnds(tx: Queryable, workspaceId: string, key: string, otherKey: string): Promise<{ ticket: Ticket; other: Ticket }> {
-  const ticket = await findTicketByKey(tx, workspaceId, key);
-  if (!ticket) throw new HttpError(404, "No such Ticket");
-  const other = await findTicketByKey(tx, workspaceId, otherKey);
-  if (!other) throw new HttpError(400, `No such Ticket ${otherKey}`);
+/**
+ * The two Tickets of a Relation being changed, if `user` has Write in both Projects,
+ * since the change shows on both. A missing or hidden `key` answers 404; a missing or
+ * hidden `otherKey`, 400.
+ */
+async function relationEnds(tx: Queryable, user: User, key: string, otherKey: string): Promise<{ ticket: Ticket; other: Ticket }> {
+  const ticket = await ticketFor(tx, user, key, "write");
+  const other = await ticketFor(tx, user, otherKey, "write").catch((err: unknown) => {
+    throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
+  });
   if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
   return { ticket, other };
 }
 
-async function projectOr404(db: Queryable, workspaceId: string, key: string): Promise<Project> {
-  const project = await findProjectByKey(db, workspaceId, key);
+/** The Project with this key, if `user` has at least `need` in it (see `requireProjectAccess`). */
+async function projectFor(db: Queryable, user: User, key: string, need: Access): Promise<{ project: Project; access: Access }> {
+  const project = await findProjectByKey(db, user.workspaceId, key);
   if (!project) throw new HttpError(404, "No such Project");
-  return project;
+  return { project, access: await requireProjectAccess(db, user, project, need) };
 }
 
-async function ticketOr404(ctx: AppContext, workspaceId: string, key: string): Promise<Ticket> {
-  const ticket = await findTicketByKey(ctx.db, workspaceId, key);
-  if (!ticket) throw new HttpError(404, "No such Ticket");
+/**
+ * The Ticket with this key, if `user` has at least `need` in its Project. A Ticket in
+ * a Project they can't see answers 404, like one that doesn't exist.
+ */
+async function ticketFor(db: Queryable, user: User, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
+  const ticket = await findTicketByKey(db, user.workspaceId, key, opts);
+  const project = ticket && (await findProjectById(db, ticket.projectId));
+  if (!ticket || !project) throw new HttpError(404, "No such Ticket");
+  await requireProjectAccess(db, user, project, need, "No such Ticket");
   return ticket;
 }

@@ -101,3 +101,34 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await page.getByLabel("Filter by Status Category").selectOption({ label: "Completed" });
   await expect(page.getByText("No Tickets match these filters")).toBeVisible();
 });
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("invite a Member, who joins from the link and loses sight of the Project once it is private", async ({ page, browser }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await page.getByRole("link", { name: "Users" }).click();
+  await page.getByLabel("Email").fill("bob@example.com");
+  await page.getByRole("button", { name: "Invite" }).click();
+  const link = await page.getByLabel("Invitation link").inputValue();
+
+  const bobContext = await browser.newContext();
+  const bob = await bobContext.newPage();
+  await bob.goto(link);
+  await expect(bob.getByRole("heading", { name: "Join Acme" })).toBeVisible();
+  await bob.getByLabel("Your name").fill("Bob");
+  await bob.getByLabel("Password").fill("bobs password");
+  await bob.getByRole("button", { name: "Join" }).click();
+  await expect(bob.getByRole("link", { name: /CRONK/ })).toBeVisible();
+
+  await page.goto("/projects/CRONK");
+  await page.getByRole("button", { name: "Access" }).click();
+  await page.getByRole("button", { name: "Make private" }).click();
+  await expect(page.getByRole("heading", { name: /Private/ })).toBeVisible();
+
+  await bob.reload();
+  await expect(bob.getByRole("heading", { name: "No Projects yet" })).toBeVisible();
+  await bobContext.close();
+});

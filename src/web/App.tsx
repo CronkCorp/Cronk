@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, type User } from "./api.js";
-import { Link, useLocation } from "./router.js";
-import { Field, messageOf, useSubmit } from "./ui.js";
+import { AcceptInvitationPage, UsersPage } from "./people.js";
+import { Link, navigate, useLocation } from "./router.js";
+import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
 import { filterFrom, ProjectPage, ProjectsPage, TicketPage } from "./work.js";
 
 type State =
@@ -13,6 +14,8 @@ type State =
 
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const { path } = useLocation();
+  const invitation = /^\/invite\/([^/]+)$/.exec(path);
 
   useEffect(() => {
     const start = async (): Promise<State> => {
@@ -25,6 +28,19 @@ export function App() {
     };
     start().then(setState, (err) => setState({ kind: "unavailable", message: messageOf(err) }));
   }, []);
+
+  // An invitation link works whoever is signed in on this browser: accepting it signs in as the new User.
+  if (invitation) {
+    return (
+      <AcceptInvitationPage
+        token={decodeURIComponent(invitation[1]!)}
+        onDone={(user) => {
+          setState({ kind: "signedIn", user });
+          navigate("/");
+        }}
+      />
+    );
+  }
 
   switch (state.kind) {
     case "loading":
@@ -43,19 +59,6 @@ export function App() {
     case "signedIn":
       return <Shell user={state.user} onSignedOut={() => setState({ kind: "signIn" })} />;
   }
-}
-
-function AuthCard(props: { title: string; intro?: string; children: ReactNode }) {
-  return (
-    <main className="auth">
-      <div className="auth-card">
-        <div className="brand">Cronk</div>
-        <h1>{props.title}</h1>
-        {props.intro && <p className="muted">{props.intro}</p>}
-        {props.children}
-      </div>
-    </main>
-  );
 }
 
 function SetupPage(props: { onDone: (user: User) => void }) {
@@ -119,7 +122,10 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
         </Link>
         <div className="topbar-right">
           {props.user.role === "admin" && (
-            <button className="link" onClick={() => setRenaming(true)}>Workspace settings</button>
+            <>
+              <Link to="/users" className="link">Users</Link>
+              <button className="link" onClick={() => setRenaming(true)}>Workspace settings</button>
+            </>
           )}
           <span className="muted">{props.user.name}</span>
           <button className="link" onClick={signOut}>Sign out</button>
@@ -137,7 +143,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
             onCancel={() => setRenaming(false)}
           />
         ) : (
-          <Page />
+          <Page me={props.user} />
         )}
       </main>
     </div>
@@ -145,8 +151,9 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
 }
 
 /** The page for the current address. */
-function Page() {
+function Page(props: { me: User }) {
   const { path, search } = useLocation();
+  if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   const project = /^\/projects\/([^/]+)$/.exec(path);
   if (project) {
     return (
@@ -154,6 +161,7 @@ function Page() {
         projectKey={decodeURIComponent(project[1]!)}
         view={search.get("view") === "board" ? "board" : "list"}
         filter={filterFrom(search)}
+        me={props.me}
       />
     );
   }

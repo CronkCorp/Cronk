@@ -2,16 +2,30 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
-import { insertWorkspace } from "../workspace/workspaces.js";
+import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
+import { requireAdmin } from "./access.js";
+import {
+  createInvitation,
+  deleteInvitation,
+  findInvitationByToken,
+  listInvitations,
+  publicInvitation,
+} from "./invitations.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { countUsers, findUserByEmail, insertUser, listUsers, publicUser } from "./users.js";
+import { countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
 
 const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]+@[^@\\s]+$" } as const;
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
+const role = { type: "string", enum: ["admin", "member"] } as const;
+
+/** Postgres's error code for a unique index refusing a row. */
+const UNIQUE_VIOLATION = "23505";
+
+const INVITATION_GONE = "This invitation has expired or was withdrawn";
 
 const dummyHash = hashPassword("dummy password for unknown emails");
 
@@ -71,6 +85,7 @@ export function identityRoutes(ctx: AppContext) {
         // Check a password even for unknown emails so response time doesn't reveal which emails exist.
         const ok = await verifyPassword(request.body.password, found?.passwordHash ?? (await dummyHash));
         if (!found || !ok) throw new HttpError(401, "Email or password is incorrect");
+        if (!found.user.active) throw new HttpError(403, "An Admin has deactivated you, so you can't sign in");
         const signIn = await createSignIn(ctx.db, ctx.clock, found.user.id);
         setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
         return { user: publicUser(found.user) };
@@ -84,11 +99,120 @@ export function identityRoutes(ctx: AppContext) {
       return reply.code(204).send();
     });
 
-    app.get("/api/me", async (request) => ({ user: publicUser(await requireUser(ctx, request)) }));
+    app.post<{ Body: { email: string; role?: Role } }>(
+      "/api/invitations",
+      {
+        schema: {
+          body: { type: "object", required: ["email"], additionalProperties: false, properties: { email, role } },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "invite Users");
+        const inviteeEmail = request.body.email.trim();
+        if (await findUserByEmail(ctx.db, inviteeEmail)) throw new HttpError(409, `${inviteeEmail} is already a User`);
+        const { invitation, token } = await createInvitation(ctx.db, {
+          workspaceId: user.workspaceId,
+          email: inviteeEmail,
+          role: request.body.role ?? "member",
+          invitedBy: user.id,
+          now: ctx.clock.now(),
+        });
+        return reply.code(201).send({ invitation: publicInvitation(invitation), token });
+      },
+    );
+
+    app.get("/api/invitations", async (request) => {
+      const user = await requireUser(ctx, request);
+      requireAdmin(user, "see invitations");
+      const invitations = await listInvitations(ctx.db, user.workspaceId, ctx.clock.now());
+      return { invitations: invitations.map(publicInvitation) };
+    });
+
+    app.delete<{ Params: { id: string } }>(
+      "/api/invitations/:id",
+      { schema: { params: { type: "object", properties: { id: { type: "string", format: "uuid" } } } } },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "withdraw invitations");
+        if (!(await deleteInvitation(ctx.db, user.workspaceId, request.params.id))) throw new HttpError(404, "No such invitation");
+        return reply.code(204).send();
+      },
+    );
+
+    // Anyone holding an invitation's token may view and accept it; the token is the proof.
+    app.get<{ Params: { token: string } }>("/api/invitations/:token", async (request) => {
+      const invitation = await findInvitationByToken(ctx.db, request.params.token, ctx.clock.now());
+      if (!invitation) throw new HttpError(404, INVITATION_GONE);
+      const workspace = await getWorkspace(ctx.db, invitation.workspaceId);
+      return { email: invitation.email, role: invitation.role, workspaceName: workspace.name };
+    });
+
+    app.post<{ Params: { token: string }; Body: { name: string; password: string } }>(
+      "/api/invitations/:token/accept",
+      {
+        schema: {
+          body: {
+            type: "object",
+            required: ["name", "password"],
+            additionalProperties: false,
+            properties: { name: nameSchema, password },
+          },
+        },
+      },
+      async (request, reply) => {
+        const passwordHash = await hashPassword(request.body.password);
+        const user = await transaction(ctx.db, async (tx) => {
+          const now = ctx.clock.now();
+          const invitation = await findInvitationByToken(tx, request.params.token, now, { forUpdate: true });
+          if (!invitation) throw new HttpError(404, INVITATION_GONE);
+          await deleteInvitation(tx, invitation.workspaceId, invitation.id);
+          try {
+            return await insertUser(tx, {
+              workspaceId: invitation.workspaceId,
+              email: invitation.email,
+              name: request.body.name.trim(),
+              passwordHash,
+              role: invitation.role,
+              now,
+            });
+          } catch (err) {
+            // Someone with this email became a User after the invitation was sent.
+            if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new HttpError(409, `${invitation.email} is already a User`);
+            throw err;
+          }
+        });
+        const signIn = await createSignIn(ctx.db, ctx.clock, user.id);
+        setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
+        return reply.code(201).send({ user: publicUser(user) });
+      },
+    );
 
     app.get("/api/users", async (request) => {
       const user = await requireUser(ctx, request);
       return { users: (await listUsers(ctx.db, user.workspaceId)).map(publicUser) };
     });
+
+    app.patch<{ Params: { id: string }; Body: { role?: Role; active?: boolean } }>(
+      "/api/users/:id",
+      {
+        schema: {
+          params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
+          body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "change Users");
+        const updated = await transaction(ctx.db, (tx) =>
+          updateUser(tx, user.workspaceId, request.params.id, request.body, ctx.clock.now()),
+        );
+        if (updated === "last admin") throw new HttpError(409, "The Workspace needs at least one active Admin");
+        if (!updated) throw new HttpError(404, "No such User");
+        return { user: publicUser(updated) };
+      },
+    );
+
+    app.get("/api/me", async (request) => ({ user: publicUser(await requireUser(ctx, request)) }));
   };
 }
