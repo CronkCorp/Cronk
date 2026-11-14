@@ -158,6 +158,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na\n\n## New\n\nnew\n\n## C\n\nc\n\n## Last\n\nlast" });
   });
 
+  it("ends the merged body with a single line break when the section that now ends it had one after it", async () => {
+    const base = "## A\n\na\n\n## B\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\na changed\n\n## B\n\nb\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## A\n\na\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na changed\n" });
+  });
+
   it("reports a section one edit removed and the other changed as a conflict", async () => {
     const base = "## A\n\na\n\n## B\n\nb\n";
     const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n## B\n\nb changed\n");
@@ -185,6 +194,56 @@ describe("merging an edit with the current Version", () => {
     const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: mine });
 
     expect(res.body.merge).toMatchObject({ conflicts: 1, sections: [{ heading: null, text: null, conflict: { base, mine, theirs } }] });
+  });
+
+  it("combines a section inserted with a repeated heading and an edit to a later section with that heading", async () => {
+    const base = "## Notes\n\na\n\n## Notes\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## Notes\n\na\n\n## Notes\n\nb changed\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: `## Notes\n\nfirst\n\n${base}` });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\na\n\n## Notes\n\nb changed\n" });
+  });
+
+  it("pairs a repeated heading with the base section whose content it kept, not merely with the most sections of that heading", async () => {
+    const base = "## Notes\n\na\n\n## Notes\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## Notes\n\na changed\n\n## Notes\n\nb\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## Notes\n\nfirst\n\n## Notes\n\na\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\na changed\n" });
+  });
+
+  it("pairs empty sections under a repeated heading with the empty sections they were", async () => {
+    const base = "## Notes\n\n## Notes\n";
+    const { admin, id } = await editedUnderneath(base, "## Notes\n\n## Notes\n\nfilled\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: `## Notes\n\nfirst\n\n${base}` });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\n## Notes\n\nfilled\n" });
+  });
+
+  it("combines a renamed heading with an edit to that section's content", async () => {
+    const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nUse it.\n";
+    const { admin, id } = await editedUnderneath(base, base.replace("Install it.", "Download it."));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Setup", "## Install") });
+
+    expect(res.body.merge).toMatchObject({
+      conflicts: 0,
+      body: "## Install\n\nDownload it.\nThen run it.\n\n## Usage\n\nUse it.\n",
+    });
+    expect(res.body.merge.sections.map((s: { heading: string }) => s.heading)).toEqual(["## Install", "## Usage"]);
+  });
+
+  it("reports a section both edits renamed differently as a conflict", async () => {
+    const base = "## Setup\n\nInstall it.\n";
+    const { admin, id } = await editedUnderneath(base, "## Install\n\nInstall it.\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## Getting started\n\nInstall it.\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 1, body: null });
+    expect(res.body.merge.sections[0].conflict).toMatchObject({ base, mine: "## Getting started\n\nInstall it.\n", theirs: "## Install\n\nInstall it.\n" });
   });
 
   it("refuses a base Version the Document never had", async () => {
