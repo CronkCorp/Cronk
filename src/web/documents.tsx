@@ -12,6 +12,7 @@ import {
   type Version,
 } from "./api.js";
 import { diffLines } from "./diff.js";
+import { DocumentComments } from "./timeline.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
@@ -196,6 +197,9 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
           <div className="markdown" data-testid="document-body">
             {d.body.trim() ? <CronkMarkdown>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
           </div>
+          <h2>Comments</h2>
+          {/* Keyed by Version, so whether each anchor is still in the Document is asked again after a save. */}
+          <DocumentComments key={d.version} documentId={d.id} canWrite={canWrite} />
         </>
       )}
     </article>

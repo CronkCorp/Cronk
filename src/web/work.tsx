@@ -1,10 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
-  watchTicket,
-  type Activity,
-  type ActivityKind,
   type AgentAccess,
   type Priority,
   type Project,
@@ -22,6 +19,7 @@ import {
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { GuidanceSection } from "./guidance.js";
+import { TicketTimeline } from "./timeline.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
@@ -678,8 +676,8 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         </>
       )}
       <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
-      <h2>Activities</h2>
-      <ActivityTimeline ticketKey={t.key} />
+      <h2>Timeline</h2>
+      <TicketTimeline ticketKey={t.key} canWrite={canWrite} />
       <h2>History</h2>
       <Show state={history}>
         {(changes) => (
@@ -700,51 +698,6 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         )}
       </Show>
     </article>
-  );
-}
-
-const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
-
-/** The Activities Agent Sessions logged on a Ticket, oldest first, kept up to date as new ones arrive. */
-function ActivityTimeline(props: { ticketKey: string }) {
-  const [activities, reload] = useLoad(() => api.activities(props.ticketKey), [props.ticketKey]);
-  // Activities pushed while this page is open; the list, loaded at any point, may or may not hold them yet.
-  const [arrived, setArrived] = useState<Activity[]>([]);
-  useEffect(() => {
-    setArrived([]);
-    return watchTicket(props.ticketKey, {
-      // Load the list again once watching, and on every reconnect, so nothing logged before the stream was
-      // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
-      ready: reload,
-      on: { activity: ({ activity }) => setArrived((list) => [...list, activity]) },
-    });
-  }, [props.ticketKey]);
-  const withArrived = (loaded: Activity[]) => {
-    const known = new Set(loaded.map((a) => a.id));
-    return [...loaded, ...arrived.filter((a) => !known.has(a.id))];
-  };
-
-  return <Show state={activities}>{(loaded) => <ActivityList activities={withArrived(loaded)} />}</Show>;
-}
-
-function ActivityList(props: { activities: Activity[] }) {
-  return (
-    <ol className="timeline" aria-label="Activities">
-      {props.activities.length === 0 && <li className="muted">No Activities yet.</li>}
-      {props.activities.map((a) => (
-        <li key={a.id} className={`activity ${a.kind}${a.blocking ? " blocking" : ""}`}>
-          <div className="activity-head">
-            <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
-            <strong>{a.agent.name}</strong>
-            <span className="muted">({sessionName(a.session.id)}, for {a.agent.owner.name})</span>
-            <span className="muted">{new Date(a.at).toLocaleString()}</span>
-          </div>
-          <div className="activity-body">
-            <CronkMarkdown>{a.body}</CronkMarkdown>
-          </div>
-        </li>
-      ))}
-    </ol>
   );
 }
 

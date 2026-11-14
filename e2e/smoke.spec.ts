@@ -218,9 +218,9 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(claimed.status()).toBe(200);
   await page.reload();
   await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
-  // The Session logs Activities; the open Ticket page shows them as they arrive, without a reload.
-  const activities = page.getByRole("list", { name: "Activities" });
-  await expect(activities).toContainText("No Activities yet");
+  // The Session logs Activities; the open Ticket page shows them in its timeline as they arrive, without a reload.
+  const activities = page.getByRole("list", { name: "Timeline" });
+  await expect(activities).toContainText("Nothing yet.");
   const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
     data: { kind: "question", body: "Should this use **Postgres**?", blocking: true },
@@ -228,6 +228,17 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(asked.status()).toBe(201);
   await expect(activities).toContainText("Blocking question");
   await expect(activities.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
+  await expect(activities).toContainText("Waiting for an answer");
+  // Ada answers the question by replying to it; the answer shows under it as a Comment.
+  await activities.getByRole("button", { name: "Answer" }).click();
+  await activities.getByLabel("Answer", { exact: true }).fill("Yes, **Postgres**.");
+  await activities.getByRole("button", { name: "Post answer" }).click();
+  await expect(activities).toContainText("Answered");
+  await expect(activities.getByRole("list", { name: "Replies" })).toContainText("Yes, Postgres.");
+  // A Comment of her own sits in the same timeline, after the question.
+  await page.getByLabel("Comment", { exact: true }).fill("Thanks, carry on.");
+  await page.getByRole("button", { name: "Post Comment" }).click();
+  await expect(activities.getByRole("listitem").last()).toContainText("Thanks, carry on.");
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.
@@ -261,6 +272,14 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(body).toContainText("Start with CRONK-1.");
   await expect(versions).toContainText("Version 4");
   await expect(versions).toContainText("restored Version 2");
+
+  // A Comment anchored to a passage shows the passage it is about.
+  await page.getByLabel("About the passage (optional)").fill("CRONK-1");
+  await page.getByLabel("Comment", { exact: true }).fill("Which Ticket is this?");
+  await page.getByRole("button", { name: "Post Comment" }).click();
+  const comments = page.getByRole("list", { name: "Comments" });
+  await expect(comments).toContainText("Which Ticket is this?");
+  await expect(comments.locator("blockquote")).toHaveText("CRONK-1");
 
   await page.getByRole("link", { name: "Documents", exact: true }).last().click();
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
