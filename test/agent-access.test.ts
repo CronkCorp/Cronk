@@ -105,6 +105,17 @@ describe("an Agent's access", () => {
       expect(res.body.error).toMatch(/read-only/);
     }
 
+    await admin.post("/api/projects/CRONK/tickets", { title: "One" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Two" });
+    for (const res of [
+      await reader.patch("/api/tickets/CRONK-1", { priority: "high", labels: ["bug"] }),
+      await reader.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" }),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/read-only/);
+    }
+    expect((await reader.get("/api/tickets/CRONK-1")).body.ticket.priority).toBe("none");
+
     const agentId = (await reader.get("/api/me")).body.agent.id;
     const writer = cronk.client((await admin.post(`/api/agents/${agentId}/tokens`, {})).body.secret);
     expect((await writer.post("/api/projects/CRONK/tickets", { title: "New" })).status).toBe(201);
