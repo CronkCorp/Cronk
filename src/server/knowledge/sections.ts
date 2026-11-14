@@ -188,15 +188,23 @@ function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
   return x.length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
 }
 
+/** A side keyed against the base by content and heading, with what is left to key once the other side is too. */
+interface SidePairing {
+  /** The keys of the base sections this side still has. */
+  kept: Set<string>;
+  /** Keys this side's remaining sections, given the base sections the other side still has. */
+  keyRest(keptByOther: Set<string>): void;
+}
+
 /**
  * Keys `base` by position, then keys each section of `side` after the base section it came from:
  * first by a best-scoring alignment that keeps both orders; then, among what is left (a section
- * moved elsewhere), by heading, then by the best-scoring renames; last, a renamed empty section by
- * being the only empty one of its level between the same two paired sections. Sections `side`
- * added are keyed by their heading and how often it was added, so both sides adding the same
- * section pair too.
+ * moved elsewhere), by heading, then by the best-scoring renames. `keyRest` then keys a renamed
+ * empty section by its being the only empty one of its level between the same two paired sections,
+ * if the other side still has its base section; and keys sections `side` added by their heading and
+ * how often it was added, so both sides adding the same section pair too.
  */
-function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
+function keyAgainstBase(base: Chunk[], side: Chunk[]): SidePairing {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
   const [n, m] = [base.length, side.length];
@@ -237,27 +245,32 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
     .filter((p) => p.score > 0)
     .sort((a, b) => b.score - a.score);
   for (const { i, j } of renames) if (!pairedBase.has(i) && !pairedSide.has(j)) pair(i, j);
-  // A renamed empty section has no content to pair on: pair it when it is the only empty section of
-  // its level, on each side, between the same two paired sections.
-  const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
-    const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
-    const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
-    return `${levelOf(chunks[k]!)}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
-  };
-  const emptyIn = (chunks: Chunk[], paired: Set<number>, length: number) =>
-    unpaired(paired, length).filter((k) => contentLines(chunks[k]!).length === 0).map((k) => ({ k, slot: slot(chunks, paired, k) }));
-  const [emptyBase, emptySide] = [emptyIn(base, pairedBase, n), emptyIn(side, pairedSide, m)];
-  for (const s of emptySide) {
-    const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
-    if (bases.length === 1 && sides.length === 1) pair(bases[0]!.k, s.k);
+  const kept = new Set([...pairedBase].map((i) => base[i]!.key));
+  return { kept, keyRest };
+  function keyRest(keptByOther: Set<string>) {
+    // A renamed empty section has no content to pair on: pair it when it is the only empty section of
+    // its level, on each side, between the same two paired sections. When the other side no longer has
+    // that base section, it was removed (or replaced) there: read this one as added, not renamed.
+    const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
+      const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
+      const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
+      return `${levelOf(chunks[k]!)}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
+    };
+    const emptyIn = (chunks: Chunk[], paired: Set<number>, length: number) =>
+      unpaired(paired, length).filter((k) => contentLines(chunks[k]!).length === 0).map((k) => ({ k, slot: slot(chunks, paired, k) }));
+    const [emptyBase, emptySide] = [emptyIn(base, pairedBase, n), emptyIn(side, pairedSide, m)];
+    for (const s of emptySide) {
+      const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
+      if (bases.length === 1 && sides.length === 1 && keptByOther.has(base[bases[0]!.k]!.key)) pair(bases[0]!.k, s.k);
+    }
+    const added = new Map<string, number>();
+    side.forEach((chunk, j) => {
+      if (pairedSide.has(j)) return;
+      const count = (added.get(chunk.heading!) ?? 0) + 1;
+      added.set(chunk.heading!, count);
+      chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
+    });
   }
-  const added = new Map<string, number>();
-  side.forEach((chunk, j) => {
-    if (pairedSide.has(j)) return;
-    const count = (added.get(chunk.heading!) ?? 0) + 1;
-    added.set(chunk.heading!, count);
-    chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
-  });
 }
 
 /** Whether two sides' texts say the same, ignoring trailing blank space; undefined (no such part) only equals undefined. */
@@ -355,8 +368,10 @@ export function mergeEdits(base: { title: string; body: string }, mine: { title:
 /** The sections of a three-way merge of bodies, in their merged order; see `mergeEdits`. */
 function mergeBodies(base: string, mine: string, theirs: string): MergedSection[] {
   const [b, m, t] = [base, mine, theirs].map(chunksOf) as [Chunk[], Chunk[], Chunk[]];
-  keyAgainstBase(b, m);
-  keyAgainstBase(b, t);
+  // A side's empty section reads as renamed only if the other side still has the base section it was.
+  const [mineKeyed, theirsKeyed] = [keyAgainstBase(b, m), keyAgainstBase(b, t)];
+  mineKeyed.keyRest(theirsKeyed.kept);
+  theirsKeyed.keyRest(mineKeyed.kept);
   const order = mergedOrder(...([b, m, t].map((chunks) => chunks.map((c) => c.key)) as [string[], string[], string[]]));
   if (!order) return [{ heading: null, text: null, conflict: sectionConflict(base, mine, theirs) }];
   const find = (chunks: Chunk[], key: string) => chunks.find((c) => c.key === key);
