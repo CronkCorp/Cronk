@@ -45,6 +45,7 @@ import {
   type Priority,
   type RecordedChange,
   type Ticket,
+  type TicketChanges,
   type TicketEdit,
   type TicketRef,
   type UserRef,
@@ -423,7 +424,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[]; assigneeId?: string | null; parentKey?: string | null } }>(
+    app.patch<{ Params: { key: string }; Body: TicketChanges }>(
       "/api/tickets/:key",
       {
         schema: {

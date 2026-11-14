@@ -143,6 +143,17 @@ export async function findTicketByKey(
   return rows[0] && toTicket(rows[0]);
 }
 
+/** A Ticket update as the API takes it: Status, assignee and parent by id or key, and null to clear them. */
+export interface TicketChanges {
+  title?: string;
+  description?: string;
+  statusId?: string;
+  priority?: Priority;
+  labels?: string[];
+  assigneeId?: string | null;
+  parentKey?: string | null;
+}
+
 export interface TicketEdit {
   title?: string;
   description?: string;
