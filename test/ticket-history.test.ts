@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk } from "./harness.js";
+import { agentOf, startInstalledCronk } from "./harness.js";
 
 describe("Ticket history", () => {
   it("records every change with the Actor who made it and when", async () => {
@@ -36,5 +36,24 @@ describe("Ticket history", () => {
 
     const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
     expect(changes.map((c: { change: string }) => c.change)).toEqual(["created"]);
+  });
+
+  it("records changes an Agent makes as that Agent's, with its Owner, even after it is removed", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ada = (await admin.get("/api/me")).body.user;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const agent = (await claude.get("/api/me")).body.agent;
+
+    await claude.post("/api/projects/CRONK/tickets", { title: "Found a bug" });
+    await claude.patch("/api/tickets/CRONK-1", { title: "Fix the bug" });
+    await admin.delete(`/api/agents/${agent.id}`);
+
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" } };
+    expect(changes).toEqual([
+      expect.objectContaining({ actor, change: "created" }),
+      expect.objectContaining({ actor, change: "title", from: "Found a bug", to: "Fix the bug" }),
+    ]);
   });
 });

@@ -149,6 +149,12 @@ export const migrations: Migration[] = [
       -- The most Agents may do in a Project, or in the Workspace outside any Project (ADR 0004).
       ALTER TABLE projects ADD COLUMN agent_access text NOT NULL DEFAULT 'write' CHECK (agent_access IN ('none', 'read', 'write'));
       ALTER TABLE workspaces ADD COLUMN agent_access text NOT NULL DEFAULT 'write' CHECK (agent_access IN ('none', 'read', 'write'));
+
+      -- A change an Agent made records the Agent; actor_user_id then holds its Owner.
+      ALTER TABLE ticket_changes DROP CONSTRAINT ticket_changes_actor_kind_check;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_kind_check CHECK (actor_kind IN ('user', 'agent'));
+      ALTER TABLE ticket_changes ADD COLUMN actor_agent_id uuid REFERENCES agents(id);
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_agent CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL));
     `,
   },
 ];
