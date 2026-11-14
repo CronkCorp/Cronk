@@ -11,6 +11,21 @@ export interface User {
 export type Role = "admin" | "member";
 export type Access = "read" | "write";
 export type Visibility = "open" | "private";
+/** The most a Project (or the Workspace) lets Agents do in it. */
+export type AgentAccess = "none" | Access;
+
+export interface Agent {
+  id: string;
+  name: string;
+  owner: { id: string; name: string };
+  createdAt: string;
+}
+
+export interface AgentToken {
+  id: string;
+  readOnly: boolean;
+  createdAt: string;
+}
 
 export interface Invitation {
   id: string;
@@ -27,6 +42,7 @@ export interface Member {
 
 export interface Workspace {
   name: string;
+  agentAccess: AgentAccess;
 }
 
 /** The fixed Status Categories, in workflow order, with their display names. */
@@ -53,6 +69,7 @@ export interface Project {
   key: string;
   archived: boolean;
   visibility: Visibility;
+  agentAccess: AgentAccess;
   /** What the signed-in User may do in the Project. */
   access: Access;
 }
@@ -124,7 +141,14 @@ export interface TicketChanges {
   parentKey?: string | null;
 }
 
-export type RecordedChange = { at: string; actor: { kind: "user"; id: string; name: string } } & (
+
+/** Who made a change: a User, or an Agent with the Owner it acted for. */
+export type RecordedActor =
+  | { kind: "user"; id: string; name: string }
+  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string } };
+
+
+export type RecordedChange = { at: string; actor: RecordedActor } & (
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
@@ -167,7 +191,19 @@ export const api = {
   signOut: () => request<void>("DELETE", "/api/sign-in"),
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
-  renameWorkspace: (name: string) => request<Workspace>("PATCH", "/api/workspace", { name }),
+  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess }) => request<Workspace>("PATCH", "/api/workspace", changes),
+
+  agents: (all = false) => request<{ agents: Agent[] }>("GET", `/api/agents${all ? "?all=true" : ""}`).then((r) => r.agents),
+  createAgent: (name: string) => request<{ agent: Agent }>("POST", "/api/agents", { name }).then((r) => r.agent),
+  renameAgent: (id: string, name: string) =>
+    request<{ agent: Agent }>("PATCH", `/api/agents/${encodeURIComponent(id)}`, { name }).then((r) => r.agent),
+  removeAgent: (id: string) => request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}`),
+  agentTokens: (id: string) =>
+    request<{ tokens: AgentToken[] }>("GET", `/api/agents/${encodeURIComponent(id)}/tokens`).then((r) => r.tokens),
+  issueAgentToken: (id: string, readOnly: boolean) =>
+    request<{ token: AgentToken; secret: string }>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
+  revokeAgentToken: (id: string, tokenId: string) =>
+    request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`),
 
   users: () => request<{ users: User[] }>("GET", "/api/users").then((r) => r.users),
   updateUser: (id: string, changes: { role?: Role; active?: boolean }) =>
@@ -186,7 +222,7 @@ export const api = {
   createProject: (input: { name: string; key: string }) =>
     request<{ project: Project }>("POST", "/api/projects", input).then((r) => r.project),
   project: (key: string) => request<{ project: Project; statuses: Status[] }>("GET", `/api/projects/${encodeURIComponent(key)}`),
-  updateProject: (key: string, changes: { name?: string; archived?: boolean; visibility?: Visibility }) =>
+  updateProject: (key: string, changes: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess }) =>
     request<{ project: Project }>("PATCH", `/api/projects/${encodeURIComponent(key)}`, changes).then((r) => r.project),
   members: (key: string) =>
     request<{ members: Member[] }>("GET", `/api/projects/${encodeURIComponent(key)}/members`).then((r) => r.members),

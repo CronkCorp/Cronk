@@ -1,34 +1,40 @@
 import type { FastifyInstance } from "fastify";
-import { requireUser, type AppContext } from "../context.js";
-import { requireAdmin } from "../identity/access.js";
-import { nameSchema } from "../schemas.js";
-import { getWorkspace, renameWorkspace } from "./workspaces.js";
+import { actingUser } from "../actor.js";
+import { requireActor, requireUser, type AppContext } from "../context.js";
+import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
+import { agentAccessSchema, nameSchema } from "../schemas.js";
+import { getWorkspace, updateWorkspace, type Workspace } from "./workspaces.js";
+
+const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess });
 
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     app.get("/api/workspace", async (request) => {
-      const user = await requireUser(ctx, request);
-      const workspace = await getWorkspace(ctx.db, user.workspaceId);
-      return { name: workspace.name };
+      const actor = await requireActor(ctx, request);
+      await requireWorkspaceAccess(ctx.db, actor, "read");
+      return publicWorkspace(await getWorkspace(ctx.db, actingUser(actor).workspaceId));
     });
 
-    app.patch<{ Body: { name: string } }>(
+    app.patch<{ Body: { name?: string; agentAccess?: AgentAccess } }>(
       "/api/workspace",
       {
         schema: {
           body: {
             type: "object",
-            required: ["name"],
             additionalProperties: false,
-            properties: { name: nameSchema },
+            properties: { name: nameSchema, agentAccess: agentAccessSchema },
           },
         },
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        requireAdmin(user, "rename the Workspace");
-        const workspace = await renameWorkspace(ctx.db, user.workspaceId, request.body.name.trim());
-        return { name: workspace.name };
+        requireAdmin(user, "change the Workspace");
+        const { name, agentAccess } = request.body;
+        const workspace = await updateWorkspace(ctx.db, user.workspaceId, {
+          ...(name !== undefined && { name: name.trim() }),
+          ...(agentAccess !== undefined && { agentAccess }),
+        });
+        return publicWorkspace(workspace);
       },
     );
   };

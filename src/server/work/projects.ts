@@ -1,4 +1,5 @@
 import type { Queryable } from "../db/database.js";
+import type { AgentAccess } from "../identity/access.js";
 
 /** The fixed Status Categories every Status belongs to (ADR 0011), in workflow order. */
 export const STATUS_CATEGORIES = ["backlog", "unstarted", "started", "in_review", "completed", "canceled"] as const;
@@ -26,6 +27,7 @@ export interface Project {
   key: string;
   archived: boolean;
   visibility: Visibility;
+  agentAccess: AgentAccess;
 }
 
 export interface Status {
@@ -40,6 +42,7 @@ interface ProjectRow {
   key: string;
   archived_at: Date | null;
   visibility: Visibility;
+  agent_access: AgentAccess;
 }
 
 const toProject = (row: ProjectRow): Project => ({
@@ -48,6 +51,7 @@ const toProject = (row: ProjectRow): Project => ({
   key: row.key,
   archived: row.archived_at !== null,
   visibility: row.visibility,
+  agentAccess: row.agent_access,
 });
 
 /** Creates a Project with the default Statuses, or returns undefined if its key is taken. Run inside a transaction. */
@@ -205,24 +209,25 @@ export async function deleteStatus(db: Queryable, statusId: string): Promise<voi
 }
 
 /**
- * Renames, archives or restores a Project, or changes whether it is open or private.
- * Its key never changes, since Ticket keys are built from it.
+ * Renames, archives or restores a Project, or changes whether it is open or private
+ * or its Agent Access. Its key never changes, since Ticket keys are built from it.
  */
 export async function updateProject(
   db: Queryable,
   id: string,
-  changes: { name?: string; archived?: boolean; visibility?: Visibility },
+  changes: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess },
   now: Date,
 ): Promise<Project> {
   const { rows } = await db.query<ProjectRow>(
     `UPDATE projects SET
        name = coalesce($2, name),
        visibility = coalesce($5, visibility),
+       agent_access = coalesce($6, agent_access),
        archived_at = CASE WHEN $3::boolean IS NULL THEN archived_at
                           WHEN $3 THEN coalesce(archived_at, $4)
                           ELSE NULL END
      WHERE id = $1 RETURNING *`,
-    [id, changes.name ?? null, changes.archived ?? null, now, changes.visibility ?? null],
+    [id, changes.name ?? null, changes.archived ?? null, now, changes.visibility ?? null, changes.agentAccess ?? null],
   );
   return toProject(rows[0]!);
 }

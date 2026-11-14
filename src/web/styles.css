@@ -140,3 +140,13 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .add-member { margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .panel h3 { font-size: 15px; margin: 16px 0 8px; }
 .badge + .badge { margin-left: 4px; }
+
+.agent + .agent { border-top: 1px solid var(--border); }
+.agent-tokens { padding: 0 14px 12px; }
+.token-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: 14px; }
+.token { display: flex; align-items: center; gap: 8px; }
+.secret { margin-top: 8px; }
+.secret p { margin: 0 0 6px; font-size: 14px; }
+.inline-input { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.field.inline select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.page-head .field.inline { margin-bottom: 0; }

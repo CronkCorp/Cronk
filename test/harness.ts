@@ -24,10 +24,13 @@ export interface Response<T = any> {
   body: T;
 }
 
-/** One API caller with its own cookie jar, like a browser tab or a script. */
+/** One API caller with its own cookie jar, like a browser tab or a script, optionally sending a bearer token. */
 export class Client {
   private cookies = new Map<string, string>();
-  constructor(private readonly cronk: Cronk) {}
+  constructor(
+    private readonly cronk: Cronk,
+    private readonly token?: string,
+  ) {}
 
   get<T = any>(path: string) {
     return this.request<T>("GET", path);
@@ -50,7 +53,7 @@ export class Client {
     const res = await this.cronk.app.inject({
       method,
       url,
-      headers: cookie ? { cookie } : {},
+      headers: { ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {
@@ -65,8 +68,8 @@ export class Client {
 export interface Cronk {
   app: FastifyInstance;
   clock: FakeClock;
-  /** A new caller with an empty cookie jar. */
-  client(): Client;
+  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given. */
+  client(token?: string): Client;
   /** Stops the application and starts it again on the same database. */
   restart(): Promise<void>;
 }
@@ -91,7 +94,7 @@ export async function startCronk(): Promise<Cronk> {
   const cronk: Cronk = {
     app: await start(),
     clock,
-    client: () => new Client(cronk),
+    client: (token?: string) => new Client(cronk, token),
     restart: async () => {
       await cronk.app.close();
       cronk.app = await start();
@@ -135,6 +138,18 @@ export async function joinAs(cronk: Cronk, admin: Client, email: string, role: "
 
 /** The password `joinAs` gives every User it creates. */
 export const memberPassword = "member password";
+
+/**
+ * Has `owner` register an Agent called `name` and issue it a token, and returns a
+ * client calling the API as that Agent.
+ */
+export async function agentOf(cronk: Cronk, owner: Client, name: string, opts: { readOnly?: boolean } = {}): Promise<Client> {
+  const agent = await owner.post("/api/agents", { name });
+  if (agent.status !== 201) throw new Error(`Registering ${name} failed: ${JSON.stringify(agent.body)}`);
+  const issued = await owner.post(`/api/agents/${agent.body.agent.id}/tokens`, { readOnly: opts.readOnly ?? false });
+  if (issued.status !== 201) throw new Error(`Issuing a token for ${name} failed: ${JSON.stringify(issued.body)}`);
+  return cronk.client(issued.body.secret);
+}
 
 /** Creates a Project named after its key, with `count` Tickets titled "Ticket 1", "Ticket 2", … */
 export async function projectWithTickets(client: Client, key: string, count: number): Promise<void> {

@@ -10,7 +10,7 @@ describe("starting the application", () => {
     const browser = cronk.client();
     expect((await browser.get("/api/setup")).body).toEqual({ required: false });
     expect((await browser.post("/api/sign-in", { email: ada.email, password: ada.password })).status).toBe(200);
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme" });
+    expect((await browser.get("/api/workspace")).body).toMatchObject({ name: "Acme" });
   });
 
   it("reports itself healthy once the database is reachable", async () => {

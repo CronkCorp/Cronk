@@ -155,4 +155,42 @@ export const migrations: Migration[] = [
       CREATE UNIQUE INDEX IF NOT EXISTS statuses_name_unique ON statuses (project_id, lower(name));
     `,
   },
+  {
+    id: "0006_agents_tokens",
+    sql: `
+      -- IF NOT EXISTS / IF EXISTS: this ran as 0005_agents_tokens on databases from the unmerged branch.
+      -- An Agent acts for exactly one User, its Owner (ADR 0001). A removed Agent keeps its row so history still names it.
+      CREATE TABLE IF NOT EXISTS agents (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        owner_id uuid NOT NULL REFERENCES users(id),
+        name text NOT NULL,
+        created_at timestamptz NOT NULL,
+        removed_at timestamptz
+      );
+      -- An Owner's Agents have distinct names while they exist.
+      CREATE UNIQUE INDEX IF NOT EXISTS agents_owner_name_unique ON agents (owner_id, lower(name)) WHERE removed_at IS NULL;
+
+      -- A token an Agent calls the API with, full or read-only. Only its hash is stored; revoking deletes it.
+      CREATE TABLE IF NOT EXISTS agent_tokens (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        read_only boolean NOT NULL,
+        created_at timestamptz NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_tokens_agent ON agent_tokens (agent_id);
+
+      -- The most Agents may do in a Project, or in the Workspace outside any Project (ADR 0004).
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_access text NOT NULL DEFAULT 'write' CHECK (agent_access IN ('none', 'read', 'write'));
+      ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS agent_access text NOT NULL DEFAULT 'write' CHECK (agent_access IN ('none', 'read', 'write'));
+
+      -- A change an Agent made records the Agent; actor_user_id then holds its Owner.
+      ALTER TABLE ticket_changes DROP CONSTRAINT IF EXISTS ticket_changes_actor_kind_check;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_kind_check CHECK (actor_kind IN ('user', 'agent'));
+      ALTER TABLE ticket_changes ADD COLUMN IF NOT EXISTS actor_agent_id uuid REFERENCES agents(id);
+      ALTER TABLE ticket_changes DROP CONSTRAINT IF EXISTS ticket_changes_actor_agent;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_agent CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL));
+    `,
+  },
 ];

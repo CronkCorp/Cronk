@@ -4,6 +4,9 @@ import { migrations as allMigrations, type Migration } from "./migrations.js";
 export type Database = pg.Pool;
 export type Queryable = pg.Pool | pg.PoolClient;
 
+/** Postgres's error code for a unique index refusing a row. */
+export const UNIQUE_VIOLATION = "23505";
+
 export function createDatabase(databaseUrl: string): Database {
   return new pg.Pool({ connectionString: databaseUrl });
 }

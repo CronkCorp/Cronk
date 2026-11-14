@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
-import { transaction } from "../db/database.js";
-import { nameSchema } from "../schemas.js";
+import { actingUser } from "../actor.js";
+import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
+import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
+import { nameSchema, publicRoute } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
-import { requireAdmin } from "./access.js";
+import { requireAdmin, requireWorkspaceAccess } from "./access.js";
+import { publicAgent } from "./agents.js";
 import {
   createInvitation,
   deleteInvitation,
@@ -22,21 +24,19 @@ const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
 const role = { type: "string", enum: ["admin", "member"] } as const;
 
-/** Postgres's error code for a unique index refusing a row. */
-const UNIQUE_VIOLATION = "23505";
-
 const INVITATION_GONE = "This invitation has expired or was withdrawn";
 
 const dummyHash = hashPassword("dummy password for unknown emails");
 
 export function identityRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    app.get("/api/setup", async () => ({ required: (await countUsers(ctx.db)) === 0 }));
+    app.get("/api/setup", { schema: publicRoute }, async () => ({ required: (await countUsers(ctx.db)) === 0 }));
 
     app.post<{ Body: { email: string; password: string; name: string; workspaceName?: string } }>(
       "/api/setup",
       {
         schema: {
+          ...publicRoute,
           body: {
             type: "object",
             required: ["email", "password", "name"],
@@ -72,6 +72,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/sign-in",
       {
         schema: {
+          ...publicRoute,
           body: {
             type: "object",
             required: ["email", "password"],
@@ -92,7 +93,7 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.delete("/api/sign-in", async (request, reply) => {
+    app.delete("/api/sign-in", { schema: publicRoute }, async (request, reply) => {
       const token = request.cookies[SIGN_IN_COOKIE];
       if (token) await deleteSignIn(ctx.db, token);
       reply.clearCookie(SIGN_IN_COOKIE, { path: "/" });
@@ -141,7 +142,7 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     // Anyone holding an invitation's token may view and accept it; the token is the proof.
-    app.get<{ Params: { token: string } }>("/api/invitations/:token", async (request) => {
+    app.get<{ Params: { token: string } }>("/api/invitations/:token", { schema: publicRoute }, async (request) => {
       const invitation = await findInvitationByToken(ctx.db, request.params.token, ctx.clock.now());
       if (!invitation) throw new HttpError(404, INVITATION_GONE);
       const workspace = await getWorkspace(ctx.db, invitation.workspaceId);
@@ -152,6 +153,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/invitations/:token/accept",
       {
         schema: {
+          ...publicRoute,
           body: {
             type: "object",
             required: ["name", "password"],
@@ -189,8 +191,9 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     app.get("/api/users", async (request) => {
-      const user = await requireUser(ctx, request);
-      return { users: (await listUsers(ctx.db, user.workspaceId)).map(publicUser) };
+      const actor = await requireActor(ctx, request);
+      await requireWorkspaceAccess(ctx.db, actor, "read");
+      return { users: (await listUsers(ctx.db, actingUser(actor).workspaceId)).map(publicUser) };
     });
 
     app.patch<{ Params: { id: string }; Body: { role?: Role; active?: boolean } }>(
@@ -213,6 +216,11 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.get("/api/me", async (request) => ({ user: publicUser(await requireUser(ctx, request)) }));
+    // Who the caller is: a User, or an Agent with its Owner and whether its token is read-only.
+    app.get("/api/me", async (request) => {
+      const actor = await requireActor(ctx, request);
+      if (actor.kind === "user") return { user: publicUser(actor.user) };
+      return { agent: publicAgent(actor.agent, actor.owner), readOnly: actor.readOnly };
+    });
   };
 }
