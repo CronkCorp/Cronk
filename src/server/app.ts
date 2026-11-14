@@ -33,14 +33,20 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   }
   const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure };
 
-  const app = Fastify({ logger: opts.logger ?? false });
+  const app = Fastify({
+    logger: opts.logger ?? false,
+    // Refuse fields a route doesn't declare (its schema's `additionalProperties: false`) instead of
+    // silently dropping them, so a caller never hears that a change worked when nothing changed.
+    ajv: { customOptions: { removeAdditional: false } },
+  });
   app.addHook("onClose", async () => db.end());
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
     const fastifyError = err as { validation?: unknown; statusCode?: number; message?: string };
-    if (fastifyError.validation || (fastifyError.statusCode && fastifyError.statusCode < 500)) {
-      return reply.code(fastifyError.statusCode ?? 400).send({ error: fastifyError.message });
+    if (fastifyError.validation) return reply.code(400).send({ error: validationMessage(fastifyError) });
+    if (fastifyError.statusCode && fastifyError.statusCode < 500) {
+      return reply.code(fastifyError.statusCode).send({ error: fastifyError.message });
     }
     request.log.error(err);
     return reply.code(500).send({ error: "Something went wrong" });
@@ -85,4 +91,19 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     return reply.code(404).send({ error: "Not found" });
   });
   return app;
+}
+
+interface SchemaIssue {
+  keyword?: string;
+  instancePath?: string;
+  params?: { additionalProperty?: string };
+}
+
+/** Names the field a caller sent that the route doesn't know; other schema errors keep Fastify's message. */
+function validationMessage(err: { validation?: unknown; validationContext?: string; message?: string }): string {
+  const issues: SchemaIssue[] = Array.isArray(err.validation) ? err.validation : [];
+  const unknown = issues.find((issue) => issue.keyword === "additionalProperties" && issue.params?.additionalProperty);
+  if (!unknown) return err.message ?? "Invalid request";
+  const path = `${err.validationContext ?? "body"}${(unknown.instancePath ?? "").replaceAll("/", ".")}`;
+  return `${path} has unknown field "${unknown.params?.additionalProperty}"`;
 }

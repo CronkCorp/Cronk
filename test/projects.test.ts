@@ -74,8 +74,10 @@ describe("Projects", () => {
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     const renamed = await admin.patch("/api/projects/CRONK", { name: " Cronk app " });
     expect(renamed.body.project).toMatchObject({ name: "Cronk app", key: "CRONK" });
-    await admin.patch("/api/projects/CRONK", { key: "APP" });
-    expect((await admin.get("/api/projects/CRONK")).body.project.key).toBe("CRONK");
+    const rekeyed = await admin.patch("/api/projects/CRONK", { key: "APP" });
+    expect(rekeyed.status).toBe(400);
+    expect(rekeyed.body.error).toContain("key");
+    expect((await admin.get("/api/projects/CRONK")).body.project).toMatchObject({ name: "Cronk app", key: "CRONK" });
     expect((await admin.get("/api/projects/APP")).status).toBe(404);
   });
 
