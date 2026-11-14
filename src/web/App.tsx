@@ -208,7 +208,7 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
 }
 
 function projectView(view: string | null): ProjectView {
-  return view === "board" || view === "statuses" || view === "guidance" ? view : "list";
+  return view === "board" || view === "statuses" || view === "reports" || view === "guidance" ? view : "list";
 }
 
 function WorkspaceGuidancePage(props: { me: User }) {

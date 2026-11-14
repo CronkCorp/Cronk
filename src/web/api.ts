@@ -25,6 +25,7 @@ import type {
   RecordedChange,
   RelationKind,
   Relations,
+  Report,
   Role,
   Status,
   StatusCategory,
@@ -67,6 +68,7 @@ export type {
   RecordedChange,
   RelationKind,
   Relations,
+  Report,
   Role,
   Status,
   StatusCategory,
@@ -243,6 +245,11 @@ export const api = {
   restoreVersion: (id: string, number: number, baseVersion: number) =>
     request<{ document: Document }>("POST", `${documentPath(id)}/versions/${number}/restore`, { baseVersion }).then((r) => r.document),
 
+  ticketReports: (key: string) =>
+    request<{ reports: Report[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/reports`).then((r) => r.reports),
+  projectReports: (projectKey: string) =>
+    request<{ reports: Report[] }>("GET", `/api/projects/${encodeURIComponent(projectKey)}/reports`).then((r) => r.reports),
+
   activities: (key: string) =>
     request<{ activities: Activity[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/activities`).then((r) => r.activities),
 
@@ -272,6 +279,7 @@ export interface TicketEvents {
   /** A new Activity, or one changed since (a question once answered). */
   activity: { activity: Activity };
   comment: { comment: Comment };
+  report: { report: Report };
 }
 
 /**

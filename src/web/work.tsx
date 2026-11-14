@@ -115,7 +115,7 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
   );
 }
 
-export type ProjectView = "list" | "board" | "statuses" | "guidance";
+export type ProjectView = "list" | "board" | "statuses" | "reports" | "guidance";
 
 /** Whether a view shows the Project's Tickets, and so takes a filter: the list and the board do. */
 const showsTickets = (view: ProjectView) => view === "list" || view === "board";
@@ -220,6 +220,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
             <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
             <Link to={`/projects/${p.key}/documents`} className="tab">Documents</Link>
+            <Link to={projectPath(p.key, "reports", {})} className={props.view === "reports" ? "tab active" : "tab"}>Reports</Link>
             <Link to={projectPath(p.key, "guidance", {})} className={props.view === "guidance" ? "tab active" : "tab"}>Guidance</Link>
           </nav>
           {props.view === "guidance" && (
@@ -237,7 +238,8 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
               onChange={(filter) => navigate(projectPath(p.key, props.view, filter))}
             />
           )}
-          {props.view !== "guidance" && (
+          {props.view === "reports" && <ReportsView projectKey={p.key} />}
+          {props.view !== "guidance" && props.view !== "reports" && (
             <Show state={tickets}>
               {(list) =>
                 props.view === "statuses" ? (
@@ -698,6 +700,38 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         )}
       </Show>
     </article>
+  );
+}
+
+/** The Reports on a Project's Tickets, newest first. */
+function ReportsView(props: { projectKey: string }) {
+  const [reports] = useLoad(() => api.projectReports(props.projectKey), [props.projectKey]);
+  return (
+    <Show state={reports}>
+      {(list) =>
+        list.length === 0 ? (
+          <div className="empty">
+            <h2>No Reports yet</h2>
+            <p className="muted">Agents write a Report on a Ticket when they hand their work over.</p>
+          </div>
+        ) : (
+          <ul className="rows" aria-label="Reports">
+            {list.map((r) => (
+              <li key={r.id}>
+                <Link to={`/documents/${r.id}`} className="row">
+                  <span className="key">{r.ticketKey}</span>
+                  <span className="grow">
+                    {r.title} <span className="muted">on {r.ticketTitle}</span>
+                  </span>
+                  <span className="muted">{r.agent.name}</span>
+                  <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </Show>
   );
 }
 

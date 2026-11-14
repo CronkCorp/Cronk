@@ -309,6 +309,28 @@ describe("the documents tool", () => {
     expect(missing.body).toContain('"headings":["## Setup","## Usage"]');
   });
 
+  it("writes a Report on the Ticket the Agent Session holds, which an Agent's move to In Review needs", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    const report = { action: "write_report", key: "CRONK-1", title: "Findings", body: "It was the cache." };
+
+    expect(await callTool(mcp, "documents", report)).toEqual({ isError: true, body: expect.stringContaining("Claim CRONK-1") });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    expect(await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "In Review" })).toEqual({
+      isError: true,
+      body: expect.stringContaining("Write a Report on CRONK-1"),
+    });
+
+    const written = await callTool(mcp, "documents", report);
+    expect(written.body.report).toMatchObject({ ticketKey: "CRONK-1", title: "Findings", body: "It was the cache.", version: 1 });
+    expect((await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "In Review" })).body.ticket.status.category).toBe("in_review");
+    expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toMatchObject([{ id: written.body.report.id, session: { id: mcp.transport.sessionId } }]);
+    expect(await callTool(mcp, "documents", { action: "write_report", key: "CRONK-1", title: "No body" })).toEqual({
+      isError: true,
+      body: "The write_report action needs a body",
+    });
+  });
+
   it("offers a read-only token only get and tree", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);

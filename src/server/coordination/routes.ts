@@ -10,6 +10,7 @@ import { accessSchema, answer, errors, holding, listing, noContent, pathParams, 
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
 import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
+import { findReport, insertReport, listTicketReports } from "../knowledge/reports.js";
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
@@ -252,6 +253,58 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
 
+    app.post<{ Params: { key: string }; Body: { title: string; body: string } }>(
+      "/api/tickets/:key/reports",
+      {
+        schema: {
+          params: ticketParams,
+          headers: sessionHeader,
+          body: {
+            type: "object",
+            required: ["title", "body"],
+            additionalProperties: false,
+            properties: {
+              title: { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" },
+              body: { type: "string", minLength: 1, maxLength: 1_000_000, pattern: "\\S", description: "The findings, as Markdown." },
+            },
+          },
+          response: {
+            201: answer(
+              "The Report, a Document of the Ticket's Project at Version 1, kept out of the page tree; it counts as the Report of the current Claim",
+              holding("report", "Document"),
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        requireSession(actor);
+        const now = ctx.clock.now();
+        const { ticket, report } = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          const claimId = await requireClaimHolder(tx, actor, ticket, now, "writing a Report on it");
+          return { ticket, report: await insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now }) };
+        });
+        ctx.live.publish(ticketTopic(ticket.id), { event: "report", data: { report: (await findReport(ctx.db, report.id))! } });
+        return reply.code(201).send({ report });
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/tickets/:key/reports",
+      {
+        schema: {
+          params: ticketParams,
+          response: { 200: answer("The Ticket's Reports, oldest first, without their bodies", listing("reports", ref("Report"))), ...errors(401, 404, 410) },
+        },
+      },
+      async (request) => {
+        const ticket = await ticketFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        return { reports: await listTicketReports(ctx.db, ticket.id) };
+      },
+    );
+
     app.get<{ Params: { key: string } }>(
       "/api/tickets/:key/events",
       {
@@ -262,7 +315,8 @@ export function coordinationRoutes(ctx: AppContext) {
               description:
                 "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
                 "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON, " +
-                "and arrives again once a Comment answers it. Each new Comment arrives as a `comment` event whose data is `{ comment }`.",
+                "and arrives again once a Comment answers it. Each new Comment arrives as a `comment` event whose data is `{ comment }`, " +
+                "and each new Report as a `report` event whose data is `{ report }`, a Report as JSON.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(401, 404, 410),

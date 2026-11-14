@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
-import { api, sessionName, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment } from "./api.js";
+import { api, sessionName, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
+import { Link } from "./router.js";
 import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
 
 /**
- * A Ticket's timeline and a Document's Comments. Activities (an Agent's own work log) and
- * Comments (conversation) show together but look different; replies sit under what they reply to.
+ * A Ticket's timeline and a Document's Comments. Activities (an Agent's own work log), Reports
+ * and Comments (conversation) show together but look different; replies sit under what they reply to.
  */
 
 const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
 
-/** What a timeline entry is: an Activity, or a Comment that replies to neither a Comment nor an Activity. */
-type Entry = { kind: "activity"; activity: Activity } | { kind: "comment"; comment: Comment };
+/** What a timeline entry is: an Activity, a Report, or a Comment that replies to neither a Comment nor an Activity. */
+type Entry = { kind: "activity"; activity: Activity } | { kind: "report"; report: Report } | { kind: "comment"; comment: Comment };
 
-const entryAt = (e: Entry) => (e.kind === "activity" ? e.activity.at : e.comment.at);
+const entryAt = (e: Entry) => (e.kind === "activity" ? e.activity.at : e.kind === "report" ? e.report.createdAt : e.comment.at);
 
 /** Keeps the last of each id, in the order each id first appeared. */
 function latestById<T extends { id: string }>(items: T[]): T[] {
@@ -23,19 +24,28 @@ function latestById<T extends { id: string }>(items: T[]): T[] {
 }
 
 /**
- * The Activities Agent Sessions logged on a Ticket and its Comments, oldest first, kept up to
+ * The Activities and Reports Agent Sessions wrote on a Ticket and its Comments, oldest first, kept up to
  * date as new ones arrive. Replies show under what they reply to; a reply to a question answers it.
  */
 export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) {
   const [loaded, reload] = useLoad(
-    async () => ({ activities: await api.activities(props.ticketKey), comments: await api.ticketComments(props.ticketKey) }),
+    async () => {
+      const [activities, reports, comments] = await Promise.all([
+        api.activities(props.ticketKey),
+        api.ticketReports(props.ticketKey),
+        api.ticketComments(props.ticketKey),
+      ]);
+      return { activities, reports, comments };
+    },
     [props.ticketKey],
   );
   // Activities and Comments pushed while this page is open; the lists, loaded at any point, may or may not hold them yet.
   const [arrivedActivities, setArrivedActivities] = useState<Activity[]>([]);
+  const [arrivedReports, setArrivedReports] = useState<Report[]>([]);
   const [arrivedComments, setArrivedComments] = useState<Comment[]>([]);
   useEffect(() => {
     setArrivedActivities([]);
+    setArrivedReports([]);
     setArrivedComments([]);
     return watchTicket(props.ticketKey, {
       // Load the lists again once watching, and on every reconnect, so nothing posted before the stream was
@@ -43,6 +53,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
       ready: reload,
       on: {
         activity: ({ activity }) => setArrivedActivities((list) => [...list, activity]),
+        report: ({ report }) => setArrivedReports((list) => [...list, report]),
         comment: ({ comment }) => setArrivedComments((list) => [...list, comment]),
       },
     });
@@ -54,10 +65,13 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
       {(lists) => {
         // A pushed Activity replaces the loaded one: it is newer, as when a question gets answered.
         const activities = latestById([...lists.activities, ...arrivedActivities]);
+        const reports = latestById([...lists.reports, ...arrivedReports]);
         const comments = latestById([...lists.comments, ...arrivedComments]);
         const entries: Entry[] = [
           ...activities.map((activity): Entry => ({ kind: "activity", activity })),
+          ...reports.map((report): Entry => ({ kind: "report", report })),
           ...comments.filter((c) => !c.replyToCommentId && !c.replyToActivityId).map((comment): Entry => ({ kind: "comment", comment })),
+          // Stable, so entries at the same instant keep the order they were written or arrived in.
         ].sort((a, b) => Date.parse(entryAt(a)) - Date.parse(entryAt(b)));
         const posted = (comment: Comment) => setArrivedComments((list) => [...list, comment]);
         return (
@@ -67,6 +81,8 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
               {entries.map((e) =>
                 e.kind === "activity" ? (
                   <ActivityItem key={e.activity.id} activity={e.activity} comments={comments} canWrite={props.canWrite} post={post} onPosted={posted} />
+                ) : e.kind === "report" ? (
+                  <ReportItem key={e.report.id} report={e.report} />
                 ) : (
                   <CommentItem key={e.comment.id} comment={e.comment} comments={comments} canWrite={props.canWrite} post={post} onPosted={posted} />
                 ),
@@ -106,6 +122,28 @@ function ActivityItem(props: { activity: Activity } & Thread) {
         <CronkMarkdown>{a.body}</CronkMarkdown>
       </div>
       <Replies {...props} replies={replies} replyTo={{ replyToActivityId: a.id }} replyLabel={isQuestion && !a.answer ? "Answer" : "Reply"} />
+    </li>
+  );
+}
+
+/** A Report in a Ticket's timeline, showing its current Version. */
+function ReportItem(props: { report: Report }) {
+  const r = props.report;
+  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
+  return (
+    <li className="activity report" aria-label={`Report: ${r.title}`}>
+      <div className="activity-head">
+        <span className="activity-kind">Report</span>
+        <strong>{r.agent.name}</strong>
+        <span className="muted">({sessionName(r.session.id)}, for {r.agent.owner.name})</span>
+        <span className="muted">{new Date(r.createdAt).toLocaleString()}</span>
+      </div>
+      <h3 className="report-title">
+        <Link to={`/documents/${r.id}`} className="link">{r.title}</Link>
+      </h3>
+      <div className="activity-body">
+        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+      </div>
     </li>
   );
 }

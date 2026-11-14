@@ -218,27 +218,40 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(claimed.status()).toBe(200);
   await page.reload();
   await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
-  // The Session logs Activities; the open Ticket page shows them in its timeline as they arrive, without a reload.
-  const activities = page.getByRole("list", { name: "Timeline" });
-  await expect(activities).toContainText("Nothing yet.");
+  // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  await expect(timeline).toContainText("Nothing yet.");
   const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
     data: { kind: "question", body: "Should this use **Postgres**?", blocking: true },
   });
   expect(asked.status()).toBe(201);
-  await expect(activities).toContainText("Blocking question");
-  await expect(activities.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
-  await expect(activities).toContainText("Waiting for an answer");
+  await expect(timeline).toContainText("Blocking question");
+  await expect(timeline.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
+  await expect(timeline).toContainText("Waiting for an answer");
   // Ada answers the question by replying to it; the answer shows under it as a Comment.
-  await activities.getByRole("button", { name: "Answer" }).click();
-  await activities.getByLabel("Answer", { exact: true }).fill("Yes, **Postgres**.");
-  await activities.getByRole("button", { name: "Post answer" }).click();
-  await expect(activities).toContainText("Answered");
-  await expect(activities.getByRole("list", { name: "Replies" })).toContainText("Yes, Postgres.");
+  await timeline.getByRole("button", { name: "Answer" }).click();
+  await timeline.getByLabel("Answer", { exact: true }).fill("Yes, **Postgres**.");
+  await timeline.getByRole("button", { name: "Post answer" }).click();
+  await expect(timeline).toContainText("Answered");
+  await expect(timeline.getByRole("list", { name: "Replies" })).toContainText("Yes, Postgres.");
   // A Comment of her own sits in the same timeline, after the question.
   await page.getByLabel("Comment", { exact: true }).fill("Thanks, carry on.");
   await page.getByRole("button", { name: "Post Comment" }).click();
-  await expect(activities.getByRole("listitem").last()).toContainText("Thanks, carry on.");
+  await expect(timeline.getByRole("listitem").last()).toContainText("Thanks, carry on.");
+  const reported = await request.post(`/api/tickets/${ticket.key}/reports`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+    data: { title: "What I found", body: "It was the **cache**." },
+  });
+  expect(reported.status()).toBe(201);
+  const report = timeline.getByRole("listitem", { name: "Report: What I found" });
+  await expect(report.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  // The Project's Reports view lists it, and it opens as a Document of the Ticket, outside the page tree.
+  await page.getByRole("link", { name: ticket.key.split("-")[0]!, exact: true }).click();
+  await page.getByRole("link", { name: "Reports" }).click();
+  await page.getByRole("list", { name: "Reports" }).getByRole("link", { name: /What I found/ }).click();
+  await expect(page.getByRole("heading", { name: /What I found/ })).toContainText(`Report on ${ticket.key}`);
+  await expect(page.getByTestId("document-body")).toContainText("It was the cache.");
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.

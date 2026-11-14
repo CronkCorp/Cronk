@@ -118,7 +118,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         run: (api, a) => api("DELETE", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "release"))}/claim`),
       },
       move: {
-        description: "move a Ticket you hold the Claim on into another Status (Unstarted, Started or In Review only)",
+        description:
+          "move a Ticket you hold the Claim on into another Status (Unstarted, Started or In Review only); In Review needs a Report written during your current Claim (documents, write_report)",
         writes: true,
         run: async (api, a) => {
           const key = required(a.key, "a key", "move");
@@ -225,16 +226,21 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Documents: Markdown knowledge belonging to a Project or, without a project, the Workspace, arranged in a page tree. " +
       "Every update names the Version it is based on (`baseVersion`, the Document's `version`) and is refused if that is no " +
       "longer current; the refusal carries the current Version, so merge your change into it and update again. " +
-      "Prefer `replace_section` to change one section: small edits rarely clash with anyone else's.",
+      "Prefer `replace_section` to change one section: small edits rarely clash with anyone else's. " +
+      "A Report is the Document of findings you write on a Ticket you hold the Claim on, with `write_report`; it stays with the Ticket, " +
+      "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
-      id: z.string().optional().describe("Document id (get, update, replace_section)"),
+      key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
+      id: z.string().optional().describe("Document id, a Report's included (get, update, replace_section)"),
       parentId: z.string().optional().describe("The Document to create it under; at the top if left out (create)"),
-      title: z.string().optional().describe("Title (create, update)"),
+      title: z.string().optional().describe("Title (create, update, write_report)"),
       body: z
         .string()
         .optional()
-        .describe("Markdown body; Ticket keys such as CRONK-12 become links (create, update). For replace_section, what goes under the heading, without the heading line"),
+        .describe(
+          "Markdown body; Ticket keys such as CRONK-12 become links (create, update, write_report). For replace_section, what goes under the heading, without the heading line",
+        ),
       heading: z
         .string()
         .optional()
@@ -283,6 +289,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             baseVersion: required(a.baseVersion, "a baseVersion", "replace_section"),
             heading: required(a.heading, "a heading", "replace_section"),
             body: required(a.body, "a body", "replace_section"),
+          }),
+      },
+      write_report: {
+        description:
+          "write a Report of your findings on a Ticket you hold the Claim on: a new Document at Version 1, kept with the Ticket. " +
+          "A Ticket may have several; moving it to In Review needs one written during your current Claim",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "write_report"))}/reports`, {
+            title: required(a.title, "a title", "write_report"),
+            body: required(a.body, "a body", "write_report"),
           }),
       },
     },

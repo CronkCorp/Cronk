@@ -6,6 +6,7 @@ import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { documentFor } from "./document-reads.js";
 import { deleteDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { listProjectReports } from "./reports.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
@@ -74,6 +75,24 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         return { documents: await listTree(ctx.db, treeFor(actor, project.id)) };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/reports",
+      {
+        schema: {
+          params: projectParams,
+          response: {
+            200: answer("The Reports on the Project's Tickets, newest first, without their bodies", listing("reports", ref("Report"))),
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        return { reports: await listProjectReports(ctx.db, project.id) };
       },
     );
 
@@ -285,6 +304,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const document = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
           const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
+          if (moved === "a report") throw new HttpError(400, "A Report lives with its Ticket, outside the page tree, so it can't be moved");
           if (moved === "no such parent") throw notInTree();
           if (moved === "under itself") throw new HttpError(409, "A Document can't move under itself or a Document under it");
           if (moved === "no such position") throw new HttpError(400, `There is no position ${position} among those Documents`);

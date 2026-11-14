@@ -48,8 +48,18 @@ function ProjectCrumbs(props: { projectKey: string; children?: ReactNode }) {
   );
 }
 
-/** The way back to the page tree a Document sits in. */
-function Breadcrumb(props: { projectKey: string | null }) {
+/** The way back to the page tree a Document sits in, or to the Ticket a Report is on. */
+function Breadcrumb(props: { projectKey: string | null; ticketKey: string | null }) {
+  if (props.projectKey && props.ticketKey) {
+    return (
+      <ProjectCrumbs projectKey={props.projectKey}>
+        {" / "}
+        <Link to={`/projects/${props.projectKey}?view=reports`} className="link">Reports</Link>
+        {" / "}
+        <Link to={`/tickets/${props.ticketKey}`} className="link">{props.ticketKey}</Link>
+      </ProjectCrumbs>
+    );
+  }
   if (!props.projectKey) {
     return (
       <div className="muted">
@@ -148,13 +158,13 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
       await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
       return true;
     },
-    (deleted) => deleted && navigate(treeAddress(d.projectKey)),
+    (deleted) => deleted && navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
   );
   const toggle = (p: Panel) => setPanel(panel === p ? "none" : p);
 
   return (
     <article className="document">
-      <Breadcrumb projectKey={d.projectKey} />
+      <Breadcrumb projectKey={d.projectKey} ticketKey={d.ticketKey} />
       {panel === "edit" ? (
         <EditDocument
           document={d}
@@ -167,14 +177,20 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
       ) : (
         <>
           <div className="page-head">
-            <h1>{d.title}</h1>
+            <h1>
+              {d.title} {d.ticketKey && <span className="badge">Report on {d.ticketKey}</span>}
+            </h1>
             <div className="actions">
               <span className="muted">Version {d.version}</span>
               <button className="secondary" onClick={() => toggle("versions")}>Versions</button>
               {canWrite && (
                 <>
-                  <button className="secondary" onClick={() => toggle("move")}>Move</button>
-                  <button className="secondary" onClick={() => toggle("new")}>New Document under this one</button>
+                  {!d.ticketKey && (
+                    <>
+                      <button className="secondary" onClick={() => toggle("move")}>Move</button>
+                      <button className="secondary" onClick={() => toggle("new")}>New Document under this one</button>
+                    </>
+                  )}
                   <button className="secondary" onClick={() => void remove.run()} disabled={remove.busy}>Delete</button>
                   <button onClick={() => setPanel("edit")}>Edit</button>
                 </>

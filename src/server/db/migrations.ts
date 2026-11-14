@@ -310,7 +310,24 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0012_comments",
+    id: "0012_reports",
+    sql: `
+      -- Each Claim gets its own id when it is taken, so a Report can say which Claim it was written in;
+      -- releasing and Claiming again starts a new Claim even within the same Agent Session.
+      ALTER TABLE tickets ADD COLUMN claim_id uuid;
+      UPDATE tickets SET claim_id = gen_random_uuid() WHERE claim_session_id IS NOT NULL;
+
+      -- A Report is a Document on a Ticket, written in one of its Claims (claim_id), and kept out of the
+      -- page tree: it has no parent and nothing sits under it.
+      ALTER TABLE documents
+        ADD COLUMN ticket_id uuid REFERENCES tickets(id) ON DELETE CASCADE,
+        ADD COLUMN claim_id uuid,
+        ADD CONSTRAINT documents_report_outside_tree CHECK (ticket_id IS NULL OR (parent_id IS NULL AND claim_id IS NOT NULL));
+      CREATE INDEX documents_ticket ON documents (ticket_id, created_at) WHERE ticket_id IS NOT NULL;
+    `,
+  },
+  {
+    id: "0013_comments",
     sql: `
       -- A message any Actor posts on a Ticket or a Document: on exactly one of them. It may reply to
       -- another Comment on the same Ticket or Document, or to an Activity on the same Ticket.
