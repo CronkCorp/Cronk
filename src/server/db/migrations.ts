@@ -270,4 +270,23 @@ export const migrations: Migration[] = [
         ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
     `,
   },
+  {
+    id: "0010_guidance",
+    sql: `
+      -- IF NOT EXISTS: this ran as 0008_guidance on databases from the unmerged branch.
+      -- Guidance: standing instructions Users write for Agents, for the Workspace (project_id NULL)
+      -- or one Project. Each save is a new Version, numbered from 1; the highest is current.
+      CREATE TABLE IF NOT EXISTS guidance_versions (
+        id bigserial PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        version integer NOT NULL CHECK (version > 0),
+        markdown text NOT NULL,
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id)
+      );
+      -- Two saves based on the same Version can't both become the next one.
+      CREATE UNIQUE INDEX IF NOT EXISTS guidance_versions_unique ON guidance_versions (workspace_id, project_id, version) NULLS NOT DISTINCT;
+    `,
+  },
 ];

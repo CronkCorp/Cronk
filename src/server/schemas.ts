@@ -45,7 +45,10 @@ export type SharedSchemaName =
   | "DocumentTreeEntry"
   | "Version"
   | "VersionSummary"
-  | "StaleVersion";
+  | "StaleVersion"
+  | "Guidance"
+  | "GuidanceVersion"
+  | "StaleGuidance";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -111,6 +114,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     agentAccess: agentAccessSchema,
     silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
   }),
+  Guidance: {
+    description: "Standing instructions Users write for Agents, as Markdown.",
+    ...object({
+      markdown: { type: "string" },
+      version: { type: "integer", description: "The current Version, counted from 1; 0 before anyone writes the Guidance." },
+    }),
+  },
+  GuidanceVersion: {
+    description: "One saved state of Guidance, with the User who saved it and when.",
+    ...object({
+      version: { type: "integer" },
+      markdown: { type: "string" },
+      at: timestamp,
+      actor: object({ kind: { type: "string", const: "user" }, id, name: { type: "string" } }),
+    }),
+  },
   Agent: object(
     {
       id,
@@ -249,6 +268,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   StaleVersion: {
     description: "A save refused because the Version it is based on is no longer current, with the current Version to merge with.",
     ...object({ error: { type: "string" }, current: ref("Version") }),
+  },
+  StaleGuidance: {
+    description: "A save of Guidance refused because the Version it is based on is no longer current, with the current Guidance to merge with.",
+    ...object({ error: { type: "string" }, current: ref("Guidance") }),
   },
 };
 

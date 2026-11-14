@@ -8,6 +8,8 @@ import type {
   AgentToken,
   Document,
   DocumentTreeEntry,
+  Guidance,
+  GuidanceVersion,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -42,6 +44,8 @@ export type {
   AgentToken,
   Document,
   DocumentTreeEntry,
+  Guidance,
+  GuidanceVersion,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -78,6 +82,9 @@ export interface TicketFilter {
   priority?: Priority;
   label?: string;
 }
+
+const guidancePath = (projectKey?: string) =>
+  projectKey === undefined ? "/api/workspace/guidance" : `/api/projects/${encodeURIComponent(projectKey)}/guidance`;
 
 export class ApiError extends Error {
   /** `body` is the whole error answer, such as `{ error, current }` for a stale save. */
@@ -121,6 +128,14 @@ export const api = {
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
   updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
+
+  /** The Workspace's Guidance, or with `projectKey` that Project's. */
+  guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),
+  guidanceVersions: (projectKey?: string) =>
+    request<{ versions: GuidanceVersion[] }>("GET", `${guidancePath(projectKey)}/versions`).then((r) => r.versions),
+  /** Refused with a 409 whose body holds the `current` Guidance if someone saved since `baseVersion`. */
+  saveGuidance: (projectKey: string | undefined, input: { markdown: string; baseVersion: number }) =>
+    request<{ guidance: Guidance }>("PUT", guidancePath(projectKey), input).then((r) => r.guidance),
 
   agents: (all = false) => request<{ agents: Agent[] }>("GET", `/api/agents${all ? "?all=true" : ""}`).then((r) => r.agents),
   createAgent: (name: string) => request<{ agent: Agent }>("POST", "/api/agents", { name }).then((r) => r.agent),

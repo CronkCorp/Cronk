@@ -3,6 +3,7 @@ import type { Actor, AgentActor } from "../actor.js";
 import { AGENT_SESSION_HEADER, HttpError, requireActor, type AppContext } from "../context.js";
 import { requireWorkspaceAccess, visibleProjects } from "../identity/access.js";
 import { publicAgent } from "../identity/agents.js";
+import { getGuidance, projectGuidanceMarkdown } from "../knowledge/guidance.js";
 import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
@@ -30,18 +31,30 @@ const welcomeSchema = {
   required: ["workspace", "agent", "readOnly", "projects", "readyTickets"],
   properties: {
     workspace: {
-      anyOf: [{ type: "object", required: ["name"], properties: { name: { type: "string" } } }, { type: "null" }],
+      anyOf: [
+        {
+          type: "object",
+          required: ["name", "guidance"],
+          properties: { name: { type: "string" }, guidance: { type: "string", description: "The Workspace's Guidance, as Markdown." } },
+        },
+        { type: "null" },
+      ],
       description: "Null when the Workspace's Agent Access is None.",
     },
     agent: ref("Agent"),
     readOnly: { type: "boolean" },
     projects: {
       type: "array",
-      description: "The unarchived Projects the Agent can see, with its access in each.",
+      description: "The unarchived Projects the Agent can see, with its access and the Project's Guidance in each.",
       items: {
         type: "object",
-        required: ["key", "name", "access"],
-        properties: { key: { type: "string" }, name: { type: "string" }, access: accessSchema },
+        required: ["key", "name", "access", "guidance"],
+        properties: {
+          key: { type: "string" },
+          name: { type: "string" },
+          access: accessSchema,
+          guidance: { type: "string", description: "The Project's Guidance, as Markdown; it layers over the Workspace's." },
+        },
       },
     },
     readyTickets: {
@@ -207,8 +220,9 @@ function requireSession(actor: Actor): AgentSession {
 
 /**
  * What an Agent is told when it connects: who it is and for whom, whether it may only
- * read, the Projects it can see, and its Ready Tickets. The Workspace's name is left out
- * if the Workspace's Agent Access is None.
+ * read, the Workspace's Guidance, the Projects it can see with each one's Guidance, and its
+ * Ready Tickets. The Workspace, with its name and Guidance, is left out if the Workspace's
+ * Agent Access is None.
  */
 export async function welcome(ctx: AppContext, agent: AgentActor) {
   const workspaceId = agent.owner.workspaceId;
@@ -220,11 +234,16 @@ export async function welcome(ctx: AppContext, agent: AgentActor) {
     },
   );
   const projects = await visibleProjects(ctx.db, agent, await listProjects(ctx.db, workspaceId, false));
+  const guidance = await projectGuidanceMarkdown(ctx.db, projects.map((p) => p.id));
+  const workspace = readable && {
+    name: (await getWorkspace(ctx.db, workspaceId)).name,
+    guidance: (await getGuidance(ctx.db, { workspaceId, projectId: null })).markdown,
+  };
   return {
-    workspace: readable ? { name: (await getWorkspace(ctx.db, workspaceId)).name } : null,
+    workspace: workspace || null,
     agent: publicAgent(agent.agent, agent.owner),
     readOnly: agent.readOnly,
-    projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access })),
+    projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access, guidance: guidance.get(p.id)! })),
     readyTickets: await readyTickets(ctx, agent),
   };
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
+import { GuidanceSection } from "./guidance.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
@@ -121,6 +122,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
         </Link>
         <div className="topbar-right">
           <Link to="/documents" className="link">Documents</Link>
+          <Link to="/guidance" className="link">Guidance</Link>
           <Link to="/agents" className="link">Agents</Link>
           {props.user.role === "admin" && (
             <>
@@ -161,6 +163,7 @@ function Page(props: { me: User }) {
   if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;
   const documentMatch = /^\/documents\/([^/]+)$/.exec(path);
   if (documentMatch) return <DocumentPage id={decodeURIComponent(documentMatch[1]!)} edit={search.get("edit") === "1"} />;
+  if (path === "/guidance") return <WorkspaceGuidancePage me={props.me} />;
   const project = /^\/projects\/([^/]+)$/.exec(path);
   if (project) {
     return (
@@ -205,5 +208,19 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
 }
 
 function projectView(view: string | null): ProjectView {
-  return view === "board" || view === "statuses" ? view : "list";
+  return view === "board" || view === "statuses" || view === "guidance" ? view : "list";
+}
+
+function WorkspaceGuidancePage(props: { me: User }) {
+  return (
+    <section>
+      <div className="page-head">
+        <h1>Workspace Guidance</h1>
+      </div>
+      <GuidanceSection
+        canEdit={props.me.role === "admin"}
+        intro="Standing instructions for every Agent, in every Project. Each Agent Session gets them when it connects, followed by the Guidance of the Projects it can see. Only Admins can change them."
+      />
+    </section>
+  );
 }
