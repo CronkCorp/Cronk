@@ -390,7 +390,6 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
     setComparing(pair);
   });
   const error = view.error ?? restore.error ?? compare.error;
-
   return (
     <section className="panel wide">
       <h2>Versions</h2>
