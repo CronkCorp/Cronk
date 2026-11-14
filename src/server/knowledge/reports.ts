@@ -1,6 +1,6 @@
 import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import type { Ticket } from "../work/tickets.js";
+import { ticketKeySql, type Ticket } from "../work/tickets.js";
 import { findDocument, insertVersion, type Document } from "./documents.js";
 
 /**
@@ -55,7 +55,7 @@ const toReport = (row: ReportRow): Report => ({
 
 /** Selects Reports as `d`, with their Ticket `t` and the Agent and Session of their first Version. */
 const SELECT_REPORTS = `
-  SELECT d.id, p.key || '-' || t.number AS ticket_key, t.title AS ticket_title, d.title, d.version, d.created_at, d.updated_at,
+  SELECT d.id, ${ticketKeySql("p", "t")} AS ticket_key, t.title AS ticket_title, d.title, d.version, d.created_at, d.updated_at,
     a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id
   FROM documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
     JOIN document_versions v ON v.document_id = d.id AND v.number = 1

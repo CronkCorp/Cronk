@@ -1,5 +1,6 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { ticketKeySql } from "../work/tickets.js";
 
 /**
  * Documents: Markdown (ADR 0003) belonging to a Project or the Workspace, arranged
@@ -52,7 +53,7 @@ const toDocument = (row: DocumentRow): Document => ({
 });
 
 const SELECT_DOCUMENTS = `
-  SELECT d.*, p.key AS project_key, tp.key || '-' || t.number AS ticket_key
+  SELECT d.*, p.key AS project_key, ${ticketKeySql("tp", "t")} AS ticket_key
   FROM documents d LEFT JOIN projects p ON p.id = d.project_id
     LEFT JOIN tickets t ON t.id = d.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id`;
 
