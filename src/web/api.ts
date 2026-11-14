@@ -238,20 +238,26 @@ export const api = {
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };
 
+/** The events a Ticket's live-update stream pushes, by name, with their data. */
+export interface TicketEvents {
+  activity: { activity: Activity };
+}
+
 /**
  * Watches a live-update stream (server-sent events) until the returned function is called.
  * `ready` is called each time the stream (re)connects, so whatever it shows can be loaded
  * again to catch up on what happened while it was away; `on` maps event names to handlers
  * of their JSON data. The browser reconnects by itself after the connection drops.
  */
-export function watch(path: string, handlers: { ready: () => void; on: Record<string, (data: any) => void> }): () => void {
+function watch<Events>(path: string, handlers: { ready: () => void; on: { [E in keyof Events]?: (data: Events[E]) => void } }): () => void {
   const source = new EventSource(path, { withCredentials: true });
   source.addEventListener("ready", () => handlers.ready());
-  for (const [event, handle] of Object.entries(handlers.on)) {
+  for (const [event, handle] of Object.entries(handlers.on) as [string, (data: unknown) => void][]) {
     source.addEventListener(event, (e) => handle(JSON.parse((e as MessageEvent<string>).data)));
   }
   return () => source.close();
 }
 
 /** Watches one Ticket's changes as they happen (see `watch`). */
-export const watchTicket = (key: string, handlers: Parameters<typeof watch>[1]) => watch(`/api/tickets/${encodeURIComponent(key)}/events`, handlers);
+export const watchTicket = (key: string, handlers: Parameters<typeof watch<TicketEvents>>[1]) =>
+  watch<TicketEvents>(`/api/tickets/${encodeURIComponent(key)}/events`, handlers);

@@ -716,7 +716,7 @@ function ActivityTimeline(props: { ticketKey: string }) {
       // Load the list again once watching, and on every reconnect, so nothing logged before the stream was
       // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
       ready: reload,
-      on: { activity: ({ activity }: { activity: Activity }) => setArrived((list) => [...list, activity]) },
+      on: { activity: ({ activity }) => setArrived((list) => [...list, activity]) },
     });
   }, [props.ticketKey]);
   const withArrived = (loaded: Activity[]) => {
