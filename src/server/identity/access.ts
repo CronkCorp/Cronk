@@ -141,17 +141,24 @@ export async function canRead(db: Queryable, actor: Actor, projectId: string | n
   }
 }
 
-/** Where an Actor may read: the ids of the Projects, archived or not, and whether the Workspace outside any Project. */
+/** Where an Actor may read: the ids of the Projects, archived or not, and their Workspace's id if they may read it outside any Project. */
 export interface Readable {
   projectIds: string[];
-  workspace: boolean;
+  workspaceId: string | null;
 }
+
+/**
+ * SQL for whether the Document aliased `document` lies where a `Readable` lets its Actor read, given
+ * SQL for its `projectIds` (a uuid[]) and its `workspaceId` (a uuid, NULL when the Workspace isn't readable).
+ */
+export const documentReadableSql = (document: string, projectIds: string, workspaceId: string) =>
+  `(${document}.project_id = ANY(${projectIds}) OR (${document}.project_id IS NULL AND ${document}.workspace_id = ${workspaceId}))`;
 
 /** Where `actor` may read, for finding things across the Workspace (see `Readable`). */
 export async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {
   const workspaceId = actingUser(actor).workspaceId;
   const projects = [...(await listProjects(db, workspaceId, false)), ...(await listProjects(db, workspaceId, true))];
-  return { projectIds: (await visibleProjects(db, actor, projects)).map((p) => p.id), workspace: await canRead(db, actor, null) };
+  return { projectIds: (await visibleProjects(db, actor, projects)).map((p) => p.id), workspaceId: (await canRead(db, actor, null)) ? workspaceId : null };
 }
 
 /**

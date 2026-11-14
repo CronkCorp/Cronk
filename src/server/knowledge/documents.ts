@@ -1,6 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
+import { documentReadableSql, type Readable } from "../identity/access.js";
 
 /**
  * Documents: Markdown (ADR 0003) belonging to a Project or the Workspace, arranged
@@ -304,7 +305,7 @@ const MENTIONS_LIMIT = 20;
 export async function listLinkedDocuments(
   db: Queryable,
   ticket: { id: string; key: string },
-  readable: { projectIds: string[]; workspace: boolean },
+  readable: Readable,
 ): Promise<LinkedDocument[]> {
   const select = `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt"
                   FROM (${SELECT_DOCUMENTS}) d`;
@@ -313,9 +314,9 @@ export async function listLinkedDocuments(
   const mentions = await db.query<LinkedDocument>(
     `${select}
      WHERE d.ticket_id IS DISTINCT FROM $1 AND (d.title || ' ' || d.body) ~ ('\\m' || $2 || '\\M')
-       AND (d.project_id = ANY($3::uuid[]) OR (d.project_id IS NULL AND $4))
+       AND ${documentReadableSql("d", "$3::uuid[]", "$4::uuid")}
      ORDER BY d.updated_at DESC, d.id LIMIT ${MENTIONS_LIMIT}`,
-    [ticket.id, ticket.key, readable.projectIds, readable.workspace],
+    [ticket.id, ticket.key, readable.projectIds, readable.workspaceId],
   );
   return [...reports.rows, ...mentions.rows];
 }

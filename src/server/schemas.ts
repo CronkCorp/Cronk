@@ -418,7 +418,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     ...object({
       kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, or a Comment." },
       title: { type: "string", description: "The title of the Ticket or Document; for a Comment, of the Ticket or Document it is on." },
-      excerpt: { type: "string", description: "Plain text around the match." },
+      excerpt: { type: "string", description: "The text around the match, as written (Markdown), without markers around the matching words." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
       documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },

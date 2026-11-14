@@ -1,6 +1,6 @@
 import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { readablePlaces, type Readable } from "../identity/access.js";
+import { documentReadableSql, readablePlaces, type Readable } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { SearchKind } from "../../shared/values.js";
 
@@ -10,13 +10,12 @@ import type { SearchKind } from "../../shared/values.js";
  * (see migration 0014), so the indexes serve these queries.
  */
 
-
 /** One thing a search found, with an excerpt of its text around the match. */
 export interface SearchResult {
   kind: SearchKind;
   /** The Ticket's or Document's title. */
   title: string;
-  /** Plain text around the match, from the body (or the title when the body is empty). */
+  /** The text around the match, as written (Markdown), from the body (or the title when the body is empty). */
   excerpt: string;
   /** Null for something in the Workspace outside any Project. */
   projectKey: string | null;
@@ -27,7 +26,7 @@ export interface SearchResult {
 /** The text-search configuration everything is indexed and searched with. */
 const CONFIG = "'english'";
 
-/** Options for the excerpt: plain text (no markers), a short stretch around the match. */
+/** Options for the excerpt: a short stretch around the match, without markers around the matching words. */
 const EXCERPT = `'StartSel="", StopSel="", MinWords=10, MaxWords=30'`;
 
 /** The searchable text of each kind, as its index is built on. */
@@ -46,7 +45,7 @@ const columns = (c: { kind: SearchKind; title: string; projectKey: string; ticke
 
 /**
  * One SELECT per kind, with what each finds. They read the query as `q.query`, the readable
- * Project ids as `q.projects` and whether the Workspace outside any Project is readable as `q.workspace`.
+ * Project ids as `q.projects` and the Workspace's id, when it is readable outside any Project, as `q.workspace_id`.
  */
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
@@ -59,7 +58,7 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
     kind: "document",
     sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d LEFT JOIN projects p ON p.id = d.project_id
-      WHERE d.ticket_id IS NULL AND (d.project_id = ANY(q.projects) OR (d.project_id IS NULL AND q.workspace))
+      WHERE d.ticket_id IS NULL AND ${documentReadableSql("d", "q.projects", "q.workspace_id")}
         AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
@@ -78,7 +77,7 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
     kind: "comment",
     sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
-      WHERE (d.project_id = ANY(q.projects) OR (d.project_id IS NULL AND q.workspace)) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+      WHERE ${documentReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
 ];
 
@@ -94,15 +93,15 @@ export async function search(
   const readable = await readablePlaces(db, actor);
   // Narrowed to Projects, the search leaves out the Workspace outside them; the caller checked it can read them.
   const places: Readable = input.projectIds
-    ? { projectIds: readable.projectIds.filter((id) => input.projectIds!.includes(id)), workspace: false }
+    ? { projectIds: readable.projectIds.filter((id) => input.projectIds!.includes(id)), workspaceId: null }
     : readable;
   const selects = SELECTS.filter((s) => !input.kinds || input.kinds.includes(s.kind)).map((s) => s.sql);
   const { rows } = await db.query<SearchResult & { rank: number }>(
-    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::boolean AS workspace)
+    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::uuid AS workspace_id)
      SELECT * FROM (${selects.join("\n UNION ALL ")}) found
      ORDER BY rank DESC, at DESC
      LIMIT $4`,
-    [input.query, places.projectIds, places.workspace, input.limit],
+    [input.query, places.projectIds, places.workspaceId, input.limit],
   );
   return rows.map(({ kind, title, excerpt, projectKey, ticketKey, documentId }) => ({ kind, title, excerpt, projectKey, ticketKey, documentId }));
 }
