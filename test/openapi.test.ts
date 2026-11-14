@@ -84,7 +84,7 @@ describe("the OpenAPI description", () => {
     const doc = await openapi();
     const shapes = new Map<string, string>();
     for (const path of Object.keys(doc.paths)) {
-      const shape = path.replace(/\{\w+\}/g, "{}");
+      const shape = path.replace(/\{[^}]+\}/g, "{}");
       expect(shapes.get(shape), `${path} clashes with ${shapes.get(shape)}`).toBeUndefined();
       shapes.set(shape, path);
     }
