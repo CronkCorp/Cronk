@@ -388,4 +388,17 @@ describe("work waiting for an Agent over MCP", () => {
       data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1" } } },
     });
   });
+
+  it("stops being pushed once the token is revoked, before the client's next request", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const notifications: unknown[] = [];
+    mcp.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => void notifications.push(n.params));
+
+    await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`);
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(notifications).toEqual([]);
+  });
 });

@@ -7,7 +7,8 @@ import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
 import type { AgentSession, WaitingWork, Welcome } from "../api-types.js";
-import { agentTopic } from "../live/topics.js";
+import { followEvents, ownBaseUrl } from "./events.js";
+import type { LiveEvent } from "../live/live-updates.js";
 import { waitingLines, welcomeText } from "./welcome.js";
 
 /**
@@ -22,7 +23,6 @@ interface Connection {
   /** Stops pushing waiting work to it. */
   unsubscribe: () => void;
 }
-
 
 /** How often connections whose Agent Session went silent are forgotten. */
 const SWEEP_INTERVAL_MS = 60_000;
@@ -77,15 +77,18 @@ export function mcpRoutes(ctx: AppContext) {
         );
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
-        // Work starting to wait for the Agent reaches it as a log message. This listens to the
-        // in-process live updates the API's own stream of them (/api/agent-sessions/current/events)
-        // is made of, as the API serves no stream to in-process calls.
-        const unsubscribe = ctx.live.subscribe(agentTopic(welcome.agent.id), ({ event, data }) => {
+        // Work starting to wait for the Agent reaches it as a log message, from the API's own stream
+        // of it, which ends as soon as the Session does or its token is revoked. That stream needs
+        // real HTTP, so when Cronk doesn't listen (its requests are only injected) nothing is pushed.
+        const baseUrl = ownBaseUrl(app);
+        const notify = ({ event, data }: LiveEvent) => {
           if (event !== "waiting") return;
           const { waiting } = data as { waiting: WaitingWork };
           const text = waitingLines(waiting).join("\n");
           void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message: `Work is waiting for you:\n${text}`, waiting } }).catch(() => {});
-        });
+        };
+        const closeEvents = baseUrl && (await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify));
+        const unsubscribe = closeEvents || (() => {});
         connections.set(session.id, {
           transport,
           server,
