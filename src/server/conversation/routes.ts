@@ -7,6 +7,7 @@ import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
+import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, type CommentPlace, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
@@ -28,7 +29,13 @@ const newCommentBody = {
   required: ["body"],
   additionalProperties: false,
   properties: {
-    body: { type: "string", minLength: 1, maxLength: 100_000, pattern: "\\S", description: "Markdown." },
+    body: {
+      type: "string",
+      minLength: 1,
+      maxLength: 100_000,
+      pattern: "\\S",
+      description: `Markdown. ${MENTION_SYNTAX}`,
+    },
     replyToCommentId: { ...id, description: "The Comment this one replies to, on the same Ticket or Document." },
     replyToActivityId: {
       ...id,

@@ -1,8 +1,11 @@
+import type { Nodes } from "mdast";
+import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
-import { listAgents } from "../identity/agents.js";
+import { listAgents, type Agent } from "../identity/agents.js";
+import type { User } from "../identity/users.js";
 import { findCommentsByIds, publicComment, type Comment, type CommentOn } from "../conversation/comments.js";
 import { WAITING_REASONS, type WaitingReason } from "../../shared/values.js";
 
@@ -36,13 +39,68 @@ export interface CommentPlace {
   delegateId: string | null;
 }
 
+/** An @mention of an Agent: its name, and the name of the Owner it picks, if it picks one. Both lower-cased. */
+interface Mention {
+  owner: string | null;
+  name: string;
+}
+
+/** A letter, mark, digit or `_`, in any script. */
+const WORD = String.raw`[\p{L}\p{M}\p{N}_]`;
+
+/** One name in a mention, captured in `quoted` or `bare`: `"anything but quotes"`, or word characters and `-` with inner dots. */
+const namePart = (group: string) => String.raw`"(?<${group}Quoted>[^"\n]+)"|(?<${group}Bare>(?:${WORD}|-)+(?:\.(?:${WORD}|-)+)*)`;
+
+/** `@name` or `@owner/name`, not preceded by a word character or another `@`. */
+const MENTION = new RegExp(String.raw`(?<!${WORD}|@)@(?:(?:${namePart("owner")})/)?(?:${namePart("name")})`, "gu");
+
 /**
- * The @mentions in a Comment's Markdown: each `@name` not preceded by a word character, where
- * the name runs of letters, digits, `_`, `-` and inner dots. Lower-cased, without repeats.
+ * The @mentions in a Comment's Markdown, without repeats: each `@name` or `@owner/name` not
+ * preceded by a word character. A bare name runs of letters, digits, `_`, `-` and inner dots;
+ * a name that contains anything else, such as spaces, goes in double quotes: `@"claude laptop"`.
+ * Mentions inside code spans, code blocks and block quotes don't count.
  */
-export function mentionedNames(body: string): string[] {
-  const names = [...body.matchAll(/(?<![\w@])@([\w-]+(?:\.[\w-]+)*)/gu)].map((m) => m[1]!.toLowerCase());
-  return [...new Set(names)];
+function mentionsIn(body: string): Mention[] {
+  const seen = new Map<string, Mention>();
+  for (const { groups } of proseOf(fromMarkdown(body)).matchAll(MENTION)) {
+    const owner = groups!.ownerQuoted ?? groups!.ownerBare;
+    const name = (groups!.nameQuoted ?? groups!.nameBare)!;
+    const mention = { owner: owner?.trim().toLowerCase() ?? null, name: name.trim().toLowerCase() };
+    seen.set(JSON.stringify(mention), mention);
+  }
+  return [...seen.values()];
+}
+
+/** Markdown nodes whose text is never prose: code, quotes of someone else, and raw HTML. */
+const NOT_PROSE = new Set(["code", "inlineCode", "blockquote", "html"]);
+
+/** Markdown nodes whose children run together on one line. */
+const INLINE = new Set(["paragraph", "heading", "emphasis", "strong", "link", "linkReference"]);
+
+/** The prose text of Markdown `node`, leaving out code and quotes; blocks and hard breaks start new lines. */
+function proseOf(node: Nodes): string {
+  if (NOT_PROSE.has(node.type)) return " ";
+  if (node.type === "text") return node.value;
+  if (node.type === "break") return "\n";
+  if (!("children" in node)) return "";
+  return node.children.map(proseOf).join(INLINE.has(node.type) ? "" : "\n");
+}
+
+/**
+ * The Agents `actor` means by each mention. `@owner/name` is that Owner's Agent of that name.
+ * `@name` is the writer's own Agent of that name if they have one, otherwise every other
+ * Owner's Agent of that name. The writer is the posting User, or the posting Agent's Owner;
+ * an Agent never means itself.
+ */
+function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, mentions: Mention[]): string[] {
+  const writerId = actingUser(actor).id;
+  const poster = actor.kind === "agent" ? actor.agent.id : null;
+  return mentions.flatMap(({ owner, name }) => {
+    const named = agents.filter((a) => a.agent.name.toLowerCase() === name && a.agent.id !== poster);
+    if (owner !== null) return named.filter((a) => a.owner.name.toLowerCase() === owner).map((a) => a.agent.id);
+    const own = named.filter((a) => a.owner.id === writerId);
+    return (own.length > 0 ? own : named).map((a) => a.agent.id);
+  });
 }
 
 /**
@@ -60,10 +118,9 @@ export async function markWaiting(
   at: Date,
 ): Promise<WaitingFor[]> {
   const agents = await listAgents(db, actingUser(actor).workspaceId);
-  const mentioned = new Set(mentionedNames(comment.body));
   const candidates: Record<WaitingReason, string[]> = {
     answer: answered ? [answered.agentId] : [],
-    mention: agents.filter((a) => mentioned.has(a.agent.name.toLowerCase())).map((a) => a.agent.id),
+    mention: mentionedAgents(agents, actor, mentionsIn(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;

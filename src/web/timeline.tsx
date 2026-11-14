@@ -227,7 +227,7 @@ function CommentForm(props: {
   );
   return (
     <form className="comment-form" onSubmit={send.submit}>
-      <TextArea label={props.label} value={body} onChange={setBody} rows={3} placeholder="Markdown; @name mentions an Agent" />
+      <TextArea label={props.label} value={body} onChange={setBody} rows={3} placeholder='Markdown; @name, @owner/name or @"name with spaces" mentions an Agent' />
       {send.error && <p className="error" role="alert">{send.error}</p>}
       <div className="actions">
         <button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</button>

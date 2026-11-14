@@ -217,13 +217,19 @@ export async function startInstalledCronk(workspaceName = "Acme"): Promise<{ cro
 
 /**
  * Has `admin` invite `email` and accepts the invitation on a new client, which is
- * returned signed in. The name is the email's local part and the password is fixed.
+ * returned signed in. The name defaults to the email's local part and the password is fixed.
  */
-export async function joinAs(cronk: Cronk, admin: Client, email: string, role: "admin" | "member" = "member"): Promise<Client> {
+export async function joinAs(
+  cronk: Cronk,
+  admin: Client,
+  email: string,
+  role: "admin" | "member" = "member",
+  name = email.split("@")[0],
+): Promise<Client> {
   const invited = await admin.post("/api/invitations", { email, role });
   if (invited.status !== 201) throw new Error(`Inviting ${email} failed: ${JSON.stringify(invited.body)}`);
   const client = cronk.client();
-  const accepted = await client.post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: email.split("@")[0], password: memberPassword });
+  const accepted = await client.post(`/api/invitations/by-token/${invited.body.token}/accept`, { name, password: memberPassword });
   if (accepted.status !== 201) throw new Error(`Accepting ${email} failed: ${JSON.stringify(accepted.body)}`);
   return client;
 }

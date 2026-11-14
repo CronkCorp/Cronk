@@ -32,3 +32,9 @@ export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
  */
 export const WAITING_REASONS = ["answer", "mention", "comment"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
+
+/** How a Comment @mentions an Agent, for the API's and the MCP tools' descriptions. */
+export const MENTION_SYNTAX =
+  "`@name` mentions the writer's own Agent of that name (for an Agent, its Owner's), or else every other Owner's Agent " +
+  'of that name; `@owner/name` picks another Owner\'s Agent; quote names with spaces, as in `@"claude laptop"` or ' +
+  '`@"Ada Lovelace"/codex`. Mentions inside code and block quotes don\'t count.';

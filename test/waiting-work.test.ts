@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startSession, type Cronk } from "./harness.js";
 
 describe("Work waiting for an Agent", () => {
   it("includes a Comment on a Ticket delegated to it, in the welcome of its next Agent Session only", async () => {
@@ -25,7 +25,7 @@ describe("Work waiting for an Agent", () => {
 });
 
 describe("An @mention of an Agent", () => {
-  it("marks the Comment waiting for every Agent of that name, ignoring case, that can see where it was posted", async () => {
+  it("waits for the writer's own Agent of that name, ignoring case, and not other Owners' Agents of that name", async () => {
     const { cronk, admin } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const codex = await registerAgent(admin, "Codex");
@@ -34,11 +34,88 @@ describe("An @mention of an Agent", () => {
 
     const posted = (await admin.post(`/api/documents/${doc.id}/comments`, { body: "@codex, can you check this? cc @nobody, mail@codex.dev" })).body.comment;
 
-    for (const agent of [codex, bobsCodex]) {
-      expect((await cronk.client(agent.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([
-        { reason: "mention", comment: posted, ticket: null, document: { id: doc.id, title: "Design" } },
-      ]);
+    expect(await waitingWork(cronk, codex)).toEqual([{ reason: "mention", comment: posted, ticket: null, document: { id: doc.id, title: "Design" } }]);
+    expect(await waitingWork(cronk, bobsCodex)).toEqual([]);
+  });
+
+  it("falls back to other Owners' Agents of that name when the writer has none", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const bobsCodex = await registerAgent(bob, "codex");
+    const carolsCodex = await registerAgent(carol, "codex");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "@codex, look." });
+
+    expect(await mentionedIn(cronk, bobsCodex)).toEqual(["@codex, look."]);
+    expect(await mentionedIn(cronk, carolsCodex)).toEqual(["@codex, look."]);
+  });
+
+  it("from an Agent, means its Owner's other Agents first, and other Owners' Agents of its own name", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
+    const bobsCodex = await registerAgent(bob, "codex");
+
+    await codex.post("/api/tickets/CRONK-1/comments", { body: "@codex, can you review?" });
+
+    expect(await mentionedIn(cronk, bobsCodex)).toEqual(["@codex, can you review?"]);
+  });
+
+  it("picks another Owner's Agent with @owner/name, the Owner by name ignoring case", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const codex = await registerAgent(admin, "codex");
+    const bobsCodex = await registerAgent(bob, "codex");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "@Bob/codex, look." });
+
+    expect(await mentionedIn(cronk, bobsCodex)).toEqual(["@Bob/codex, look."]);
+    expect(await mentionedIn(cronk, codex)).toEqual([]);
+  });
+
+  it("takes names that contain spaces in quotes, for the Agent and for its Owner", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const laptop = await registerAgent(admin, "claude laptop");
+    const bob = await joinAs(cronk, admin, "bob@example.com", "member", "Bob Smith");
+    const bobsDesktop = await registerAgent(bob, "claude desktop");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: `@"Claude Laptop" and @"bob smith"/"claude desktop", look.` });
+
+    expect(await mentionedIn(cronk, laptop)).toHaveLength(1);
+    expect(await mentionedIn(cronk, bobsDesktop)).toHaveLength(1);
+  });
+
+  it("takes bare names in any script, and mentions that start a line after a hard break", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const zoe = await joinAs(cronk, admin, "zoe@example.com", "member", "Zoë");
+    const zoesCodex = await registerAgent(zoe, "codex");
+    const zoesHelper = await registerAgent(zoe, "hëlper");
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Thanks  \n@zoë/codex" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Thanks\\\n@hëlper" });
+
+    expect(await mentionedIn(cronk, zoesCodex)).toEqual(["Thanks  \n@zoë/codex"]);
+    expect(await mentionedIn(cronk, zoesHelper)).toEqual(["Thanks\\\n@hëlper"]);
+  });
+
+  it("doesn't count mentions inside code spans, code blocks or block quotes", async () => {
+    const { cronk, admin } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+
+    for (const body of [
+      "Run `@codex review` later.",
+      "```\n@codex review\n```",
+      "~~~sh\nnotify @codex\n~~~",
+      "Example:\n\n    @codex review",
+      "> @codex said this was fine.",
+      "> quoting\n> - @codex in a list",
+    ]) {
+      await admin.post("/api/tickets/CRONK-1/comments", { body });
     }
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "> quoted\n\nBut **@codex**, look." });
+
+    expect(await mentionedIn(cronk, codex)).toEqual(["> quoted\n\nBut **@codex**, look."]);
   });
 
   it("leaves out Agents that can't see where it was posted", async () => {
@@ -52,6 +129,16 @@ describe("An @mention of an Agent", () => {
     expect((await cronk.client(bobsCodex.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);
   });
 });
+
+/** The work waiting for `agent`, from the welcome of a new Agent Session. */
+async function waitingWork(cronk: Cronk, agent: { secret: string }) {
+  return (await cronk.client(agent.secret).post("/api/agent-sessions")).body.welcome.waitingWork;
+}
+
+/** The bodies of the Comments waiting for `agent` because they @mention it. */
+async function mentionedIn(cronk: Cronk, agent: { secret: string }): Promise<string[]> {
+  return (await waitingWork(cronk, agent)).filter((w: { reason: string }) => w.reason === "mention").map((w: { comment: { body: string } }) => w.comment.body);
+}
 
 describe("An answer to an Agent's question", () => {
   it("waits for the Agent that asked, as an answer", async () => {
