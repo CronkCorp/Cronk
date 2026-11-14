@@ -708,20 +708,17 @@ const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "
 /** The Activities Agent Sessions logged on a Ticket, oldest first, kept up to date as new ones arrive. */
 function ActivityTimeline(props: { ticketKey: string }) {
   const [activities, reload] = useLoad(() => api.activities(props.ticketKey), [props.ticketKey]);
-  // Activities pushed since the stream last connected; the list loaded after that may or may not hold them yet.
+  // Activities pushed while this page is open; the list, loaded at any point, may or may not hold them yet.
   const [arrived, setArrived] = useState<Activity[]>([]);
-  useEffect(
-    () =>
-      watchTicket(props.ticketKey, {
-        // On every (re)connect, load the list again in case Activities were logged while the stream was away.
-        ready: () => {
-          setArrived([]);
-          reload();
-        },
-        on: { activity: ({ activity }: { activity: Activity }) => setArrived((list) => [...list, activity]) },
-      }),
-    [props.ticketKey],
-  );
+  useEffect(() => {
+    setArrived([]);
+    return watchTicket(props.ticketKey, {
+      // Load the list again once watching, and on every reconnect, so nothing logged before the stream was
+      // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
+      ready: reload,
+      on: { activity: ({ activity }: { activity: Activity }) => setArrived((list) => [...list, activity]) },
+    });
+  }, [props.ticketKey]);
   const withArrived = (loaded: Activity[]) => {
     const known = new Set(loaded.map((a) => a.id));
     return [...loaded, ...arrived.filter((a) => !known.has(a.id))];
