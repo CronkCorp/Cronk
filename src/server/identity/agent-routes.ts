@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
+import { endAgentSessionsOf, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
 import { nameSchema } from "../schemas.js";
 import { requireAdmin } from "./access.js";
 import {
@@ -22,7 +23,7 @@ const agentBody = { type: "object", required: ["name"], additionalProperties: fa
 
 export function agentRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    // Each User's own Agents; with `all`, an Admin sees every User's.
+    // Each User's own Agents with their live Agent Sessions; with `all`, an Admin sees every User's.
     app.get<{ Querystring: { all?: boolean } }>(
       "/api/agents",
       { schema: { querystring: { type: "object", properties: { all: { type: "boolean" } } } } },
@@ -30,7 +31,10 @@ export function agentRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");
         const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id);
-        return { agents: agents.map((a) => publicAgent(a.agent, a.owner)) };
+        const sessions = await liveAgentSessions(ctx.db, agents.map((a) => a.agent.id), ctx.clock.now());
+        return {
+          agents: agents.map((a) => ({ ...publicAgent(a.agent, a.owner), sessions: sessions.get(a.agent.id)!.map(publicAgentSession) })),
+        };
       },
     );
 
@@ -54,7 +58,11 @@ export function agentRoutes(ctx: AppContext) {
 
     app.delete<{ Params: { id: string } }>("/api/agents/:id", { schema: { params: agentParams } }, async (request, reply) => {
       const user = await requireUser(ctx, request);
-      await transaction(ctx.db, async (tx) => removeAgent(tx, await ownAgent(ctx, user, request.params.id), ctx.clock.now()));
+      await transaction(ctx.db, async (tx) => {
+        const agent = await ownAgent(ctx, user, request.params.id);
+        await removeAgent(tx, agent, ctx.clock.now());
+        await endAgentSessionsOf(tx, agent.id, ctx.clock.now());
+      });
       return reply.code(204).send();
     });
 

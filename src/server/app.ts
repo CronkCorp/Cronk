@@ -6,7 +6,9 @@ import type { Clock } from "./clock.js";
 import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { publicRoute } from "./schemas.js";
+import { coordinationRoutes } from "./coordination/routes.js";
 import { agentRoutes } from "./identity/agent-routes.js";
+import { mcpRoutes } from "./mcp/server.js";
 import { identityRoutes } from "./identity/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
@@ -76,6 +78,8 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
+  await app.register(coordinationRoutes(ctx));
+  await app.register(mcpRoutes(ctx));
 
   const webRoot = opts.config.webRoot;
   if (webRoot) await app.register(staticFiles, { root: webRoot });

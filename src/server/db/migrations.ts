@@ -193,4 +193,25 @@ export const migrations: Migration[] = [
       ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_agent CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL));
     `,
   },
+  {
+    id: "0007_agent_sessions",
+    sql: `
+      -- How long an Agent Session may stay silent before it ends (and, later, its Claims lapse).
+      ALTER TABLE workspaces ADD COLUMN silence_threshold_seconds integer NOT NULL DEFAULT 300 CHECK (silence_threshold_seconds > 0);
+
+      -- One continuous connection of an Agent, over MCP. It is live until it is ended or stays
+      -- silent longer than its Workspace's silence threshold; every call in it refreshes last_seen_at.
+      CREATE TABLE agent_sessions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        started_at timestamptz NOT NULL,
+        last_seen_at timestamptz NOT NULL,
+        ended_at timestamptz
+      );
+      CREATE INDEX agent_sessions_open ON agent_sessions (agent_id) WHERE ended_at IS NULL;
+
+      -- A change an Agent made in an Agent Session records the Session too.
+      ALTER TABLE ticket_changes ADD COLUMN actor_session_id uuid REFERENCES agent_sessions(id);
+    `,
+  },
 ];

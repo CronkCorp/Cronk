@@ -1,12 +1,16 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { userActor, type Actor } from "./actor.js";
 import type { Clock } from "./clock.js";
+import { touchAgentSession } from "./coordination/agent-sessions.js";
 import type { Database } from "./db/database.js";
 import { agentForToken } from "./identity/agents.js";
 import { userForSignIn } from "./identity/sign-ins.js";
 import type { User } from "./identity/users.js";
 
 export const SIGN_IN_COOKIE = "cronk_sign_in";
+
+/** The header an Agent sends to make a call within one of its live Agent Sessions. */
+export const AGENT_SESSION_HEADER = "cronk-agent-session";
 
 /** What every route module needs from the running application. */
 export interface AppContext {
@@ -26,14 +30,20 @@ export class HttpError extends Error {
 
 /**
  * Who is making the request, or a 401: the Agent whose token is sent as
- * `Authorization: Bearer <token>`, or else the signed-in User.
+ * `Authorization: Bearer <token>`, or else the signed-in User. An Agent that also
+ * sends the Cronk-Agent-Session header calls within that Agent Session, which the
+ * call refreshes; a Session that isn't the Agent's or has ended answers 410.
  */
 export async function requireActor(ctx: AppContext, request: FastifyRequest): Promise<Actor> {
   const bearer = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
   if (bearer) {
     const found = await agentForToken(ctx.db, bearer);
     if (!found) throw new HttpError(401, "This token is unknown or was revoked");
-    return { kind: "agent", ...found };
+    const sessionId = request.headers[AGENT_SESSION_HEADER];
+    if (typeof sessionId !== "string") return { kind: "agent", session: null, ...found };
+    const session = await touchAgentSession(ctx.db, found.agent.id, sessionId, ctx.clock.now());
+    if (!session) throw new HttpError(410, "This Agent Session has ended; start a new one");
+    return { kind: "agent", session, ...found };
   }
   const token = request.cookies[SIGN_IN_COOKIE];
   const user = token ? await userForSignIn(ctx.db, ctx.clock, token) : undefined;
