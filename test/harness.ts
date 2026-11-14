@@ -4,6 +4,8 @@ import { inject, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/server/app.js";
 import type { Clock } from "../src/server/clock.js";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 /** A clock tests control. Starts at a fixed instant and only moves when told to. */
 export class FakeClock implements Clock {
@@ -30,6 +32,7 @@ export class Client {
   constructor(
     private readonly cronk: Cronk,
     private readonly token?: string,
+    private readonly headers: Record<string, string> = {},
   ) {}
 
   get<T = any>(path: string) {
@@ -53,7 +56,7 @@ export class Client {
     const res = await this.cronk.app.inject({
       method,
       url,
-      headers: { ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      headers: { ...this.headers, ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {
@@ -68,8 +71,8 @@ export class Client {
 export interface Cronk {
   app: FastifyInstance;
   clock: FakeClock;
-  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given. */
-  client(token?: string): Client;
+  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given, and any extra `headers`. */
+  client(token?: string, headers?: Record<string, string>): Client;
   /** Stops the application and starts it again on the same database. */
   restart(): Promise<void>;
   /**
@@ -77,6 +80,8 @@ export interface Cronk {
    * it restarts, and waits until they are gone.
    */
   terminateConnections(): Promise<void>;
+  /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
+  url(): Promise<string>;
 }
 
 /**
@@ -99,10 +104,11 @@ export async function startCronk(): Promise<Cronk> {
   const cronk: Cronk = {
     app: await start(),
     clock,
-    client: (token?: string) => new Client(cronk, token),
+    client: (token?: string, headers?: Record<string, string>) => new Client(cronk, token, headers),
     restart: async () => {
       await cronk.app.close();
       cronk.app = await start();
+      listening = undefined;
     },
     terminateConnections: async () => {
       const admin = new pg.Client({ connectionString: adminUrl });
@@ -122,7 +128,9 @@ export async function startCronk(): Promise<Cronk> {
       // Give the server's clients a moment to read the termination notice.
       await new Promise((resolve) => setTimeout(resolve, 50));
     },
+    url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
+  let listening: Promise<string> | undefined;
 
   onTestFinished(async () => {
     await cronk.app.close();
@@ -167,11 +175,46 @@ export const memberPassword = "member password";
  * client calling the API as that Agent.
  */
 export async function agentOf(cronk: Cronk, owner: Client, name: string, opts: { readOnly?: boolean } = {}): Promise<Client> {
+  return cronk.client((await registerAgent(owner, name, opts)).secret);
+}
+
+/** Has `owner` register an Agent called `name` and issue it a token; returns the Agent's id, the token's id and its secret. */
+export async function registerAgent(
+  owner: Client,
+  name: string,
+  opts: { readOnly?: boolean } = {},
+): Promise<{ agentId: string; tokenId: string; secret: string }> {
   const agent = await owner.post("/api/agents", { name });
   if (agent.status !== 201) throw new Error(`Registering ${name} failed: ${JSON.stringify(agent.body)}`);
   const issued = await owner.post(`/api/agents/${agent.body.agent.id}/tokens`, { readOnly: opts.readOnly ?? false });
   if (issued.status !== 201) throw new Error(`Issuing a token for ${name} failed: ${JSON.stringify(issued.body)}`);
-  return cronk.client(issued.body.secret);
+  return { agentId: agent.body.agent.id, tokenId: issued.body.token.id, secret: issued.body.secret };
+}
+
+/** An MCP connection to Cronk, made by a real MCP client over streamable HTTP. */
+export interface McpConnection {
+  client: McpClient;
+  transport: StreamableHTTPClientTransport;
+  /** Disconnects as a well-behaved client does: ends the MCP session, then closes. */
+  disconnect(): Promise<void>;
+}
+
+/** Connects a real MCP client to Cronk's MCP endpoint with `token`; closed when the test ends. */
+export async function connectMcp(cronk: Cronk, token: string): Promise<McpConnection> {
+  const transport = new StreamableHTTPClientTransport(new URL("/mcp", await cronk.url()), {
+    requestInit: { headers: { authorization: `Bearer ${token}` } },
+  });
+  const client = new McpClient({ name: "cronk-tests", version: "0.0.0" });
+  await client.connect(transport);
+  onTestFinished(() => client.close());
+  return {
+    client,
+    transport,
+    disconnect: async () => {
+      await transport.terminateSession();
+      await client.close();
+    },
+  };
 }
 
 /** Creates a Project named after its key, with `count` Tickets titled "Ticket 1", "Ticket 2", … */
