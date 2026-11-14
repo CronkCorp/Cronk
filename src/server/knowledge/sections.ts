@@ -212,12 +212,21 @@ function pair(p: Pairing, i: number, j: number): void {
 /** The indexes of a side's sections not paired yet, in order, never the preamble. */
 const unpaired = (s: PairingSide) => s.chunks.map((_, k) => k).filter((k) => k > 0 && !s.paired.has(k));
 
+/** A side keyed against the base by content and heading, with what is left to key once the other side is too. */
+interface SidePairing {
+  /** The keys of the base sections this side still has. */
+  kept: Set<string>;
+  /** Keys this side's remaining sections, given the base sections the other side still has. */
+  keyRest(keptByOther: Set<string>): void;
+}
+
 /**
  * Keys `base` by position, then keys each section of `side` after the base section it came from,
  * pass by pass, each pairing only what earlier passes left: `pairInOrder`, `pairMovedByHeading`,
- * `pairMovedByRename`, then `pairEmptyBySlot`. Sections `side` added are keyed by `keyAdded`.
+ * then `pairMovedByRename`. Once the other side is keyed too, `keyRest` runs `pairEmptyBySlot`,
+ * which needs to know which base sections the other side still has, then `keyAdded`.
  */
-function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
+function keyAgainstBase(base: Chunk[], side: Chunk[]): SidePairing {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
   const boilerplate = boilerplateIn(base);
@@ -229,8 +238,12 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   pairInOrder(p);
   pairMovedByHeading(p);
   pairMovedByRename(p);
-  pairEmptyBySlot(p);
-  keyAdded(p.side);
+  const kept = new Set([...p.base.paired].map((i) => base[i]!.key));
+  const keyRest = (keptByOther: Set<string>) => {
+    pairEmptyBySlot(p, keptByOther);
+    keyAdded(p.side);
+  };
+  return { kept, keyRest };
 }
 
 /** Pairs sections by the best-scoring alignment that keeps both sides' orders, preambles excluded. */
@@ -274,13 +287,15 @@ function pairMovedByRename(p: Pairing): void {
 
 /**
  * Pairs a renamed empty section, which has no content to pair on, when it is the only empty section
- * of its level, on each side, between the same two paired sections.
+ * of its level, on each side, between the same two paired sections. When the other side no longer
+ * has that base section, it was removed (or replaced) there: the empty section is left to read as
+ * added, not renamed.
  */
-function pairEmptyBySlot(p: Pairing): void {
+function pairEmptyBySlot(p: Pairing, keptByOther: Set<string>): void {
   const [emptyBase, emptySide] = [emptySlots(p.base), emptySlots(p.side)];
   for (const s of emptySide) {
     const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
-    if (bases.length === 1 && sides.length === 1) pair(p, bases[0]!.k, s.k);
+    if (bases.length === 1 && sides.length === 1 && keptByOther.has(p.base.chunks[bases[0]!.k]!.key)) pair(p, bases[0]!.k, s.k);
   }
 }
 
@@ -402,8 +417,10 @@ export function mergeEdits(base: { title: string; body: string }, mine: { title:
 /** The sections of a three-way merge of bodies, in their merged order; see `mergeEdits`. */
 function mergeBodies(base: string, mine: string, theirs: string): MergedSection[] {
   const [b, m, t] = [base, mine, theirs].map(chunksOf) as [Chunk[], Chunk[], Chunk[]];
-  keyAgainstBase(b, m);
-  keyAgainstBase(b, t);
+  // A side's empty section reads as renamed only if the other side still has the base section it was.
+  const [mineKeyed, theirsKeyed] = [keyAgainstBase(b, m), keyAgainstBase(b, t)];
+  mineKeyed.keyRest(theirsKeyed.kept);
+  theirsKeyed.keyRest(mineKeyed.kept);
   const order = mergedOrder(...([b, m, t].map((chunks) => chunks.map((c) => c.key)) as [string[], string[], string[]]));
   if (!order) return [{ heading: null, text: null, conflict: sectionConflict(base, mine, theirs) }];
   const find = (chunks: Chunk[], key: string) => chunks.find((c) => c.key === key);
