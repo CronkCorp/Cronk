@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -41,6 +41,7 @@ export type SharedSchemaName =
   | "TicketRef"
   | "Relations"
   | "RecordedChange"
+  | "Activity"
   | "Document"
   | "DocumentTreeEntry"
   | "Version"
@@ -249,6 +250,19 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         ticket: ticketName,
       }),
     ],
+  },
+  Activity: {
+    description: "One timestamped entry an Agent Session wrote on a Ticket while holding its Claim.",
+    ...object({
+      id,
+      ticketKey: { type: "string" },
+      kind: { type: "string", enum: ACTIVITY_KINDS },
+      body: { type: "string", description: "Markdown." },
+      blocking: { type: "boolean", description: "True for a question the Agent waits on; only questions can be." },
+      at: timestamp,
+      agent: { ...object({ id, name: { type: "string" }, owner: named }), description: "The Agent, with the Owner it acts for." },
+      session: object({ id }),
+    }),
   },
   Document: {
     description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",

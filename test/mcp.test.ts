@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { McpConnection } from "./harness.js";
-import { connectMcp, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
 /** Calls a tool and returns its result: the API's answer parsed from the text, and whether it is an error. */
 async function callTool(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: any }> {
@@ -216,6 +216,38 @@ describe("working a delegated Ticket over MCP", () => {
     expect((await callTool(mcp, "tickets", { action: "release", key: "CRONK-1" })).isError).toBe(false);
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
     expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.claim.session.id).toBe(mcp.transport.sessionId);
+  });
+});
+
+describe("the activities tool", () => {
+  it("logs Activities and asks questions on the Ticket the Agent Session holds, and lists them", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect(await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "plan", body: "First" })).toEqual({
+      isError: true,
+      body: expect.stringContaining("Claim CRONK-1"),
+    });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const logged = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "plan", body: "First" });
+    expect(logged.body.activity).toMatchObject({ kind: "plan", body: "First", blocking: false, session: { id: mcp.transport.sessionId } });
+    await callTool(mcp, "activities", { action: "ask", key: "CRONK-1", body: "Postgres or SQLite?", blocking: true });
+    await callTool(mcp, "activities", { action: "ask", key: "CRONK-1", body: "Any naming preference?" });
+
+    const listed = await callTool(mcp, "activities", { action: "list", key: "CRONK-1" });
+    expect(listed.body.activities.map((a: { kind: string; blocking: boolean }) => [a.kind, a.blocking])).toEqual([
+      ["plan", false],
+      ["question", true],
+      ["question", false],
+    ]);
+    expect((await admin.get("/api/tickets/CRONK-1/activities")).body).toEqual(listed.body);
+  });
+
+  it("offers a read-only token only the list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "activities")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
   });
 });
 

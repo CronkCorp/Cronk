@@ -59,7 +59,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, findLiveClaim } from "../coordination/claims.js";
+import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
@@ -701,17 +701,6 @@ async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Tic
     throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
   }
   await requireClaimHolder(db, agent, ticket, now, "moving it");
-}
-
-/**
- * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409).
- * `refusedAction` completes the refusal "Claim CRONK-1 in your Agent Session before …", such as "moving it".
- */
-async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
-  const claim = await findLiveClaim(db, ticket.id, now);
-  if (!agent.session || claim?.session.id !== agent.session.id) {
-    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}`);
-  }
 }
 
 /** The Agent `id`, as a Ticket shows it, if it is one of `assignee`'s own; otherwise a 400. */

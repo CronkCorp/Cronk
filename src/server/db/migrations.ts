@@ -289,4 +289,24 @@ export const migrations: Migration[] = [
       CREATE UNIQUE INDEX IF NOT EXISTS guidance_versions_unique ON guidance_versions (workspace_id, project_id, version) NULLS NOT DISTINCT;
     `,
   },
+  {
+    id: "0011_activities",
+    sql: `
+      -- One timestamped entry an Agent Session writes on a Ticket while holding its Claim. Only a
+      -- question may be blocking. actor_user_id is the Agent's Owner, as history records it.
+      CREATE TABLE activities (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        seq bigserial NOT NULL,
+        ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        kind text NOT NULL CHECK (kind IN ('plan', 'progress', 'finding', 'question', 'error')),
+        body text NOT NULL,
+        blocking boolean NOT NULL DEFAULT false CHECK (NOT blocking OR kind = 'question'),
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid NOT NULL REFERENCES agents(id),
+        actor_session_id uuid NOT NULL REFERENCES agent_sessions(id)
+      );
+      CREATE INDEX activities_ticket ON activities (ticket_id, seq);
+    `,
+  },
 ];

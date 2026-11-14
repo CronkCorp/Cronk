@@ -21,3 +21,7 @@ export type Priority = (typeof PRIORITIES)[number];
  */
 export const RELATION_KINDS = ["blocks", "blocked_by", "relates_to"] as const;
 export type RelationKind = (typeof RELATION_KINDS)[number];
+
+/** The kinds of Activity an Agent Session logs on a Ticket it works on. Only a question may be blocking. */
+export const ACTIVITY_KINDS = ["plan", "progress", "finding", "question", "error"] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];

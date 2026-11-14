@@ -76,6 +76,16 @@ export async function touchAgentSession(db: Queryable, agentId: string, id: stri
   return rows[0] && toAgentSession(rows[0]);
 }
 
+/** The Agent's live Session `id`, without refreshing it; undefined if it has none such or it has ended. */
+export async function findLiveAgentSession(db: Queryable, agentId: string, id: string, now: Date): Promise<AgentSession | undefined> {
+  if (!UUID.test(id)) return undefined;
+  const { rows } = await db.query<AgentSessionRow>(
+    `SELECT s.*, w.silence_threshold_seconds FROM agent_sessions s ${WITH_WORKSPACE} WHERE s.id = $1 AND s.agent_id = $2 AND ${isLiveAt("$3")}`,
+    [id, agentId, now],
+  );
+  return rows[0] && toAgentSession(rows[0]);
+}
+
 /** Ends a Session now. */
 export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<void> {
   await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE id = $1 AND ended_at IS NULL", [id, now]);

@@ -1,6 +1,8 @@
+import type { AgentActor } from "../actor.js";
+import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
-import type { AgentRef } from "../work/tickets.js";
+import type { AgentRef, Ticket } from "../work/tickets.js";
 import { isLiveAt, WITH_WORKSPACE } from "./agent-sessions.js";
 
 /**
@@ -125,4 +127,15 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
     return id;
   }
   return undefined;
+}
+
+/**
+ * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409).
+ * `refusedAction` completes the refusal "Claim CRONK-1 in your Agent Session before …", such as "moving it".
+ */
+export async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
+  const claim = await findLiveClaim(db, ticket.id, now);
+  if (!agent.session || claim?.session.id !== agent.session.id) {
+    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}`);
+  }
 }

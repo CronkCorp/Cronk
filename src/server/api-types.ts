@@ -4,6 +4,7 @@
  * there as a type error. Types only: nothing here may reach the web bundle.
  */
 import type { publicAgentSession } from "./coordination/agent-sessions.js";
+import type { publicActivity } from "./coordination/activities.js";
 import type { Claim as StoredClaim } from "./coordination/claims.js";
 import type { welcome } from "./coordination/routes.js";
 import type { AgentToken as StoredAgentToken, issueAgentToken, publicAgent } from "./identity/agents.js";
@@ -29,7 +30,7 @@ export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
-export type { Priority, RelationKind, StatusCategory } from "../shared/values.js";
+export type { ActivityKind, Priority, RelationKind, StatusCategory } from "../shared/values.js";
 export type { RecordedActor, TicketName, TicketRef, UserRef };
 
 /** A value as JSON carries it: `Date`s arrive as ISO strings. */
@@ -84,6 +85,9 @@ export interface TicketDetail {
 }
 
 export type RecordedChange = Serialized<StoredRecordedChange>;
+
+/** One timestamped entry an Agent Session wrote on a Ticket while holding its Claim. */
+export type Activity = Serialized<ReturnType<typeof publicActivity>>;
 
 /** A Document at its current Version. */
 export type Document = Serialized<StoredDocument>;
