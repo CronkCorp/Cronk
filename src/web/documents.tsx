@@ -169,7 +169,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               }}
             />
           )}
-          {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} />}
+          {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} onOutdated={props.onReload} />}
           <div className="markdown" data-testid="document-body">
             {d.body.trim() ? <CronkMarkdown>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
           </div>
@@ -224,7 +224,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
             Merge their changes into yours below, then save again.
           </p>
           <div className="field">
-            <span>Version {theirs.number} (theirs)</span>
+            <span>Version {theirs.number} (theirs){theirs.title !== title && <>, titled “{theirs.title}”</>}</span>
             <pre className="theirs" aria-label={`Version ${theirs.number}`}>{theirs.body}</pre>
           </div>
           <div className="actions">
@@ -287,13 +287,23 @@ function MoveDocument(props: { document: Document; onMoved: (d: Document) => voi
 }
 
 /** A Document's Versions, newest first, each viewable and, but for the current one, restorable. */
-function Versions(props: { document: Document; canWrite: boolean; onRestored: (d: Document) => void }) {
+function Versions(props: { document: Document; canWrite: boolean; onRestored: (d: Document) => void; onOutdated: () => void }) {
   const d = props.document;
   const [versions] = useLoad(() => api.versions(d.id), [d.id, d.version]);
   const [viewing, setViewing] = useState<Version>();
   const view = useAction((number: number) => api.version(d.id, number), setViewing);
   const restore = useAction(
-    (number: number) => api.restoreVersion(d.id, number, d.version),
+    async (number: number) => {
+      try {
+        return await api.restoreVersion(d.id, number, d.version);
+      } catch (err) {
+        const current = staleVersionOf(err);
+        if (!current) throw err;
+        // Someone saved since this page loaded: show their Version before anyone restores over it.
+        props.onOutdated();
+        throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before restoring`);
+      }
+    },
     (restored) => {
       setViewing(undefined);
       props.onRestored(restored);
