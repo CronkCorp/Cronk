@@ -2,7 +2,19 @@ import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { answer, errors, nameSchema, noContent, pathParams, publicRoute, ref } from "../schemas.js";
+import {
+  answer,
+  errors,
+  holding,
+  listing,
+  nameSchema,
+  noContent,
+  pathParams,
+  publicRoute,
+  ref,
+  roleSchema,
+  userIdParam,
+} from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -22,9 +34,9 @@ const SETUP_LOCK = 0x7365747570;
 
 const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]+@[^@\\s]+$" } as const;
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
-const role = { type: "string", enum: ["admin", "member"] } as const;
+const role = roleSchema;
 
-const userAnswer = { type: "object", required: ["user"], properties: { user: ref("User") } } as const;
+const userAnswer = holding("user", "User");
 
 /** The path parameters of the routes anyone holding an invitation's token may call. */
 const invitationTokenParams = pathParams({ token: { type: "string", description: "The secret token the invitation was sent with." } });
@@ -158,11 +170,7 @@ export function identityRoutes(ctx: AppContext) {
       {
         schema: {
           response: {
-            200: answer("The Workspace's unexpired invitations, newest first", {
-              type: "object",
-              required: ["invitations"],
-              properties: { invitations: { type: "array", items: ref("Invitation") } },
-            }),
+            200: answer("The Workspace's unexpired invitations, newest first", listing("invitations", ref("Invitation"))),
             ...errors(401, 403),
           },
         },
@@ -264,11 +272,7 @@ export function identityRoutes(ctx: AppContext) {
       {
         schema: {
           response: {
-            200: answer("The Workspace's Users", {
-              type: "object",
-              required: ["users"],
-              properties: { users: { type: "array", items: ref("User") } },
-            }),
+            200: answer("The Workspace's Users", listing("users", ref("User"))),
             ...errors(401, 403),
           },
         },
@@ -284,7 +288,7 @@ export function identityRoutes(ctx: AppContext) {
       "/api/users/:id",
       {
         schema: {
-          params: pathParams({ id: { type: "string", format: "uuid", description: "The User's id." } }),
+          params: pathParams({ id: userIdParam }),
           body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
           response: { 200: answer("The changed User", userAnswer), ...errors(400, 401, 403, 404, 409) },
         },

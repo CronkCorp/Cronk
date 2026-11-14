@@ -1,4 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import { STATUS_CATEGORIES } from "./work/projects.js";
+import { RELATION_KINDS } from "./work/relations.js";
+import { PRIORITIES } from "./work/tickets.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -7,6 +10,12 @@ export const nameSchema = { type: "string", minLength: 1, maxLength: 200, patter
 
 /** Agent Access: the most Agents may do in a Project or the Workspace. */
 export const agentAccessSchema = { type: "string", enum: ["none", "read", "write"] } as const;
+
+/** A User's Role in the Workspace. */
+export const roleSchema = { type: "string", enum: ["admin", "member"] } as const;
+
+/** A User's access in a Project. */
+export const accessSchema = { type: "string", enum: ["read", "write"] } as const;
 
 /** Route schema for an operation anyone may call, signed in or not; the OpenAPI description lists no security for it. */
 export const publicRoute = { security: [] } as const;
@@ -38,6 +47,7 @@ export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
 
 const id = { type: "string", format: "uuid" } as const;
 const timestamp = { type: "string", format: "date-time" } as const;
+/** An object schema whose properties are all required, except those listed as `optional`. */
 const object = (properties: Record<string, object>, optional: string[] = []) => ({
   type: "object",
   required: Object.keys(properties).filter((p) => !optional.includes(p)),
@@ -48,7 +58,7 @@ const named = object({ id, name: { type: "string" } });
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
 /** Another Ticket as a Ticket's parent and history name it. */
 const ticketName = object({ key: { type: "string" }, title: { type: "string" } });
-const priority = { type: "string", enum: ["urgent", "high", "medium", "low", "none"] } as const;
+const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
 
 const sharedSchemas: Record<SharedSchemaName, object> = {
@@ -57,13 +67,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     id,
     email: { type: "string" },
     name: { type: "string" },
-    role: { type: "string", enum: ["admin", "member"] },
+    role: roleSchema,
     active: { type: "boolean", description: "False once an Admin has deactivated the User." },
   }),
   Invitation: object({
     id,
     email: { type: "string" },
-    role: { type: "string", enum: ["admin", "member"] },
+    role: roleSchema,
     createdAt: timestamp,
     expiresAt: timestamp,
   }),
@@ -80,12 +90,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     archived: { type: "boolean" },
     visibility: { type: "string", enum: ["open", "private"] },
     agentAccess: agentAccessSchema,
-    access: { type: "string", enum: ["read", "write"], description: "What the caller may do in the Project." },
+    access: { ...accessSchema, description: "What the caller may do in the Project." },
   }),
   Status: object({
     id,
     name: { type: "string" },
-    category: { type: "string", enum: ["backlog", "unstarted", "started", "in_review", "completed", "canceled"] },
+    category: { type: "string", enum: STATUS_CATEGORIES },
   }),
   Ticket: object({
     id,
@@ -125,7 +135,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
       change: {
         type: "string",
-        enum: ["created", "title", "description", "status", "priority", "labels", "assignee", "parent", "relation added", "relation removed"],
+        enum: [
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "parent"],
+          ...["relation added", "relation removed"],
+        ],
       },
     }),
     anyOf: [
@@ -138,7 +151,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
-        kind: { type: "string", enum: ["blocks", "blocked_by", "relates_to"] },
+        kind: { type: "string", enum: RELATION_KINDS },
         ticket: ticketName,
       }),
     ],
@@ -149,6 +162,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
 export function addSharedSchemas(app: FastifyInstance): void {
   for (const [name, schema] of Object.entries(sharedSchemas)) app.addSchema({ $id: name, ...schema });
 }
+
+/** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
+export const holding = (field: string, name: SharedSchemaName) => object({ [field]: ref(name) });
+
+/** A JSON body with one field listing items, such as `{ tickets: Ticket[] }`. */
+export const listing = (field: string, items: object) => object({ [field]: { type: "array", items } });
 
 /** A success answer with a JSON body. */
 export const answer = (description: string, schema: object) => ({ description, ...schema });
@@ -170,14 +189,14 @@ export const errors = (...codes: (keyof typeof ERROR_MEANINGS)[]) =>
   Object.fromEntries(codes.map((code) => [code, { description: ERROR_MEANINGS[code], ...ref("Error") }]));
 
 /** A route's path parameters; each is required, and each schema should say what it names. */
-export const pathParams = <P extends Record<string, { readonly type: string; readonly description: string }>>(properties: P) => ({
-  type: "object",
-  required: Object.keys(properties),
-  properties,
-});
+export const pathParams = <P extends Record<string, { readonly type: string; readonly description: string }>>(properties: P) =>
+  object(properties);
 
 /** A Project's key, such as `CRONK`, in any case. */
 export const projectKeyParam = { type: "string", description: "The Project's key, such as `CRONK`; any case." } as const;
+
+/** A User's id. */
+export const userIdParam = { type: "string", format: "uuid", description: "The User's id." } as const;
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;

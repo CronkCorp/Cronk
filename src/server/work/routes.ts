@@ -2,16 +2,19 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import {
+  accessSchema,
   agentAccessSchema,
   answer,
   errors,
+  holding,
+  listing,
   nameSchema,
   noContent,
   pathParams,
   projectKeyParam,
   ref,
   ticketKeyParam,
-  type SharedSchemaName,
+  userIdParam,
 } from "../schemas.js";
 import { actingUser, userActor, type Actor } from "../actor.js";
 import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
@@ -75,21 +78,8 @@ const projectParams = pathParams({ key: projectKeyParam });
 const statusParams = pathParams({ key: projectKeyParam, statusId: { type: "string", description: "The Status's id." } });
 const ticketParams = pathParams({ key: ticketKeyParam });
 
-/** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
-const holding = (field: string, name: SharedSchemaName) => ({ type: "object", required: [field], properties: { [field]: ref(name) } });
-/** A JSON body with one field listing a shared shape, such as `{ tickets: Ticket[] }`. */
-const listing = (field: string, items: object) => ({
-  type: "object",
-  required: [field],
-  properties: { [field]: { type: "array", items } },
-});
-
 /** A User listed in a Project, with their access there. */
-const member = {
-  type: "object",
-  required: ["user", "access"],
-  properties: { user: ref("User"), access: { type: "string", enum: ["read", "write"] } },
-} as const;
+const member = { type: "object", required: ["user", "access"], properties: { user: ref("User"), access: accessSchema } } as const;
 
 /** Filters for a Project's Ticket list; each may be repeated to match any of several values. */
 interface TicketQuery {
@@ -223,7 +213,7 @@ export function workRoutes(ctx: AppContext) {
 
     const memberParams = pathParams({
       key: projectKeyParam,
-      userId: { type: "string", format: "uuid", description: "The User's id." },
+      userId: userIdParam,
     });
 
     app.put<{ Params: { key: string; userId: string }; Body: { access: Access } }>(
@@ -235,7 +225,7 @@ export function workRoutes(ctx: AppContext) {
             type: "object",
             required: ["access"],
             additionalProperties: false,
-            properties: { access: { type: "string", enum: ["read", "write"] } },
+            properties: { access: accessSchema },
           },
           response: {
             200: answer("The User's access in the Project", { type: "object", required: ["member"], properties: { member } }),
@@ -421,7 +411,10 @@ export function workRoutes(ctx: AppContext) {
         schema: {
           params: projectParams,
           response: {
-            200: answer("The Labels on the Project's Tickets, alphabetically, one per spelling ignoring case", listing("labels", { type: "string" })),
+            200: answer(
+              "The Labels on the Project's Tickets, alphabetically, one per spelling ignoring case",
+              listing("labels", { type: "string" }),
+            ),
             ...errors(401, 404),
           },
         },
@@ -612,7 +605,10 @@ export function workRoutes(ctx: AppContext) {
         schema: {
           params: ticketParams,
           response: {
-            200: answer("The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see", listing("changes", ref("RecordedChange"))),
+            200: answer(
+              "The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see",
+              listing("changes", ref("RecordedChange")),
+            ),
             ...errors(401, 404),
           },
         },

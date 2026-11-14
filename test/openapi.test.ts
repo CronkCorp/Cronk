@@ -55,7 +55,8 @@ describe("the OpenAPI description", () => {
     const body = (path: string, method: string, code: string) => doc.paths[path][method].responses[code].content["application/json"].schema;
     expect(body("/api/tickets/{key}", "get", "200").properties.ticket).toEqual({ $ref: "#/components/schemas/Ticket" });
     expect(body("/api/projects", "get", "200").properties.projects.items).toEqual({ $ref: "#/components/schemas/Project" });
-    expect(body("/api/tickets/{key}/history", "get", "200").properties.changes.items).toEqual({ $ref: "#/components/schemas/RecordedChange" });
+    const history = body("/api/tickets/{key}/history", "get", "200");
+    expect(history.properties.changes.items).toEqual({ $ref: "#/components/schemas/RecordedChange" });
     expect(body("/api/agents", "post", "201").properties.agent).toEqual({ $ref: "#/components/schemas/Agent" });
     expect(body("/api/workspace", "get", "200")).toEqual({ $ref: "#/components/schemas/Workspace" });
   });

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { answer, errors, nameSchema, noContent, pathParams, ref } from "../schemas.js";
+import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
 import { requireAdmin } from "./access.js";
 import {
   findAgent,
@@ -19,7 +19,7 @@ import type { User } from "./users.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
 const agentParams = pathParams({ id: agentId });
-const agentAnswer = { type: "object", required: ["agent"], properties: { agent: ref("Agent") } } as const;
+const agentAnswer = holding("agent", "Agent");
 const agentBody = { type: "object", required: ["name"], additionalProperties: false, properties: { name: nameSchema } } as const;
 
 export function agentRoutes(ctx: AppContext) {
@@ -31,11 +31,7 @@ export function agentRoutes(ctx: AppContext) {
         schema: {
           querystring: { type: "object", properties: { all: { type: "boolean" } } },
           response: {
-            200: answer("The Agents, by Owner then name", {
-              type: "object",
-              required: ["agents"],
-              properties: { agents: { type: "array", items: ref("Agent") } },
-            }),
+            200: answer("The Agents, by Owner then name", listing("agents", ref("Agent"))),
             ...errors(400, 401, 403),
           },
         },
@@ -102,11 +98,7 @@ export function agentRoutes(ctx: AppContext) {
         schema: {
           params: agentParams,
           response: {
-            200: answer("The Agent's tokens, oldest first, without their secrets", {
-              type: "object",
-              required: ["tokens"],
-              properties: { tokens: { type: "array", items: ref("AgentToken") } },
-            }),
+            200: answer("The Agent's tokens, oldest first, without their secrets", listing("tokens", ref("AgentToken"))),
             ...errors(400, 401, 403, 404),
           },
         },
