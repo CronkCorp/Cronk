@@ -12,11 +12,11 @@ const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } a
 /** A Document's Markdown. */
 const body = { type: "string", maxLength: 1_000_000 } as const;
 
-/** The Version a save is based on; it must be the Document's current one (ADR 0009). */
+/** The Version a save or delete is based on; it must be the Document's current one (ADR 0009). */
 const baseVersion = {
   type: "integer",
   minimum: 1,
-  description: "The number of the Version this save is based on. The save is refused if it is no longer the current Version.",
+  description: "The number of the Version this write is based on. The write is refused if it is no longer the current Version.",
 } as const;
 
 const staleVersionAnswer = {
@@ -163,7 +163,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
-          await requireCurrent(tx, current, request.body.baseVersion);
+          await requireCurrent(tx, current, request.body.baseVersion, "save");
           return saveVersion(tx, current, {
             title: request.body.title?.trim() ?? current.title,
             body: request.body.body ?? current.body,
@@ -218,12 +218,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           querystring: {
             type: "object",
             required: ["baseVersion"],
-            properties: {
-              baseVersion: {
-                ...baseVersion,
-                description: "The number of the Version this delete is based on. The delete is refused if it is no longer the current Version.",
-              },
-            },
+            properties: { baseVersion },
           },
           response: {
             204: noContent("The Document and its Versions are deleted"),
@@ -300,7 +295,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           const earlier = await requireVersion(tx, current, request.params.number);
-          await requireCurrent(tx, current, request.body.baseVersion);
+          await requireCurrent(tx, current, request.body.baseVersion, "save");
           return saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
         });
         return { document };
@@ -321,14 +316,18 @@ async function requireVersion(db: Queryable, document: Document, number: string)
   return version;
 }
 
+/** What to do after a write is refused as stale, by the kind of write. */
+const AFTER_STALE = { save: "merge with it and save again", delete: "read it and delete again if you still mean to" } as const;
+
 /** Refuses a save or delete based on a Version that is no longer current, answering with the current Version. */
-async function requireCurrent(db: Queryable, document: Document, baseVersion: number, write: "save" | "delete" = "save"): Promise<void> {
+async function requireCurrent(db: Queryable, document: Document, baseVersion: number, write: keyof typeof AFTER_STALE): Promise<void> {
   if (baseVersion === document.version) return;
   const current = (await findVersion(db, document.id, document.version))!;
-  const next = write === "save" ? "merge with it and save again" : "read it and delete again if you still mean to";
-  throw new HttpError(409, `This ${write} is based on Version ${baseVersion}, but the Document is at Version ${document.version}; ${next}`, {
-    current,
-  });
+  throw new HttpError(
+    409,
+    `This ${write} is based on Version ${baseVersion}, but the Document is at Version ${document.version}; ${AFTER_STALE[write]}`,
+    { current },
+  );
 }
 
 /**
