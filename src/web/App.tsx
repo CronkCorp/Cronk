@@ -1,5 +1,8 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, type User } from "./api.js";
+import { Link, useLocation } from "./router.js";
+import { Field, messageOf, useSubmit } from "./ui.js";
+import { ProjectPage, ProjectsPage, TicketPage } from "./work.js";
 
 type State =
   | { kind: "loading" }
@@ -7,8 +10,6 @@ type State =
   | { kind: "setup" }
   | { kind: "signIn" }
   | { kind: "signedIn"; user: User };
-
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -44,25 +45,6 @@ export function App() {
   }
 }
 
-/** Runs a form submission, showing the API's error message if it is refused. */
-function useSubmit<T>(action: () => Promise<T>, onDone: (result: T) => void) {
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    try {
-      onDone(await action());
-    } catch (err) {
-      setError(messageOf(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { submit, error, busy };
-}
-
 function AuthCard(props: { title: string; intro?: string; children: ReactNode }) {
   return (
     <main className="auth">
@@ -73,21 +55,6 @@ function AuthCard(props: { title: string; intro?: string; children: ReactNode })
         {props.children}
       </div>
     </main>
-  );
-}
-
-function Field(props: { label: string; type?: string; value: string; onChange: (v: string) => void; autoComplete?: string; required?: boolean }) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <input
-        type={props.type ?? "text"}
-        value={props.value}
-        required={props.required ?? true}
-        autoComplete={props.autoComplete}
-        onChange={(e) => props.onChange(e.target.value)}
-      />
-    </label>
   );
 }
 
@@ -147,7 +114,9 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="workspace-name" data-testid="workspace-name">{workspaceName}</div>
+        <Link to="/" className="workspace-name">
+          <span data-testid="workspace-name">{workspaceName}</span>
+        </Link>
         <div className="topbar-right">
           {props.user.role === "admin" && (
             <button className="link" onClick={() => setRenaming(true)}>Workspace settings</button>
@@ -168,14 +137,21 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
             onCancel={() => setRenaming(false)}
           />
         ) : (
-          <div className="empty">
-            <h2>No Projects yet</h2>
-            <p className="muted">Projects, Tickets and Documents will appear here.</p>
-          </div>
+          <Page />
         )}
       </main>
     </div>
   );
+}
+
+/** The page for the current address. */
+function Page() {
+  const { path, search } = useLocation();
+  const project = /^\/projects\/([^/]+)$/.exec(path);
+  if (project) return <ProjectPage projectKey={decodeURIComponent(project[1]!)} view={search.get("view") === "board" ? "board" : "list"} />;
+  const ticket = /^\/tickets\/([^/]+)$/.exec(path);
+  if (ticket) return <TicketPage ticketKey={decodeURIComponent(ticket[1]!)} />;
+  return <ProjectsPage archived={path === "/archived"} />;
 }
 
 function RenameWorkspace(props: { current: string; onDone: (name: string) => void; onCancel: () => void }) {
