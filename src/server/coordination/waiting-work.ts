@@ -2,7 +2,8 @@ import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
-import { listAgents } from "../identity/agents.js";
+import { listAgents, type Agent } from "../identity/agents.js";
+import type { User } from "../identity/users.js";
 import { findCommentsByIds, publicComment, type Comment, type CommentOn } from "../conversation/comments.js";
 import { WAITING_REASONS, type WaitingReason } from "../../shared/values.js";
 
@@ -46,6 +47,18 @@ export function mentionedNames(body: string): string[] {
 }
 
 /**
+ * The Agents the writer `writerId` means by each mentioned name: their own Agent of that name
+ * if they have one, otherwise every other Owner's Agent of that name.
+ */
+function mentionedAgents(agents: { agent: Agent; owner: User }[], writerId: string, names: string[]): string[] {
+  return names.flatMap((name) => {
+    const named = agents.filter((a) => a.agent.name.toLowerCase() === name);
+    const own = named.filter((a) => a.owner.id === writerId);
+    return (own.length > 0 ? own : named).map((a) => a.agent.id);
+  });
+}
+
+/**
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the
  * Agent whose question it answers (`answered`), every Agent it @mentions by name, and the
  * Delegate of the Ticket it is on. Never for the Agent that posted it, and only for Agents
@@ -60,10 +73,9 @@ export async function markWaiting(
   at: Date,
 ): Promise<WaitingFor[]> {
   const agents = await listAgents(db, actingUser(actor).workspaceId);
-  const mentioned = new Set(mentionedNames(comment.body));
   const candidates: Record<WaitingReason, string[]> = {
     answer: answered ? [answered.agentId] : [],
-    mention: agents.filter((a) => mentioned.has(a.agent.name.toLowerCase())).map((a) => a.agent.id),
+    mention: mentionedAgents(agents, actingUser(actor).id, mentionedNames(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;
