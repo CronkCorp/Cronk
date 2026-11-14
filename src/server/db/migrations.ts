@@ -204,6 +204,8 @@ export const migrations: Migration[] = [
       CREATE TABLE agent_sessions (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         agent_id uuid NOT NULL REFERENCES agents(id),
+        -- The token that started it; revoking the token ends the Session.
+        token_id uuid REFERENCES agent_tokens(id) ON DELETE SET NULL,
         started_at timestamptz NOT NULL,
         last_seen_at timestamptz NOT NULL,
         ended_at timestamptz

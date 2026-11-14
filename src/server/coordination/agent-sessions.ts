@@ -38,18 +38,20 @@ export const publicAgentSession = (session: AgentSession) => ({
   endsIfSilentAt: session.endsIfSilentAt,
 });
 
-/** Joins a Session to its Workspace's silence threshold; `s` is the Session. */
-const WITH_THRESHOLD = `
+/** Joins a Session `s` to its Agent `a` and Workspace `w`, whose silence threshold decides whether it is live. */
+const WITH_WORKSPACE = `
   JOIN agents a ON a.id = s.agent_id JOIN workspaces w ON w.id = a.workspace_id`;
 
-/** SQL condition: the Session `s` is live at `$now`. */
-const isLive = (now: string) => `s.ended_at IS NULL AND s.last_seen_at > ${now}::timestamptz - make_interval(secs => w.silence_threshold_seconds)`;
+/** SQL condition: the Session `s`, joined by WITH_WORKSPACE, is live at the time in the parameter `nowParam`, such as `$2`. */
+const isLiveAt = (nowParam: string) =>
+  `s.ended_at IS NULL AND s.last_seen_at > ${nowParam}::timestamptz - make_interval(secs => w.silence_threshold_seconds)`;
 
-export async function startAgentSession(db: Queryable, agentId: string, now: Date): Promise<AgentSession> {
+/** Starts a live Session for the Agent whose token `tokenId` is. */
+export async function startAgentSession(db: Queryable, input: { agentId: string; tokenId: string; now: Date }): Promise<AgentSession> {
   const { rows } = await db.query<AgentSessionRow>(
-    `WITH s AS (INSERT INTO agent_sessions (agent_id, started_at, last_seen_at) VALUES ($1, $2, $2) RETURNING *)
-     SELECT s.*, w.silence_threshold_seconds FROM s ${WITH_THRESHOLD}`,
-    [agentId, now],
+    `WITH s AS (INSERT INTO agent_sessions (agent_id, token_id, started_at, last_seen_at) VALUES ($1, $2, $3, $3) RETURNING *)
+     SELECT s.*, w.silence_threshold_seconds FROM s ${WITH_WORKSPACE}`,
+    [input.agentId, input.tokenId, input.now],
   );
   return toAgentSession(rows[0]!);
 }
@@ -64,7 +66,7 @@ export async function touchAgentSession(db: Queryable, agentId: string, id: stri
   if (!UUID.test(id)) return undefined;
   const { rows } = await db.query<AgentSessionRow>(
     `UPDATE agent_sessions s SET last_seen_at = $3 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
-     WHERE a.id = s.agent_id AND s.id = $1 AND s.agent_id = $2 AND ${isLive("$3")}
+     WHERE a.id = s.agent_id AND s.id = $1 AND s.agent_id = $2 AND ${isLiveAt("$3")}
      RETURNING s.*, w.silence_threshold_seconds`,
     [id, agentId, now],
   );
@@ -76,6 +78,11 @@ export async function endAgentSession(db: Queryable, id: string, now: Date): Pro
   await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE id = $1 AND ended_at IS NULL", [id, now]);
 }
 
+/** Ends every Session a token started, as when it is revoked. */
+export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<void> {
+  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE token_id = $1 AND ended_at IS NULL", [tokenId, now]);
+}
+
 /** Ends every Session of an Agent, as when it is removed. */
 export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<void> {
   await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE agent_id = $1 AND ended_at IS NULL", [agentId, now]);
@@ -84,8 +91,8 @@ export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Da
 /** The live Sessions of each of these Agents, oldest first. */
 export async function liveAgentSessions(db: Queryable, agentIds: string[], now: Date): Promise<Map<string, AgentSession[]>> {
   const { rows } = await db.query<AgentSessionRow>(
-    `SELECT s.*, w.silence_threshold_seconds FROM agent_sessions s ${WITH_THRESHOLD}
-     WHERE s.agent_id = ANY($1::uuid[]) AND ${isLive("$2")} ORDER BY s.started_at, s.id`,
+    `SELECT s.*, w.silence_threshold_seconds FROM agent_sessions s ${WITH_WORKSPACE}
+     WHERE s.agent_id = ANY($1::uuid[]) AND ${isLiveAt("$2")} ORDER BY s.started_at, s.id`,
     [agentIds, now],
   );
   const byAgent = new Map<string, AgentSession[]>(agentIds.map((id) => [id, []]));

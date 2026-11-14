@@ -13,6 +13,8 @@ export type AgentActor = { kind: "agent"; session: AgentSession | null } & Agent
 
 /** What an Agent token stands for: the Agent, its Owner, and whether the token is read-only. */
 export interface AgentCredential {
+  /** The token's id. */
+  tokenId: string;
   agent: Agent;
   owner: User;
   readOnly: boolean;

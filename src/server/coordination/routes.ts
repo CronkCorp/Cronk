@@ -23,7 +23,7 @@ export function coordinationRoutes(ctx: AppContext) {
     // Starts an Agent Session and returns it with the welcome the Agent gets on connecting.
     app.post("/api/agent-sessions", async (request, reply) => {
       const agent = requireAgent(await requireActor(ctx, request));
-      const session = await startAgentSession(ctx.db, agent.agent.id, ctx.clock.now());
+      const session = await startAgentSession(ctx.db, { agentId: agent.agent.id, tokenId: agent.tokenId, now: ctx.clock.now() });
       return reply.code(201).send({ session: publicAgentSession(session), welcome: await welcome(ctx, agent) });
     });
 

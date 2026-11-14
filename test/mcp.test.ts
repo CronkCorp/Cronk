@@ -58,6 +58,28 @@ describe("the MCP endpoint", () => {
     const mcp = await connectMcp(cronk, claude.secret);
     await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`);
     await expect(mcp.client.ping()).rejects.toMatchObject({ code: 401 });
+    expect((await admin.get("/api/agents")).body.agents[0].sessions).toEqual([]);
+  });
+
+  it("ends an Agent Session it no longer holds, as after a restart, when its client comes back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const mcp = await connectMcp(cronk, claude.secret);
+    await mcp.client.close();
+    await cronk.restart();
+
+    const res = await fetch(new URL("/mcp", await cronk.url()), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${claude.secret}`,
+        "mcp-session-id": mcp.transport.sessionId!,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(res.status).toBe(404);
+    expect((await admin.get("/api/agents")).body.agents[0].sessions).toEqual([]);
   });
 });
 

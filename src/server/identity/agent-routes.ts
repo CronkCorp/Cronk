@@ -60,8 +60,9 @@ export function agentRoutes(ctx: AppContext) {
       const user = await requireUser(ctx, request);
       await transaction(ctx.db, async (tx) => {
         const agent = await ownAgent(ctx, user, request.params.id);
-        await removeAgent(tx, agent, ctx.clock.now());
-        await endAgentSessionsOf(tx, agent.id, ctx.clock.now());
+        const now = ctx.clock.now();
+        await removeAgent(tx, agent, now);
+        await endAgentSessionsOf(tx, agent.id, now);
       });
       return reply.code(204).send();
     });
@@ -98,7 +99,7 @@ export function agentRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
-        if (!(await revokeAgentToken(ctx.db, agent, request.params.tokenId))) throw new HttpError(404, "No such token");
+        if (!(await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now()))) throw new HttpError(404, "No such token");
         return reply.code(204).send();
       },
     );
