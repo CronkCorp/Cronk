@@ -15,13 +15,17 @@ export interface SavedText {
   body: string;
 }
 
-/** Where settling a refused save stands: a conflict to settle, a clean merge, or a conflict the User settled. */
-export type MergeStage = "conflict" | "merged" | "resolved";
+/**
+ * Where settling a refused save stands: a conflict to settle, a clean merge, a conflict the User
+ * settled, or a conflict the User left unsettled to go back to their draft.
+ */
+export type MergeStage = "conflict" | "merged" | "resolved" | "behind";
 
 const STAGE_ADVICE: Record<MergeStage, string> = {
   conflict: "You both changed the same part; choose or combine below, then save.",
   merged: "Their changes touched other sections and are merged into yours below; check them and save again.",
   resolved: "Your choices are merged into your draft below; check it and save again.",
+  behind: "Your draft is still behind theirs; save again to merge them.",
 };
 
 /**

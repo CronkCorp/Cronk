@@ -351,6 +351,7 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   // Leaving the resolver keeps the draft; saving it again is refused and merges again.
   await page.getByRole("button", { name: "Back to my draft" }).click();
   await expect(page.getByLabel("Body (Markdown)")).toHaveValue("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it hourly.\n");
+  await expect(page.getByRole("alert")).toContainText("Your draft is still behind theirs");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
   await usage.getByRole("button", { name: "Use both" }).click();

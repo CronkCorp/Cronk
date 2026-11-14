@@ -76,6 +76,8 @@ interface OtherEdit {
   by: string;
   /** Whether the merge left conflicts for the User to settle. */
   conflicted: boolean;
+  /** The User left the conflict unsettled and went back to their draft. */
+  wentBack?: boolean;
 }
 
 /**
@@ -139,7 +141,7 @@ function GuidanceEditor(props: {
   // The draft is still based on the Version editing started from, so its next save is refused and merges again.
   const backToDraft = () => {
     setResolving(undefined);
-    setOther(undefined);
+    setOther((o) => o && { ...o, wentBack: true });
   };
 
   return (
@@ -149,7 +151,7 @@ function GuidanceEditor(props: {
           by={other.by}
           base={other.base}
           theirs={other.theirs}
-          stage={resolving ? "conflict" : other.conflicted ? "resolved" : "merged"}
+          stage={resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged"}
           onDiscardMine={() => takeTheirs(other.theirs)}
         />
       )}
