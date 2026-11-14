@@ -6,9 +6,10 @@ import { parse, stringify } from "yaml";
 
 /** Splits a Markdown file into its frontmatter (empty if it has none) and body. Throws on frontmatter that isn't a YAML mapping. */
 export function readFrontmatter(text: string): { data: Record<string, unknown>; body: string } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n?---(?:\r?\n|$)/.exec(text);
+  const match = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/.exec(text);
   if (!match) return { data: {}, body: text };
-  const data: unknown = match[1]!.trim() === "" ? {} : parse(match[1]!);
+  const yaml = match[1] ?? "";
+  const data: unknown = yaml.trim() === "" ? {} : parse(yaml);
   if (data === null || typeof data !== "object" || Array.isArray(data)) throw new Error("its frontmatter isn't a YAML mapping");
   return { data: data as Record<string, unknown>, body: text.slice(match[0].length) };
 }

@@ -155,6 +155,9 @@ async function busyWorkspace() {
   const remark = (await grace.post(`/api/documents/${guide.id}/comments`, { body: "Which here?", anchor: { passage: "Start here" } })).body.comment;
   await admin.post(`/api/documents/${guide.id}/comments`, { body: "This one.", replyToCommentId: remark.id });
   await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome." });
+  // A line of dashes, as frontmatter ends with, in a title, a body and an anchored passage.
+  const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
+  await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
 
   // A second, archived Project; a removed Agent.
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
