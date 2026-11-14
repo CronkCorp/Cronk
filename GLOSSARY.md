@@ -57,8 +57,20 @@ A Ticket an Agent files for work it noticed outside the scope of the Ticket it w
 _Avoid_: Follow-up, spin-off, finding
 
 **Sub-Ticket**:
-A Ticket that splits up part of a parent Ticket's work and stays within the parent's Delegation.
+A Ticket that splits up part of a parent Ticket's work and stays within the parent's Delegation. Its parent is in the same Project.
 _Avoid_: Subtask, child issue
+
+**Priority**:
+How urgent a Ticket is: Urgent, High, Medium, Low or None. Ready Tickets are offered highest Priority first.
+_Avoid_: Severity, importance, rank
+
+**Label**:
+A free-form tag on a Ticket for grouping and filtering, matched ignoring case.
+_Avoid_: Tag, category (reserved for Status Category)
+
+**Relation**:
+A link between two Tickets, in any Projects of the Workspace: one **blocks** the other (which is **blocked by** it), or they **relate to** each other. Blocking never forms a cycle.
+_Avoid_: Dependency, link (as the term)
 
 **Activity**:
 One timestamped entry an Agent Session writes on a Ticket while working: a plan, progress, finding, question or error. Activities also keep the Agent Session's Claim alive.
