@@ -5,7 +5,7 @@ import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
 import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
-import { addSharedSchemas, answer, publicRoute } from "./schemas.js";
+import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { mcpRoutes } from "./mcp/server.js";
@@ -51,7 +51,12 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     if (!route.url.startsWith("/api/") || route.url === "/api/openapi.json") return;
     // `properties: {}` so the OpenAPI description lists no query parameters rather than reading the schema as one.
     const querystring = (route.schema?.querystring ?? { type: "object", properties: {} }) as Record<string, unknown>;
-    route.schema = { ...route.schema, querystring: { additionalProperties: false, ...querystring } };
+    route.schema = {
+      ...route.schema,
+      querystring: { additionalProperties: false, ...querystring },
+      // So every operation's description says it can be refused.
+      response: { ...errors(400), ...(route.schema?.response as object | undefined) },
+    };
   });
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {

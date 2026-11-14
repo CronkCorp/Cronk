@@ -68,16 +68,18 @@ describe("the OpenAPI description", () => {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
       // Every operation that needs a sign-in or token can be refused without one, or for an ended Agent Session.
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
+      // Every operation refuses query parameters it doesn't take.
+      expect(errors, label).toContain("400");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
         expect(op.responses[code].content["application/json"].schema, `${label} ${code}`).toEqual(errorBody);
       }
     }
     const errorsOf = (path: string, method: string) => Object.keys(doc.paths[path][method].responses).filter((c) => c.startsWith("4"));
-    expect(errorsOf("/api/tickets/{key}", "get")).toEqual(["401", "404", "410"]);
+    expect(errorsOf("/api/tickets/{key}", "get")).toEqual(["400", "401", "404", "410"]);
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
-    expect(errorsOf("/api/invitations/{token}", "get")).toEqual(["404"]);
+    expect(errorsOf("/api/invitations/{token}", "get")).toEqual(["400", "404"]);
   });
 
   it("declares and describes every path parameter", async () => {
