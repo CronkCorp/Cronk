@@ -237,6 +237,7 @@ export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
 
 export async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
+  const agent = actor.kind === "agent" ? actor : undefined;
   await db.query(
     `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -245,8 +246,8 @@ export async function recordChange(db: Queryable, ticketId: string, actor: Actor
       at,
       actor.kind,
       actingUser(actor).id,
-      actor.kind === "agent" ? actor.agent.id : null,
-      actor.kind === "agent" ? (actor.session?.id ?? null) : null,
+      agent?.agent.id ?? null,
+      agent?.session?.id ?? null,
       kind,
       data,
     ],
