@@ -137,8 +137,10 @@ function chunksOf(markdown: string): Chunk[] {
 const contentLines = (chunk: Chunk) => chunk.text.split("\n").slice(chunk.heading === null ? 0 : 1).map((l) => l.trim()).filter((l) => l !== "");
 
 /** How alike two sections' contents are, from 0 to 1: the share of their lines they have in common; two empty contents are alike. */
-function similarity(a: Chunk, b: Chunk): number {
-  const [x, y] = [contentLines(a), contentLines(b)];
+const similarity = (a: Chunk, b: Chunk) => linesAlike(contentLines(a), contentLines(b));
+
+/** How alike two lists of lines are, from 0 to 1: the share of their lines they have in common; two empty lists are alike. */
+function linesAlike(x: string[], y: string[]): number {
   if (x.length + y.length === 0) return 1;
   const counts = new Map<string, number>();
   for (const line of x) counts.set(line, (counts.get(line) ?? 0) + 1);
@@ -153,6 +155,21 @@ function similarity(a: Chunk, b: Chunk): number {
   return (2 * common) / (x.length + y.length);
 }
 
+/** How many sections a content line must appear in to count as boilerplate. */
+const BOILERPLATE_SECTIONS = 3;
+
+/** The content lines found in many of `chunks`' sections, such as `- [ ] TODO`: they tell no section apart. */
+function boilerplateIn(chunks: Chunk[]): Set<string> {
+  const sections = new Map<string, number>();
+  for (const chunk of chunks.slice(1)) {
+    for (const line of new Set(contentLines(chunk))) sections.set(line, (sections.get(line) ?? 0) + 1);
+  }
+  return new Set([...sections].filter(([, count]) => count >= BOILERPLATE_SECTIONS).map(([line]) => line));
+}
+
+/** A section's heading level, 1 to 6; 0 for the text before the first heading. */
+const levelOf = (chunk: Chunk) => /^#*/.exec(chunk.heading ?? "")![0].length;
+
 /** How alike a renamed section's content must stay to still pair with the base section it came from. */
 const RENAME_SIMILARITY = 0.5;
 
@@ -161,24 +178,30 @@ const RENAME_SIMILARITY = 0.5;
  * pairs at least as well as any rename, and its content weighs double, so one section that kept its
  * content outscores two that only kept their headings.
  */
-function pairScore(base: Chunk, side: Chunk): number {
-  const alike = similarity(base, side);
-  if (base.heading === side.heading) return 1 + 2 * alike;
-  // A renamed heading still pairs with the section it came from, if it had content and most of it stayed.
-  return contentLines(base).length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
+function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
+  if (base.heading === side.heading) return 1 + 2 * similarity(base, side);
+  // A renamed heading still pairs with the section it came from, if it had content that tells it
+  // apart from other sections and most of that stayed.
+  const distinct = (chunk: Chunk) => contentLines(chunk).filter((line) => !boilerplate.has(line));
+  const [x, y] = [distinct(base), distinct(side)];
+  const alike = linesAlike(x, y);
+  return x.length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
 }
 
 /**
  * Keys `base` by position, then keys each section of `side` after the base section it came from:
- * first by a best-scoring alignment that keeps both orders, then by heading among what is left (a
- * section moved elsewhere). Sections `side` added are keyed by their heading and how often it was
- * added, so both sides adding the same section pair too.
+ * first by a best-scoring alignment that keeps both orders; then, among what is left (a section
+ * moved elsewhere), by heading, then by the best-scoring renames; last, a renamed empty section by
+ * being the only empty one of its level between the same two paired sections. Sections `side`
+ * added are keyed by their heading and how often it was added, so both sides adding the same
+ * section pair too.
  */
 function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
   const [n, m] = [base.length, side.length];
-  const scores = base.map((b) => side.map((c) => pairScore(b, c)));
+  const boilerplate = boilerplateIn(base);
+  const scores = base.map((b) => side.map((c) => pairScore(b, c, boilerplate)));
   // best[i][j]: the highest total score aligning base[i..] with side[j..], preambles excluded.
   const best = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 1; i--) {
@@ -189,26 +212,48 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   }
   const pairedBase = new Set<number>();
   const pairedSide = new Set<number>([0]);
+  const pair = (i: number, j: number) => {
+    side[j]!.key = base[i]!.key;
+    pairedBase.add(i);
+    pairedSide.add(j);
+  };
   for (let i = 1, j = 1; i < n && j < m; ) {
     const score = scores[i]![j]!;
     if (score > 0 && best[i]![j] === score + best[i + 1]![j + 1]!) {
-      side[j]!.key = base[i]!.key;
-      pairedBase.add(i);
-      pairedSide.add(j);
+      pair(i, j);
       i++;
       j++;
     } else if (best[i]![j] === best[i + 1]![j]) i++;
     else j++;
   }
+  const unpaired = (paired: Set<number>, length: number) => Array.from({ length }, (_, k) => k).filter((k) => k > 0 && !paired.has(k));
+  // A section moved elsewhere: first by its heading, then (renamed too) by its content.
+  for (const j of unpaired(pairedSide, m)) {
+    const moved = unpaired(pairedBase, n).find((i) => base[i]!.heading === side[j]!.heading);
+    if (moved !== undefined) pair(moved, j);
+  }
+  const renames = unpaired(pairedBase, n)
+    .flatMap((i) => unpaired(pairedSide, m).map((j) => ({ i, j, score: scores[i]![j]! })))
+    .filter((p) => p.score > 0)
+    .sort((a, b) => b.score - a.score);
+  for (const { i, j } of renames) if (!pairedBase.has(i) && !pairedSide.has(j)) pair(i, j);
+  // A renamed empty section has no content to pair on: pair it when it is the only empty section of
+  // its level, on each side, between the same two paired sections.
+  const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
+    const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
+    const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
+    return `${levelOf(chunks[k]!)}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
+  };
+  const emptyIn = (chunks: Chunk[], paired: Set<number>, length: number) =>
+    unpaired(paired, length).filter((k) => contentLines(chunks[k]!).length === 0).map((k) => ({ k, slot: slot(chunks, paired, k) }));
+  const [emptyBase, emptySide] = [emptyIn(base, pairedBase, n), emptyIn(side, pairedSide, m)];
+  for (const s of emptySide) {
+    const [bases, sides] = [emptyBase.filter((b) => b.slot === s.slot), emptySide.filter((o) => o.slot === s.slot)];
+    if (bases.length === 1 && sides.length === 1) pair(bases[0]!.k, s.k);
+  }
   const added = new Map<string, number>();
   side.forEach((chunk, j) => {
     if (pairedSide.has(j)) return;
-    const moved = base.findIndex((b, i) => i > 0 && !pairedBase.has(i) && b.heading === chunk.heading);
-    if (moved > 0) {
-      chunk.key = base[moved]!.key;
-      pairedBase.add(moved);
-      return;
-    }
     const count = (added.get(chunk.heading!) ?? 0) + 1;
     added.set(chunk.heading!, count);
     chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
