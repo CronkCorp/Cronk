@@ -309,8 +309,9 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
         />
       ) : (
         <form onSubmit={save}>
-          <Field label="Title" value={title} onChange={setTitle} />
-          <TextArea label="Body (Markdown)" value={body} onChange={setBody} rows={18} />
+          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+          <Field label="Title" value={title} onChange={setTitle} disabled={busy} />
+          <TextArea label="Body (Markdown)" value={body} onChange={setBody} rows={18} disabled={busy} />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="submit" disabled={busy}>Save</button>

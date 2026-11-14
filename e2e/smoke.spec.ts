@@ -335,7 +335,17 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it hourly.\n");
   await saveUnderneath("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it weekly.\n");
+  // While the save is in flight, the draft can't be changed under it.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**/api/documents/${id}`, async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.continue();
+  });
   await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByLabel("Title")).toBeDisabled();
+  await expect(page.getByLabel("Body (Markdown)")).toBeDisabled();
+  release();
   const usage = page.getByRole("region", { name: "## Usage" });
   await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
   // Leaving the resolver keeps the draft; saving it again is refused and merges again.

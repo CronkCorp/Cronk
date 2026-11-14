@@ -165,7 +165,8 @@ function GuidanceEditor(props: {
         />
       ) : (
         <form onSubmit={save}>
-          <TextArea label="Guidance (Markdown)" value={markdown} onChange={setMarkdown} rows={14} />
+          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+          <TextArea label="Guidance (Markdown)" value={markdown} onChange={setMarkdown} rows={14} disabled={busy} />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="submit" disabled={busy}>Save</button>
