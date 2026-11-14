@@ -481,7 +481,7 @@ async function historyIds(change: TicketChange["change"], data: Record<string, u
     if (ref === null || typeof ref !== "object" || Array.isArray(ref)) return ref;
     const { [by]: name, ...rest } = ref as Record<string, unknown>;
     const id = typeof name === "string" ? await lookup(name) : undefined;
-    return id === undefined ? rest : { ...rest, id };
+    return { ...rest, id: id ?? (ref as Record<string, unknown>).id };
   };
   const mapped = { ...data };
   if (change === "created") mapped.status = await swap(data.status, find.status, "current");
