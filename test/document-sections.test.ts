@@ -281,6 +281,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na\n\n## Mine\n\n## Theirs\n\n## B\n\nb\n" });
   });
 
+  it("keeps a renamed parent heading with only subsections as added when the other edit removed the heading", async () => {
+    const base = "## A\n\na\n\n## Parent\n\n### Child\n\nc\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n### Child\n\nc\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Parent", "## Group") });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na\n\n## Group\n\n### Child\n\nc\n" });
+  });
+
   it("does not pair sections as a rename when their content shares only a line many sections have", async () => {
     const base = "## A\n\n- [ ] TODO\nalpha\n\n## B\n\n- [ ] TODO\nbeta\n\n## C\n\n- [ ] TODO\ngamma\n";
     const { admin, id } = await editedUnderneath(base, "## A\n\n- [ ] TODO\nalpha\n\n## C\n\n- [ ] TODO\ngamma\n");
