@@ -38,11 +38,14 @@ export class Client {
   patch<T = any>(path: string, body?: unknown) {
     return this.request<T>("PATCH", path, body);
   }
+  put<T = any>(path: string, body?: unknown) {
+    return this.request<T>("PUT", path, body);
+  }
   delete<T = any>(path: string) {
     return this.request<T>("DELETE", path);
   }
 
-  private async request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
+  private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
     const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const res = await this.cronk.app.inject({
       method,

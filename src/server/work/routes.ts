@@ -5,7 +5,8 @@ import { nameSchema } from "../schemas.js";
 import { userActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { requireAdmin, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
-import type { User } from "../identity/users.js";
+import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
+import { findUserById, publicUser, type User } from "../identity/users.js";
 import {
   findProjectById,
   findProjectByKey,
@@ -89,6 +90,55 @@ export function workRoutes(ctx: AppContext) {
           ...(visibility !== undefined && { visibility }),
         };
         return { project: { ...(await updateProject(ctx.db, project.id, changes, ctx.clock.now())), access } };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>("/api/projects/:key/members", async (request) => {
+      const user = await requireUser(ctx, request);
+      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+      const members = await listMemberships(ctx.db, user.workspaceId, project.id);
+      return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
+    });
+
+    const memberParams = {
+      type: "object",
+      properties: { key: { type: "string" }, userId: { type: "string", format: "uuid" } },
+    } as const;
+
+    app.put<{ Params: { key: string; userId: string }; Body: { access: Access } }>(
+      "/api/projects/:key/members/:userId",
+      {
+        schema: {
+          params: memberParams,
+          body: {
+            type: "object",
+            required: ["access"],
+            additionalProperties: false,
+            properties: { access: { type: "string", enum: ["read", "write"] } },
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+        requireAdmin(user, "change who is in a Project");
+        const member = await findUserById(ctx.db, request.params.userId);
+        if (!member || member.workspaceId !== user.workspaceId) throw new HttpError(404, "No such User");
+        if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
+        await setMembership(ctx.db, project.id, member.id, request.body.access);
+        return { member: { user: publicUser(member), access: request.body.access } };
+      },
+    );
+
+    app.delete<{ Params: { key: string; userId: string } }>(
+      "/api/projects/:key/members/:userId",
+      { schema: { params: memberParams } },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+        requireAdmin(user, "change who is in a Project");
+        await removeMembership(ctx.db, project.id, request.params.userId);
+        return reply.code(204).send();
       },
     );
 
