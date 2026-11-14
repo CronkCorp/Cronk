@@ -62,7 +62,7 @@ import { findAgent } from "../identity/agents.js";
 import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
-import { inboxesChanged, usersWithItemsIn } from "../inbox/inbox.js";
+import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -192,7 +192,7 @@ export function workRoutes(ctx: AppContext) {
           ...(agentAccess !== undefined && { agentAccess }),
         };
         const updated = await updateProject(ctx.db, project.id, changes, ctx.clock.now());
-        if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsIn(ctx.db, project.id));
+        if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
         return { project: { ...updated, access } };
       },
     );
@@ -331,6 +331,7 @@ export function workRoutes(ctx: AppContext) {
           }
           return status;
         });
+        if (name !== undefined) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { statusId: status.id }));
         return { status };
       },
     );

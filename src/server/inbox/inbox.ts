@@ -92,17 +92,18 @@ export function inboxesChanged(live: LiveUpdates, userIds: (string | null | unde
 }
 
 /**
- * Ids of the Users with items in Project `projectId`: the Assignees of its Tickets in an In Review
- * Status, and the Owners of Agents with open questions on its Tickets.
+ * Ids of the Users with items on the Tickets of a Project, or of a Status: the Assignees of those
+ * in an In Review Status, and the Owners of Agents with open questions on them.
  */
-export async function usersWithItemsIn(db: Queryable, projectId: string): Promise<string[]> {
+export async function usersWithItemsOn(db: Queryable, tickets: { projectId: string } | { statusId: string }): Promise<string[]> {
+  const [column, id] = "projectId" in tickets ? ["t.project_id", tickets.projectId] : ["t.status_id", tickets.statusId];
   const { rows } = await db.query<{ id: string }>(
     `SELECT t.assignee_id AS id FROM tickets t JOIN statuses s ON s.id = t.status_id
-     WHERE t.project_id = $1 AND s.category = 'in_review' AND t.assignee_id IS NOT NULL
+     WHERE ${column} = $1 AND s.category = 'in_review' AND t.assignee_id IS NOT NULL
      UNION
      SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
-     WHERE t.project_id = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL`,
-    [projectId],
+     WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL`,
+    [id],
   );
   return rows.map((r) => r.id);
 }

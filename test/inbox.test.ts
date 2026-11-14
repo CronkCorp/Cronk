@@ -245,6 +245,28 @@ describe("The Inbox's live updates", () => {
     expect(await inboxLines(bob)).toEqual(["review CRONK-1"]);
   });
 
+  it("tell the Users with items on Tickets in a Status when it is renamed", async () => {
+    const { cronk, admin, session } = await delegatedSetup(2);
+    const checking = (await admin.post("/api/projects/CRONK/statuses", { name: "Checking", category: "in_review" })).body.status;
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: (await bob.get("/api/me")).body.user.id, statusId: checking.id });
+    const stream = await bob.events("/api/inbox/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch(`/api/projects/CRONK/statuses/${checking.id}`, { name: "Verifying" });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+
+    // A question's item shows its Ticket's Status too.
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-2/claim");
+    await agent.post("/api/tickets/CRONK-2/activities", { kind: "question", body: "Which cache?" });
+    const adasStream = await admin.events("/api/inbox/events");
+    expect((await adasStream.next())?.event).toBe("ready");
+    const { status } = (await admin.get("/api/tickets/CRONK-2")).body.ticket;
+    await admin.patch(`/api/projects/CRONK/statuses/${status.id}`, { name: "Underway" });
+    expect(await adasStream.next()).toMatchObject({ event: "changed" });
+  });
+
   it("are only for Users", async () => {
     const { cronk, claude } = await delegatedSetup();
     expect((await cronk.client(claude.secret).events("/api/inbox/events")).status).toBe(403);
