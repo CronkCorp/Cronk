@@ -1,10 +1,10 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Clock } from "./clock.js";
 import type { Database } from "./db/database.js";
-import { userForSession } from "./identity/sessions.js";
+import { userForSignIn } from "./identity/sign-ins.js";
 import type { User } from "./identity/users.js";
 
-export const SESSION_COOKIE = "cronk_session";
+export const SIGN_IN_COOKIE = "cronk_sign_in";
 
 /** What every route module needs from the running application. */
 export interface AppContext {
@@ -24,15 +24,15 @@ export class HttpError extends Error {
 
 /** The signed-in User making the request, or a 401. */
 export async function requireUser(ctx: AppContext, request: FastifyRequest): Promise<User> {
-  const token = request.cookies[SESSION_COOKIE];
-  const user = token ? await userForSession(ctx.db, ctx.clock, token) : undefined;
+  const token = request.cookies[SIGN_IN_COOKIE];
+  const user = token ? await userForSignIn(ctx.db, ctx.clock, token) : undefined;
   if (!user) throw new HttpError(401, "Sign in first");
   return user;
 }
 
-/** Sets the session cookie. Its lifetime is relative (Max-Age) so it doesn't depend on the browser's clock agreeing with ours. */
-export function setSessionCookie(ctx: AppContext, reply: FastifyReply, token: string, expiresAt: Date): void {
-  reply.setCookie(SESSION_COOKIE, token, {
+/** Sets the sign-in cookie. Its lifetime is relative (Max-Age) so it doesn't depend on the browser's clock agreeing with ours. */
+export function setSignInCookie(ctx: AppContext, reply: FastifyReply, token: string, expiresAt: Date): void {
+  reply.setCookie(SIGN_IN_COOKIE, token, {
     path: "/",
     httpOnly: true,
     sameSite: "lax",

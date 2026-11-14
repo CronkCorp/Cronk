@@ -38,8 +38,8 @@ export const api = {
   setup: (input: { email: string; password: string; name: string; workspaceName?: string }) =>
     request<{ user: User }>("POST", "/api/setup", input).then((r) => r.user),
   signIn: (email: string, password: string) =>
-    request<{ user: User }>("POST", "/api/sessions", { email, password }).then((r) => r.user),
-  signOut: () => request<void>("DELETE", "/api/sessions/current"),
+    request<{ user: User }>("POST", "/api/sign-in", { email, password }).then((r) => r.user),
+  signOut: () => request<void>("DELETE", "/api/sign-in"),
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
   renameWorkspace: (name: string) => request<Workspace>("PATCH", "/api/workspace", { name }),

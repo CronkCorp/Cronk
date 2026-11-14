@@ -9,7 +9,7 @@ import { workspaceRoutes } from "./workspace/routes.js";
 
 export interface AppConfig {
   databaseUrl: string;
-  /** Mark the session cookie Secure; turn on when served over HTTPS. */
+  /** Mark the sign-in cookie Secure; turn on when served over HTTPS. */
   cookieSecure: boolean;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;

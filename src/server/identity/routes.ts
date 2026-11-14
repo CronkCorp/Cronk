@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireUser, SESSION_COOKIE, setSessionCookie, type AppContext } from "../context.js";
+import { HttpError, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
-import { createSession, deleteSession } from "./sessions.js";
+import { createSignIn, deleteSignIn } from "./sign-ins.js";
 import { countUsers, findUserByEmail, insertUser, publicUser } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
@@ -48,14 +48,14 @@ export function identityRoutes(ctx: AppContext) {
             now,
           });
         });
-        const session = await createSession(ctx.db, ctx.clock, user.id);
-        setSessionCookie(ctx, reply, session.token, session.expiresAt);
+        const signIn = await createSignIn(ctx.db, ctx.clock, user.id);
+        setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
         return reply.code(201).send({ user: publicUser(user) });
       },
     );
 
     app.post<{ Body: { email: string; password: string } }>(
-      "/api/sessions",
+      "/api/sign-in",
       {
         schema: {
           body: {
@@ -71,16 +71,16 @@ export function identityRoutes(ctx: AppContext) {
         // Check a password even for unknown emails so response time doesn't reveal which emails exist.
         const ok = await verifyPassword(request.body.password, found?.passwordHash ?? (await dummyHash));
         if (!found || !ok) throw new HttpError(401, "Email or password is incorrect");
-        const session = await createSession(ctx.db, ctx.clock, found.user.id);
-        setSessionCookie(ctx, reply, session.token, session.expiresAt);
+        const signIn = await createSignIn(ctx.db, ctx.clock, found.user.id);
+        setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
         return { user: publicUser(found.user) };
       },
     );
 
-    app.delete("/api/sessions/current", async (request, reply) => {
-      const token = request.cookies[SESSION_COOKIE];
-      if (token) await deleteSession(ctx.db, token);
-      reply.clearCookie(SESSION_COOKIE, { path: "/" });
+    app.delete("/api/sign-in", async (request, reply) => {
+      const token = request.cookies[SIGN_IN_COOKIE];
+      if (token) await deleteSignIn(ctx.db, token);
+      reply.clearCookie(SIGN_IN_COOKIE, { path: "/" });
       return reply.code(204).send();
     });
 

@@ -10,7 +10,7 @@ describe("starting the application", () => {
 
     const browser = cronk.client();
     expect((await browser.get("/api/setup")).body).toEqual({ required: false });
-    expect((await browser.post("/api/sessions", { email: "ada@example.com", password: "correct horse battery" })).status).toBe(200);
+    expect((await browser.post("/api/sign-in", { email: "ada@example.com", password: "correct horse battery" })).status).toBe(200);
     expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme" });
   });
 
