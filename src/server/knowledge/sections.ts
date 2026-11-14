@@ -117,6 +117,8 @@ interface Chunk {
   /** Which section it is, the same across Versions for sections paired by `keyAgainstBase`; "" before the first heading. */
   key: string;
   heading: string | null;
+  /** Its heading's level, 1 to 6; 0 for the text before the first heading. */
+  level: number;
   text: string;
   /** Whether it ends its Version's body. */
   last: boolean;
@@ -125,10 +127,10 @@ interface Chunk {
 /** `markdown` cut at every heading, always starting with the (perhaps empty) text before the first one; keys are left to `keyAgainstBase`. */
 function chunksOf(markdown: string): Chunk[] {
   const headings = headingsOf(markdown);
-  const chunks: Chunk[] = [{ key: "", heading: null, text: markdown.slice(0, headings[0]?.start ?? markdown.length), last: headings.length === 0 }];
+  const chunks: Chunk[] = [{ key: "", heading: null, level: 0, text: markdown.slice(0, headings[0]?.start ?? markdown.length), last: headings.length === 0 }];
   headings.forEach((h, i) => {
     const end = headings[i + 1]?.start ?? markdown.length;
-    chunks.push({ key: "", heading: headingLine(h), text: markdown.slice(h.start, end), last: i === headings.length - 1 });
+    chunks.push({ key: "", heading: headingLine(h), level: h.level, text: markdown.slice(h.start, end), last: i === headings.length - 1 });
   });
   return chunks;
 }
@@ -166,9 +168,6 @@ function boilerplateIn(chunks: Chunk[]): Set<string> {
   }
   return new Set([...sections].filter(([, count]) => count >= BOILERPLATE_SECTIONS).map(([line]) => line));
 }
-
-/** A section's heading level, 1 to 6; 0 for the text before the first heading. */
-const levelOf = (chunk: Chunk) => /^#*/.exec(chunk.heading ?? "")![0].length;
 
 /** How alike a renamed section's content must stay to still pair with the base section it came from. */
 const RENAME_SIMILARITY = 0.5;
@@ -242,7 +241,7 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   const slot = (chunks: Chunk[], paired: Set<number>, k: number) => {
     const before = [...paired].filter((p) => p < k).reduce((a, b) => Math.max(a, b), 0);
     const after = [...paired].filter((p) => p > k).reduce((a, b) => Math.min(a, b), Infinity);
-    return `${levelOf(chunks[k]!)}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
+    return `${chunks[k]!.level}\u0000${chunks[before]!.key}\u0000${chunks[after]?.key ?? "end"}`;
   };
   const emptyIn = (chunks: Chunk[], paired: Set<number>, length: number) =>
     unpaired(paired, length).filter((k) => contentLines(chunks[k]!).length === 0).map((k) => ({ k, slot: slot(chunks, paired, k) }));
@@ -289,7 +288,7 @@ function mergeSection(base: Chunk | undefined, mine: Chunk | undefined, theirs: 
   const rest = mergePart(b.rest, m.rest, t.rest);
   if (head === "conflict" || rest === "conflict") return "conflict";
   const [h, r] = [head.merged!, rest.merged!];
-  return { merged: { key: base.key, heading: h.heading, text: h.text + r.text, last: r.last } };
+  return { merged: { key: base.key, heading: h.heading, level: h.level, text: h.text + r.text, last: r.last } };
 }
 
 /** Whether `a` and `b` put the sections they share in the same order. */
