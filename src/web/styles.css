@@ -112,6 +112,9 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .markdown { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px; overflow-wrap: anywhere; }
 .markdown pre { overflow-x: auto; }
 .history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.guidance .actions { margin: 12px 0; }
+.conflict { border: 1px solid var(--error); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; }
+.their-version { background: var(--bg); border-radius: 6px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
 .filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }

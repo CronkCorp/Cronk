@@ -6,6 +6,8 @@ import type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  Guidance,
+  GuidanceVersion,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -36,6 +38,8 @@ export type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  Guidance,
+  GuidanceVersion,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -71,10 +75,15 @@ export interface TicketFilter {
   label?: string;
 }
 
+const guidancePath = (projectKey?: string) =>
+  projectKey === undefined ? "/api/workspace/guidance" : `/api/projects/${encodeURIComponent(projectKey)}/guidance`;
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The error's whole body, for errors carrying more than a message, such as a stale save's current Version. */
+    readonly body?: any,
   ) {
     super(message);
   }
@@ -89,7 +98,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data);
   return data as T;
 }
 
@@ -103,6 +112,14 @@ export const api = {
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
   updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess }) => request<Workspace>("PATCH", "/api/workspace", changes),
+
+  /** The Workspace's Guidance, or with `projectKey` that Project's. */
+  guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),
+  guidanceVersions: (projectKey?: string) =>
+    request<{ versions: GuidanceVersion[] }>("GET", `${guidancePath(projectKey)}/versions`).then((r) => r.versions),
+  /** Refused with a 409 whose body holds the current `guidance` if someone saved since `baseVersion`. */
+  saveGuidance: (projectKey: string | undefined, input: { markdown: string; baseVersion: number }) =>
+    request<{ guidance: Guidance }>("PUT", guidancePath(projectKey), input).then((r) => r.guidance),
 
   agents: (all = false) => request<{ agents: Agent[] }>("GET", `/api/agents${all ? "?all=true" : ""}`).then((r) => r.agents),
   createAgent: (name: string) => request<{ agent: Agent }>("POST", "/api/agents", { name }).then((r) => r.agent),

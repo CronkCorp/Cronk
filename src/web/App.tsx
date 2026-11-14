@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
+import { GuidanceSection } from "./guidance.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
@@ -119,6 +120,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
           <span data-testid="workspace-name">{workspace?.name}</span>
         </Link>
         <div className="topbar-right">
+          <Link to="/guidance" className="link">Guidance</Link>
           <Link to="/agents" className="link">Agents</Link>
           {props.user.role === "admin" && (
             <>
@@ -154,6 +156,7 @@ function Page(props: { me: User }) {
   const { path, search } = useLocation();
   if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   if (path === "/agents") return <AgentsPage me={props.me} />;
+  if (path === "/guidance") return <WorkspaceGuidancePage me={props.me} />;
   const project = /^\/projects\/([^/]+)$/.exec(path);
   if (project) {
     return (
@@ -192,5 +195,19 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
 }
 
 function projectView(view: string | null): ProjectView {
-  return view === "board" || view === "statuses" ? view : "list";
+  return view === "board" || view === "statuses" || view === "guidance" ? view : "list";
+}
+
+function WorkspaceGuidancePage(props: { me: User }) {
+  return (
+    <section>
+      <div className="page-head">
+        <h1>Workspace Guidance</h1>
+      </div>
+      <GuidanceSection
+        canEdit={props.me.role === "admin"}
+        intro="Standing instructions for every Agent, in every Project. Each Agent Session gets them when it connects, followed by the Guidance of the Projects it can see. Only Admins can change them."
+      />
+    </section>
+  );
 }
