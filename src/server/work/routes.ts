@@ -122,7 +122,7 @@ export function workRoutes(ctx: AppContext) {
           await lockProject(tx, project.id);
           return insertStatus(tx, project.id, { name, category: request.body.category });
         });
-        if (!status) throw new HttpError(409, `Another Status is already named ${name}`);
+        if (!status) throw statusNameTaken(name);
         return reply.code(201).send({ status });
       },
     );
@@ -145,10 +145,10 @@ export function workRoutes(ctx: AppContext) {
         const status = await transaction(ctx.db, async (tx) => {
           const project = await projectOr404(tx, user.workspaceId, request.params.key);
           await lockProject(tx, project.id);
-          let status = await statusOr404(tx, project, request.params.statusId);
+          let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
           if (name !== undefined) {
             const renamed = await renameStatus(tx, project.id, status.id, name);
-            if (!renamed) throw new HttpError(409, `Another Status is already named ${name}`);
+            if (!renamed) throw statusNameTaken(name);
             status = renamed;
           }
           const { position } = request.body;
@@ -171,14 +171,13 @@ export function workRoutes(ctx: AppContext) {
         await transaction(ctx.db, async (tx) => {
           const project = await projectOr404(tx, user.workspaceId, request.params.key);
           await lockProject(tx, project.id);
-          const all = await listStatuses(tx, project.id);
-          const status = all.find((s) => s.id === request.params.statusId);
-          if (!status) throw new HttpError(404, "No such Status in this Project");
-          if (!all.some((s) => s.category === status.category && s.id !== status.id)) {
+          const statuses = await listStatuses(tx, project.id);
+          const status = statusOr404(statuses, request.params.statusId);
+          if (!statuses.some((s) => s.category === status.category && s.id !== status.id)) {
             throw new HttpError(409, `${status.name} is the last Status of its Status Category, which needs at least one`);
           }
           await lockStatus(tx, status.id);
-          const target = moveTo === undefined ? undefined : all.find((s) => s.id === moveTo && s.id !== status.id);
+          const target = moveTo === undefined ? undefined : statuses.find((s) => s.id === moveTo && s.id !== status.id);
           if (moveTo !== undefined && !target) {
             throw new HttpError(400, "Tickets can only move to another Status of this Project");
           }
@@ -285,12 +284,14 @@ async function projectOr404(db: Queryable, workspaceId: string, key: string): Pr
   return project;
 }
 
-/** One of the Project's Statuses, by id. */
-async function statusOr404(db: Queryable, project: Project, statusId: string): Promise<Status> {
-  const status = (await listStatuses(db, project.id)).find((s) => s.id === statusId);
+/** The Status with this id among a Project's Statuses. */
+function statusOr404(statuses: Status[], statusId: string): Status {
+  const status = statuses.find((s) => s.id === statusId);
   if (!status) throw new HttpError(404, "No such Status in this Project");
   return status;
 }
+
+const statusNameTaken = (name: string) => new HttpError(409, `Another Status is already named ${name}`);
 
 async function ticketOr404(ctx: AppContext, workspaceId: string, key: string): Promise<Ticket> {
   const ticket = await findTicketByKey(ctx.db, workspaceId, key);
