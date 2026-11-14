@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { answer, nameSchema, noContent, publicRoute, ref } from "../schemas.js";
+import { answer, errors, nameSchema, noContent, publicRoute, ref } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -60,7 +60,7 @@ export function identityRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { email, password, name: nameSchema, workspaceName: nameSchema },
           },
-          response: { 201: answer("The first Admin, now signed in", userAnswer) },
+          response: { 201: answer("The first Admin, now signed in", userAnswer), ...errors(400, 409) },
         },
       },
       async (request, reply) => {
@@ -97,7 +97,7 @@ export function identityRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { email: { type: "string", maxLength: 320 }, password: { type: "string", maxLength: 1024 } },
           },
-          response: { 200: answer("The User, now signed in", userAnswer) },
+          response: { 200: answer("The User, now signed in", userAnswer), ...errors(400, 401, 403) },
         },
       },
       async (request, reply) => {
@@ -130,6 +130,7 @@ export function identityRoutes(ctx: AppContext) {
               required: ["invitation", "token"],
               properties: { invitation: ref("Invitation"), token: { type: "string" } },
             }),
+            ...errors(400, 401, 403, 409),
           },
         },
       },
@@ -159,6 +160,7 @@ export function identityRoutes(ctx: AppContext) {
               required: ["invitations"],
               properties: { invitations: { type: "array", items: ref("Invitation") } },
             }),
+            ...errors(401, 403),
           },
         },
       },
@@ -175,7 +177,7 @@ export function identityRoutes(ctx: AppContext) {
       {
         schema: {
           params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
-          response: { 204: noContent("The invitation is withdrawn") },
+          response: { 204: noContent("The invitation is withdrawn"), ...errors(400, 401, 403, 404) },
         },
       },
       async (request, reply) => {
@@ -198,6 +200,7 @@ export function identityRoutes(ctx: AppContext) {
               required: ["email", "role", "workspaceName"],
               properties: { email: { type: "string" }, role, workspaceName: { type: "string" } },
             }),
+            ...errors(404),
           },
         },
       },
@@ -220,7 +223,7 @@ export function identityRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, password },
           },
-          response: { 201: answer("The new User, now signed in", userAnswer) },
+          response: { 201: answer("The new User, now signed in", userAnswer), ...errors(400, 404, 409) },
         },
       },
       async (request, reply) => {
@@ -261,6 +264,7 @@ export function identityRoutes(ctx: AppContext) {
               required: ["users"],
               properties: { users: { type: "array", items: ref("User") } },
             }),
+            ...errors(401, 403),
           },
         },
       },
@@ -277,7 +281,7 @@ export function identityRoutes(ctx: AppContext) {
         schema: {
           params: { type: "object", properties: { id: { type: "string", format: "uuid" } } },
           body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
-          response: { 200: answer("The changed User", userAnswer) },
+          response: { 200: answer("The changed User", userAnswer), ...errors(400, 401, 403, 404, 409) },
         },
       },
       async (request) => {
@@ -302,6 +306,7 @@ export function identityRoutes(ctx: AppContext) {
               type: "object",
               properties: { user: ref("User"), agent: ref("Agent"), readOnly: { type: "boolean" } },
             }),
+            ...errors(401),
           },
         },
       },

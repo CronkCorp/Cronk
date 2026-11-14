@@ -155,3 +155,16 @@ export const answer = (description: string, schema: object) => ({ description, .
 
 /** A success answer with no body, such as a 204. */
 export const noContent = (description: string) => ({ description, type: "null" }) as const;
+
+/** What each error status means, wherever a route answers it. */
+const ERROR_MEANINGS = {
+  400: "The request is invalid: a field, parameter or value the operation refuses",
+  401: "Not signed in, or the Agent token is unknown or revoked",
+  403: "The caller may not do this: an Admin-only change, Read access where Write is needed, or an Agent where only a User may act",
+  404: "There is no such record, or the caller can't see it",
+  409: "The change conflicts with the current state",
+} as const;
+
+/** The error answers of a route, each with the shared `Error` shape. */
+export const errors = (...codes: (keyof typeof ERROR_MEANINGS)[]) =>
+  Object.fromEntries(codes.map((code) => [code, { description: ERROR_MEANINGS[code], ...ref("Error") }]));

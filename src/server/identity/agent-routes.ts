@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { answer, nameSchema, noContent, ref } from "../schemas.js";
+import { answer, errors, nameSchema, noContent, ref } from "../schemas.js";
 import { requireAdmin } from "./access.js";
 import {
   findAgent,
@@ -35,6 +35,7 @@ export function agentRoutes(ctx: AppContext) {
               required: ["agents"],
               properties: { agents: { type: "array", items: ref("Agent") } },
             }),
+            ...errors(400, 401, 403),
           },
         },
       },
@@ -48,7 +49,12 @@ export function agentRoutes(ctx: AppContext) {
 
     app.post<{ Body: { name: string } }>(
       "/api/agents",
-      { schema: { body: agentBody, response: { 201: answer("The new Agent, owned by the caller", agentAnswer) } } },
+      {
+        schema: {
+          body: agentBody,
+          response: { 201: answer("The new Agent, owned by the caller", agentAnswer), ...errors(400, 401, 403, 409) },
+        },
+      },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const name = request.body.name.trim();
@@ -59,7 +65,13 @@ export function agentRoutes(ctx: AppContext) {
 
     app.patch<{ Params: { id: string }; Body: { name: string } }>(
       "/api/agents/:id",
-      { schema: { params: agentParams, body: agentBody, response: { 200: answer("The renamed Agent", agentAnswer) } } },
+      {
+        schema: {
+          params: agentParams,
+          body: agentBody,
+          response: { 200: answer("The renamed Agent", agentAnswer), ...errors(400, 401, 403, 404, 409) },
+        },
+      },
       async (request) => {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
@@ -70,7 +82,12 @@ export function agentRoutes(ctx: AppContext) {
 
     app.delete<{ Params: { id: string } }>(
       "/api/agents/:id",
-      { schema: { params: agentParams, response: { 204: noContent("The Agent is removed and its tokens revoked") } } },
+      {
+        schema: {
+          params: agentParams,
+          response: { 204: noContent("The Agent is removed and its tokens revoked"), ...errors(400, 401, 403, 404) },
+        },
+      },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         await transaction(ctx.db, async (tx) => removeAgent(tx, await ownAgent(ctx, user, request.params.id), ctx.clock.now()));
@@ -89,6 +106,7 @@ export function agentRoutes(ctx: AppContext) {
               required: ["tokens"],
               properties: { tokens: { type: "array", items: ref("AgentToken") } },
             }),
+            ...errors(400, 401, 403, 404),
           },
         },
       },
@@ -111,6 +129,7 @@ export function agentRoutes(ctx: AppContext) {
               required: ["token", "secret"],
               properties: { token: ref("AgentToken"), secret: { type: "string" } },
             }),
+            ...errors(400, 401, 403, 404),
           },
         },
       },
@@ -127,7 +146,7 @@ export function agentRoutes(ctx: AppContext) {
       {
         schema: {
           params: { type: "object", properties: { id: { type: "string", format: "uuid" }, tokenId: { type: "string", format: "uuid" } } },
-          response: { 204: noContent("The token is revoked") },
+          response: { 204: noContent("The token is revoked"), ...errors(400, 401, 403, 404) },
         },
       },
       async (request, reply) => {

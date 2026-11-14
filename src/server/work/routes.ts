@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
-import { agentAccessSchema, answer, nameSchema, noContent, ref, type SharedSchemaName } from "../schemas.js";
+import { agentAccessSchema, answer, errors, nameSchema, noContent, ref, type SharedSchemaName } from "../schemas.js";
 import { actingUser, userActor, type Actor } from "../actor.js";
 import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
 import type { Queryable } from "../db/database.js";
@@ -93,7 +93,7 @@ export function workRoutes(ctx: AppContext) {
       {
         schema: {
           querystring: { type: "object", properties: { archived: { type: "boolean" } } },
-          response: { 200: answer("The Projects the caller can see", listing("projects", ref("Project"))) },
+          response: { 200: answer("The Projects the caller can see", listing("projects", ref("Project"))), ...errors(400, 401) },
         },
       },
       async (request) => {
@@ -113,7 +113,10 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, key: projectKey },
           },
-          response: { 201: answer("The new Project, with one Status per Status Category", holding("project", "Project")) },
+          response: {
+            201: answer("The new Project, with one Status per Status Category", holding("project", "Project")),
+            ...errors(400, 401, 403, 409),
+          },
         },
       },
       async (request, reply) => {
@@ -138,6 +141,7 @@ export function workRoutes(ctx: AppContext) {
               required: ["project", "statuses"],
               properties: { project: ref("Project"), statuses: { type: "array", items: ref("Status") } },
             }),
+            ...errors(401, 404),
           },
         },
       },
@@ -165,7 +169,7 @@ export function workRoutes(ctx: AppContext) {
               agentAccess: agentAccessSchema,
             },
           },
-          response: { 200: answer("The changed Project", holding("project", "Project")) },
+          response: { 200: answer("The changed Project", holding("project", "Project")), ...errors(400, 401, 403, 404) },
         },
       },
       async (request) => {
@@ -186,7 +190,11 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>(
       "/api/projects/:key/members",
-      { schema: { response: { 200: answer("The Users listed in the Project, with their access", listing("members", member)) } } },
+      {
+        schema: {
+          response: { 200: answer("The Users listed in the Project, with their access", listing("members", member)), ...errors(401, 404) },
+        },
+      },
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
@@ -213,6 +221,7 @@ export function workRoutes(ctx: AppContext) {
           },
           response: {
             200: answer("The User's access in the Project", { type: "object", required: ["member"], properties: { member } }),
+            ...errors(400, 401, 403, 404),
           },
         },
       },
@@ -230,7 +239,12 @@ export function workRoutes(ctx: AppContext) {
 
     app.delete<{ Params: { key: string; userId: string } }>(
       "/api/projects/:key/members/:userId",
-      { schema: { params: memberParams, response: { 204: noContent("The User is no longer listed in the Project") } } },
+      {
+        schema: {
+          params: memberParams,
+          response: { 204: noContent("The User is no longer listed in the Project"), ...errors(400, 401, 403, 404) },
+        },
+      },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
@@ -250,7 +264,10 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, category: { type: "string", enum: STATUS_CATEGORIES } },
           },
-          response: { 201: answer("The new Status, last of its Status Category", holding("status", "Status")) },
+          response: {
+            201: answer("The new Status, last of its Status Category", holding("status", "Status")),
+            ...errors(400, 401, 403, 404, 409),
+          },
         },
       },
       async (request, reply) => {
@@ -276,7 +293,7 @@ export function workRoutes(ctx: AppContext) {
             // `position` counts from 0 among the Statuses of the same Status Category.
             properties: { name: nameSchema, position: { type: "integer", minimum: 0 } },
           },
-          response: { 200: answer("The changed Status", holding("status", "Status")) },
+          response: { 200: answer("The changed Status", holding("status", "Status")), ...errors(400, 401, 403, 404, 409) },
         },
       },
       async (request) => {
@@ -307,7 +324,7 @@ export function workRoutes(ctx: AppContext) {
       {
         schema: {
           querystring: { type: "object", properties: { moveTo: { type: "string" } } },
-          response: { 204: noContent("The Status is removed, and any Tickets in it moved") },
+          response: { 204: noContent("The Status is removed, and any Tickets in it moved"), ...errors(400, 401, 403, 404, 409) },
         },
       },
       async (request, reply) => {
@@ -354,7 +371,10 @@ export function workRoutes(ctx: AppContext) {
               label: { type: "array", items: { type: "string", maxLength: 50 } },
             },
           },
-          response: { 200: answer("The Project's Tickets matching the filters, in key order", listing("tickets", ref("Ticket"))) },
+          response: {
+            200: answer("The Project's Tickets matching the filters, in key order", listing("tickets", ref("Ticket"))),
+            ...errors(400, 401, 404),
+          },
         },
       },
       async (request) => {
@@ -379,6 +399,7 @@ export function workRoutes(ctx: AppContext) {
         schema: {
           response: {
             200: answer("The Labels on the Project's Tickets, alphabetically, one per spelling ignoring case", listing("labels", { type: "string" })),
+            ...errors(401, 404),
           },
         },
       },
@@ -399,7 +420,10 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { title, description },
           },
-          response: { 201: answer("The new Ticket, in the Project's first Status", holding("ticket", "Ticket")) },
+          response: {
+            201: answer("The new Ticket, in the Project's first Status", holding("ticket", "Ticket")),
+            ...errors(400, 401, 403, 404),
+          },
         },
       },
       async (request, reply) => {
@@ -432,6 +456,7 @@ export function workRoutes(ctx: AppContext) {
               required: ["ticket", "subTickets", "relations"],
               properties: { ticket: ref("Ticket"), subTickets: { type: "array", items: ref("TicketRef") }, relations: ref("Relations") },
             }),
+            ...errors(401, 404),
           },
         },
       },
@@ -456,7 +481,10 @@ export function workRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
           },
-          response: { 201: answer("The Ticket's relations, with the new one", holding("relations", "Relations")) },
+          response: {
+            201: answer("The Ticket's relations, with the new one", holding("relations", "Relations")),
+            ...errors(400, 401, 403, 404, 409),
+          },
         },
       },
       async (request, reply) => {
@@ -487,7 +515,7 @@ export function workRoutes(ctx: AppContext) {
             type: "object",
             properties: { key: { type: "string" }, kind: { type: "string", enum: RELATION_KINDS }, otherKey: { type: "string" } },
           },
-          response: { 200: answer("The Ticket's remaining relations", holding("relations", "Relations")) },
+          response: { 200: answer("The Ticket's remaining relations", holding("relations", "Relations")), ...errors(400, 401, 403, 404) },
         },
       },
       async (request) => {
@@ -519,7 +547,7 @@ export function workRoutes(ctx: AppContext) {
               parentKey: { type: ["string", "null"], maxLength: 30 },
             },
           },
-          response: { 200: answer("The changed Ticket", holding("ticket", "Ticket")) },
+          response: { 200: answer("The changed Ticket", holding("ticket", "Ticket")), ...errors(400, 401, 403, 404, 409) },
         },
       },
       async (request) => {
@@ -552,6 +580,7 @@ export function workRoutes(ctx: AppContext) {
         schema: {
           response: {
             200: answer("The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see", listing("changes", ref("RecordedChange"))),
+            ...errors(401, 404),
           },
         },
       },

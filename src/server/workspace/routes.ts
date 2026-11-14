@@ -2,18 +2,22 @@ import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
-import { agentAccessSchema, answer, nameSchema, ref } from "../schemas.js";
+import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.js";
 import { getWorkspace, updateWorkspace, type Workspace } from "./workspaces.js";
 
 const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess });
 
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    app.get("/api/workspace", { schema: { response: { 200: answer("The caller's Workspace", ref("Workspace")) } } }, async (request) => {
-      const actor = await requireActor(ctx, request);
-      await requireWorkspaceAccess(ctx.db, actor, "read");
-      return publicWorkspace(await getWorkspace(ctx.db, actingUser(actor).workspaceId));
-    });
+    app.get(
+      "/api/workspace",
+      { schema: { response: { 200: answer("The caller's Workspace", ref("Workspace")), ...errors(401, 403) } } },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "read");
+        return publicWorkspace(await getWorkspace(ctx.db, actingUser(actor).workspaceId));
+      },
+    );
 
     app.patch<{ Body: { name?: string; agentAccess?: AgentAccess } }>(
       "/api/workspace",
@@ -24,7 +28,7 @@ export function workspaceRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, agentAccess: agentAccessSchema },
           },
-          response: { 200: answer("The changed Workspace", ref("Workspace")) },
+          response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403) },
         },
       },
       async (request) => {
