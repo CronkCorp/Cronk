@@ -550,7 +550,7 @@ function StatusRow(props: {
   );
 }
 
-function StatusPill(props: { status: Status }) {
+export function StatusPill(props: { status: Status }) {
   return (
     <span className="status-pill">
       <span className={`dot ${props.status.category}`} />

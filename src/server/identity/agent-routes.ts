@@ -17,6 +17,7 @@ import {
   type Agent,
 } from "./agents.js";
 import type { User } from "./users.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
 const agentParams = pathParams({ id: agentId });
@@ -100,6 +101,8 @@ export function agentRoutes(ctx: AppContext) {
           await removeAgent(tx, agent, now);
           await endAgentSessionsOf(tx, agent.id, now);
         });
+        // Its open questions leave its Owner's Inbox.
+        inboxesChanged(ctx.live, [user.id]);
         return reply.code(204).send();
       },
     );
