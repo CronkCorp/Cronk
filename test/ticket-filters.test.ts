@@ -63,4 +63,12 @@ describe("Filtering a Project's Tickets", () => {
       expect((await admin.get(`/api/projects/CRONK/tickets?${query}`)).status, query).toBe(400);
     }
   });
+
+  it("refuses a filter it doesn't know, naming it, rather than listing every Ticket", async () => {
+    const { admin } = await startInstalledCronk();
+    await seed(admin);
+    const res = await admin.get("/api/projects/CRONK/tickets?labels=bug");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('querystring has unknown field "labels"');
+  });
 });
