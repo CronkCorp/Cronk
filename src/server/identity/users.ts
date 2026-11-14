@@ -45,12 +45,12 @@ export async function countUsers(db: Queryable): Promise<number> {
 
 export async function insertUser(
   db: Queryable,
-  input: { workspaceId: string; email: string; name: string; passwordHash: string; role: Role; now: Date },
+  input: { workspaceId: string; email: string; name: string; passwordHash: string; role: Role; now: Date; deactivated?: boolean },
 ): Promise<User> {
   const { rows } = await db.query<UserRow>(
-    `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [input.workspaceId, input.email, input.name, input.passwordHash, input.role, input.now],
+    `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [input.workspaceId, input.email, input.name, input.passwordHash, input.role, input.now, input.deactivated ? input.now : null],
   );
   return toUser(rows[0]!);
 }
