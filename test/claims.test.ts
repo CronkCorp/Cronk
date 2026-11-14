@@ -259,3 +259,42 @@ describe("The welcome", () => {
     ]);
   });
 });
+
+describe("Claims and access", () => {
+  it("are refused to read-only tokens and where the Project's Agent Access is Read, and such Tickets aren't offered", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(1);
+    const readOnly = (await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret;
+    const lookup = await startSession(cronk, readOnly);
+    expect((await lookup.post("/api/tickets/CRONK-1/claim")).status).toBe(403);
+    expect((await lookup.post("/api/agent-sessions/current/next")).body.next).toBeNull();
+
+    await admin.patch("/api/projects/CRONK", { agentAccess: "read" });
+    const agent = await session();
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(403);
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next).toBeNull();
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.readyTickets).toEqual([]);
+  });
+
+  it("end with their Agent Session", async () => {
+    const { admin, session } = await delegatedSetup();
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    await first.delete("/api/agent-sessions/current");
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    expect((await (await session()).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  });
+
+  it("are never held by two Agent Sessions at once, whether they claim or ask for next", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const sessions = await Promise.all(Array.from({ length: 8 }, () => session()));
+
+    const answers = await Promise.all(
+      sessions.map((s, i) => (i % 2 ? s.post("/api/tickets/CRONK-1/claim") : s.post("/api/agent-sessions/current/next"))),
+    );
+
+    const winners = answers.filter((a) => (a.body.next ?? a.body)?.claim);
+    expect(winners).toHaveLength(1);
+    const holder = (winners[0]!.body.next ?? winners[0]!.body).claim.session.id;
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim.session.id).toBe(holder);
+  });
+});
