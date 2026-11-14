@@ -345,6 +345,20 @@ export const migrations: Migration[] = [
       -- The Comment that answered a question: the first reply to it from anyone but the Agent that asked.
       ALTER TABLE activities ADD COLUMN answer_comment_id uuid REFERENCES comments(id) ON DELETE SET NULL
         CHECK (answer_comment_id IS NULL OR kind = 'question');
+
+      -- A Comment waiting for an Agent it concerns (ADR 0005): it answers the Agent's question, @mentions
+      -- it, or is on a Ticket delegated to it. The welcome of the Agent's next Agent Session takes it.
+      CREATE TABLE waiting_work (
+        seq bigserial PRIMARY KEY,
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        comment_id uuid NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        reason text NOT NULL CHECK (reason IN ('answer', 'mention', 'comment')),
+        at timestamptz NOT NULL,
+        taken_at timestamptz,
+        taken_by_session_id uuid REFERENCES agent_sessions(id),
+        UNIQUE (agent_id, comment_id)
+      );
+      CREATE INDEX waiting_work_waiting ON waiting_work (agent_id, seq) WHERE taken_at IS NULL;
     `,
   },
 ];

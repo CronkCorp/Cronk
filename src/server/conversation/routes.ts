@@ -6,6 +6,7 @@ import { answer, documentIdParam, errors, holding, listing, pathParams, ref, tic
 import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered } from "../coordination/activities.js";
+import { markWaiting, type CommentPlace } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
@@ -49,7 +50,14 @@ export function conversationRoutes(ctx: AppContext) {
      * Posts `input` on `target` as `actor`, checking what it replies to is on the same target,
      * and that an anchor's passage is in `document`, the Document it is on.
      */
-    const post = async (tx: Queryable, actor: Actor, target: CommentTarget, input: NewComment, document?: Document): Promise<Comment> => {
+    const post = async (
+      tx: Queryable,
+      actor: Actor,
+      target: CommentTarget,
+      place: CommentPlace,
+      input: NewComment,
+      document?: Document,
+    ): Promise<Comment> => {
       const replyToCommentId = input.replyToCommentId ?? null;
       const replyToActivityId = input.replyToActivityId ?? null;
       if (replyToCommentId && replyToActivityId) throw new HttpError(400, "Reply to a Comment or an Activity, not both");
@@ -66,6 +74,8 @@ export function conversationRoutes(ctx: AppContext) {
       const comment = await insertComment(tx, target, actor, { body: input.body, replyToCommentId, replyToActivityId, anchor }, ctx.clock.now());
       const askedIt = actor.kind === "agent" && actor.agent.id === activity?.agent.id;
       if (activity && !askedIt) await markAnswered(tx, activity, comment.id);
+      const answered = activity?.kind === "question" ? { agentId: activity.agent.id } : null;
+      await markWaiting(tx, actor, comment, place, answered, comment.at);
       return comment;
     };
 
@@ -82,7 +92,7 @@ export function conversationRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const comment = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write");
-          return post(tx, actor, { ticketId: ticket.id }, request.body);
+          return post(tx, actor, { ticketId: ticket.id }, { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null }, request.body);
         });
         return reply.code(201).send({ comment: publicComment(comment) });
       },
@@ -115,7 +125,7 @@ export function conversationRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const comment = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
-          return post(tx, actor, { documentId: document.id }, request.body, document);
+          return post(tx, actor, { documentId: document.id }, { projectId: document.projectId, delegateId: null }, request.body, document);
         });
         return reply.code(201).send({ comment: publicComment(comment) });
       },

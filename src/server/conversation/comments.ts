@@ -45,6 +45,9 @@ interface CommentRow extends RecordedActorRow {
   anchor_in_current_version: boolean | null;
   body: string;
   at: Date;
+  ticket_title: string | null;
+  document_title: string | null;
+  project_id: string | null;
 }
 
 /**
@@ -54,7 +57,7 @@ interface CommentRow extends RecordedActorRow {
 const selectFrom = (source: string) => `
   SELECT c.id, c.ticket_id, p.key || '-' || t.number AS ticket_key, c.document_id, c.reply_to_comment_id, c.reply_to_activity_id,
     c.anchor_passage, c.anchor_version, strpos(d.body, c.anchor_passage) > 0 AS anchor_in_current_version,
-    c.body, c.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
+    c.body, c.at, t.title AS ticket_title, d.title AS document_title, coalesce(t.project_id, d.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
   FROM ${source} c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
     LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN documents d ON d.id = c.document_id`;
 
@@ -131,6 +134,26 @@ export async function findComment(db: Queryable, target: CommentTarget, id: stri
     [id, ticketId ?? documentId],
   );
   return rows[0] && toComment(rows[0]);
+}
+
+/** Where a Comment is: its Project (null for a Workspace Document) and its Ticket or Document. */
+export interface CommentOn {
+  projectId: string | null;
+  ticket: { key: string; title: string } | null;
+  document: { id: string; title: string } | null;
+}
+
+/** The Comments with these ids, in the order they were posted, each with where it is. */
+export async function findCommentsByIds(db: Queryable, ids: string[]): Promise<{ comment: Comment; on: CommentOn }[]> {
+  const { rows } = await db.query<CommentRow>(`${selectFrom("comments")} WHERE c.id = ANY($1) ORDER BY c.seq`, [ids]);
+  return rows.map((row) => ({
+    comment: toComment(row),
+    on: {
+      projectId: row.project_id,
+      ticket: row.ticket_key === null ? null : { key: row.ticket_key, title: row.ticket_title! },
+      document: row.document_id === null ? null : { id: row.document_id, title: row.document_title! },
+    },
+  }));
 }
 
 /** The shape of a Comment the API returns. */

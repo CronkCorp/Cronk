@@ -43,6 +43,7 @@ export type SharedSchemaName =
   | "RecordedChange"
   | "Activity"
   | "Comment"
+  | "WaitingWork"
   | "Document"
   | "DocumentTreeEntry"
   | "Version"
@@ -290,6 +291,19 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       body: { type: "string", description: "Markdown." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },
+    }),
+  },
+  WaitingWork: {
+    description: "A Comment waiting for an Agent (ADR 0005), with why and what it is on.",
+    ...object({
+      reason: {
+        type: "string",
+        enum: ["answer", "mention", "comment"],
+        description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
+      },
+      comment: ref("Comment"),
+      ticket: { ...nullable(ticketName), description: "The Ticket it is on; null on a Document." },
+      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document it is on; null on a Ticket." },
     }),
   },
   Document: {

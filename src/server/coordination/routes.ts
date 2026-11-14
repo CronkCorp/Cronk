@@ -13,6 +13,7 @@ import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireC
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
+import { takeWaitingWork } from "./waiting-work.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -29,7 +30,7 @@ const WELCOME_READY_LIMIT = 20;
 /** What an Agent is told when its Agent Session starts (see `welcome`). */
 const welcomeSchema = {
   type: "object",
-  required: ["workspace", "agent", "readOnly", "projects", "readyTickets"],
+  required: ["workspace", "agent", "readOnly", "projects", "readyTickets", "waitingWork"],
   properties: {
     workspace: {
       anyOf: [
@@ -67,6 +68,13 @@ const welcomeSchema = {
         properties: { key: { type: "string" }, title: { type: "string" }, priority: { type: "string", enum: PRIORITIES }, status: ref("Status") },
       },
     },
+    waitingWork: {
+      type: "array",
+      description:
+        "Comments waiting for the Agent since its last welcome, oldest first: answers to its questions, @mentions of it, and " +
+        "Comments on Tickets delegated to it. This welcome takes them, so the next one lists only newer ones.",
+      items: ref("WaitingWork"),
+    },
   },
 } as const;
 
@@ -95,7 +103,7 @@ export function coordinationRoutes(ctx: AppContext) {
       async (request, reply) => {
         const agent = requireAgent(await requireActor(ctx, request));
         const session = await startAgentSession(ctx.db, { agentId: agent.agent.id, tokenId: agent.tokenId, now: ctx.clock.now() });
-        return reply.code(201).send({ session: publicAgentSession(session), welcome: await welcome(ctx, agent) });
+        return reply.code(201).send({ session: publicAgentSession(session), welcome: await welcome(ctx, { ...agent, session }) });
       },
     );
 
@@ -303,10 +311,11 @@ function requireSession(actor: Actor): AgentSession {
 /**
  * What an Agent is told when it connects: who it is and for whom, whether it may only
  * read, the Workspace's Guidance, the Projects it can see with each one's Guidance, and its
- * Ready Tickets. The Workspace, with its name and Guidance, is left out if the Workspace's
+ * Ready Tickets, and the work waiting for it, which the welcome takes so the next one doesn't
+ * list it again. The Workspace, with its name and Guidance, is left out if the Workspace's
  * Agent Access is None.
  */
-export async function welcome(ctx: AppContext, agent: AgentActor) {
+export async function welcome(ctx: AppContext, agent: AgentActor & { session: AgentSession }) {
   const workspaceId = agent.owner.workspaceId;
   const readable = await requireWorkspaceAccess(ctx.db, agent, "read").then(
     () => true,
@@ -327,6 +336,7 @@ export async function welcome(ctx: AppContext, agent: AgentActor) {
     readOnly: agent.readOnly,
     projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access, guidance: guidance.get(p.id)! })),
     readyTickets: await readyTickets(ctx, agent),
+    waitingWork: await takeWaitingWork(ctx.db, agent, agent.session.id, ctx.clock.now()),
   };
 }
 
