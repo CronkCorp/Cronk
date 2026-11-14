@@ -74,9 +74,20 @@ function Breadcrumb(props: { projectKey: string | null; ticketKey: string | null
 
 /** A Project's page tree, or the Workspace's without a Project key. */
 export function DocumentsPage(props: { projectKey?: string }) {
-  const [tree] = useLoad(() => api.documentTree(props.projectKey), [props.projectKey]);
+  const [tree, reload] = useLoad(() => api.documentTree(props.projectKey), [props.projectKey]);
   const canWrite = useCanWrite(props.projectKey);
   const [creating, setCreating] = useState(false);
+  const [importError, setImportError] = useState<string>();
+  const importFolder = async (file: File | undefined) => {
+    if (!file) return;
+    setImportError(undefined);
+    try {
+      await api.importDocuments(props.projectKey, file);
+      reload();
+    } catch (err) {
+      setImportError(messageOf(err));
+    }
+  };
   return (
     <section>
       <div className="page-head">
@@ -87,9 +98,14 @@ export function DocumentsPage(props: { projectKey?: string }) {
         {canWrite && !creating && (
           <div className="actions">
             <button onClick={() => setCreating(true)}>New Document</button>
+            <label className="button secondary" title="A .tar.gz of a folder of Markdown files; the folders become the page tree">
+              Import Markdown folder…
+              <input type="file" accept=".gz,.tgz,.tar" hidden onChange={(e) => void importFolder(e.target.files?.[0])} />
+            </label>
           </div>
         )}
       </div>
+      {importError && <p className="error" role="alert">{importError}</p>}
       {creating && <NewDocument projectKey={props.projectKey} onCancel={() => setCreating(false)} />}
       <Show state={tree}>
         {(entries) =>

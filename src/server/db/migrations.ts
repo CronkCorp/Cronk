@@ -378,4 +378,13 @@ export const migrations: Migration[] = [
       CREATE INDEX waiting_work_waiting ON waiting_work (agent_id, seq) WHERE taken_at IS NULL;
     `,
   },
+  {
+    id: "0014_search",
+    sql: `
+      -- Full-text search (search/search.ts) matches these exact expressions, so keep the two in step.
+      CREATE INDEX tickets_search ON tickets USING gin (to_tsvector('english', title || ' ' || description));
+      CREATE INDEX documents_search ON documents USING gin (to_tsvector('english', title || ' ' || body));
+      CREATE INDEX comments_search ON comments USING gin (to_tsvector('english', body));
+    `,
+  },
 ];

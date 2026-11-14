@@ -1,7 +1,7 @@
 import { actingUser, type Actor, type AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { findProjectById, findProjectByKey, type Project, type Visibility } from "../work/projects.js";
+import { findProjectById, findProjectByKey, listProjects, type Project, type Visibility } from "../work/projects.js";
 import type { Agent } from "./agents.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import type { User } from "./users.js";
@@ -139,6 +139,26 @@ export async function canRead(db: Queryable, actor: Actor, projectId: string | n
     if (err instanceof HttpError) return false;
     throw err;
   }
+}
+
+/** Where an Actor may read: the ids of the Projects, archived or not, and their Workspace's id if they may read it outside any Project. */
+export interface Readable {
+  projectIds: string[];
+  workspaceId: string | null;
+}
+
+/**
+ * SQL for whether the Document aliased `document` lies where a `Readable` lets its Actor read, given
+ * SQL for its `projectIds` (a uuid[]) and its `workspaceId` (a uuid, NULL when the Workspace isn't readable).
+ */
+export const documentReadableSql = (document: string, projectIds: string, workspaceId: string) =>
+  `(${document}.project_id = ANY(${projectIds}) OR (${document}.project_id IS NULL AND ${document}.workspace_id = ${workspaceId}))`;
+
+/** Where `actor` may read, for finding things across the Workspace (see `Readable`). */
+export async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {
+  const workspaceId = actingUser(actor).workspaceId;
+  const projects = [...(await listProjects(db, workspaceId, false)), ...(await listProjects(db, workspaceId, true))];
+  return { projectIds: (await visibleProjects(db, actor, projects)).map((p) => p.id), workspaceId: (await canRead(db, actor, null)) ? workspaceId : null };
 }
 
 /**

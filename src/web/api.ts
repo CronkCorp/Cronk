@@ -30,6 +30,8 @@ import type {
   Relations,
   Report,
   Role,
+  SearchKind,
+  SearchResult,
   Status,
   StatusCategory,
   Ticket,
@@ -76,6 +78,8 @@ export type {
   Relations,
   Report,
   Role,
+  SearchKind,
+  SearchResult,
   Status,
   StatusCategory,
   Ticket,
@@ -138,7 +142,35 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+/** Uploads `file`, such as a .tar.gz archive, as the raw request body. */
+async function upload<T>(path: string, file: File): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/gzip" },
+    body: file,
+    credentials: "same-origin",
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : undefined;
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
+  return data as T;
+}
+
+/** Where the whole Workspace's export downloads from; it holds every Version. */
+export const workspaceExportUrl = "/api/export";
+
 export const api = {
+  /** Imports an export of the Workspace or a Project; Admins only. */
+  importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
+  /** Imports a .tar.gz of a folder of Markdown files as Documents of a Project's tree, or the Workspace's. */
+  importDocuments: (projectKey: string | undefined, file: File) =>
+    upload<{ documents: DocumentTreeEntry[] }>(`${treePath(projectKey)}/documents/import`, file).then((r) => r.documents),
+  /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
+  search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
+    request<{ results: SearchResult[] }>(
+      "GET",
+      `/api/search?${new URLSearchParams({ q, ...(filter.kind && { kind: filter.kind }), ...(filter.project && { project: filter.project }) })}`,
+    ).then((r) => r.results),
   setupRequired: () => request<{ required: boolean }>("GET", "/api/setup").then((r) => r.required),
   setup: (input: { email: string; password: string; name: string; workspaceName?: string }) =>
     request<{ user: User }>("POST", "/api/setup", input).then((r) => r.user),
