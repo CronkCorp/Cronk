@@ -16,7 +16,10 @@ export function ownBaseUrl(app: FastifyInstance): string | undefined {
 
 /** How long a stream may take to open with `ready` before it is given up. */
 const READY_TIMEOUT_MS = 5_000;
-/** How long after a stream ends, or fails to open, it is first opened again; each further failure doubles it, up to the maximum. */
+/**
+ * How long after a stream ends, or fails to open, it is first opened again; each further try doubles it, up to the
+ * maximum, until a stream stays open for that maximum.
+ */
 const REOPEN_DELAY_MS = 250;
 const MAX_REOPEN_DELAY_MS = 30_000;
 
@@ -46,16 +49,18 @@ export async function followEvents(baseUrl: string, caller: Caller, path: string
   const follow = async (): Promise<void> => {
     const opened = await openStream(baseUrl, caller, path, onEvent, (close) => (closeStream = close));
     if (stopped || opened === "refused") return;
-    if (opened === "failed") {
-      reopenIn(delay);
-      delay = Math.min(delay * 2, MAX_REOPEN_DELAY_MS);
-      return;
-    }
-    delay = REOPEN_DELAY_MS;
-    void opened.ended.then(() => reopenIn(delay));
+    if (opened === "failed") return reopenLater();
+    const openedAt = Date.now();
+    void opened.ended.then(() => {
+      // Only a stream that stayed open a while counts as recovered; one that keeps ending at once backs off too.
+      if (Date.now() - openedAt >= MAX_REOPEN_DELAY_MS) delay = REOPEN_DELAY_MS;
+      reopenLater();
+    });
   };
-  const reopenIn = (ms: number) => {
-    if (!stopped) reopening = setTimeout(() => void follow(), ms).unref();
+  const reopenLater = () => {
+    if (stopped) return;
+    reopening = setTimeout(() => void follow(), delay).unref();
+    delay = Math.min(delay * 2, MAX_REOPEN_DELAY_MS);
   };
   await follow();
   return stop;
