@@ -14,6 +14,8 @@ import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
+/** Where the OpenAPI description is served; it takes any query string. */
+const OPENAPI_PATH = "/api/openapi.json";
 
 export interface AppConfig {
   databaseUrl: string;
@@ -48,7 +50,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
   // so a new route can't forget to. The web shell and the OpenAPI document take any query string.
   app.addHook("onRoute", (route) => {
-    if (!route.url.startsWith("/api/") || route.url === "/api/openapi.json") return;
+    if (!route.url.startsWith("/api/") || route.url === OPENAPI_PATH) return;
     // Fastify also takes `query` for `querystring`; declaring both fails at startup, so fold it in.
     const { query, querystring: declared, ...schema } = (route.schema ?? {}) as Record<string, unknown>;
     // `properties: {}` so the OpenAPI description lists no query parameters rather than reading the schema as one.
@@ -58,7 +60,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     route.schema = {
       ...schema,
       querystring: inline ? { additionalProperties: false, ...querystring } : querystring,
-      // So every operation's description says it can be refused.
+      // So every operation's description says it can be refused; a route's own 400 description wins.
       response: { ...errors(400), ...(schema.response as object | undefined) },
     };
   });
@@ -100,7 +102,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     // Shared schemas appear under `components.schemas` by their `$id`.
     refResolver: { buildLocalReference: (json, _baseUri, _fragment, i) => (typeof json.$id === "string" ? json.$id : `def-${i}`) },
   });
-  app.get("/api/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+  app.get(OPENAPI_PATH, { schema: { hide: true } }, async () => app.swagger());
   app.get(
     "/api/health",
     { schema: { ...publicRoute, response: { 200: answer("Cronk is up and its database answers", healthSchema) } } },
