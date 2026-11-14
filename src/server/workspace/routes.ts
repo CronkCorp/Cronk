@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { requireUser, type AppContext } from "../context.js";
+import { actingUser } from "../actor.js";
+import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin } from "../identity/access.js";
 import { nameSchema } from "../schemas.js";
 import { getWorkspace, renameWorkspace } from "./workspaces.js";
@@ -7,8 +8,8 @@ import { getWorkspace, renameWorkspace } from "./workspaces.js";
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     app.get("/api/workspace", async (request) => {
-      const user = await requireUser(ctx, request);
-      const workspace = await getWorkspace(ctx.db, user.workspaceId);
+      const actor = await requireActor(ctx, request);
+      const workspace = await getWorkspace(ctx.db, actingUser(actor).workspaceId);
       return { name: workspace.name };
     });
 

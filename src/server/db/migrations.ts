@@ -121,4 +121,30 @@ export const migrations: Migration[] = [
       CREATE INDEX project_members_user ON project_members (user_id);
     `,
   },
+  {
+    id: "0004_agents_tokens",
+    sql: `
+      -- An Agent acts for exactly one User, its Owner (ADR 0001). A removed Agent keeps its row so history still names it.
+      CREATE TABLE agents (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        owner_id uuid NOT NULL REFERENCES users(id),
+        name text NOT NULL,
+        created_at timestamptz NOT NULL,
+        removed_at timestamptz
+      );
+      -- An Owner's Agents have distinct names while they exist.
+      CREATE UNIQUE INDEX agents_owner_name_unique ON agents (owner_id, lower(name)) WHERE removed_at IS NULL;
+
+      -- A token an Agent calls the API with, full or read-only. Only its hash is stored; revoking deletes it.
+      CREATE TABLE agent_tokens (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        read_only boolean NOT NULL,
+        created_at timestamptz NOT NULL
+      );
+      CREATE INDEX agent_tokens_agent ON agent_tokens (agent_id);
+    `,
+  },
 ];

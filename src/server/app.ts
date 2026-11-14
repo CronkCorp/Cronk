@@ -4,6 +4,7 @@ import staticFiles from "@fastify/static";
 import type { Clock } from "./clock.js";
 import { HttpError, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
+import { agentRoutes } from "./identity/agent-routes.js";
 import { identityRoutes } from "./identity/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
@@ -48,6 +49,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     return { status: "ok" };
   });
   await app.register(identityRoutes(ctx));
+  await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
 

@@ -1,4 +1,4 @@
-import type { Actor } from "../actor.js";
+import { actingUser, type Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
@@ -148,7 +148,7 @@ async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: D
   const { change: kind, ...data } = change;
   await db.query(
     "INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, change, data) VALUES ($1, $2, $3, $4, $5, $6)",
-    [ticketId, at, actor.kind, actor.user.id, kind, data],
+    [ticketId, at, "user", actingUser(actor).id, kind, data],
   );
 }
 

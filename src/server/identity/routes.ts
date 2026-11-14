@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
-import { transaction } from "../db/database.js";
+import { actingUser } from "../actor.js";
+import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
+import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin } from "./access.js";
+import { publicAgent } from "./agents.js";
 import {
   createInvitation,
   deleteInvitation,
@@ -21,9 +23,6 @@ const SETUP_LOCK = 0x7365747570;
 const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]+@[^@\\s]+$" } as const;
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
 const role = { type: "string", enum: ["admin", "member"] } as const;
-
-/** Postgres's error code for a unique index refusing a row. */
-const UNIQUE_VIOLATION = "23505";
 
 const INVITATION_GONE = "This invitation has expired or was withdrawn";
 
@@ -189,8 +188,8 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     app.get("/api/users", async (request) => {
-      const user = await requireUser(ctx, request);
-      return { users: (await listUsers(ctx.db, user.workspaceId)).map(publicUser) };
+      const actor = await requireActor(ctx, request);
+      return { users: (await listUsers(ctx.db, actingUser(actor).workspaceId)).map(publicUser) };
     });
 
     app.patch<{ Params: { id: string }; Body: { role?: Role; active?: boolean } }>(
@@ -213,6 +212,11 @@ export function identityRoutes(ctx: AppContext) {
       },
     );
 
-    app.get("/api/me", async (request) => ({ user: publicUser(await requireUser(ctx, request)) }));
+    // Who the caller is: a User, or an Agent with its Owner and whether its token is read-only.
+    app.get("/api/me", async (request) => {
+      const actor = await requireActor(ctx, request);
+      if (actor.kind === "user") return { user: publicUser(actor.user) };
+      return { agent: publicAgent(actor.agent, actor.owner), readOnly: actor.readOnly };
+    });
   };
 }

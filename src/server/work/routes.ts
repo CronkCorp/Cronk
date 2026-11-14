@@ -1,12 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireUser, type AppContext } from "../context.js";
+import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
-import { userActor } from "../actor.js";
+import { actingUser, type Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { requireAdmin, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
-import { findUserById, publicUser, type User } from "../identity/users.js";
+import { findUserById, publicUser } from "../identity/users.js";
 import {
   findProjectById,
   findProjectByKey,
@@ -33,9 +33,9 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects",
       { schema: { querystring: { type: "object", properties: { archived: { type: "boolean" } } } } },
       async (request) => {
-        const user = await requireUser(ctx, request);
-        const projects = await listProjects(ctx.db, user.workspaceId, request.query.archived ?? false);
-        return { projects: await visibleProjects(ctx.db, user, projects) };
+        const actor = await requireActor(ctx, request);
+        const projects = await listProjects(ctx.db, actingUser(actor).workspaceId, request.query.archived ?? false);
+        return { projects: await visibleProjects(ctx.db, actor, projects) };
       },
     );
 
@@ -52,10 +52,10 @@ export function workRoutes(ctx: AppContext) {
         },
       },
       async (request, reply) => {
-        const user = await requireUser(ctx, request);
+        const actor = await requireActor(ctx, request);
         const key = request.body.key.toUpperCase();
         const project = await transaction(ctx.db, (tx) =>
-          insertProject(tx, { workspaceId: user.workspaceId, name: request.body.name.trim(), key, now: ctx.clock.now() }),
+          insertProject(tx, { workspaceId: actingUser(actor).workspaceId, name: request.body.name.trim(), key, now: ctx.clock.now() }),
         );
         if (!project) throw new HttpError(409, `Another Project already has the key ${key}`);
         return reply.code(201).send({ project: { ...project, access: "write" } });
@@ -63,8 +63,8 @@ export function workRoutes(ctx: AppContext) {
     );
 
     app.get<{ Params: { key: string } }>("/api/projects/:key", async (request) => {
-      const user = await requireUser(ctx, request);
-      const { project, access } = await projectFor(ctx.db, user, request.params.key, "read");
+      const actor = await requireActor(ctx, request);
+      const { project, access } = await projectFor(ctx.db, actor, request.params.key, "read");
       return { project: { ...project, access }, statuses: await listStatuses(ctx.db, project.id) };
     });
 
@@ -80,10 +80,10 @@ export function workRoutes(ctx: AppContext) {
         },
       },
       async (request) => {
-        const user = await requireUser(ctx, request);
-        const { project, access } = await projectFor(ctx.db, user, request.params.key, "write");
+        const actor = await requireActor(ctx, request);
+        const { project, access } = await projectFor(ctx.db, actor, request.params.key, "write");
         const { name, archived, visibility } = request.body;
-        if (visibility !== undefined) requireAdmin(user, "make a Project open or private");
+        if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
@@ -94,8 +94,8 @@ export function workRoutes(ctx: AppContext) {
     );
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/members", async (request) => {
-      const user = await requireUser(ctx, request);
-      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+      const actor = await requireActor(ctx, request);
+      const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
       const members = await listMemberships(ctx.db, project.id);
       return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
     });
@@ -119,11 +119,11 @@ export function workRoutes(ctx: AppContext) {
         },
       },
       async (request) => {
-        const user = await requireUser(ctx, request);
-        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
-        requireAdmin(user, "change who is in a Project");
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        requireAdmin(actor, "change who is in a Project");
         const member = await findUserById(ctx.db, request.params.userId);
-        if (!member || member.workspaceId !== user.workspaceId) throw new HttpError(404, "No such User");
+        if (!member || member.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(404, "No such User");
         if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
         await setMembership(ctx.db, project.id, member.id, request.body.access);
         return { member: { user: publicUser(member), access: request.body.access } };
@@ -134,17 +134,17 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects/:key/members/:userId",
       { schema: { params: memberParams } },
       async (request, reply) => {
-        const user = await requireUser(ctx, request);
-        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
-        requireAdmin(user, "change who is in a Project");
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        requireAdmin(actor, "change who is in a Project");
         await removeMembership(ctx.db, project.id, request.params.userId);
         return reply.code(204).send();
       },
     );
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/tickets", async (request) => {
-      const user = await requireUser(ctx, request);
-      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+      const actor = await requireActor(ctx, request);
+      const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
       return { tickets: await listTickets(ctx.db, project.id) };
     });
 
@@ -161,9 +161,9 @@ export function workRoutes(ctx: AppContext) {
         },
       },
       async (request, reply) => {
-        const user = await requireUser(ctx, request);
+        const actor = await requireActor(ctx, request);
         const ticket = await transaction(ctx.db, async (tx) => {
-          const { project } = await projectFor(tx, user, request.params.key, "write");
+          const { project } = await projectFor(tx, actor, request.params.key, "write");
           // New Tickets start in the Project's first Status.
           const [firstStatus] = await listStatuses(tx, project.id);
           return insertTicket(tx, {
@@ -171,7 +171,7 @@ export function workRoutes(ctx: AppContext) {
             title: request.body.title.trim(),
             description: request.body.description ?? "",
             status: firstStatus!,
-            actor: userActor(user),
+            actor,
             now: ctx.clock.now(),
           });
         });
@@ -180,8 +180,8 @@ export function workRoutes(ctx: AppContext) {
     );
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key", async (request) => {
-      const user = await requireUser(ctx, request);
-      return { ticket: await ticketFor(ctx.db, user, request.params.key, "read") };
+      const actor = await requireActor(ctx, request);
+      return { ticket: await ticketFor(ctx.db, actor, request.params.key, "read") };
     });
 
     app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string } }>(
@@ -196,10 +196,10 @@ export function workRoutes(ctx: AppContext) {
         },
       },
       async (request) => {
-        const user = await requireUser(ctx, request);
+        const actor = await requireActor(ctx, request);
         const { title, description, statusId } = request.body;
         const ticket = await transaction(ctx.db, async (tx) => {
-          const ticket = await ticketFor(tx, user, request.params.key, "write", { forUpdate: true });
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
@@ -209,35 +209,35 @@ export function workRoutes(ctx: AppContext) {
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
             changes.status = status;
           }
-          return updateTicket(tx, ticket, changes, userActor(user), ctx.clock.now());
+          return updateTicket(tx, ticket, changes, actor, ctx.clock.now());
         });
         return { ticket };
       },
     );
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key/history", async (request) => {
-      const user = await requireUser(ctx, request);
-      const ticket = await ticketFor(ctx.db, user, request.params.key, "read");
+      const actor = await requireActor(ctx, request);
+      const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
       return { changes: await listHistory(ctx.db, ticket.id) };
     });
   };
 }
 
-/** The Project with this key, if `user` has at least `need` in it (see `requireProjectAccess`). */
-async function projectFor(db: Queryable, user: User, key: string, need: Access): Promise<{ project: Project; access: Access }> {
-  const project = await findProjectByKey(db, user.workspaceId, key);
+/** The Project with this key, if `actor` has at least `need` in it (see `requireProjectAccess`). */
+async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
+  const project = await findProjectByKey(db, actingUser(actor).workspaceId, key);
   if (!project) throw new HttpError(404, "No such Project");
-  return { project, access: await requireProjectAccess(db, user, project, need) };
+  return { project, access: await requireProjectAccess(db, actor, project, need) };
 }
 
 /**
- * The Ticket with this key, if `user` has at least `need` in its Project. A Ticket in
+ * The Ticket with this key, if `actor` has at least `need` in its Project. A Ticket in
  * a Project they can't see answers 404, like one that doesn't exist.
  */
-async function ticketFor(db: Queryable, user: User, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
-  const ticket = await findTicketByKey(db, user.workspaceId, key, opts);
+async function ticketFor(db: Queryable, actor: Actor, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
+  const ticket = await findTicketByKey(db, actingUser(actor).workspaceId, key, opts);
   const project = ticket && (await findProjectById(db, ticket.projectId));
   if (!ticket || !project) throw new HttpError(404, "No such Ticket");
-  await requireProjectAccess(db, user, project, need, "No such Ticket");
+  await requireProjectAccess(db, actor, project, need, "No such Ticket");
   return ticket;
 }

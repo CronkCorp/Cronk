@@ -1,3 +1,4 @@
+import { actingUser, type Actor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import type { Visibility } from "../work/projects.js";
@@ -36,11 +37,12 @@ const covers = (has: Access, need: Access) => has === "write" || need === "read"
  */
 export async function requireProjectAccess(
   db: Queryable,
-  user: User,
+  actor: Actor,
   project: AccessTarget,
   need: Access,
   hiddenAs = "No such Project",
 ): Promise<Access> {
+  const user = actingUser(actor);
   const { rows } = await db.query<{ access: Access }>(
     "SELECT access FROM project_members WHERE project_id = $1 AND user_id = $2",
     [project.id, user.id],
@@ -51,8 +53,9 @@ export async function requireProjectAccess(
   return access;
 }
 
-/** The Projects `user` can see, each with the access they have in it. */
-export async function visibleProjects<P extends AccessTarget>(db: Queryable, user: User, projects: P[]): Promise<(P & { access: Access })[]> {
+/** The Projects `actor` can see, each with the access they have in it. */
+export async function visibleProjects<P extends AccessTarget>(db: Queryable, actor: Actor, projects: P[]): Promise<(P & { access: Access })[]> {
+  const user = actingUser(actor);
   const { rows } = await db.query<{ project_id: string; access: Access }>(
     "SELECT project_id, access FROM project_members WHERE user_id = $1",
     [user.id],
@@ -64,7 +67,8 @@ export async function visibleProjects<P extends AccessTarget>(db: Queryable, use
   });
 }
 
-/** Refuses anyone but an Admin. `what` completes "Only an Admin can …". */
-export function requireAdmin(user: User, what: string): void {
-  if (user.role !== "admin") throw new HttpError(403, `Only an Admin can ${what}`);
+/** Refuses anyone but an Admin; an Agent never is one, even if its Owner is. `what` completes "Only an Admin can …". */
+export function requireAdmin(who: User | Actor, what: string): void {
+  const user = "kind" in who ? (who.kind === "user" ? who.user : undefined) : who;
+  if (user?.role !== "admin") throw new HttpError(403, `Only an Admin can ${what}`);
 }
