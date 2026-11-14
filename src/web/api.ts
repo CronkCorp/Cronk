@@ -1,5 +1,7 @@
 /** A thin client for the Cronk HTTP API. The UI holds no rules; the API decides. */
 
+import type { Priority, RelationKind, StatusCategory } from "../shared/values.js";
+
 export interface User {
   id: string;
   email: string;
@@ -45,18 +47,6 @@ export interface Workspace {
   agentAccess: AgentAccess;
 }
 
-/** The fixed Status Categories, in workflow order, with their display names. */
-export const STATUS_CATEGORIES = [
-  ["backlog", "Backlog"],
-  ["unstarted", "Unstarted"],
-  ["started", "Started"],
-  ["in_review", "In Review"],
-  ["completed", "Completed"],
-  ["canceled", "Canceled"],
-] as const;
-
-export type StatusCategory = (typeof STATUS_CATEGORIES)[number][0];
-
 export interface Status {
   id: string;
   name: string;
@@ -73,9 +63,6 @@ export interface Project {
   /** What the signed-in User may do in the Project. */
   access: Access;
 }
-
-export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
-export type Priority = (typeof PRIORITIES)[number];
 
 export interface UserRef {
   id: string;
@@ -106,8 +93,6 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
 }
-
-export type RelationKind = "blocks" | "blocked_by" | "relates_to";
 
 export interface Relations {
   blocks: TicketRef[];

@@ -3,9 +3,9 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "./relations.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status, type StatusCategory } from "./projects.js";
 
-/** A Ticket's Priority, most urgent first. */
-export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
-export type Priority = (typeof PRIORITIES)[number];
+import type { Priority } from "../../shared/values.js";
+
+export { PRIORITIES, type Priority } from "../../shared/values.js";
 
 /** A User as a Ticket shows them. */
 export interface UserRef {

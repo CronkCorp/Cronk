@@ -1,9 +1,9 @@
 import type { Queryable } from "../db/database.js";
 import type { AgentAccess } from "../identity/access.js";
 
-/** The fixed Status Categories every Status belongs to (ADR 0011), in workflow order. */
-export const STATUS_CATEGORIES = ["backlog", "unstarted", "started", "in_review", "completed", "canceled"] as const;
-export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
+import { STATUS_CATEGORIES, type StatusCategory } from "../../shared/values.js";
+
+export { STATUS_CATEGORIES, type StatusCategory };
 
 /** The Statuses a new Project starts with: one per Status Category. */
 const DEFAULT_STATUSES: { name: string; category: StatusCategory }[] = [

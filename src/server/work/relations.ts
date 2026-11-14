@@ -2,13 +2,9 @@ import type { Actor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { listTicketRefs, recordChange, type Ticket, type TicketRef } from "./tickets.js";
 
-/**
- * How one Ticket relates to another, read from the first Ticket's side.
- * `blocks` and `blocked_by` are the two sides of one blocking relation;
- * `relates_to` reads the same from both sides.
- */
-export const RELATION_KINDS = ["blocks", "blocked_by", "relates_to"] as const;
-export type RelationKind = (typeof RELATION_KINDS)[number];
+import type { RelationKind } from "../../shared/values.js";
+
+export { RELATION_KINDS, type RelationKind } from "../../shared/values.js";
 
 const inverse: Record<RelationKind, RelationKind> = { blocks: "blocked_by", blocked_by: "blocks", relates_to: "relates_to" };
 
