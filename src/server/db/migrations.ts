@@ -88,4 +88,22 @@ export const migrations: Migration[] = [
       CREATE INDEX ticket_changes_ticket ON ticket_changes (ticket_id, id);
     `,
   },
+  {
+    id: "0003_invitations_access",
+    sql: `
+      -- An Admin's invitation for someone to join the Workspace. Only the token's hash is stored.
+      CREATE TABLE invitations (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        email text NOT NULL,
+        role text NOT NULL CHECK (role IN ('admin', 'member')),
+        token_hash text NOT NULL UNIQUE,
+        invited_by uuid NOT NULL REFERENCES users(id),
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL
+      );
+      -- One pending invitation per email; inviting again replaces it.
+      CREATE UNIQUE INDEX invitations_email_unique ON invitations (lower(email));
+    `,
+  },
 ];

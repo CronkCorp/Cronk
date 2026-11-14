@@ -1,16 +1,14 @@
-import { createHash, randomBytes } from "node:crypto";
 import type { Queryable } from "../db/database.js";
 import type { Clock } from "../clock.js";
+import { hashToken as hash, newToken } from "./tokens.js";
 import { findUserById, type User } from "./users.js";
 
 /** How long a sign-in lasts before the User must sign in again. */
 export const SIGN_IN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-const hash = (token: string) => createHash("sha256").update(token).digest("hex");
-
 /** Records a sign-in and returns the secret token for the cookie. Only its hash is stored. */
 export async function createSignIn(db: Queryable, clock: Clock, userId: string): Promise<{ token: string; expiresAt: Date }> {
-  const token = randomBytes(32).toString("base64url");
+  const token = newToken();
   const now = clock.now();
   const expiresAt = new Date(now.getTime() + SIGN_IN_TTL_MS);
   // Expired sign-ins can never be used again; clear them out as new ones arrive.
