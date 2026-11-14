@@ -89,7 +89,40 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0003_status_names_unique",
+    id: "0003_invitations_access",
+    sql: `
+      -- An Admin's invitation for someone to join the Workspace. Only the token's hash is stored.
+      CREATE TABLE invitations (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        email text NOT NULL,
+        role text NOT NULL CHECK (role IN ('admin', 'member')),
+        token_hash text NOT NULL UNIQUE,
+        invited_by uuid NOT NULL REFERENCES users(id),
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL
+      );
+      -- One pending invitation per email; inviting again replaces it.
+      CREATE UNIQUE INDEX invitations_email_unique ON invitations (lower(email));
+
+      -- A deactivated User can't sign in; their history stays.
+      ALTER TABLE users ADD COLUMN deactivated_at timestamptz;
+
+      -- Open Projects are open to every Member; private ones only to those listed in project_members.
+      ALTER TABLE projects ADD COLUMN visibility text NOT NULL DEFAULT 'open' CHECK (visibility IN ('open', 'private'));
+
+      -- A Member's access in a Project: who may enter a private Project, and Read or Write in any Project.
+      CREATE TABLE project_members (
+        project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        access text NOT NULL CHECK (access IN ('read', 'write')),
+        PRIMARY KEY (project_id, user_id)
+      );
+      CREATE INDEX project_members_user ON project_members (user_id);
+    `,
+  },
+  {
+    id: "0004_status_names_unique",
     sql: `
       -- A Project's Statuses are told apart by name, so no two may share one, ignoring case.
       CREATE UNIQUE INDEX statuses_name_unique ON statuses (project_id, lower(name));

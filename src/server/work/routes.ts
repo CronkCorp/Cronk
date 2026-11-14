@@ -4,9 +4,13 @@ import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { userActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
+import { requireAdmin, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
+import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
+import { findUserById, publicUser, type User } from "../identity/users.js";
 import {
   countTicketsInStatus,
   deleteStatus,
+  findProjectById,
   findProjectByKey,
   findStatusToMoveInto,
   insertProject,
@@ -23,6 +27,7 @@ import {
   type Project,
   type Status,
   type StatusCategory,
+  type Visibility,
 } from "./projects.js";
 import {
   findTicketByKey,
@@ -49,7 +54,8 @@ export function workRoutes(ctx: AppContext) {
       { schema: { querystring: { type: "object", properties: { archived: { type: "boolean" } } } } },
       async (request) => {
         const user = await requireUser(ctx, request);
-        return { projects: await listProjects(ctx.db, user.workspaceId, request.query.archived ?? false) };
+        const projects = await listProjects(ctx.db, user.workspaceId, request.query.archived ?? false);
+        return { projects: await visibleProjects(ctx.db, user, projects) };
       },
     );
 
@@ -72,33 +78,87 @@ export function workRoutes(ctx: AppContext) {
           insertProject(tx, { workspaceId: user.workspaceId, name: request.body.name.trim(), key, now: ctx.clock.now() }),
         );
         if (!project) throw new HttpError(409, `Another Project already has the key ${key}`);
-        return reply.code(201).send({ project });
+        return reply.code(201).send({ project: { ...project, access: "write" } });
       },
     );
 
     app.get<{ Params: { key: string } }>("/api/projects/:key", async (request) => {
       const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
-      return { project, statuses: await listStatuses(ctx.db, project.id) };
+      const { project, access } = await projectFor(ctx.db, user, request.params.key, "read");
+      return { project: { ...project, access }, statuses: await listStatuses(ctx.db, project.id) };
     });
 
-    app.patch<{ Params: { key: string }; Body: { name?: string; archived?: boolean } }>(
+    app.patch<{ Params: { key: string }; Body: { name?: string; archived?: boolean; visibility?: Visibility } }>(
       "/api/projects/:key",
       {
         schema: {
           body: {
             type: "object",
             additionalProperties: false,
-            properties: { name: nameSchema, archived: { type: "boolean" } },
+            properties: { name: nameSchema, archived: { type: "boolean" }, visibility: { type: "string", enum: ["open", "private"] } },
           },
         },
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
-        const { name, archived } = request.body;
-        const changes = { ...(name !== undefined && { name: name.trim() }), ...(archived !== undefined && { archived }) };
-        return { project: await updateProject(ctx.db, project.id, changes, ctx.clock.now()) };
+        const { project, access } = await projectFor(ctx.db, user, request.params.key, "write");
+        const { name, archived, visibility } = request.body;
+        if (visibility !== undefined) requireAdmin(user, "make a Project open or private");
+        const changes = {
+          ...(name !== undefined && { name: name.trim() }),
+          ...(archived !== undefined && { archived }),
+          ...(visibility !== undefined && { visibility }),
+        };
+        return { project: { ...(await updateProject(ctx.db, project.id, changes, ctx.clock.now())), access } };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>("/api/projects/:key/members", async (request) => {
+      const user = await requireUser(ctx, request);
+      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+      const members = await listMemberships(ctx.db, project.id);
+      return { members: members.map((m) => ({ user: publicUser(m.user), access: m.access })) };
+    });
+
+    const memberParams = {
+      type: "object",
+      properties: { key: { type: "string" }, userId: { type: "string", format: "uuid" } },
+    } as const;
+
+    app.put<{ Params: { key: string; userId: string }; Body: { access: Access } }>(
+      "/api/projects/:key/members/:userId",
+      {
+        schema: {
+          params: memberParams,
+          body: {
+            type: "object",
+            required: ["access"],
+            additionalProperties: false,
+            properties: { access: { type: "string", enum: ["read", "write"] } },
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+        requireAdmin(user, "change who is in a Project");
+        const member = await findUserById(ctx.db, request.params.userId);
+        if (!member || member.workspaceId !== user.workspaceId) throw new HttpError(404, "No such User");
+        if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
+        await setMembership(ctx.db, project.id, member.id, request.body.access);
+        return { member: { user: publicUser(member), access: request.body.access } };
+      },
+    );
+
+    app.delete<{ Params: { key: string; userId: string } }>(
+      "/api/projects/:key/members/:userId",
+      { schema: { params: memberParams } },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const { project } = await projectFor(ctx.db, user, request.params.key, "read");
+        requireAdmin(user, "change who is in a Project");
+        await removeMembership(ctx.db, project.id, request.params.userId);
+        return reply.code(204).send();
       },
     );
 
@@ -118,7 +178,7 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const name = request.body.name.trim();
         const status = await transaction(ctx.db, async (tx) => {
-          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          const { project } = await projectFor(tx, user, request.params.key, "write");
           await lockProject(tx, project.id);
           return insertStatus(tx, project.id, { name, category: request.body.category });
         });
@@ -143,7 +203,7 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const name = request.body.name?.trim();
         const status = await transaction(ctx.db, async (tx) => {
-          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          const { project } = await projectFor(tx, user, request.params.key, "write");
           await lockProject(tx, project.id);
           let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
           if (name !== undefined) {
@@ -169,7 +229,7 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const { moveTo } = request.query;
         await transaction(ctx.db, async (tx) => {
-          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          const { project } = await projectFor(tx, user, request.params.key, "write");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
           const status = statusOr404(statuses, request.params.statusId);
@@ -197,7 +257,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/tickets", async (request) => {
       const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
+      const { project } = await projectFor(ctx.db, user, request.params.key, "read");
       return { tickets: await listTickets(ctx.db, project.id) };
     });
 
@@ -216,7 +276,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const ticket = await transaction(ctx.db, async (tx) => {
-          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          const { project } = await projectFor(tx, user, request.params.key, "write");
           // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
           await lockProject(tx, project.id);
           const [firstStatus] = await listStatuses(tx, project.id);
@@ -235,7 +295,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key", async (request) => {
       const user = await requireUser(ctx, request);
-      return { ticket: await ticketOr404(ctx, user.workspaceId, request.params.key) };
+      return { ticket: await ticketFor(ctx.db, user, request.params.key, "read") };
     });
 
     app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string } }>(
@@ -253,8 +313,7 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const { title, description, statusId } = request.body;
         const ticket = await transaction(ctx.db, async (tx) => {
-          const ticket = await findTicketByKey(tx, user.workspaceId, request.params.key, { forUpdate: true });
-          if (!ticket) throw new HttpError(404, "No such Ticket");
+          const ticket = await ticketFor(tx, user, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
@@ -272,16 +331,17 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/tickets/:key/history", async (request) => {
       const user = await requireUser(ctx, request);
-      const ticket = await ticketOr404(ctx, user.workspaceId, request.params.key);
+      const ticket = await ticketFor(ctx.db, user, request.params.key, "read");
       return { changes: await listHistory(ctx.db, ticket.id) };
     });
   };
 }
 
-async function projectOr404(db: Queryable, workspaceId: string, key: string): Promise<Project> {
-  const project = await findProjectByKey(db, workspaceId, key);
+/** The Project with this key, if `user` has at least `need` in it (see `requireProjectAccess`). */
+async function projectFor(db: Queryable, user: User, key: string, need: Access): Promise<{ project: Project; access: Access }> {
+  const project = await findProjectByKey(db, user.workspaceId, key);
   if (!project) throw new HttpError(404, "No such Project");
-  return project;
+  return { project, access: await requireProjectAccess(db, user, project, need) };
 }
 
 /** The Status with this id among a Project's Statuses. */
@@ -293,8 +353,14 @@ function statusOr404(statuses: Status[], statusId: string): Status {
 
 const statusNameTaken = (name: string) => new HttpError(409, `Another Status is already named ${name}`);
 
-async function ticketOr404(ctx: AppContext, workspaceId: string, key: string): Promise<Ticket> {
-  const ticket = await findTicketByKey(ctx.db, workspaceId, key);
-  if (!ticket) throw new HttpError(404, "No such Ticket");
+/**
+ * The Ticket with this key, if `user` has at least `need` in its Project. A Ticket in
+ * a Project they can't see answers 404, like one that doesn't exist.
+ */
+async function ticketFor(db: Queryable, user: User, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
+  const ticket = await findTicketByKey(db, user.workspaceId, key, opts);
+  const project = ticket && (await findProjectById(db, ticket.projectId));
+  if (!ticket || !project) throw new HttpError(404, "No such Ticket");
+  await requireProjectAccess(db, user, project, need, "No such Ticket");
   return ticket;
 }

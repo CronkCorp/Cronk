@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk, type Client } from "./harness.js";
+import { joinAs, startInstalledCronk, type Client } from "./harness.js";
 
 interface Status {
   id: string;
@@ -211,5 +211,22 @@ describe("Statuses", () => {
     const tickets = (await admin.get("/api/projects/CRONK/tickets")).body.tickets;
     expect(tickets).toHaveLength(20);
     expect(tickets.filter((t: { status: Status }) => t.status.id !== icebox.id)).toEqual([]);
+  });
+
+  it("are changed only by Users with Write access in the Project, and hidden with a private Project", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const reader = await joinAs(cronk, admin, "reader@example.com");
+    const outsider = await joinAs(cronk, admin, "outsider@example.com");
+    await createProject(admin, "CRONK");
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.put(`/api/projects/CRONK/members/${(await reader.get("/api/me")).body.user.id}`, { access: "read" });
+    const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
+
+    for (const [client, expected] of [[reader, 403], [outsider, 404]] as const) {
+      expect((await client.post("/api/projects/CRONK/statuses", { name: "Mine", category: "started" })).status).toBe(expected);
+      expect((await client.patch(`/api/projects/CRONK/statuses/${qa.id}`, { name: "Mine" })).status).toBe(expected);
+      expect((await client.delete(`/api/projects/CRONK/statuses/${qa.id}`)).status).toBe(expected);
+    }
+    expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In QA", "In Review", "Done", "Canceled"]);
   });
 });

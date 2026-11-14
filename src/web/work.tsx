@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
-import { api, STATUS_CATEGORIES, type RecordedChange, type Project, type Status, type StatusCategory, type Ticket } from "./api.js";
+import { api, STATUS_CATEGORIES, type RecordedChange, type Project, type Status, type StatusCategory, type Ticket, type User } from "./api.js";
+import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -43,7 +44,9 @@ export function ProjectsPage(props: { archived: boolean }) {
                 <li key={project.id}>
                   <Link to={`/projects/${project.key}`} className="row">
                     <span className="key">{project.key}</span>
-                    <span>{project.name}</span>
+                    <span className="grow">{project.name}</span>
+                    {project.visibility === "private" && <span className="badge">Private</span>}
+                    {project.access === "read" && <span className="badge">Read only</span>}
                   </Link>
                 </li>
               ))}
@@ -79,10 +82,11 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
 export type ProjectView = "list" | "board" | "statuses";
 
 /** One Project's Tickets, as a list or as a board grouped by Status, or its Statuses to tailor. */
-export function ProjectPage(props: { projectKey: string; view: ProjectView }) {
+export function ProjectPage(props: { projectKey: string; view: ProjectView; me: User }) {
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey), [props.projectKey]);
   const [creating, setCreating] = useState(false);
+  const [showAccess, setShowAccess] = useState(false);
   const archive = useSubmit(
     async () => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -99,17 +103,32 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView }) {
             <div>
               <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
               <h1>
-                {p.name} {p.archived && <span className="badge">Archived</span>}
+                {p.name} {p.archived && <span className="badge">Archived</span>}{" "}
+                {p.visibility === "private" && <span className="badge">Private</span>}{" "}
+                {p.access === "read" && <span className="badge">Read only</span>}
               </h1>
             </div>
             <div className="actions">
-              <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
-                {p.archived ? "Restore Project" : "Archive Project"}
-              </button>
-              {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+              {props.me.role === "admin" && (
+                <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
+              )}
+              {p.access === "write" && (
+                <>
+                  <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
+                    {p.archived ? "Restore Project" : "Archive Project"}
+                  </button>
+                  {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+                </>
+              )}
             </div>
           </div>
           {archive.error && <p className="error" role="alert">{archive.error}</p>}
+          {showAccess && (
+            <ProjectAccessPanel
+              project={p}
+              onProjectChanged={(updated) => setProject({ project: updated, statuses })}
+            />
+          )}
           {creating && (
             <NewTicket
               projectKey={p.key}
@@ -132,6 +151,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView }) {
                   projectKey={p.key}
                   statuses={statuses}
                   tickets={list}
+                  canChange={p.access === "write"}
                   onChanged={() => {
                     reloadProject();
                     reloadTickets();
@@ -187,7 +207,7 @@ function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
 }
 
 /** The Project's Statuses by Status Category, to add, rename, reorder and remove. */
-function StatusesView(props: { projectKey: string; statuses: Status[]; tickets: Ticket[]; onChanged: () => void }) {
+function StatusesView(props: { projectKey: string; statuses: Status[]; tickets: Ticket[]; canChange: boolean; onChanged: () => void }) {
   return (
     <div className="status-categories">
       {STATUS_CATEGORIES.map(([category, label]) => (
@@ -210,6 +230,7 @@ function StatusCategorySection(props: {
   statuses: Status[];
   inCategory: Status[];
   tickets: Ticket[];
+  canChange: boolean;
   onChanged: () => void;
 }) {
   const [name, setName] = useState("");
@@ -237,10 +258,12 @@ function StatusCategorySection(props: {
           />
         ))}
       </ul>
-      <form className="add-status" onSubmit={add.submit}>
-        <input aria-label={`New ${props.label} Status`} placeholder="New Status" value={name} required onChange={(e) => setName(e.target.value)} />
-        <button type="submit" disabled={add.busy}>Add</button>
-      </form>
+      {props.canChange && (
+        <form className="add-status" onSubmit={add.submit}>
+          <input aria-label={`New ${props.label} Status`} placeholder="New Status" value={name} required onChange={(e) => setName(e.target.value)} />
+          <button type="submit" disabled={add.busy}>Add</button>
+        </form>
+      )}
       {add.error && <p className="error" role="alert">{add.error}</p>}
     </section>
   );
@@ -253,6 +276,7 @@ function StatusRow(props: {
   statuses: Status[];
   inCategory: Status[];
   ticketCount: number;
+  canChange: boolean;
   onChanged: () => void;
 }) {
   const s = props.status;
@@ -296,35 +320,39 @@ function StatusRow(props: {
         <div className="row">
           <span className="grow">{s.name}</span>
           <span className="muted">{props.ticketCount} {props.ticketCount === 1 ? "Ticket" : "Tickets"}</span>
-          <button
-            className="link"
-            aria-label={`Move ${s.name} up`}
-            disabled={props.position === 0 || update.busy}
-            onClick={() => void update.run({ position: props.position - 1 })}
-          >
-            ↑
-          </button>
-          <button
-            className="link"
-            aria-label={`Move ${s.name} down`}
-            disabled={props.position === props.inCategory.length - 1 || update.busy}
-            onClick={() => void update.run({ position: props.position + 1 })}
-          >
-            ↓
-          </button>
-          <button
-            className="link"
-            aria-label={`Rename ${s.name}`}
-            onClick={() => {
-              setName(s.name);
-              setMode("rename");
-            }}
-          >
-            Rename
-          </button>
-          {/* A Status Category keeps at least one Status, so its last can't be removed. */}
-          {props.inCategory.length > 1 && (
-            <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+          {props.canChange && (
+            <>
+              <button
+                className="link"
+                aria-label={`Move ${s.name} up`}
+                disabled={props.position === 0 || update.busy}
+                onClick={() => void update.run({ position: props.position - 1 })}
+              >
+                ↑
+              </button>
+              <button
+                className="link"
+                aria-label={`Move ${s.name} down`}
+                disabled={props.position === props.inCategory.length - 1 || update.busy}
+                onClick={() => void update.run({ position: props.position + 1 })}
+              >
+                ↓
+              </button>
+              <button
+                className="link"
+                aria-label={`Rename ${s.name}`}
+                onClick={() => {
+                  setName(s.name);
+                  setMode("rename");
+                }}
+              >
+                Rename
+              </button>
+              {/* A Status Category keeps at least one Status, so its last can't be removed. */}
+              {props.inCategory.length > 1 && (
+                <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -392,6 +420,7 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
   const [history, reloadHistory] = useLoad(() => api.ticketHistory(t.key), [t.key]);
   const [editing, setEditing] = useState(false);
   const archived = project.kind === "loaded" && project.value.project.archived;
+  const canWrite = project.kind === "loaded" && project.value.project.access === "write";
 
   const changed = (updated: Ticket) => {
     props.onChanged(updated);
@@ -417,10 +446,12 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
         <>
           <div className="page-head">
             <h1>{t.title}</h1>
-            <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
+            {canWrite && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
           </div>
           <Show state={project}>
-            {({ statuses }) => <StatusPicker ticket={t} statuses={statuses} onChanged={changed} />}
+            {({ project: p, statuses }) => (
+              <StatusPicker ticket={t} statuses={statuses} readOnly={p.access === "read"} onChanged={changed} />
+            )}
           </Show>
           <div className="markdown" data-testid="ticket-description">
             {t.description.trim() ? <Markdown>{t.description}</Markdown> : <p className="muted">No description.</p>}
@@ -444,7 +475,7 @@ function TicketView(props: { ticket: Ticket; onChanged: (ticket: Ticket) => void
   );
 }
 
-function StatusPicker(props: { ticket: Ticket; statuses: Status[]; onChanged: (ticket: Ticket) => void }) {
+function StatusPicker(props: { ticket: Ticket; statuses: Status[]; readOnly: boolean; onChanged: (ticket: Ticket) => void }) {
   const { run: move, error, busy } = useAction(
     (statusId: string) => api.updateTicket(props.ticket.key, { statusId }),
     props.onChanged,
@@ -453,7 +484,7 @@ function StatusPicker(props: { ticket: Ticket; statuses: Status[]; onChanged: (t
     <div className="status-picker">
       <label className="field inline">
         <span>Status</span>
-        <select value={props.ticket.status.id} disabled={busy} onChange={(e) => void move(e.target.value)}>
+        <select value={props.ticket.status.id} disabled={busy || props.readOnly} onChange={(e) => void move(e.target.value)}>
           {props.statuses.map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
