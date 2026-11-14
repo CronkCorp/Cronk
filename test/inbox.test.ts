@@ -68,4 +68,27 @@ describe("The Inbox", () => {
     await bob.post("/api/tickets/CRONK-1/comments", { body: "The page cache.", replyToActivityId: asked.id });
     expect(await inboxLines(admin)).toEqual(["question CRONK-3", "review CRONK-2"]);
   });
+
+  it("filters by kind, Project and Agent, each taking several values", async () => {
+    const { cronk, admin, adaId, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which cache?" });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "in_review") });
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    await admin.post("/api/projects/DOCS/tickets", { title: "Write the guide" });
+    const codex = await registerAgent(admin, "codex");
+    await admin.patch("/api/tickets/DOCS-1", { assigneeId: adaId, delegateId: codex.agentId });
+    const codexSession = await startSession(cronk, codex.secret);
+    await codexSession.post("/api/tickets/DOCS-1/claim");
+    await codexSession.post("/api/tickets/DOCS-1/activities", { kind: "question", body: "Which audience?" });
+    await admin.patch("/api/tickets/DOCS-1", { statusId: await statusIn(admin, "in_review", "DOCS") });
+
+    expect(await inboxLines(admin, "?kind=review")).toEqual(["review CRONK-2", "review DOCS-1"]);
+    expect(await inboxLines(admin, "?kind=question&kind=review&project=docs")).toEqual(["question DOCS-1", "review DOCS-1"]);
+    expect(await inboxLines(admin, `?agent=${claude.agentId}`)).toEqual(["question CRONK-1", "review CRONK-2"]);
+    expect(await inboxLines(admin, `?kind=review&agent=${codex.agentId}`)).toEqual(["review DOCS-1"]);
+    expect(await inboxLines(admin, `?project=CRONK&agent=${codex.agentId}`)).toEqual([]);
+    expect((await admin.get("/api/inbox?kind=suggestion")).status).toBe(400);
+  });
 });
