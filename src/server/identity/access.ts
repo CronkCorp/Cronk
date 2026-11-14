@@ -1,7 +1,8 @@
 import { actingUser, type Actor, type AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { findProjectByKey, type Project, type Visibility } from "../work/projects.js";
+import { findProjectById, findProjectByKey, type Project, type Visibility } from "../work/projects.js";
+import type { Agent } from "./agents.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import type { User } from "./users.js";
 
@@ -124,6 +125,27 @@ export async function requireWorkspaceAccess(db: Queryable, actor: Actor, need: 
   if (lowest(limits) === "none") throw new HttpError(403, "The Workspace's Agent Access is None, so Agents can't use it");
   requireWritable(limits, need);
 }
+
+/**
+ * Whether `actor` can read in the Project with this id, or in the Workspace outside any
+ * Project when it is null: whether something there is theirs to see.
+ */
+export async function canRead(db: Queryable, actor: Actor, projectId: string | null): Promise<boolean> {
+  try {
+    if (projectId === null) await requireWorkspaceAccess(db, actor, "read");
+    else await requireProjectAccess(db, actor, (await findProjectById(db, projectId))!, "read");
+    return true;
+  } catch (err) {
+    if (err instanceof HttpError) return false;
+    throw err;
+  }
+}
+
+/**
+ * An Agent as it reads outside any Agent Session, whatever its tokens: for asking what it may
+ * see on its behalf (as when deciding whom a Comment concerns), never for acting as it.
+ */
+export const agentReading = (agent: Agent, owner: User): AgentActor => ({ kind: "agent", session: null, tokenId: "", readOnly: true, agent, owner });
 
 /** Refuses anyone but an Admin; an Agent never is one, even if its Owner is. `what` completes "Only an Admin can …". */
 export function requireAdmin(who: User | Actor, what: string): void {

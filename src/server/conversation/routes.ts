@@ -6,8 +6,8 @@ import { answer, documentIdParam, errors, holding, listing, pathParams, ref, tic
 import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
-import { agentTopic, ticketTopic } from "../coordination/routes.js";
-import { markWaiting, type CommentPlace, type WaitingReason, type WaitingWork } from "../coordination/waiting-work.js";
+import { agentTopic, ticketTopic } from "../live/topics.js";
+import { markWaiting, type CommentPlace, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
@@ -48,7 +48,7 @@ const newCommentBody = {
 interface Posted {
   comment: Comment;
   answered: Activity | undefined;
-  waiting: { agentId: string; reason: WaitingReason }[];
+  waiting: WaitingFor[];
 }
 
 /** Comments: conversation on Tickets and Documents, from any Actor. */
@@ -86,7 +86,7 @@ export function conversationRoutes(ctx: AppContext) {
       return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at) };
     };
 
-    /** Tells each Agent the Comment now waits for, through its connected Agent Sessions. Call once committed. */
+    /** Tells each Agent the Comment now waits for, through its live Agent Sessions. Call once committed. */
     const pushWaiting = (posted: Posted, on: Omit<WaitingWork, "reason" | "comment">) => {
       for (const { agentId, reason } of posted.waiting) {
         const waiting: WaitingWork = { reason, comment: publicComment(posted.comment), ...on };

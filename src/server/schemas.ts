@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -298,7 +298,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     ...object({
       reason: {
         type: "string",
-        enum: ["answer", "mention", "comment"],
+        enum: WAITING_REASONS,
         description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
       },
       comment: ref("Comment"),

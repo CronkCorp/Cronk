@@ -7,7 +7,7 @@ import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
 import type { AgentSession, WaitingWork, Welcome } from "../api-types.js";
-import { agentTopic } from "../coordination/routes.js";
+import { agentTopic } from "../live/topics.js";
 import { waitingLines, welcomeText } from "./welcome.js";
 
 /**

@@ -25,3 +25,10 @@ export type RelationKind = (typeof RELATION_KINDS)[number];
 /** The kinds of Activity an Agent Session logs on a Ticket it works on. Only a question may be blocking. */
 export const ACTIVITY_KINDS = ["plan", "progress", "finding", "question", "error"] as const;
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+
+/**
+ * Why a Comment waits for an Agent, in order of precedence: it answers the Agent's question,
+ * @mentions it, or is on a Ticket delegated to it.
+ */
+export const WAITING_REASONS = ["answer", "mention", "comment"] as const;
+export type WaitingReason = (typeof WAITING_REASONS)[number];

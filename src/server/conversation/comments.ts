@@ -80,6 +80,10 @@ const toComment = (row: CommentRow): Comment => ({
 const targetColumns = (target: CommentTarget): [ticketId: string | null, documentId: string | null] =>
   "ticketId" in target ? [target.ticketId, null] : [null, target.documentId];
 
+/** SQL condition: the Comment `c` is on `target`, whose id is the parameter `param`, such as `$1`; with that id. */
+const onTarget = (target: CommentTarget, param: string): [condition: string, id: string] =>
+  "ticketId" in target ? [`c.ticket_id = ${param}`, target.ticketId] : [`c.document_id = ${param}`, target.documentId];
+
 /**
  * Records a Comment by `actor` on `target`. Callers check what it replies to is on the same
  * target, and that an anchor is on a Document whose Version `anchor.version` holds the passage.
@@ -118,21 +122,15 @@ export async function insertComment(
 
 /** The Comments on `target`, oldest first. */
 export async function listComments(db: Queryable, target: CommentTarget): Promise<Comment[]> {
-  const [ticketId, documentId] = targetColumns(target);
-  const { rows } = await db.query<CommentRow>(
-    `${selectFrom("comments")} WHERE ${ticketId ? "c.ticket_id = $1" : "c.document_id = $1"} ORDER BY c.seq`,
-    [ticketId ?? documentId],
-  );
+  const [on, targetId] = onTarget(target, "$1");
+  const { rows } = await db.query<CommentRow>(`${selectFrom("comments")} WHERE ${on} ORDER BY c.seq`, [targetId]);
   return rows.map(toComment);
 }
 
 /** The Comment with this id, if it is on `target`. */
 export async function findComment(db: Queryable, target: CommentTarget, id: string): Promise<Comment | undefined> {
-  const [ticketId, documentId] = targetColumns(target);
-  const { rows } = await db.query<CommentRow>(
-    `${selectFrom("comments")} WHERE c.id = $1 AND ${ticketId ? "c.ticket_id = $2" : "c.document_id = $2"}`,
-    [id, ticketId ?? documentId],
-  );
+  const [on, targetId] = onTarget(target, "$2");
+  const { rows } = await db.query<CommentRow>(`${selectFrom("comments")} WHERE c.id = $1 AND ${on}`, [id, targetId]);
   return rows[0] && toComment(rows[0]);
 }
 

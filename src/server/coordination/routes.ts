@@ -14,6 +14,7 @@ import { insertActivity, listActivities, publicActivity } from "./activities.js"
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
 import { takeWaitingWork } from "./waiting-work.js";
+import { agentTopic, ticketTopic } from "../live/topics.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -72,7 +73,8 @@ const welcomeSchema = {
       type: "array",
       description:
         "Comments waiting for the Agent since its last welcome, oldest first: answers to its questions, @mentions of it, and " +
-        "Comments on Tickets delegated to it. This welcome takes them, so the next one lists only newer ones.",
+        "Comments on Tickets delegated to it. A full token's welcome takes them, so the next one lists only newer ones; a read-only " +
+        "token's leaves them waiting. Work in places the Agent can't see right now is left out, and waits until it can.",
       items: ref("WaitingWork"),
     },
   },
@@ -313,12 +315,6 @@ export function coordinationRoutes(ctx: AppContext) {
     );
   };
 }
-
-/** The live-update topic of one Ticket's changes. */
-export const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
-
-/** The live-update topic of the work starting to wait for one Agent, which each of its connected Agent Sessions watches. */
-export const agentTopic = (agentId: string) => `agent:${agentId}`;
 
 /** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
 async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {

@@ -1,30 +1,31 @@
 import type { Actor, AgentActor } from "../actor.js";
 import { actingUser } from "../actor.js";
-import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { requireProjectAccess, requireWorkspaceAccess } from "../identity/access.js";
+import { agentReading, canRead } from "../identity/access.js";
 import { listAgents } from "../identity/agents.js";
-import { findProjectById } from "../work/projects.js";
-import { findCommentsByIds, publicComment, type Comment } from "../conversation/comments.js";
+import { findCommentsByIds, publicComment, type Comment, type CommentOn } from "../conversation/comments.js";
+import { WAITING_REASONS, type WaitingReason } from "../../shared/values.js";
+
+export type { WaitingReason };
 
 /**
  * Work waiting for an Agent (ADR 0005): Cronk never starts an Agent, so when a Comment
  * concerns one, Cronk marks it as waiting for that Agent. It is listed in the welcome of the
- * Agent's next Agent Session, which takes it, and pushed to the Agent's connected Sessions.
+ * Agent's next Agent Session, which takes it, and pushed to the Agent's live Agent Sessions.
  */
 
-/** Why a Comment waits for an Agent: it answers the Agent's question, @mentions it, or is on a Ticket delegated to it. */
-export type WaitingReason = "answer" | "mention" | "comment";
-
-/** The reasons in order of precedence: a Comment waits for an Agent for the first that applies. */
-const REASONS: WaitingReason[] = ["answer", "mention", "comment"];
+/** One Agent a Comment now waits for, and why. */
+export interface WaitingFor {
+  agentId: string;
+  reason: WaitingReason;
+}
 
 /** A Comment waiting for an Agent, with why and what it is on. */
 export interface WaitingWork {
   reason: WaitingReason;
   comment: ReturnType<typeof publicComment>;
-  ticket: { key: string; title: string } | null;
-  document: { id: string; title: string } | null;
+  ticket: CommentOn["ticket"];
+  document: CommentOn["document"];
 }
 
 /** Where a Comment was posted, as deciding who it waits for needs it. */
@@ -57,7 +58,7 @@ export async function markWaiting(
   place: CommentPlace,
   answered: { agentId: string } | null,
   at: Date,
-): Promise<{ agentId: string; reason: WaitingReason }[]> {
+): Promise<WaitingFor[]> {
   const agents = await listAgents(db, actingUser(actor).workspaceId);
   const mentioned = new Set(mentionedNames(comment.body));
   const candidates: Record<WaitingReason, string[]> = {
@@ -67,15 +68,15 @@ export async function markWaiting(
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;
   const marked = new Map<string, WaitingReason>();
-  for (const reason of REASONS) {
+  // A Comment waits for an Agent for the first reason that applies, in precedence order.
+  for (const reason of WAITING_REASONS) {
     for (const agentId of candidates[reason]) if (agentId !== poster && !marked.has(agentId)) marked.set(agentId, reason);
   }
-  const waiting: { agentId: string; reason: WaitingReason }[] = [];
+  const waiting: WaitingFor[] = [];
   for (const [agentId, reason] of marked) {
     const found = agents.find((a) => a.agent.id === agentId);
     if (!found?.owner.active) continue;
-    const agent: AgentActor = { kind: "agent", session: null, tokenId: "", readOnly: true, agent: found.agent, owner: found.owner };
-    if (!(await canSee(db, agent, place.projectId))) continue;
+    if (!(await canRead(db, agentReading(found.agent, found.owner), place.projectId))) continue;
     await db.query("INSERT INTO waiting_work (agent_id, comment_id, reason, at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING", [
       agentId,
       comment.id,
@@ -85,18 +86,6 @@ export async function markWaiting(
     waiting.push({ agentId, reason });
   }
   return waiting;
-}
-
-/** Whether `agent` can read in the Project with this id, or in the Workspace when it is null. */
-async function canSee(db: Queryable, agent: AgentActor, projectId: string | null): Promise<boolean> {
-  try {
-    if (projectId === null) await requireWorkspaceAccess(db, agent, "read");
-    else await requireProjectAccess(db, agent, (await findProjectById(db, projectId))!, "read");
-    return true;
-  } catch (err) {
-    if (err instanceof HttpError) return false;
-    throw err;
-  }
 }
 
 /**
@@ -126,7 +115,7 @@ export async function waitingWorkFor(db: Queryable, agent: AgentActor, items: { 
   const comments = await findCommentsByIds(db, [...reasons.keys()]);
   const work: WaitingWork[] = [];
   for (const { comment, on } of comments) {
-    if (!(await canSee(db, agent, on.projectId))) continue;
+    if (!(await canRead(db, agent, on.projectId))) continue;
     work.push({
       reason: reasons.get(comment.id)!,
       comment: publicComment(comment),
