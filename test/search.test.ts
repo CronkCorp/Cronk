@@ -16,6 +16,17 @@ describe("Searching", () => {
     expect(found.body.results[0].excerpt).toContain("session cookie expires");
   });
 
+  it("finds a Ticket by its key, in any case, first", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Fix sign-in" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Follow-up", description: "After CRONK-1 ships." });
+
+    const found = (await admin.get("/api/search?q=cronk-1")).body.results;
+    expect(found[0]).toMatchObject({ kind: "ticket", ticketKey: "CRONK-1", title: "Fix sign-in" });
+    expect((await admin.get("/api/search?q=CRONK-1&kind=document")).body.results).toEqual([]);
+  });
+
   it("finds Documents of a Project and of the Workspace by words in their body, matching other forms of the word", async () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });

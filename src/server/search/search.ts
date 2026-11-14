@@ -38,21 +38,35 @@ const COMMENT_TEXT = "c.body";
 const excerpt = (title: string, body: string) => `ts_headline(${CONFIG}, CASE WHEN ${body} = '' THEN ${title} ELSE ${body} END, q.query, ${EXCERPT})`;
 
 /** The columns every kind's SELECT gives, in order: a result's fields, its rank, and when it last changed. */
-const columns = (c: { kind: SearchKind; title: string; projectKey: string; ticketKey: string; documentId: string; excerptOf: [string, string]; text: string; at: string }) =>
+const columns = (c: {
+  kind: SearchKind;
+  title: string;
+  projectKey: string;
+  ticketKey: string;
+  documentId: string;
+  excerptOf: [string, string];
+  text: string;
+  at: string;
+  /** SQL added to the rank, to put some results first. */
+  boost?: string;
+}) =>
   `SELECT '${c.kind}' AS kind, ${c.title} AS title, ${c.projectKey} AS "projectKey", ${c.ticketKey}::text AS "ticketKey",
      ${c.documentId}::uuid AS "documentId", ${excerpt(...c.excerptOf)} AS excerpt,
-     ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) AS rank, ${c.at} AS at`;
+     ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
+
+/** Whether the Ticket aliased `t` in the Project aliased `p` has the key the search is for, typed in any case. */
+const KEY_MATCHES = `upper(${ticketKeySql("p", "t")}) = q.key`;
 
 /**
- * One SELECT per kind, with what each finds. They read the query as `q.query`, the readable
+ * One SELECT per kind, with what each finds. They read the query as `q.query` (and as a Ticket key, upper-cased, as `q.key`), the readable
  * Project ids as `q.projects` and the Workspace's id, when it is readable outside any Project, as `q.workspace_id`.
  */
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
     kind: "ticket",
-    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at" })}
+    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${KEY_MATCHES} THEN 1000 ELSE 0 END` })}
       FROM q, tickets t JOIN projects p ON p.id = t.project_id
-      WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query`,
+      WHERE t.project_id = ANY(q.projects) AND (to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query OR ${KEY_MATCHES})`,
   },
   {
     kind: "document",
@@ -97,7 +111,7 @@ export async function search(
     : readable;
   const selects = SELECTS.filter((s) => !input.kinds || input.kinds.includes(s.kind)).map((s) => s.sql);
   const { rows } = await db.query<SearchResult & { rank: number }>(
-    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::uuid AS workspace_id)
+    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::uuid AS workspace_id, upper(trim($1)) AS key)
      SELECT * FROM (${selects.join("\n UNION ALL ")}) found
      ORDER BY rank DESC, at DESC
      LIMIT $4`,

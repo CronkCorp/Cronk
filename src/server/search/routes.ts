@@ -22,7 +22,7 @@ export function searchRoutes(ctx: AppContext) {
                 type: "string",
                 minLength: 1,
                 maxLength: 500,
-                description: 'What to look for, as typed into a search box: words, "quoted phrases", and -words to leave out.',
+                description: 'What to look for, as typed into a search box: words, "quoted phrases", and -words to leave out; or a Ticket key, such as CRONK-12, to find that Ticket first.',
               },
               kind: {
                 type: "array",
