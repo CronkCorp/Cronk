@@ -53,13 +53,14 @@ export class Client {
 
   /**
    * Opens a server-sent event stream at `path` over real HTTP, as a browser's EventSource
-   * does, sending this caller's cookies and headers. Closed when the test ends.
+   * does, sending this caller's cookies and headers, and any extra `headers` (such as
+   * `last-event-id`). Closed when the test ends.
    */
-  async events(path: string): Promise<EventStream> {
+  async events(path: string, headers: Record<string, string> = {}): Promise<EventStream> {
     const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
     const abort = new AbortController();
     const res = await fetch(new URL(path, await this.cronk.url()), {
-      headers: { ...this.headers, accept: "text/event-stream", ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      headers: { ...this.headers, ...headers, accept: "text/event-stream", ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
       signal: abort.signal,
     });
     onTestFinished(() => abort.abort());
@@ -83,10 +84,11 @@ export class Client {
   }
 }
 
-/** One server-sent event: its name and parsed JSON data. */
+/** One server-sent event: its name, parsed JSON data, and its id if it has one. */
 export interface ServerEvent {
   event: string;
   data: any;
+  id?: string;
 }
 
 /** A server-sent event stream being read, one event at a time. */
@@ -116,7 +118,8 @@ export class EventStream {
         if (fields.length === 0) continue;
         const field = (name: string) => fields.find((l) => l.startsWith(`${name}:`))?.slice(name.length + 1).trim();
         const data = field("data");
-        return { event: field("event") ?? "message", data: data === undefined ? undefined : JSON.parse(data) };
+        const id = field("id");
+        return { event: field("event") ?? "message", data: data === undefined ? undefined : JSON.parse(data), ...(id !== undefined && { id }) };
       }
       if (!this.reader) return null;
       const read = await Promise.race([

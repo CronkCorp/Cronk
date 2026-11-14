@@ -8,7 +8,7 @@ import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
-import { markWaiting, type CommentPlace, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
+import { markWaiting, waitingEvent, type CommentPlace, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
@@ -95,9 +95,8 @@ export function conversationRoutes(ctx: AppContext) {
 
     /** Tells each Agent the Comment now waits for, through its live Agent Sessions. Call once committed. */
     const pushWaiting = (posted: Posted, on: Omit<WaitingWork, "reason" | "comment">) => {
-      for (const { agentId, reason } of posted.waiting) {
-        const waiting: WaitingWork = { reason, comment: publicComment(posted.comment), ...on };
-        ctx.live.publish(agentTopic(agentId), { event: "waiting", data: { waiting } });
+      for (const { agentId, reason, seq } of posted.waiting) {
+        ctx.live.publish(agentTopic(agentId), waitingEvent(seq, { reason, comment: publicComment(posted.comment), ...on }));
       }
     };
 

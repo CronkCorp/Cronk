@@ -422,6 +422,26 @@ describe("work waiting for an Agent over MCP", () => {
     expect(notified).toBe(true);
   });
 
+  it("that started waiting while its stream was down is pushed once the stream is back, once", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const bodies: string[] = [];
+    let notified!: () => void;
+    const lost = new Promise<void>((resolve) => (notified = resolve));
+    mcp.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
+      const body = (n.params as { data: { waiting: { comment: { body: string } } } }).data.waiting.comment.body;
+      bodies.push(body);
+      if (body === "Lost.") notified();
+    });
+
+    // The stream's access check, before it pushes this Comment's waiting work, fails, which ends the stream.
+    await cronk.interruptQueriesOn("agent_tokens", () => admin.post("/api/tickets/CRONK-1/comments", { body: "Lost." }));
+    await lost;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(bodies).toEqual(["Lost."]);
+  });
+
   it("stops being pushed once the token is revoked, before the client's next request", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     const mcp = await connectMcp(cronk, claude.secret, { listening: true });
