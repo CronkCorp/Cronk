@@ -42,9 +42,12 @@ export const publicAgentSession = (session: AgentSession) => ({
 export const WITH_WORKSPACE = `
   JOIN agents a ON a.id = s.agent_id JOIN workspaces w ON w.id = a.workspace_id`;
 
-/** SQL condition: the Session `s`, joined by WITH_WORKSPACE, is live at the time in the parameter `nowParam`, such as `$2`. */
-export const isLiveAt = (nowParam: string) =>
-  `s.ended_at IS NULL AND s.last_seen_at > ${nowParam}::timestamptz - make_interval(secs => w.silence_threshold_seconds)`;
+/**
+ * SQL condition: the Session `s`, joined by WITH_WORKSPACE to its Workspace `w`, is live at the time in the
+ * parameter `nowParam`, such as `$2`. Pass other aliases for the Session and Workspace if they differ.
+ */
+export const isLiveAt = (nowParam: string, alias: { session: string; workspace: string } = { session: "s", workspace: "w" }) =>
+  `${alias.session}.ended_at IS NULL AND ${alias.session}.last_seen_at > ${nowParam}::timestamptz - make_interval(secs => ${alias.workspace}.silence_threshold_seconds)`;
 
 /** Starts a live Session for the Agent whose token `tokenId` is. */
 export async function startAgentSession(db: Queryable, input: { agentId: string; tokenId: string; now: Date }): Promise<AgentSession> {

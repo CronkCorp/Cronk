@@ -17,7 +17,7 @@ import {
   userIdParam,
 } from "../schemas.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
-import { addRelation, listRelations, removeRelation, type Relations } from "./relations.js";
+import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
@@ -49,21 +49,19 @@ import {
   listHistory,
   listLabels,
   moveTicketsBetweenStatuses,
-  listSubTickets,
   wouldNestUnderItself,
   normalizeLabels,
   listTickets,
   updateTicket,
-  type RecordedChange,
   type Ticket,
   type TicketChanges,
   type TicketEdit,
-  type TicketRef,
   type UserRef,
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { findLiveClaim } from "../coordination/claims.js";
+import { clearClaim, findLiveClaim } from "../coordination/claims.js";
+import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -652,6 +650,8 @@ export function workRoutes(ctx: AppContext) {
             changes.delegate = null;
           }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
+          // A new Delegate starts afresh: whoever held the Claim was working for the old one.
+          if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) await clearClaim(tx, ticket.id);
           return updateTicket(tx, ticket, changes, actor, ctx.clock.now());
         });
         return { ticket };
@@ -681,28 +681,6 @@ export function workRoutes(ctx: AppContext) {
   };
 }
 
-/** A Ticket with the Tickets around it and its live Claim, as its page and a Claim show it. */
-export const ticketDetailSchema = {
-  type: "object",
-  required: ["ticket", "subTickets", "relations", "claim"],
-  properties: {
-    ticket: ref("Ticket"),
-    subTickets: { type: "array", items: ref("TicketRef") },
-    relations: ref("Relations"),
-    claim: { anyOf: [ref("Claim"), { type: "null" }], description: "Null unless an Agent Session holds a live Claim." },
-  },
-} as const;
-
-/** The Ticket with its Sub-Tickets, the relations `actor` can see, and its live Claim at `now`. */
-export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, now: Date) {
-  return {
-    ticket,
-    subTickets: await listSubTickets(db, ticket.id),
-    relations: await visibleRelations(db, actor, await listRelations(db, ticket.id)),
-    claim: (await findLiveClaim(db, ticket.id, now)) ?? null,
-  };
-}
-
 /** The User `id`, as a Ticket shows them, if they are active and can see the Ticket's Project; otherwise a 400. */
 async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: string): Promise<UserRef> {
   const assignee = await findUserById(db, id);
@@ -727,11 +705,14 @@ async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Tic
   await requireClaimHolder(db, agent, ticket, now, "moving it");
 }
 
-/** Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409). `doing` ends "Claim … before …". */
-async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, doing: string): Promise<void> {
+/**
+ * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409).
+ * `refusedAction` completes the refusal "Claim CRONK-1 in your Agent Session before …", such as "moving it".
+ */
+async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
   const claim = await findLiveClaim(db, ticket.id, now);
   if (!agent.session || claim?.session.id !== agent.session.id) {
-    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${doing}`);
+    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}`);
   }
 }
 
@@ -748,28 +729,6 @@ async function delegableAgent(db: Queryable, workspaceId: string, assignee: User
 async function ownsAgent(db: Queryable, workspaceId: string, user: UserRef | null, agentId: string): Promise<boolean> {
   const agent = await findAgent(db, workspaceId, agentId);
   return !!user && agent?.ownerId === user.id;
-}
-
-/** Keys of the Projects, archived or not, that `actor` can see. */
-async function visibleProjectKeys(db: Queryable, actor: Actor): Promise<Set<string>> {
-  const projects = [...(await listProjects(db, actingUser(actor).workspaceId, false)), ...(await listProjects(db, actingUser(actor).workspaceId, true))];
-  return new Set((await visibleProjects(db, actor, projects)).map((p) => p.key));
-}
-
-/** The Project key a Ticket key starts with. */
-const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastIndexOf("-"));
-
-/** Relations, leaving out Tickets of Projects `actor` can't see. */
-async function visibleRelations(db: Queryable, actor: Actor, relations: Relations): Promise<Relations> {
-  const keys = await visibleProjectKeys(db, actor);
-  const visible = (refs: TicketRef[]) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
-  return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
-}
-
-/** A Ticket's history, leaving out Relation changes with Tickets of Projects `actor` can't see. */
-async function visibleHistory(db: Queryable, actor: Actor, changes: RecordedChange[]): Promise<RecordedChange[]> {
-  const keys = await visibleProjectKeys(db, actor);
-  return changes.filter((c) => !(c.change === "relation added" || c.change === "relation removed") || keys.has(projectKeyOf(c.ticket.key)));
 }
 
 /** The Ticket `key` names, if it may become the parent of `ticket`; otherwise a 400 or 409. */
@@ -812,15 +771,3 @@ function statusOr404(statuses: Status[], statusId: string): Status {
 }
 
 const statusNameTaken = (name: string) => new HttpError(409, `Another Status is already named ${name}`);
-
-/**
- * The Ticket with this key, if `actor` has at least `need` in its Project. A Ticket in
- * a Project they can't see answers 404, like one that doesn't exist.
- */
-export async function ticketFor(db: Queryable, actor: Actor, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
-  const ticket = await findTicketByKey(db, actingUser(actor).workspaceId, key, opts);
-  const project = ticket && (await findProjectById(db, ticket.projectId));
-  if (!ticket || !project) throw new HttpError(404, "No such Ticket");
-  await requireProjectAccess(db, actor, project, need, "No such Ticket");
-  return ticket;
-}

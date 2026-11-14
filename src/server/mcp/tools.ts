@@ -99,12 +99,12 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "get"))}`),
       },
       next: {
-        description: "Claim your next Ready Ticket (highest Priority, then oldest) and get it; `next` is null when none is Ready",
+        description: "claim your next Ready Ticket (highest Priority, then oldest) and get it; `next` is null when none is Ready",
         writes: true,
         run: (api) => api("POST", "/api/agent-sessions/current/next"),
       },
       claim: {
-        description: "Claim a Ticket delegated to you, so no other Agent Session works on it, and get it",
+        description: "claim a Ticket delegated to you, so no other Agent Session works on it, and get it",
         writes: true,
         run: (api, a) => api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "claim"))}/claim`),
       },

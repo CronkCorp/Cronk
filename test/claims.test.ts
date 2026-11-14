@@ -275,6 +275,13 @@ describe("Claims and access", () => {
     expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.readyTickets).toEqual([]);
   });
 
+  it("end when the Ticket's Delegate changes", async () => {
+    const { admin, session } = await delegatedSetup();
+    await (await session()).post("/api/tickets/CRONK-1/claim");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: null });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+  });
+
   it("end with their Agent Session", async () => {
     const { admin, session } = await delegatedSetup();
     const first = await session();

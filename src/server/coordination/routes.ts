@@ -7,10 +7,10 @@ import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
-import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/routes.js";
+import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
 import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, setClaim, type ReadyScope } from "./claims.js";
-import { findTicketById } from "../work/tickets.js";
-import { PRIORITIES } from "../../shared/values.js";
+import { findTicketById, findTicketsByIds } from "../work/tickets.js";
+import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -143,7 +143,7 @@ export function coordinationRoutes(ctx: AppContext) {
         return transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (ticket.delegate?.id !== actor.agent.id) throw new HttpError(409, `${ticket.key} isn't delegated to ${actor.agent.name}`);
-          if (ticket.status.category === "completed" || ticket.status.category === "canceled") {
+          if (FINISHED_CATEGORIES.includes(ticket.status.category)) {
             throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`);
           }
           const held = await findLiveClaim(tx, ticket.id, now);
@@ -232,6 +232,6 @@ export async function welcome(ctx: AppContext, agent: AgentActor) {
 /** The first of the Agent's Ready Tickets, as the welcome lists them. */
 async function readyTickets(ctx: AppContext, agent: AgentActor) {
   const ids = await listReadyTicketIds(ctx.db, await readyScope(ctx, agent), ctx.clock.now(), WELCOME_READY_LIMIT);
-  const tickets = await Promise.all(ids.map((id) => findTicketById(ctx.db, id)));
-  return tickets.map((t) => ({ key: t!.key, title: t!.title, priority: t!.priority, status: t!.status }));
+  const tickets = await findTicketsByIds(ctx.db, ids);
+  return tickets.map((t) => ({ key: t.key, title: t.title, priority: t.priority, status: t.status }));
 }

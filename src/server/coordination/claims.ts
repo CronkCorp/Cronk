@@ -1,4 +1,5 @@
 import type { Queryable } from "../db/database.js";
+import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
 import type { AgentRef } from "../work/tickets.js";
 import { isLiveAt, WITH_WORKSPACE } from "./agent-sessions.js";
 
@@ -56,7 +57,7 @@ export async function setClaim(db: Queryable, ticketId: string, sessionId: strin
   );
 }
 
-/** Drops the Ticket's Claim. */
+/** Drops the Ticket's Claim, as when it is released or its Delegate changes. */
 export async function clearClaim(db: Queryable, ticketId: string): Promise<void> {
   await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL WHERE id = $1", [ticketId]);
 }
@@ -64,8 +65,10 @@ export async function clearClaim(db: Queryable, ticketId: string): Promise<void>
 /** SQL condition: the Ticket `t` has a live Claim at the time in the parameter `nowParam`. */
 const hasLiveClaim = (nowParam: string) => `EXISTS (
   SELECT 1 FROM agent_sessions cs JOIN agents ca ON ca.id = cs.agent_id JOIN workspaces cw ON cw.id = ca.workspace_id
-  WHERE cs.id = t.claim_session_id AND cs.ended_at IS NULL
-    AND cs.last_seen_at > ${nowParam}::timestamptz - make_interval(secs => cw.silence_threshold_seconds))`;
+  WHERE cs.id = t.claim_session_id AND ${isLiveAt(nowParam, { session: "cs", workspace: "cw" })})`;
+
+/** SQL list of the finished Status Categories, for `IN`. */
+const FINISHED = `(${FINISHED_CATEGORIES.map((c) => `'${c}'`).join(", ")})`;
 
 /**
  * SQL condition: the Ticket `t`, in the Status `s`, is Ready for the Agent `agentParam` among the
@@ -74,15 +77,15 @@ const hasLiveClaim = (nowParam: string) => `EXISTS (
  */
 const isReady = (agentParam: string, projectsParam: string, nowParam: string) => `
   t.delegate_id = ${agentParam} AND t.project_id = ANY(${projectsParam}::uuid[])
-  AND s.category NOT IN ('completed', 'canceled')
+  AND s.category NOT IN ${FINISHED}
   AND NOT EXISTS (
     SELECT 1 FROM ticket_relations r JOIN tickets b ON b.id = r.from_ticket_id JOIN statuses bs ON bs.id = b.status_id
-    WHERE r.kind = 'blocks' AND r.to_ticket_id = t.id AND bs.category NOT IN ('completed', 'canceled'))
+    WHERE r.kind = 'blocks' AND r.to_ticket_id = t.id AND bs.category NOT IN ${FINISHED})
   AND NOT ${hasLiveClaim(nowParam)}`;
 
 /** Ready Tickets are offered highest Priority first, then oldest first. */
 const READY_ORDER = `
-  CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+  CASE t.priority ${PRIORITIES.map((p, i) => `WHEN '${p}' THEN ${i}`).join(" ")} END,
   t.created_at, t.number, t.id`;
 
 /** Where an Agent looks for Ready Tickets: the Agent, and the Projects it may work in. */

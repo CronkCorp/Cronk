@@ -123,6 +123,13 @@ export async function insertTicket(
   return (await findTicketById(db, id))!;
 }
 
+/** The Tickets with these ids, in the order given. */
+export async function findTicketsByIds(db: Queryable, ids: string[]): Promise<Ticket[]> {
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ANY($1::uuid[])`, [ids]);
+  const byId = new Map(rows.map((row) => [row.id, toTicket(row)]));
+  return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
 export async function findTicketById(db: Queryable, id: string): Promise<Ticket | undefined> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = $1`, [id]);
   return rows[0] && toTicket(rows[0]);
@@ -173,7 +180,7 @@ export interface TicketEdit {
   labels?: string[];
   /** A User of the Ticket's Workspace, or null to leave it unassigned. */
   assignee?: UserRef | null;
-  /** One of the Assignee's own Agents, or null. Changing it drops the Ticket's Claim. */
+  /** One of the Assignee's own Agents, or null. Callers drop the Ticket's Claim when it changes. */
   delegate?: AgentRef | null;
   /** A Ticket of the same Project that isn't this one or below it (see `wouldNestUnderItself`), or null. */
   parent?: Ticket | null;
@@ -212,7 +219,7 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
   }
   if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) {
     recorded.push({ change: "delegate", from: ticket.delegate, to: changes.delegate });
-    columns.push(["delegate_id", changes.delegate?.id ?? null], ["claim_session_id", null], ["claimed_at", null]);
+    columns.push(["delegate_id", changes.delegate?.id ?? null]);
   }
   if (changes.parent !== undefined && changes.parent?.key !== ticket.parent?.key) {
     const to = changes.parent && { key: changes.parent.key, title: changes.parent.title };
