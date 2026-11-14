@@ -5,8 +5,13 @@ import { requireWorkspaceAccess, visibleProjects } from "../identity/access.js";
 import { publicAgent } from "../identity/agents.js";
 import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
-import { accessSchema, answer, errors, holding, noContent, ref } from "../schemas.js";
+import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { transaction } from "../db/database.js";
+import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/routes.js";
+import { clearClaim, findLiveClaim, setClaim } from "./claims.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
+
+const ticketParams = pathParams({ key: ticketKeyParam });
 
 const sessionHeader = {
   type: "object",
@@ -77,6 +82,58 @@ export function coordinationRoutes(ctx: AppContext) {
       },
       async (request) => {
         return { session: publicAgentSession(requireSession(await requireActor(ctx, request))) };
+      },
+    );
+
+    app.post<{ Params: { key: string } }>(
+      "/api/tickets/:key/claim",
+      {
+        schema: {
+          params: ticketParams,
+          headers: sessionHeader,
+          response: {
+            200: answer("The Ticket, now Claimed by the Agent Session, with the Tickets around it", ticketDetailSchema),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        const now = ctx.clock.now();
+        return transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (ticket.delegate?.id !== actor.agent.id) throw new HttpError(409, `${ticket.key} isn't delegated to ${actor.agent.name}`);
+          if (ticket.status.category === "completed" || ticket.status.category === "canceled") {
+            throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`);
+          }
+          const held = await findLiveClaim(tx, ticket.id, now);
+          if (held && held.session.id !== session.id) throw new HttpError(409, `${ticket.key} is Claimed by another Agent Session`);
+          await setClaim(tx, ticket.id, session.id, now);
+          return ticketDetail(tx, actor, ticket, now);
+        });
+      },
+    );
+
+    app.delete<{ Params: { key: string } }>(
+      "/api/tickets/:key/claim",
+      {
+        schema: {
+          params: ticketParams,
+          headers: sessionHeader,
+          response: { 204: noContent("The Claim is released; the Ticket keeps its Delegate"), ...errors(400, 401, 403, 404, 409, 410) },
+        },
+      },
+      async (request, reply) => {
+        const actor = requireAgent(await requireActor(ctx, request));
+        const session = requireSession(actor);
+        await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          const held = await findLiveClaim(tx, ticket.id, ctx.clock.now());
+          if (held?.session.id !== session.id) throw new HttpError(409, `This Agent Session doesn't hold ${ticket.key}'s Claim`);
+          await clearClaim(tx, ticket.id);
+        });
+        return reply.code(204).send();
       },
     );
 

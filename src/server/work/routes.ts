@@ -63,6 +63,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
+import { findLiveClaim } from "../coordination/claims.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -473,11 +474,10 @@ export function workRoutes(ctx: AppContext) {
         schema: {
           params: ticketParams,
           response: {
-            200: answer("The Ticket, its Sub-Tickets in key order, and its relations to Tickets the caller can see", {
-              type: "object",
-              required: ["ticket", "subTickets", "relations"],
-              properties: { ticket: ref("Ticket"), subTickets: { type: "array", items: ref("TicketRef") }, relations: ref("Relations") },
-            }),
+            200: answer(
+              "The Ticket, its Sub-Tickets in key order, its relations to Tickets the caller can see, and its live Claim",
+              ticketDetailSchema,
+            ),
             ...errors(401, 404, 410),
           },
         },
@@ -485,11 +485,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
-        return {
-          ticket,
-          subTickets: await listSubTickets(ctx.db, ticket.id),
-          relations: await visibleRelations(ctx.db, actor, await listRelations(ctx.db, ticket.id)),
-        };
+        return ticketDetail(ctx.db, actor, ticket, ctx.clock.now());
       },
     );
 
@@ -640,6 +636,28 @@ export function workRoutes(ctx: AppContext) {
   };
 }
 
+/** A Ticket with the Tickets around it and its live Claim, as its page and a Claim show it. */
+export const ticketDetailSchema = {
+  type: "object",
+  required: ["ticket", "subTickets", "relations", "claim"],
+  properties: {
+    ticket: ref("Ticket"),
+    subTickets: { type: "array", items: ref("TicketRef") },
+    relations: ref("Relations"),
+    claim: { anyOf: [ref("Claim"), { type: "null" }], description: "Null unless an Agent Session holds a live Claim." },
+  },
+} as const;
+
+/** The Ticket with its Sub-Tickets, the relations `actor` can see, and its live Claim at `now`. */
+export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, now: Date) {
+  return {
+    ticket,
+    subTickets: await listSubTickets(db, ticket.id),
+    relations: await visibleRelations(db, actor, await listRelations(db, ticket.id)),
+    claim: (await findLiveClaim(db, ticket.id, now)) ?? null,
+  };
+}
+
 /** The User `id`, as a Ticket shows them, if they are active and can see the Ticket's Project; otherwise a 400. */
 async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: string): Promise<UserRef> {
   const assignee = await findUserById(db, id);
@@ -732,7 +750,7 @@ const statusNameTaken = (name: string) => new HttpError(409, `Another Status is 
  * The Ticket with this key, if `actor` has at least `need` in its Project. A Ticket in
  * a Project they can't see answers 404, like one that doesn't exist.
  */
-async function ticketFor(db: Queryable, actor: Actor, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
+export async function ticketFor(db: Queryable, actor: Actor, key: string, need: Access, opts: { forUpdate?: boolean } = {}): Promise<Ticket> {
   const ticket = await findTicketByKey(db, actingUser(actor).workspaceId, key, opts);
   const project = ticket && (await findProjectById(db, ticket.projectId));
   if (!ticket || !project) throw new HttpError(404, "No such Ticket");

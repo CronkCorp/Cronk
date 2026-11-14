@@ -34,6 +34,7 @@ export type SharedSchemaName =
   | "Agent"
   | "AgentSession"
   | "AgentToken"
+  | "Claim"
   | "Project"
   | "Status"
   | "Ticket"
@@ -103,6 +104,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   AgentToken: {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
     ...object({ id, readOnly: { type: "boolean" }, createdAt: timestamp }),
+  },
+  Claim: {
+    description: "An Agent Session's exclusive, temporary hold on a Ticket. It lapses when the Session stays silent too long.",
+    ...object({
+      agent: named,
+      session: object({ id }),
+      claimedAt: timestamp,
+      endsIfSilentAt: { ...timestamp, description: "When the Claim lapses if its Agent Session stays silent until then." },
+    }),
   },
   Project: object({
     id,
