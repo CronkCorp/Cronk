@@ -187,6 +187,15 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 1, sections: [{ heading: null, text: null, conflict: { base, mine, theirs } }] });
   });
 
+  it("combines a section inserted with a repeated heading and an edit to a later section with that heading", async () => {
+    const base = "## Notes\n\na\n\n## Notes\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## Notes\n\na\n\n## Notes\n\nb changed\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: `## Notes\n\nfirst\n\n${base}` });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\na\n\n## Notes\n\nb changed\n" });
+  });
+
   it("refuses a base Version the Document never had", async () => {
     const { admin, id } = await documentWith(plan);
     expect((await admin.post(`/api/documents/${id}/merge`, { baseVersion: 5, body: "x" })).status).toBe(404);
