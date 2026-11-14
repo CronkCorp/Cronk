@@ -1,15 +1,14 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   api,
   sessionName,
   staleVersionOf,
   type Document,
   type DocumentTreeEntry,
-  type Merge,
   type RecordedActor,
   type Version,
 } from "./api.js";
-import { ResolveMerge, StaleSaveNotice, VersionDiff } from "./merge.js";
+import { ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentComments } from "./timeline.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
@@ -220,16 +219,6 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   );
 }
 
-/** Someone else's save that refused this one: the Version this edit started from, and the Version they saved. */
-interface OtherEdit {
-  base: Version;
-  theirs: Version;
-  /** Whether the merge left conflicts for the User to settle. */
-  conflicted: boolean;
-  /** The User left the conflict unsettled and went back to their draft. */
-  wentBack?: boolean;
-}
-
 /**
  * Edits a Document's title and Markdown. The save names the Version editing started from; if
  * someone saved since, it is refused, and the editor shows their edit and merges it into this one
@@ -237,84 +226,33 @@ interface OtherEdit {
  */
 function EditDocument(props: { document: Document; onSaved: (d: Document) => void; onCancel: () => void }) {
   const id = props.document.id;
-  const [title, setTitle] = useState(props.document.title);
-  const [body, setBody] = useState(props.document.body);
-  const [base, setBase] = useState(props.document.version);
-  const [other, setOther] = useState<OtherEdit>();
-  const [resolving, setResolving] = useState<Merge>();
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    try {
-      props.onSaved(await api.saveDocument(id, { baseVersion: base, title, body }));
-    } catch (err) {
-      if (!staleVersionOf(err)) {
-        setError(messageOf(err));
-        return;
-      }
-      try {
-        const [merge, started] = await Promise.all([api.mergeDocument(id, { baseVersion: base, title, body }), api.version(id, base)]);
-        setOther({ base: started, theirs: merge.onto, conflicted: merge.conflicts > 0 });
-        if (merge.conflicts === 0) {
-          setTitle(merge.title!);
-          setBody(merge.body!);
-          setBase(merge.onto.number);
-        } else {
-          setResolving(merge);
-        }
-      } catch (mergeErr) {
-        setError(messageOf(mergeErr));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-  const takeTheirs = (theirs: Version) => {
-    setTitle(theirs.title);
-    setBody(theirs.body);
-    setBase(theirs.number);
-    setResolving(undefined);
-    setOther(undefined);
-  };
-
-  // The draft is still based on the Version editing started from, so its next save is refused and merges again.
-  const backToDraft = () => {
-    setResolving(undefined);
-    setOther((o) => o && { ...o, wentBack: true });
-  };
+  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+    draft: { title: props.document.title, text: props.document.body },
+    baseVersion: props.document.version,
+    save: (d, baseVersion) => api.saveDocument(id, { baseVersion, title: d.title, body: d.text }),
+    merge: async (d, baseVersion) => {
+      const [merge, started] = await Promise.all([api.mergeDocument(id, { baseVersion, title: d.title, body: d.text }), api.version(id, baseVersion)]);
+      return {
+        base: started,
+        theirs: merge.onto,
+        by: actorName(merge.onto.actor),
+        merge,
+        merged: merge.conflicts === 0 ? { title: merge.title!, text: merge.body! } : null,
+      };
+    },
+    onSaved: props.onSaved,
+  });
 
   return (
     <section className="panel wide">
-      {other && (
-        <StaleSaveNotice
-          by={actorName(other.theirs.actor)}
-          base={other.base}
-          theirs={other.theirs}
-          stage={resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged"}
-          onDiscardMine={() => takeTheirs(other.theirs)}
-          disabled={busy}
-        />
-      )}
-      {resolving ? (
-        <ResolveMerge
-          merge={resolving}
-          onResolved={(resolved) => {
-            setTitle(resolved.title);
-            setBody(resolved.body);
-            setBase(resolving.onto.number);
-            setResolving(undefined);
-          }}
-          onBack={backToDraft}
-        />
+      {notice && <StaleSaveNotice {...notice} />}
+      {resolve ? (
+        <ResolveMerge {...resolve} />
       ) : (
         <form onSubmit={save}>
           {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <Field label="Title" value={title} onChange={setTitle} disabled={busy} />
-          <TextArea label="Body (Markdown)" value={body} onChange={setBody} rows={18} disabled={busy} />
+          <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
+          <TextArea label="Body (Markdown)" value={draft.text} onChange={(text) => setDraft((d) => ({ ...d, text }))} rows={18} disabled={busy} />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="submit" disabled={busy}>Save</button>

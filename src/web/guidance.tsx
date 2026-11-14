@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from "react";
-import { api, ApiError, type Guidance, type GuidanceMerge } from "./api.js";
+import { useState } from "react";
+import { api, type Guidance } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
-import { ResolveMerge, StaleSaveNotice, type SavedText } from "./merge.js";
-import { messageOf, Show, TextArea, useLoad } from "./ui.js";
+import { ResolveMerge, StaleSaveNotice, useStaleSave, type SavedText } from "./merge.js";
+import { Show, TextArea, useLoad } from "./ui.js";
 
 /**
  * Guidance for Agents, the Workspace's or (with `projectKey`) a Project's: its current Markdown,
@@ -68,18 +68,6 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
   );
 }
 
-/** Someone else's save that refused this one: the Guidance this edit started from, and the Version they saved. */
-interface OtherEdit {
-  base: SavedText;
-  theirs: SavedText;
-  /** Who saved their Version. */
-  by: string;
-  /** Whether the merge left conflicts for the User to settle. */
-  conflicted: boolean;
-  /** The User left the conflict unsettled and went back to their draft. */
-  wentBack?: boolean;
-}
-
 /**
  * Edits Guidance. The save names the Version editing started from; if someone saved since, it is
  * refused, and the editor shows their edit and merges it into this one section by section, as the
@@ -92,84 +80,36 @@ function GuidanceEditor(props: {
   onDone: (guidance: Guidance) => void;
   onCancel: () => void;
 }) {
-  const [markdown, setMarkdown] = useState(props.current.markdown);
-  const [base, setBase] = useState(props.current.version);
-  const [other, setOther] = useState<OtherEdit>();
-  const [resolving, setResolving] = useState<GuidanceMerge>();
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    try {
-      props.onDone(await api.saveGuidance(props.projectKey, { markdown, baseVersion: base }));
-    } catch (err) {
-      if (!(err instanceof ApiError && err.status === 409 && err.body.current)) {
-        setError(messageOf(err));
-        return;
-      }
-      try {
-        const merge = await api.mergeGuidance(props.projectKey, { markdown, baseVersion: base });
-        // Listed after the merge, so the Version it merged onto is among them.
-        const versions = await api.guidanceVersions(props.projectKey);
-        const at = (version: number): SavedText => ({ number: version, body: versions.find((v) => v.version === version)?.markdown ?? "" });
-        const by = versions.find((v) => v.version === merge.onto.version)?.actor.name ?? "Someone";
-        setOther({ base: at(base), theirs: { number: merge.onto.version, body: merge.onto.markdown }, by, conflicted: merge.conflicts > 0 });
-        props.onCurrentChanged(merge.onto);
-        if (merge.conflicts === 0) {
-          setMarkdown(merge.markdown!);
-          setBase(merge.onto.version);
-        } else {
-          setResolving(merge);
-        }
-      } catch (mergeErr) {
-        setError(messageOf(mergeErr));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-  const takeTheirs = (theirs: SavedText) => {
-    setMarkdown(theirs.body);
-    setBase(theirs.number);
-    setResolving(undefined);
-    setOther(undefined);
-  };
-
-  // The draft is still based on the Version editing started from, so its next save is refused and merges again.
-  const backToDraft = () => {
-    setResolving(undefined);
-    setOther((o) => o && { ...o, wentBack: true });
-  };
+  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+    draft: { text: props.current.markdown },
+    baseVersion: props.current.version,
+    save: (d, baseVersion) => api.saveGuidance(props.projectKey, { markdown: d.text, baseVersion }),
+    merge: async (d, baseVersion) => {
+      const merge = await api.mergeGuidance(props.projectKey, { markdown: d.text, baseVersion });
+      // Listed after the merge, so the Version it merged onto is among them.
+      const versions = await api.guidanceVersions(props.projectKey);
+      const at = (version: number): SavedText => ({ number: version, body: versions.find((v) => v.version === version)?.markdown ?? "" });
+      props.onCurrentChanged(merge.onto);
+      return {
+        base: at(baseVersion),
+        theirs: { number: merge.onto.version, body: merge.onto.markdown },
+        by: versions.find((v) => v.version === merge.onto.version)?.actor.name ?? "Someone",
+        merge,
+        merged: merge.conflicts === 0 ? { text: merge.markdown! } : null,
+      };
+    },
+    onSaved: props.onDone,
+  });
 
   return (
     <section className="panel wide">
-      {other && (
-        <StaleSaveNotice
-          by={other.by}
-          base={other.base}
-          theirs={other.theirs}
-          stage={resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged"}
-          onDiscardMine={() => takeTheirs(other.theirs)}
-          disabled={busy}
-        />
-      )}
-      {resolving ? (
-        <ResolveMerge
-          merge={resolving}
-          onResolved={(resolved) => {
-            setMarkdown(resolved.body);
-            setBase(resolving.onto.version);
-            setResolving(undefined);
-          }}
-          onBack={backToDraft}
-        />
+      {notice && <StaleSaveNotice {...notice} />}
+      {resolve ? (
+        <ResolveMerge {...resolve} />
       ) : (
         <form onSubmit={save}>
           {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <TextArea label="Guidance (Markdown)" value={markdown} onChange={setMarkdown} rows={14} disabled={busy} />
+          <TextArea label="Guidance (Markdown)" value={draft.text} onChange={(text) => setDraft({ text })} rows={14} disabled={busy} />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="submit" disabled={busy}>Save</button>
