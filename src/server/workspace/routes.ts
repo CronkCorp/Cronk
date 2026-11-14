@@ -3,9 +3,7 @@ import { actingUser } from "../actor.js";
 import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
 import { agentAccessSchema, nameSchema } from "../schemas.js";
-import { getWorkspace, updateWorkspace, type Workspace } from "./workspaces.js";
-
-const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess });
+import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
 
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
