@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
-import { insertWorkspace } from "../workspace/workspaces.js";
+import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin } from "./access.js";
 import {
@@ -14,7 +14,6 @@ import {
 } from "./invitations.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
 import { countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
-import { getWorkspace } from "../workspace/workspaces.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -22,6 +21,9 @@ const SETUP_LOCK = 0x7365747570;
 const email = { type: "string", minLength: 3, maxLength: 320, pattern: "^[^@\\s]+@[^@\\s]+$" } as const;
 const password = { type: "string", minLength: 8, maxLength: 1024 } as const;
 const role = { type: "string", enum: ["admin", "member"] } as const;
+
+/** Postgres's error code for a unique index refusing a row. */
+const UNIQUE_VIOLATION = "23505";
 
 const INVITATION_GONE = "This invitation has expired or was withdrawn";
 
@@ -83,7 +85,7 @@ export function identityRoutes(ctx: AppContext) {
         // Check a password even for unknown emails so response time doesn't reveal which emails exist.
         const ok = await verifyPassword(request.body.password, found?.passwordHash ?? (await dummyHash));
         if (!found || !ok) throw new HttpError(401, "Email or password is incorrect");
-        if (!found.user.active) throw new HttpError(403, "This account has been deactivated");
+        if (!found.user.active) throw new HttpError(403, "An Admin has deactivated you, so you can't sign in");
         const signIn = await createSignIn(ctx.db, ctx.clock, found.user.id);
         setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
         return { user: publicUser(found.user) };
@@ -108,7 +110,7 @@ export function identityRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "invite Users");
         const inviteeEmail = request.body.email.trim();
-        if (await findUserByEmail(ctx.db, inviteeEmail)) throw new HttpError(409, `${inviteeEmail} already has an account`);
+        if (await findUserByEmail(ctx.db, inviteeEmail)) throw new HttpError(409, `${inviteeEmail} is already a User`);
         const { invitation, token } = await createInvitation(ctx.db, {
           workspaceId: user.workspaceId,
           email: inviteeEmail,
@@ -165,14 +167,20 @@ export function identityRoutes(ctx: AppContext) {
           const invitation = await findInvitationByToken(tx, request.params.token, now, { forUpdate: true });
           if (!invitation) throw new HttpError(404, INVITATION_GONE);
           await deleteInvitation(tx, invitation.workspaceId, invitation.id);
-          return insertUser(tx, {
-            workspaceId: invitation.workspaceId,
-            email: invitation.email,
-            name: request.body.name.trim(),
-            passwordHash,
-            role: invitation.role,
-            now,
-          });
+          try {
+            return await insertUser(tx, {
+              workspaceId: invitation.workspaceId,
+              email: invitation.email,
+              name: request.body.name.trim(),
+              passwordHash,
+              role: invitation.role,
+              now,
+            });
+          } catch (err) {
+            // Someone with this email became a User after the invitation was sent.
+            if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new HttpError(409, `${invitation.email} is already a User`);
+            throw err;
+          }
         });
         const signIn = await createSignIn(ctx.db, ctx.clock, user.id);
         setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);

@@ -26,7 +26,7 @@ function accessOf(user: User, project: AccessTarget, listed: Access | undefined)
   return project.visibility === "open" ? "write" : undefined;
 }
 
-const satisfies = (has: Access, need: Access) => has === "write" || need === "read";
+const covers = (has: Access, need: Access) => has === "write" || need === "read";
 
 /**
  * Checks that `user` has at least `need` in `project` and returns what they have.
@@ -46,7 +46,7 @@ export async function requireProjectAccess(
   );
   const access = accessOf(user, project, rows[0]?.access);
   if (!access) throw new HttpError(404, hiddenAs);
-  if (!satisfies(access, need)) throw new HttpError(403, "You have Read access in this Project, so you can't change anything in it");
+  if (!covers(access, need)) throw new HttpError(403, "You have Read access in this Project, so you can't change anything in it");
   return access;
 }
 
