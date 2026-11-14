@@ -20,14 +20,13 @@ import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js"
 import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
-import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
+import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
 import { findUserById, publicUser } from "../identity/users.js";
 import {
   countTicketsInStatus,
   deleteStatus,
   findProjectById,
-  findProjectByKey,
   findStatusToMoveInto,
   insertProject,
   insertStatus,
@@ -754,13 +753,6 @@ async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: 
   });
   if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
   return { ticket, other };
-}
-
-/** The Project with this key, if `actor` has at least `need` in it (see `requireProjectAccess`). */
-async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
-  const project = await findProjectByKey(db, actingUser(actor).workspaceId, key);
-  if (!project) throw new HttpError(404, "No such Project");
-  return { project, access: await requireProjectAccess(db, actor, project, need) };
 }
 
 /** The Status with this id among a Project's Statuses. */

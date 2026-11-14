@@ -185,3 +185,54 @@ describe("working a delegated Ticket over MCP", () => {
     expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.claim.session.id).toBe(mcp.transport.sessionId);
   });
 });
+
+describe("the documents tool", () => {
+  it("creates, lists, gets and updates Documents through the API", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claude = await registerAgent(admin, "claude-laptop");
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const guide = (await callTool(mcp, "documents", { action: "create", project: "CRONK", title: "Guide", body: "# Guide" })).body.document;
+    expect(guide).toMatchObject({ projectKey: "CRONK", title: "Guide", body: "# Guide", version: 1 });
+    await callTool(mcp, "documents", { action: "create", project: "CRONK", title: "Setup", parentId: guide.id });
+    await callTool(mcp, "documents", { action: "create", title: "Handbook" });
+
+    const tree = await callTool(mcp, "documents", { action: "tree", project: "CRONK" });
+    expect(tree.body.documents.map((d: { title: string; depth: number }) => [d.title, d.depth])).toEqual([["Guide", 0], ["Setup", 1]]);
+    const workspace = await callTool(mcp, "documents", { action: "tree" });
+    expect(workspace.body.documents.map((d: { title: string }) => d.title)).toEqual(["Handbook"]);
+
+    const updated = await callTool(mcp, "documents", { action: "update", id: guide.id, baseVersion: 1, body: "# Guide\n\nMore." });
+    expect(updated.body.document.version).toBe(2);
+    expect((await callTool(mcp, "documents", { action: "get", id: guide.id })).body.document.body).toBe("# Guide\n\nMore.");
+
+    const versions = (await admin.get(`/api/documents/${guide.id}/versions`)).body.versions;
+    expect(versions[0].actor).toMatchObject({ kind: "agent", name: "claude-laptop", session: { id: mcp.transport.sessionId } });
+  });
+
+  it("answers a stale update with the current Version, so the Agent can merge and retry", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { id } = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "v1" })).body.document;
+    await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "theirs" });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const stale = await callTool(mcp, "documents", { action: "update", id, baseVersion: 1, body: "mine" });
+    expect(stale.isError).toBe(true);
+    expect(stale.body).toContain("Version 2");
+    expect(stale.body).toContain('"body":"theirs"');
+    expect(await callTool(mcp, "documents", { action: "update", id, body: "mine" })).toEqual({
+      isError: true,
+      body: "The update action needs a baseVersion",
+    });
+  });
+
+  it("offers a read-only token only get and tree", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "documents")?.inputSchema.properties?.action).toMatchObject({ enum: ["get", "tree"] });
+  });
+});

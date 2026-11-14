@@ -1,4 +1,4 @@
-import { actingUser, type Actor } from "../actor.js";
+import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
@@ -264,49 +264,24 @@ export type TicketChange =
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName };
 
-/** Who made a change in history: a User, or an Agent with the Owner it acted for and the Agent Session it was in, if any. */
-export type RecordedActor =
-  | { kind: "user"; id: string; name: string }
-  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
+export type { RecordedActor };
 
 export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
 
 export async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
-  const agent = actor.kind === "agent" ? actor : undefined;
   await db.query(
     `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [
-      ticketId,
-      at,
-      actor.kind,
-      actingUser(actor).id,
-      agent?.agent.id ?? null,
-      agent?.session?.id ?? null,
-      kind,
-      data,
-    ],
+    [ticketId, at, ...actorColumns(actor), kind, data],
   );
 }
 
-interface HistoryRow {
+interface HistoryRow extends RecordedActorRow {
   at: Date;
-  user_id: string;
-  user_name: string;
-  agent_id: string | null;
-  agent_name: string | null;
-  session_id: string | null;
   change: TicketChange["change"];
   data: object;
 }
-
-const toRecordedActor = (row: HistoryRow): RecordedActor => {
-  const user = { id: row.user_id, name: row.user_name };
-  if (row.agent_id === null) return { kind: "user", ...user };
-  const session = row.session_id === null ? null : { id: row.session_id };
-  return { kind: "agent", id: row.agent_id, name: row.agent_name!, owner: user, session };
-};
 
 /** A Ticket's history, oldest first. */
 export async function listHistory(db: Queryable, ticketId: string): Promise<RecordedChange[]> {

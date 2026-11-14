@@ -155,3 +155,15 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .inline-input { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .field.inline select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .page-head .field.inline { margin-bottom: 0; }
+
+.page-tree .depth-1 { padding-left: 34px; }
+.page-tree .depth-2 { padding-left: 54px; }
+.page-tree .depth-3 { padding-left: 74px; }
+.page-tree .depth-4 { padding-left: 94px; }
+.page-tree .depth-5 { padding-left: 114px; }
+.page-tree .depth-6 { padding-left: 134px; }
+.versions .version { display: flex; align-items: center; gap: 8px; }
+.version-view { margin-top: 12px; }
+.conflict { border: 1px solid var(--error); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.conflict p { margin: 0 0 8px; }
+.theirs { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 14px; }

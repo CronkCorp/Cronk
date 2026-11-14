@@ -215,3 +215,39 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await page.reload();
   await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
 });
+
+// Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.
+test("write a Document, edit it, and restore an earlier Version", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: "Documents" }).last().click();
+
+  await page.getByRole("button", { name: "New Document" }).click();
+  await page.getByLabel("Title").fill("Onboarding");
+  await page.getByRole("button", { name: "Create Document" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Start with CRONK-1.");
+  await page.getByRole("button", { name: "Save" }).click();
+
+  const body = page.getByTestId("document-body");
+  await expect(body).toContainText("Start with CRONK-1.");
+  await expect(body.getByRole("link", { name: "CRONK-1" })).toHaveAttribute("href", "/tickets/CRONK-1");
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Rewritten.");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Rewritten.");
+
+  await page.getByRole("button", { name: "Versions" }).click();
+  const versions = page.getByRole("list", { name: "Versions" });
+  await expect(versions).toContainText("Version 3");
+  await versions.getByRole("listitem").filter({ hasText: "Version 2" }).getByRole("button", { name: "Restore" }).click();
+  await expect(body).toContainText("Start with CRONK-1.");
+  await expect(versions).toContainText("Version 4");
+  await expect(versions).toContainText("restored Version 2");
+
+  await page.getByRole("link", { name: "Documents", exact: true }).last().click();
+  await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
+});

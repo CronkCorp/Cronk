@@ -217,17 +217,57 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0008_delegation_claims",
+    id: "0008_documents_versions",
     sql: `
+      -- A Document belongs to a Project, or to the Workspace when project_id is null, and sits in that
+      -- container's page tree: under parent_id (null at the top), ordered among its siblings by position.
+      -- title and body repeat its current Version, which is numbered version.
+      CREATE TABLE documents (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        parent_id uuid REFERENCES documents(id),
+        position integer NOT NULL,
+        title text NOT NULL,
+        body text NOT NULL,
+        version integer NOT NULL,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE INDEX documents_tree ON documents (workspace_id, project_id, parent_id, position);
+      CREATE INDEX documents_parent ON documents (parent_id);
+
+      -- Every saved state of a Document, numbered from 1 and never changed, with the Actor who saved it.
+      -- restored_from names the Version a restore copied.
+      CREATE TABLE document_versions (
+        document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        number integer NOT NULL,
+        title text NOT NULL,
+        body text NOT NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        restored_from integer,
+        PRIMARY KEY (document_id, number),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+    `,
+  },
+  {
+    id: "0009_delegation_claims",
+    sql: `
+      -- IF NOT EXISTS: this ran as 0008_delegation_claims on databases from the unmerged branch.
       -- The Agent the Assignee handed the Ticket to: always one of the Assignee's own Agents (ADR 0001).
-      ALTER TABLE tickets ADD COLUMN delegate_id uuid REFERENCES agents(id);
-      CREATE INDEX tickets_delegate ON tickets (delegate_id) WHERE delegate_id IS NOT NULL;
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS delegate_id uuid REFERENCES agents(id);
+      CREATE INDEX IF NOT EXISTS tickets_delegate ON tickets (delegate_id) WHERE delegate_id IS NOT NULL;
 
       -- The Agent Session holding the Ticket's Claim. Being one column, a Ticket has at most one Claim;
       -- it is live while that Session is (see coordination/claims.ts) and lapses with it.
       ALTER TABLE tickets
-        ADD COLUMN claim_session_id uuid REFERENCES agent_sessions(id),
-        ADD COLUMN claimed_at timestamptz;
+        ADD COLUMN IF NOT EXISTS claim_session_id uuid REFERENCES agent_sessions(id),
+        ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
     `,
   },
 ];

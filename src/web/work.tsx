@@ -214,6 +214,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             <Link to={projectPath(p.key, "list", props.filter)} className={props.view === "list" ? "tab active" : "tab"}>List</Link>
             <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
             <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
+            <Link to={`/projects/${p.key}/documents`} className="tab">Documents</Link>
           </nav>
           {props.view !== "statuses" && (
             <FilterBar
