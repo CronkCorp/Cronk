@@ -267,6 +267,26 @@ describe("The Inbox's live updates", () => {
     expect(await adasStream.next()).toMatchObject({ event: "changed" });
   });
 
+  it("tell a Ticket's Assignee when a User changes or deletes its Report", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "## Cause\n\nThe cache." })).body.report;
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: (await bob.get("/api/me")).body.user.id });
+    const stream = await bob.events("/api/inbox/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.patch(`/api/documents/${report.id}`, { baseVersion: 1, title: "What I found" })).status).toBe(200);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect((await admin.post(`/api/documents/${report.id}/replace-section`, { baseVersion: 2, heading: "Cause", body: "The page cache." })).status).toBe(200);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect((await admin.post(`/api/documents/${report.id}/versions/1/restore`, { baseVersion: 3 })).status).toBe(200);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect((await admin.delete(`/api/documents/${report.id}?baseVersion=4`)).status).toBe(204);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+  });
+
   it("are only for Users", async () => {
     const { cronk, claude } = await delegatedSetup();
     expect((await cronk.client(claude.secret).events("/api/inbox/events")).status).toBe(403);
