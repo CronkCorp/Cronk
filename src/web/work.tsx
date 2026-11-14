@@ -335,7 +335,7 @@ function FilterBar(props: { projectKey: string; statuses: Status[]; filter: Tick
   );
 }
 
-function FilterSelect(props: { name: string; value: string | undefined; onChange: (value: string) => void; options: [string, string][] }) {
+export function FilterSelect(props: { name: string; value: string | undefined; onChange: (value: string) => void; options: [string, string][] }) {
   return (
     <label className="filter">
       <span>{props.name}</span>

@@ -117,6 +117,10 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await page.getByRole("searchbox", { name: "Search" }).press("Enter");
   const results = page.getByRole("list", { name: "Search results" });
   await expect(results).toContainText("Explains CRONK-1 once it ships.");
+  await page.getByLabel("Filter by Kind").selectOption({ label: "Document" });
+  await expect(page.getByText("Nothing found.")).toBeVisible();
+  await page.getByLabel("Filter by Kind").selectOption({ label: "Ticket" });
+  await page.getByLabel("Filter by Project").selectOption({ label: "Cronk" });
   await results.getByRole("link", { name: /Document sign-in/ }).click();
   await expect(page.getByRole("heading", { name: "Document sign-in" })).toBeVisible();
 });
