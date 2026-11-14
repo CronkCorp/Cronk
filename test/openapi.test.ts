@@ -70,7 +70,9 @@ describe("the OpenAPI description", () => {
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        expect(op.responses[code].content["application/json"].schema, `${label} ${code}`).toEqual(errorBody);
+        // An error may carry more fields beside `error`, such as the current Version a stale edit is refused for.
+        const schema = op.responses[code].content["application/json"].schema;
+        expect(schema.allOf?.[0] ?? schema, `${label} ${code}`).toEqual(errorBody);
       }
     }
     const errorsOf = (path: string, method: string) => Object.keys(doc.paths[path][method].responses).filter((c) => c.startsWith("4"));
