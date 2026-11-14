@@ -95,7 +95,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects",
       {
         schema: {
-          querystring: { type: "object", additionalProperties: false, properties: { archived: { type: "boolean" } } },
+          querystring: { type: "object", properties: { archived: { type: "boolean" } } },
           response: { 200: answer("The Projects the caller can see", listing("projects", ref("Project"))), ...errors(400, 401, 410) },
         },
       },
@@ -335,7 +335,7 @@ export function workRoutes(ctx: AppContext) {
       {
         schema: {
           params: statusParams,
-          querystring: { type: "object", additionalProperties: false, properties: { moveTo: { type: "string" } } },
+          querystring: { type: "object", properties: { moveTo: { type: "string" } } },
           response: { 204: noContent("The Status is removed, and any Tickets in it moved"), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
@@ -376,7 +376,6 @@ export function workRoutes(ctx: AppContext) {
           params: projectParams,
           querystring: {
             type: "object",
-            additionalProperties: false,
             properties: {
               status: { type: "array", items: { type: "string", format: "uuid" } },
               category: { type: "array", items: { type: "string", enum: STATUS_CATEGORIES } },
