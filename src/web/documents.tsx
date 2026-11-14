@@ -19,6 +19,17 @@ import { Field, Show, TextArea, messageOf, useAction, useLoad, useSubmit } from 
 /** The address of a page tree: a Project's, or the Workspace's without a Project key. */
 const treeAddress = (projectKey: string | null | undefined) => (projectKey ? `/projects/${projectKey}/documents` : "/documents");
 
+/**
+ * Handles a write refused because someone saved since this page loaded: reloads the page so it
+ * shows their Version, and explains why, before anyone writes over it. Other errors pass through.
+ */
+const explainStale = (reload: () => void, doing: string) => (err: unknown): never => {
+  const current = staleVersionOf(err);
+  if (!current) throw err;
+  reload();
+  throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before ${doing}`);
+};
+
 /** Whether the signed-in User may change Documents in a Project's tree, or the Workspace's (every User may). */
 function useCanWrite(projectKey: string | null | undefined): boolean {
   const [project] = useLoad(() => (projectKey ? api.project(projectKey) : Promise.resolve(undefined)), [projectKey]);
@@ -133,7 +144,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   const remove = useAction(
     async () => {
       if (!confirm(`Delete ${d.title} and all its Versions?`)) return false;
-      await api.deleteDocument(d.id);
+      await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
       return true;
     },
     (deleted) => deleted && navigate(treeAddress(d.projectKey)),
@@ -438,15 +449,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
   );
   const restore = useAction(
     async (number: number) => {
-      try {
-        return await api.restoreVersion(d.id, number, d.version);
-      } catch (err) {
-        const current = staleVersionOf(err);
-        if (!current) throw err;
-        // Someone saved since this page loaded: show their Version before anyone restores over it.
-        props.onOutdated();
-        throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before restoring`);
-      }
+      return api.restoreVersion(d.id, number, d.version).catch(explainStale(props.onOutdated, "restoring"));
     },
     (restored) => {
       setViewing(undefined);

@@ -214,13 +214,33 @@ describe("arranging the page tree", () => {
   it("deletes a Document with its Versions, but not one with Documents under it", async () => {
     const { admin, ids, current } = await tree();
 
-    const refused = await admin.delete(`/api/documents/${ids.A}`);
+    const refused = await admin.delete(`/api/documents/${ids.A}?baseVersion=1`);
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/under it/);
 
-    expect((await admin.delete(`/api/documents/${ids.A1}`)).status).toBe(204);
+    expect((await admin.delete(`/api/documents/${ids.A1}?baseVersion=1`)).status).toBe(204);
     expect(await current()).toEqual(["A", "  A2", "B", "C"]);
     expect((await admin.get(`/api/documents/${ids.A1}`)).status).toBe(404);
     expect((await admin.get(`/api/documents/${ids.A1}/versions`)).status).toBe(404);
+  });
+
+  it("refuses a delete based on an outdated Version, returning the current Version", async () => {
+    const { admin, ids, current } = await tree();
+    await admin.patch(`/api/documents/${ids.A1}`, { baseVersion: 1, body: "theirs" });
+
+    const stale = await admin.delete(`/api/documents/${ids.A1}?baseVersion=1`);
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toMatch(/delete is based on Version 1.*at Version 2/);
+    expect(stale.body.current).toMatchObject({ number: 2, title: "A1", body: "theirs" });
+    expect(await current()).toEqual(["A", "  A1", "  A2", "B", "C"]);
+
+    expect((await admin.delete(`/api/documents/${ids.A1}?baseVersion=2`)).status).toBe(204);
+  });
+
+  it("refuses a delete that names no Version", async () => {
+    const { admin, ids, current } = await tree();
+
+    expect((await admin.delete(`/api/documents/${ids.A1}`)).status).toBe(400);
+    expect(await current()).toEqual(["A", "  A1", "  A2", "B", "C"]);
   });
 });
