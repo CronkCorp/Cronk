@@ -75,8 +75,10 @@ describe("the OpenAPI description", () => {
       expect(errors, label).toContain("400");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        // A stale save's refusal is the error shape plus the current Version (of a Document or of Guidance).
-        const allowed = code === "409" ? [errorBody, staleBody, staleGuidanceBody] : [errorBody];
+        // A stale save's refusal is the error shape plus the current Version (of a Document or of Guidance);
+        // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons.
+        const allowed =
+          code === "409" ? [errorBody, staleBody, staleGuidanceBody, expect.objectContaining({ anyOf: [staleBody, errorBody] })] : [errorBody];
         expect(allowed, `${label} ${code}`).toContainEqual(op.responses[code].content["application/json"].schema);
       }
     }
@@ -86,6 +88,11 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
     expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["400", "404"]);
     expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toEqual(staleBody);
+    expect(doc.paths["/api/documents/{id}"].delete.responses["409"].content["application/json"].schema).toMatchObject({
+      anyOf: [staleBody, errorBody],
+    });
+    const deleteParams = doc.paths["/api/documents/{id}"].delete.parameters.filter((p: { in: string }) => p.in === "query");
+    expect(deleteParams).toEqual([expect.objectContaining({ name: "baseVersion", required: true })]);
   });
 
   it("has no two paths that differ only in the names of their path parameters", async () => {

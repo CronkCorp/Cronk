@@ -280,7 +280,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   VersionSummary: { description: "A Version without its body, as a Document's Version list shows it.", ...object(versionFields) },
   StaleVersion: {
-    description: "A save refused because the Version it is based on is no longer current, with the current Version to merge with.",
+    description: "A save or delete of a Document refused because the Version it is based on is no longer current, with the current Version to merge with.",
     ...object({ error: { type: "string" }, current: ref("Version") }),
   },
   StaleGuidance: {
