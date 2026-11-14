@@ -28,6 +28,10 @@ export class HttpError extends Error {
   }
 }
 
+/** The token sent as `Authorization: Bearer <token>`, if any. */
+export const bearerToken = (request: FastifyRequest): string | undefined =>
+  /^Bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
+
 /**
  * Who is making the request, or a 401: the Agent whose token is sent as
  * `Authorization: Bearer <token>`, or else the signed-in User. An Agent that also
@@ -35,7 +39,7 @@ export class HttpError extends Error {
  * call refreshes; a Session that isn't the Agent's or has ended answers 410.
  */
 export async function requireActor(ctx: AppContext, request: FastifyRequest): Promise<Actor> {
-  const bearer = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
+  const bearer = bearerToken(request);
   if (bearer) {
     const found = await agentForToken(ctx.db, bearer);
     if (!found) throw new HttpError(401, "This token is unknown or was revoked");

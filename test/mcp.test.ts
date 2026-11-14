@@ -61,6 +61,28 @@ describe("the MCP endpoint", () => {
   });
 });
 
+describe("an MCP session", () => {
+  it("answers only the token that opened it, and is left alone by others naming it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const codex = await registerAgent(admin, "codex");
+    const mcp = await connectMcp(cronk, claude.secret);
+    const otherToken = (await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret;
+
+    for (const token of [codex.secret, otherToken]) {
+      const res = await fetch(new URL("/mcp", await cronk.url()), {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}`, "mcp-session-id": mcp.transport.sessionId! },
+      });
+      expect(res.status).toBe(404);
+    }
+
+    await mcp.client.ping();
+    const [agent] = (await admin.get("/api/agents")).body.agents;
+    expect(agent.sessions.map((s: { id: string }) => s.id)).toEqual([mcp.transport.sessionId]);
+  });
+});
+
 describe("the tickets tool", () => {
   it("lists a Project's Tickets and gets one, through the API's access rules", async () => {
     const { cronk, admin } = await startInstalledCronk();

@@ -2,29 +2,41 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import type { AppContext } from "../context.js";
+import { bearerToken, type AppContext } from "../context.js";
+import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
 import { welcomeText, type Welcome } from "./welcome.js";
 
-/** One MCP connection: its transport and server, and when its Agent Session ends if it stays silent. */
+/**
+ * One MCP connection: its transport and server, the hash of the token that opened it (the
+ * only token it answers), and when its Agent Session ends if it stays silent.
+ */
 interface Connection {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
+  tokenHash: string;
   endsIfSilentAt: Date;
 }
 
+/** The parts of an Agent Session, as the API returns it, that the MCP server uses. */
 interface PublicSession {
   id: string;
   endsIfSilentAt: string;
 }
+
+/** How often connections whose Agent Session went silent are forgotten. */
+const SWEEP_INTERVAL_MS = 60_000;
+
+const SESSION_ENDED = "This Agent Session has ended; reconnect to start a new one";
 
 /**
  * Cronk's streamable-HTTP MCP endpoint, at `/mcp`. Each MCP session is one Agent Session.
  *
  * This is a thin client of the HTTP API (ADR 0010): it calls the API with the Agent's own
  * token, within the Agent Session, so every rule (tokens, access, Session liveness) is the
- * API's. An MCP session id is its Agent Session's id.
+ * API's. An MCP session id is its Agent Session's id, and only the token that opened it may
+ * use it, so the tools it offers always match that token.
  */
 export function mcpRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -35,18 +47,20 @@ export function mcpRoutes(ctx: AppContext) {
       connections.delete(id);
       await connection?.server.close();
     };
-    // Sessions that went silent are over on the API's side; forget them here too.
+    // A Session that stayed silent has ended on the API's side; forget its connection too.
     const sweep = async () => {
       const now = ctx.clock.now();
       for (const [id, c] of connections) if (c.endsIfSilentAt <= now) await drop(id);
     };
+    const sweeping = setInterval(() => void sweep(), SWEEP_INTERVAL_MS).unref();
     app.addHook("preClose", async () => {
+      clearInterval(sweeping);
       for (const id of [...connections.keys()]) await drop(id);
     });
 
     const handle = async (request: FastifyRequest, reply: FastifyReply) => {
       await sweep();
-      const token = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
+      const token = bearerToken(request);
       if (!token) return refuse(reply, 401, "Send one of your Agent's tokens as Authorization: Bearer <token>");
       const sessionId = request.headers["mcp-session-id"];
 
@@ -60,19 +74,24 @@ export function mcpRoutes(ctx: AppContext) {
         const server = new McpServer({ name: "cronk", version: "0.0.0" }, { instructions: welcomeText(welcome, session.id) });
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
-        connections.set(session.id, { transport, server, endsIfSilentAt: new Date(session.endsIfSilentAt) });
+        connections.set(session.id, { transport, server, tokenHash: hashToken(token), endsIfSilentAt: new Date(session.endsIfSilentAt) });
         await server.connect(transport);
         return serve(transport, request, reply, token);
       }
 
       const connection = connections.get(sessionId);
-      // Asking the API for the Session checks the token and refreshes the Session.
+      if (!connection) {
+        // Not one this server holds (it restarted, say), so it can't go on: end it if it is the caller's.
+        await callApi(app, { token, sessionId }, "DELETE", "/api/agent-sessions/current");
+        return refuse(reply, 404, SESSION_ENDED);
+      }
+      // Anyone else naming the session is told it doesn't exist, and changes nothing.
+      if (hashToken(token) !== connection.tokenHash) return refuse(reply, 404, SESSION_ENDED);
+      // Asking the API for the Session checks the token and refreshes the Session (or ends it, for DELETE).
       const current = await callApi(app, { token, sessionId }, request.method === "DELETE" ? "DELETE" : "GET", "/api/agent-sessions/current");
-      if (current.status === 401) return refuse(reply, 401, current.body.error);
-      if (!connection || current.status >= 400) {
-        // Over (or never ours): the client has to start a new Agent Session.
+      if (current.status >= 400) {
         await drop(sessionId);
-        return refuse(reply, 404, "This Agent Session has ended; reconnect to start a new one");
+        return current.status === 401 ? refuse(reply, 401, current.body.error) : refuse(reply, 404, SESSION_ENDED);
       }
       if (request.method === "DELETE") {
         await serve(connection.transport, request, reply, token);
