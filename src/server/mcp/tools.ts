@@ -97,4 +97,21 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
     },
   });
+
+  registerGroupedTool(server, ctx, {
+    name: "guidance",
+    description:
+      "Guidance: standing instructions Users wrote for Agents, as Markdown. The Workspace's applies everywhere; " +
+      "a Project's layers on top of it when you work in that Project.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK, for that Project's Guidance; leave out for the Workspace's"),
+    },
+    actions: {
+      get: {
+        description: "the current Guidance of the Workspace, or of a Project",
+        writes: false,
+        run: (api, a) => api("GET", a.project ? `/api/projects/${encodeURIComponent(a.project)}/guidance` : "/api/workspace/guidance"),
+      },
+    },
+  });
 }

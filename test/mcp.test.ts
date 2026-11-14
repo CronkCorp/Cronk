@@ -22,6 +22,23 @@ describe("the MCP endpoint", () => {
     expect(agent.sessions).toEqual([expect.objectContaining({ id: mcp.transport.sessionId, startedAt: "2026-01-01T09:00:00.000Z" })]);
   });
 
+  it("welcomes it with the Workspace's Guidance, then each Project's", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await projectWithTickets(admin, "DOCS", 0);
+    await admin.put("/api/workspace/guidance", { markdown: "Always write tests first.", baseVersion: 0 });
+    await admin.put("/api/projects/CRONK/guidance", { markdown: "Use pnpm, never npm.", baseVersion: 0 });
+    await admin.put("/api/projects/DOCS/guidance", { markdown: "Write in British English.", baseVersion: 0 });
+
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const instructions = mcp.client.getInstructions()!;
+    const at = (text: string) => instructions.indexOf(text);
+    expect(at("Always write tests first.")).toBeGreaterThan(-1);
+    expect(at("Use pnpm, never npm.")).toBeGreaterThan(at("Always write tests first."));
+    expect(at("Write in British English.")).toBeGreaterThan(at("Use pnpm, never npm."));
+  });
+
   it("ends the Agent Session when the client disconnects", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const claude = await registerAgent(admin, "claude-laptop");
@@ -143,5 +160,21 @@ describe("the tickets tool", () => {
 
     const listed = await callTool(mcp, "tickets", { action: "list", project: "CRONK", priority: ["high"], label: ["UI"] });
     expect(listed.body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
+  });
+});
+
+describe("the guidance tool", () => {
+  it("fetches the Workspace's Guidance, or a Project's, through the API's access rules", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await projectWithTickets(admin, "SECRET", 0);
+    await admin.patch("/api/projects/SECRET", { agentAccess: "none" });
+    await admin.put("/api/workspace/guidance", { markdown: "Always write tests first.", baseVersion: 0 });
+    await admin.put("/api/projects/CRONK/guidance", { markdown: "Use pnpm, never npm.", baseVersion: 0 });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    expect((await callTool(mcp, "guidance", { action: "get" })).body).toEqual({ guidance: { markdown: "Always write tests first.", version: 1 } });
+    expect((await callTool(mcp, "guidance", { action: "get", project: "cronk" })).body).toEqual({ guidance: { markdown: "Use pnpm, never npm.", version: 1 } });
+    expect(await callTool(mcp, "guidance", { action: "get", project: "SECRET" })).toEqual({ isError: true, body: "No such Project" });
   });
 });
