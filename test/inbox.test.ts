@@ -92,6 +92,17 @@ describe("The Inbox", () => {
     expect((await admin.get("/api/inbox?kind=suggestion")).status).toBe(400);
   });
 
+  it("leaves out the questions of an Agent its Owner removed", async () => {
+    const { admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which cache?" });
+    expect(await inboxLines(admin)).toEqual(["question CRONK-1"]);
+
+    await admin.delete(`/api/agents/${claude.agentId}`);
+    expect(await inboxLines(admin)).toEqual([]);
+  });
+
   it("leaves out items in Projects the User can no longer see, and is only for Users", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");
@@ -180,6 +191,19 @@ describe("The Inbox's live updates", () => {
     await admin.patch("/api/tickets/CRONK-2", { assigneeId: (await bob.get("/api/me")).body.user.id });
     expect(await stream.next()).toMatchObject({ event: "changed" });
     expect(await bobsStream.next()).toMatchObject({ event: "changed" });
+  });
+
+  it("tell the User when their Agent is removed, and when removing a Status moves their Tickets", async () => {
+    const { admin, claude } = await delegatedSetup();
+    const checking = (await admin.post("/api/projects/CRONK/statuses", { name: "Checking", category: "in_review" })).body.status;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: checking.id });
+    const stream = await admin.events("/api/inbox/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.delete(`/api/projects/CRONK/statuses/${checking.id}?moveTo=${await statusIn(admin, "started")}`);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.delete(`/api/agents/${claude.agentId}`);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
   });
 
   it("are only for Users", async () => {

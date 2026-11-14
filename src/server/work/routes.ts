@@ -1,4 +1,3 @@
-import { inboxesChanged } from "../inbox/inbox.js";
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
@@ -63,6 +62,7 @@ import { findAgent } from "../identity/agents.js";
 import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -344,7 +344,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { moveTo } = request.query;
-        await transaction(ctx.db, async (tx) => {
+        const moved = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
@@ -357,8 +357,9 @@ export function workRoutes(ctx: AppContext) {
           if (moveTo !== undefined && !target) {
             throw new HttpError(400, "Tickets can only move to another Status of this Project");
           }
+          let moved: Ticket[] = [];
           if (target) {
-            await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
+            moved = await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
           } else {
             const inUse = await countTicketsInStatus(tx, status.id);
             if (inUse > 0) {
@@ -366,7 +367,10 @@ export function workRoutes(ctx: AppContext) {
             }
           }
           await deleteStatus(tx, status.id);
+          return moved;
         });
+        // Moved Tickets may have entered or left an In Review Status.
+        inboxesChanged(ctx.live, moved.map((t) => t.assignee?.id));
         return reply.code(204).send();
       },
     );
