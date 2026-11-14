@@ -342,7 +342,7 @@ export const migrations: Migration[] = [
       CREATE INDEX comments_ticket ON comments (ticket_id, seq) WHERE ticket_id IS NOT NULL;
       CREATE INDEX comments_document ON comments (document_id, seq) WHERE document_id IS NOT NULL;
 
-      -- The Comment that answered a question: the first reply to it from anyone but the Agent that asked.
+      -- The Comment that answered a question: the first reply to it from a User.
       ALTER TABLE activities ADD COLUMN answer_comment_id uuid REFERENCES comments(id) ON DELETE SET NULL
         CHECK (answer_comment_id IS NULL OR kind = 'question');
 

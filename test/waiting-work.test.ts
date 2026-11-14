@@ -66,6 +66,18 @@ describe("An answer to an Agent's question", () => {
       { reason: "answer", comment: answer, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null },
     ]);
   });
+
+  it("is only the reply that answered it; later replies wait as Comments on the delegated Ticket", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which one?" })).body.activity;
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "The first.", replyToActivityId: question.id });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Or the second.", replyToActivityId: question.id });
+
+    const waiting = (await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork;
+    expect(waiting.map((w: { reason: string }) => w.reason)).toEqual(["answer", "comment"]);
+  });
 });
 
 describe("An Agent Session's live updates", () => {

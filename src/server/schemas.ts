@@ -266,7 +266,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       session: object({ id }),
       answer: {
         ...nullable(object({ commentId: id, at: timestamp })),
-        description: "For a question, once answered: the first Comment replying to it from anyone but the Agent that asked.",
+        description: "For a question, once answered: the first Comment a User replied to it with.",
       },
     }),
   },

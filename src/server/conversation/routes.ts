@@ -32,7 +32,7 @@ const newCommentBody = {
     replyToCommentId: { ...id, description: "The Comment this one replies to, on the same Ticket or Document." },
     replyToActivityId: {
       ...id,
-      description: "The Activity this one replies to, on the same Ticket. The first reply to a question from anyone but the Agent that asked answers it.",
+      description: "The Activity this one replies to, on the same Ticket. The first reply to a question from a User answers it.",
     },
     anchor: {
       type: "object",
@@ -80,9 +80,9 @@ export function conversationRoutes(ctx: AppContext) {
       }
       const anchor = input.anchor ? { passage: input.anchor.passage, version: document!.version } : null;
       const comment = await insertComment(tx, target, actor, { body: input.body, replyToCommentId, replyToActivityId, anchor }, ctx.clock.now());
-      const askedIt = actor.kind === "agent" && actor.agent.id === activity?.agent.id;
-      const answered = activity && !askedIt && (await markAnswered(tx, activity, comment.id)) ? await findActivity(tx, activity.ticketId, activity.id) : undefined;
-      const asker = activity?.kind === "question" ? { agentId: activity.agent.id } : null;
+      // A User answers a question by replying to it; the first such reply is its answer.
+      const answered = activity && actor.kind === "user" && (await markAnswered(tx, activity, comment.id)) ? await findActivity(tx, activity.ticketId, activity.id) : undefined;
+      const asker = answered ? { agentId: answered.agent.id } : null;
       return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at) };
     };
 

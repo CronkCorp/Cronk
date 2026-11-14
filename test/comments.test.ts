@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
 
 describe("Comments on a Ticket", () => {
   it("are posted by Users and Agents and listed oldest first, with replies naming the Comment they answer", async () => {
@@ -66,14 +66,16 @@ describe("Posting a Comment", () => {
 });
 
 describe("Replying to an Activity", () => {
-  it("answers a question, which is marked answered by the first reply from anyone but the Agent that asked", async () => {
+  it("answers a question, which is marked answered by the first reply from a User", async () => {
     const { cronk, admin, session } = await delegatedSetup();
     const agent = await session();
+    const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
     await agent.post("/api/tickets/CRONK-1/claim");
     const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Postgres or SQLite?", blocking: true })).body.activity;
     const plan = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Write the schema" })).body.activity;
 
     await agent.post("/api/tickets/CRONK-1/comments", { body: "Still waiting on this.", replyToActivityId: question.id });
+    expect((await codex.post("/api/tickets/CRONK-1/comments", { body: "I'd guess Postgres.", replyToActivityId: question.id })).status).toBe(201);
     await admin.post("/api/tickets/CRONK-1/comments", { body: "Good plan.", replyToActivityId: plan.id });
     expect((await admin.get("/api/tickets/CRONK-1/activities")).body.activities.map((a: { answer: unknown }) => a.answer)).toEqual([null, null]);
 
