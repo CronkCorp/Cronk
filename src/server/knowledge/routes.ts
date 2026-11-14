@@ -66,11 +66,9 @@ export function knowledgeRoutes(ctx: AppContext) {
     /** Creates a Document in `tree`, which the caller has Write in. */
     const create = async (tx: Queryable, actor: Actor, tree: Tree, input: NewDocument) => {
       const parentId = input.parentId ?? null;
-      if (parentId !== null) {
-        const parent = await findDocument(tx, tree.workspaceId, parentId);
-        if (!parent || parent.projectId !== tree.projectId) throw new HttpError(400, "The parent must be a Document of the same page tree");
-      }
-      return insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
+      const created = await insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
+      if (created === "no such parent") throw notInTree();
+      return created;
     };
 
     app.get<{ Params: { key: string } }>(
@@ -84,7 +82,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
-        return { documents: await listTree(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }) };
+        return { documents: await listTree(ctx.db, treeFor(actor, project.id)) };
       },
     );
 
@@ -94,7 +92,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "read");
-        return { documents: await listTree(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: null }) };
+        return { documents: await listTree(ctx.db, treeFor(actor, null)) };
       },
     );
 
@@ -112,8 +110,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
-        const tree = { workspaceId: actingUser(actor).workspaceId, projectId: null };
-        const document = await transaction(ctx.db, (tx) => create(tx, actor, tree, request.body));
+        const document = await transaction(ctx.db, (tx) => create(tx, actor, treeFor(actor, null), request.body));
         return reply.code(201).send({ document });
       },
     );
@@ -134,7 +131,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
-          return create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
+          return create(tx, actor, treeFor(actor, project.id), request.body);
         });
         return reply.code(201).send({ document });
       },
@@ -213,12 +210,8 @@ export function knowledgeRoutes(ctx: AppContext) {
         const { parentId, position } = request.body;
         const document = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
-          const tree = treeOf(actor, document);
-          if (parentId !== null) {
-            const parent = await findDocument(tx, tree.workspaceId, parentId);
-            if (!parent || parent.projectId !== document.projectId) throw new HttpError(400, "The parent must be a Document of the same page tree");
-          }
-          const moved = await moveDocument(tx, tree, document, { parentId, position });
+          const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
+          if (moved === "no such parent") throw notInTree();
           if (moved === "under itself") throw new HttpError(409, "A Document can't move under itself or a Document under it");
           if (moved === "no such position") throw new HttpError(400, `There is no position ${position} among those Documents`);
           return moved;
@@ -239,7 +232,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
-          if (!(await deleteDocument(tx, treeOf(actor, document), document))) {
+          if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
             throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
           }
         });
@@ -307,8 +300,10 @@ export function knowledgeRoutes(ctx: AppContext) {
   };
 }
 
-/** The page tree a Document sits in. */
-const treeOf = (actor: Actor, document: Document): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId: document.projectId });
+/** The page tree of a Project in the Actor's Workspace, or the Workspace's own with a null `projectId`. */
+const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId });
+
+const notInTree = () => new HttpError(400, "The parent must be a Document of the same page tree");
 
 async function versionOr404(db: Queryable, document: Document, number: string): Promise<Version> {
   const version = await findVersion(db, document.id, Number(number));

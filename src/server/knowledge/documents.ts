@@ -86,15 +86,30 @@ export async function listTree(db: Queryable, tree: Tree): Promise<TreeEntry[]> 
   return rows;
 }
 
+/** Why a Document can't go where it was asked to in its page tree. */
+export type TreeRefusal = "no such parent" | "under itself" | "no such position";
+
+/** Whether `parentId` is null (the top) or a Document of `tree`. Lock the tree first, so it can't be deleted meanwhile. */
+async function isParentIn(db: Queryable, tree: Tree, parentId: string | null): Promise<boolean> {
+  if (parentId === null) return true;
+  const { rows } = await db.query("SELECT 1 FROM documents WHERE id = $1 AND workspace_id = $2 AND project_id IS NOT DISTINCT FROM $3", [
+    parentId,
+    tree.workspaceId,
+    tree.projectId,
+  ]);
+  return rows.length > 0;
+}
+
 /**
- * Creates a Document last among its siblings, with its first Version. `parentId` must
- * be a Document of the same tree (see `findDocument`). Run inside a transaction.
+ * Creates a Document last among its siblings under `parentId` (null for the top), with its
+ * first Version, or refuses if the parent isn't a Document of the same tree. Run inside a transaction.
  */
 export async function insertDocument(
   db: Queryable,
   input: { tree: Tree; parentId: string | null; title: string; body: string; actor: Actor; now: Date },
-): Promise<Document> {
+): Promise<Document | "no such parent"> {
   await lockTree(db, input.tree);
+  if (!(await isParentIn(db, input.tree, input.parentId))) return "no such parent";
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO documents (workspace_id, project_id, parent_id, position, title, body, version, created_at, updated_at)
      SELECT $1, $2, $3, coalesce(max(position) + 1, 0), $4, $5, 1, $6, $6
@@ -203,21 +218,19 @@ export async function saveVersion(
   return { ...document, title: save.title, body: save.body, version: number, updatedAt: save.now };
 }
 
-/** Why a Document can't move where it was asked to. */
-export type MoveRefusal = "under itself" | "no such position";
-
 /**
  * Moves a Document, with what sits under it, under `parentId` (null for the top) at `position`
- * among its new siblings, counted from 0, or last if left out. `parentId` must be a Document of
- * the same tree. Changes no Version. Run inside a transaction.
+ * among its new siblings, counted from 0, or last if left out. Refuses a parent outside its tree,
+ * itself or below it, and a position past the end. Changes no Version. Run inside a transaction.
  */
 export async function moveDocument(
   db: Queryable,
   tree: Tree,
   document: Document,
   to: { parentId: string | null; position?: number | undefined },
-): Promise<Document | MoveRefusal> {
+): Promise<Document | TreeRefusal> {
   await lockTree(db, tree);
+  if (!(await isParentIn(db, tree, to.parentId))) return "no such parent";
   if (to.parentId !== null) {
     const { rows } = await db.query(
       `WITH RECURSIVE ancestors(id) AS (
