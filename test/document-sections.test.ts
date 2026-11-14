@@ -272,6 +272,16 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\n- [ ] TODO\nalpha\n\n## D\n\n- [ ] TODO\ndelta\n\n## C\n\n- [ ] TODO\ngamma\n" });
   });
 
+  it("still pairs a renamed section by a line only one other section shares", async () => {
+    const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nThen run it.\n";
+    const { admin, id } = await editedUnderneath(base, "## Usage\n\nThen run it.\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: base.replace("## Setup\n\nInstall it.", "## Install\n\nInstall it now.") });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 1, body: null });
+    expect(res.body.merge.sections[0].conflict).toMatchObject({ mine: "## Install\n\nInstall it now.\nThen run it.\n\n", theirs: null });
+  });
+
   it("reports a section both edits renamed differently as a conflict", async () => {
     const base = "## Setup\n\nInstall it.\n";
     const { admin, id } = await editedUnderneath(base, "## Install\n\nInstall it.\n");

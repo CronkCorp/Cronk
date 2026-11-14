@@ -155,14 +155,16 @@ function linesAlike(x: string[], y: string[]): number {
   return (2 * common) / (x.length + y.length);
 }
 
-/** The content lines found in more than one of `chunks`' sections, such as `- [ ] TODO`: they tell no section apart. */
+/** How many sections a content line must appear in to count as boilerplate. */
+const BOILERPLATE_SECTIONS = 3;
+
+/** The content lines found in many of `chunks`' sections, such as `- [ ] TODO`: they tell no section apart. */
 function boilerplateIn(chunks: Chunk[]): Set<string> {
-  const seen = new Set<string>();
-  const repeated = new Set<string>();
+  const sections = new Map<string, number>();
   for (const chunk of chunks.slice(1)) {
-    for (const line of new Set(contentLines(chunk))) (seen.has(line) ? repeated : seen).add(line);
+    for (const line of new Set(contentLines(chunk))) sections.set(line, (sections.get(line) ?? 0) + 1);
   }
-  return repeated;
+  return new Set([...sections].filter(([, count]) => count >= BOILERPLATE_SECTIONS).map(([line]) => line));
 }
 
 /** A section's heading level, 1 to 6; 0 for the text before the first heading. */
