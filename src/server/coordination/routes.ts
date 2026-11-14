@@ -264,7 +264,7 @@ export function coordinationRoutes(ctx: AppContext) {
           const actor = await requireActor(ctx, request, { refreshSession: false });
           return !!(await ticketFor(ctx.db, actor, ticket.key, "read"));
         };
-        ctx.live.stream(request, reply, ticketTopic(ticket.id), canSee);
+        ctx.live.stream(reply, ticketTopic(ticket.id), canSee);
       },
     );
 
