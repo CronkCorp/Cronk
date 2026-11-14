@@ -210,18 +210,37 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
     );
 
-    app.delete<{ Params: { id: string } }>(
+    app.delete<{ Params: { id: string }; Querystring: { baseVersion: number } }>(
       "/api/documents/:id",
       {
         schema: {
           params: documentParams,
-          response: { 204: noContent("The Document and its Versions are deleted"), ...errors(400, 401, 403, 404, 409, 410) },
+          querystring: {
+            type: "object",
+            required: ["baseVersion"],
+            properties: {
+              baseVersion: {
+                ...baseVersion,
+                description: "The number of the Version this delete is based on. The delete is refused if it is no longer the current Version.",
+              },
+            },
+          },
+          response: {
+            204: noContent("The Document and its Versions are deleted"),
+            ...errors(400, 401, 403, 404, 410),
+            409: {
+              description:
+                "The delete is based on a Version that is no longer current, and the answer carries the current Version; or the Document has Documents under it",
+              anyOf: [ref("StaleVersion"), ref("Error")],
+            },
+          },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await transaction(ctx.db, async (tx) => {
-          const document = await documentFor(tx, actor, request.params.id, "write");
+          const document = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireCurrent(tx, document, request.query.baseVersion, "delete");
           if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
             throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
           }
@@ -302,15 +321,14 @@ async function requireVersion(db: Queryable, document: Document, number: string)
   return version;
 }
 
-/** Refuses a save based on a Version that is no longer current, answering with the current Version. */
-async function requireCurrent(db: Queryable, document: Document, baseVersion: number): Promise<void> {
+/** Refuses a save or delete based on a Version that is no longer current, answering with the current Version. */
+async function requireCurrent(db: Queryable, document: Document, baseVersion: number, write: "save" | "delete" = "save"): Promise<void> {
   if (baseVersion === document.version) return;
   const current = (await findVersion(db, document.id, document.version))!;
-  throw new HttpError(
-    409,
-    `This save is based on Version ${baseVersion}, but the Document is at Version ${document.version}; merge with it and save again`,
-    { current },
-  );
+  const next = write === "save" ? "merge with it and save again" : "read it and delete again if you still mean to";
+  throw new HttpError(409, `This ${write} is based on Version ${baseVersion}, but the Document is at Version ${document.version}; ${next}`, {
+    current,
+  });
 }
 
 /**

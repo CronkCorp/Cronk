@@ -129,7 +129,15 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   const remove = useAction(
     async () => {
       if (!confirm(`Delete ${d.title} and all its Versions?`)) return false;
-      await api.deleteDocument(d.id);
+      try {
+        await api.deleteDocument(d.id, d.version);
+      } catch (err) {
+        const current = staleVersionOf(err);
+        if (!current) throw err;
+        // Someone saved since this page loaded: show their Version before anyone deletes it.
+        props.onReload();
+        throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before deleting`);
+      }
       return true;
     },
     (deleted) => deleted && navigate(treeAddress(d.projectKey)),

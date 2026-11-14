@@ -8,7 +8,7 @@ async function writes(client: Client, id: string, projectKey = "CRONK") {
     await client.patch(`/api/documents/${id}`, { baseVersion: 1, body: "changed" }),
     await client.post(`/api/documents/${id}/versions/1/restore`, { baseVersion: 1 }),
     await client.post(`/api/documents/${id}/move`, { parentId: null }),
-    await client.delete(`/api/documents/${id}`),
+    await client.delete(`/api/documents/${id}?baseVersion=1`),
   ];
 }
 
@@ -116,7 +116,7 @@ describe("Workspace Document access", () => {
     for (const res of [
       await claude.post("/api/workspace/documents", { title: "Mine" }),
       await claude.patch(`/api/documents/${id}`, { baseVersion: 1, body: "v2" }),
-      await claude.delete(`/api/documents/${id}`),
+      await claude.delete(`/api/documents/${id}?baseVersion=1`),
     ]) {
       expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/Workspace's Agent Access is Read/);
