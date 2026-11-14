@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
+import tar from "tar-stream";
 import { inject, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/server/app.js";
@@ -67,12 +69,33 @@ export class Client {
     return new EventStream(res, () => abort.abort());
   }
 
-  private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
+  /** Downloads `path` as raw bytes, as a browser saving a file does. */
+  async download(path: string): Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }> {
+    const res = await this.cronk.app.inject({ method: "GET", url: path, headers: this.authHeaders() });
+    return { status: res.statusCode, headers: res.headers, body: res.rawPayload };
+  }
+
+  /** Uploads `bytes` to `path` as a file of `contentType`; the answer is JSON. */
+  async upload<T = any>(path: string, bytes: Buffer, contentType = "application/gzip"): Promise<Response<T>> {
+    const res = await this.cronk.app.inject({
+      method: "POST",
+      url: path,
+      headers: { ...this.authHeaders(), "content-type": contentType },
+      payload: bytes,
+    });
+    return { status: res.statusCode, body: (res.body ? JSON.parse(res.body) : undefined) as T };
+  }
+
+  private authHeaders(): Record<string, string> {
     const cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    return { ...this.headers, ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) };
+  }
+
+  private async request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response<T>> {
     const res = await this.cronk.app.inject({
       method,
       url,
-      headers: { ...this.headers, ...(cookie && { cookie }), ...(this.token && { authorization: `Bearer ${this.token}` }) },
+      headers: this.authHeaders(),
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {
@@ -352,4 +375,30 @@ export async function startSession(cronk: Cronk, secret: string): Promise<Client
   if (started.status !== 201) throw new Error(`Starting a Session failed: ${JSON.stringify(started.body)}`);
   const sessionId: string = started.body.session.id;
   return Object.assign(cronk.client(secret, { "cronk-agent-session": sessionId }), { sessionId });
+}
+
+/** A gzipped tar archive holding `files` (path to text), as `tar czf` makes of a folder. */
+export async function tarGz(files: Record<string, string>): Promise<Buffer> {
+  const pack = tar.pack();
+  for (const [name, text] of Object.entries(files)) pack.entry({ name }, text);
+  pack.finalize();
+  const chunks: Buffer[] = [];
+  for await (const chunk of pack) chunks.push(Buffer.from(chunk as Uint8Array));
+  return gzipSync(Buffer.concat(chunks));
+}
+
+/** The files in a gzipped tar archive, path to text. */
+export async function untarGz(archive: Buffer): Promise<Record<string, string>> {
+  const extract = tar.extract();
+  const files: Record<string, string> = {};
+  const done = (async () => {
+    for await (const entry of extract) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of entry) chunks.push(Buffer.from(chunk as Uint8Array));
+      if (entry.header.type === "file") files[entry.header.name] = Buffer.concat(chunks).toString("utf8");
+    }
+  })();
+  extract.end(gunzipSync(archive));
+  await done;
+  return files;
 }

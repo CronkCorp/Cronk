@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
-import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
+import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
 import { inboxFilterFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
@@ -209,7 +209,43 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
           <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
         </div>
       </form>
+      <h2>Export and import</h2>
+      <p className="muted hint">
+        Everything in the Workspace as Markdown files with frontmatter, in a .tar.gz archive. Import one into a fresh installation to move Cronk.
+      </p>
+      <div className="actions">
+        <a className="button secondary" href={workspaceExportUrl} download>Download export</a>
+        <ImportExport />
+      </div>
     </section>
+  );
+}
+
+/** Picks an export archive and imports it. */
+function ImportExport() {
+  const [status, setStatus] = useState<string>();
+  const [error, setError] = useState<string>();
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    setError(undefined);
+    setStatus("Importing…");
+    try {
+      const imported = await api.importExport(file);
+      setStatus(`Imported ${imported.projects.length === 1 ? "Project" : "Projects"} ${imported.projects.join(", ") || "none"}.`);
+    } catch (err) {
+      setStatus(undefined);
+      setError(messageOf(err));
+    }
+  };
+  return (
+    <>
+      <label className="button secondary">
+        Import export…
+        <input type="file" accept=".gz,.tgz,.tar" hidden onChange={(e) => void pick(e.target.files?.[0])} />
+      </label>
+      {status && <span className="muted">{status}</span>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </>
   );
 }
 
