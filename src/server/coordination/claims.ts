@@ -20,6 +20,7 @@ export interface Claim {
 }
 
 interface ClaimRow {
+  claim_id: string;
   agent_id: string;
   agent_name: string;
   session_id: string;
@@ -30,8 +31,16 @@ interface ClaimRow {
 
 /** The Ticket's live Claim, if it has one at `now`. */
 export async function findLiveClaim(db: Queryable, ticketId: string, now: Date): Promise<Claim | undefined> {
+  return (await findLiveClaimWithId(db, ticketId, now))?.claim;
+}
+
+/**
+ * The Ticket's live Claim at `now` with its id, which Reports written in it record. Each Claim gets
+ * a new id, so Claiming again after a release is a new Claim.
+ */
+async function findLiveClaimWithId(db: Queryable, ticketId: string, now: Date): Promise<{ id: string; claim: Claim } | undefined> {
   const { rows } = await db.query<ClaimRow>(
-    `SELECT a.id AS agent_id, a.name AS agent_name, s.id AS session_id, t.claimed_at, s.last_seen_at, w.silence_threshold_seconds
+    `SELECT t.claim_id, a.id AS agent_id, a.name AS agent_name, s.id AS session_id, t.claimed_at, s.last_seen_at, w.silence_threshold_seconds
      FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id ${WITH_WORKSPACE}
      WHERE t.id = $1 AND ${isLiveAt("$2")}`,
     [ticketId, now],
@@ -39,10 +48,13 @@ export async function findLiveClaim(db: Queryable, ticketId: string, now: Date):
   const row = rows[0];
   return (
     row && {
-      agent: { id: row.agent_id, name: row.agent_name },
-      session: { id: row.session_id },
-      claimedAt: row.claimed_at,
-      endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+      id: row.claim_id,
+      claim: {
+        agent: { id: row.agent_id, name: row.agent_name },
+        session: { id: row.session_id },
+        claimedAt: row.claimed_at,
+        endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+      },
     }
   );
 }
@@ -54,14 +66,14 @@ export async function findLiveClaim(db: Queryable, ticketId: string, now: Date):
  */
 export async function setClaim(db: Queryable, ticketId: string, sessionId: string, now: Date): Promise<void> {
   await db.query(
-    `UPDATE tickets SET claim_session_id = $2, claimed_at = $3 WHERE id = $1 AND claim_session_id IS DISTINCT FROM $2`,
+    `UPDATE tickets SET claim_session_id = $2, claimed_at = $3, claim_id = gen_random_uuid() WHERE id = $1 AND claim_session_id IS DISTINCT FROM $2`,
     [ticketId, sessionId, now],
   );
 }
 
 /** Drops the Ticket's Claim, as when it is released or its Delegate changes. */
 export async function clearClaim(db: Queryable, ticketId: string): Promise<void> {
-  await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL WHERE id = $1", [ticketId]);
+  await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL, claim_id = NULL WHERE id = $1", [ticketId]);
 }
 
 /** SQL condition: the Ticket `t` has a live Claim at the time in the parameter `nowParam`. */
@@ -130,12 +142,14 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
 }
 
 /**
- * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409).
- * `refusedAction` completes the refusal "Claim CRONK-1 in your Agent Session before …", such as "moving it".
+ * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409),
+ * and returns that Claim's id. `refusedAction` completes the refusal "Claim CRONK-1 in your Agent
+ * Session before …", such as "moving it".
  */
-export async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
-  const claim = await findLiveClaim(db, ticket.id, now);
-  if (!agent.session || claim?.session.id !== agent.session.id) {
+export async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<string> {
+  const held = await findLiveClaimWithId(db, ticket.id, now);
+  if (!held || !agent.session || held.claim.session.id !== agent.session.id) {
     throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}`);
   }
+  return held.id;
 }

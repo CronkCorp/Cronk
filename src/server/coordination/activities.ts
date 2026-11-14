@@ -1,6 +1,7 @@
 import type { AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import type { ActivityKind } from "../../shared/values.js";
+import { ticketKeySql } from "../work/tickets.js";
 
 /**
  * One timestamped entry an Agent Session writes on a Ticket while holding its Claim: a plan,
@@ -35,7 +36,7 @@ interface ActivityRow {
 
 /** Selects Activities, with their Ticket's key, Agent and Owner, from `source` (the table, or a CTE of new rows) as `v`. */
 const selectFrom = (source: string) => `
-  SELECT v.id, v.ticket_id, p.key || '-' || t.number AS ticket_key, v.kind, v.body, v.blocking, v.at,
+  SELECT v.id, v.ticket_id, ${ticketKeySql("p", "t")} AS ticket_key, v.kind, v.body, v.blocking, v.at,
     a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id
   FROM ${source} v JOIN tickets t ON t.id = v.ticket_id JOIN projects p ON p.id = t.project_id
     JOIN agents a ON a.id = v.actor_agent_id JOIN users u ON u.id = v.actor_user_id`;

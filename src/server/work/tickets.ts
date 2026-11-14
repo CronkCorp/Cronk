@@ -3,6 +3,9 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
+/** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
+export const ticketKeySql = (project: string, ticket: string) => `${project}.key || '-' || ${ticket}.number`;
+
 /** A User as a Ticket shows them. */
 export interface UserRef {
   id: string;

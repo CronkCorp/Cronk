@@ -165,6 +165,7 @@ describe("The Claim holder", () => {
     const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." });
 
     for (const category of ["started", "unstarted", "in_review"]) {
       const moved = await agent.patch("/api/tickets/CRONK-1", { statusId: inCategory(category) });

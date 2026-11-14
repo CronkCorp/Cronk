@@ -1,5 +1,6 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { ticketKeySql } from "../work/tickets.js";
 
 /**
  * Documents: Markdown (ADR 0003) belonging to a Project or the Workspace, arranged
@@ -11,8 +12,10 @@ export interface Document {
   /** Null for a Workspace Document. */
   projectId: string | null;
   projectKey: string | null;
-  /** The Document it sits under in the page tree; null at the top. */
+  /** The Document it sits under in the page tree; null at the top, and for a Report. */
   parentId: string | null;
+  /** The Ticket a Report is on; null for any other Document. Reports stay out of the page tree. */
+  ticketKey: string | null;
   title: string;
   /** Markdown. */
   body: string;
@@ -28,6 +31,7 @@ interface DocumentRow {
   project_id: string | null;
   project_key: string | null;
   parent_id: string | null;
+  ticket_key: string | null;
   title: string;
   body: string;
   version: number;
@@ -40,6 +44,7 @@ const toDocument = (row: DocumentRow): Document => ({
   projectId: row.project_id,
   projectKey: row.project_key,
   parentId: row.parent_id,
+  ticketKey: row.ticket_key,
   title: row.title,
   body: row.body,
   version: row.version,
@@ -48,7 +53,9 @@ const toDocument = (row: DocumentRow): Document => ({
 });
 
 const SELECT_DOCUMENTS = `
-  SELECT d.*, p.key AS project_key FROM documents d LEFT JOIN projects p ON p.id = d.project_id`;
+  SELECT d.*, p.key AS project_key, ${ticketKeySql("tp", "t")} AS ticket_key
+  FROM documents d LEFT JOIN projects p ON p.id = d.project_id
+    LEFT JOIN tickets t ON t.id = d.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id`;
 
 /** The page tree a Document sits in: a Project's, or the Workspace's when `projectId` is null. */
 export interface Tree {
@@ -70,12 +77,12 @@ export interface TreeEntry {
   depth: number;
 }
 
-/** A page tree's Documents depth first: each followed by those under it, siblings in their order. */
+/** A page tree's Documents depth first: each followed by those under it, siblings in their order. Reports are left out. */
 export async function listTree(db: Queryable, tree: Tree): Promise<TreeEntry[]> {
   const { rows } = await db.query<TreeEntry>(
     `WITH RECURSIVE tree AS (
        SELECT id, parent_id, title, 0 AS depth, ARRAY[position] AS path
-       FROM documents WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NULL
+       FROM documents WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NULL AND ticket_id IS NULL
        UNION ALL
        SELECT d.id, d.parent_id, d.title, t.depth + 1, t.path || d.position
        FROM documents d JOIN tree t ON d.parent_id = t.id
@@ -87,12 +94,12 @@ export async function listTree(db: Queryable, tree: Tree): Promise<TreeEntry[]> 
 }
 
 /** Why a Document can't go where it was asked to in its page tree. */
-export type TreeRefusal = "no such parent" | "under itself" | "no such position";
+export type TreeRefusal = "no such parent" | "under itself" | "no such position" | "a report";
 
-/** Whether `parentId` is null (the top) or a Document of `tree`. Lock the tree first, so it can't be deleted meanwhile. */
+/** Whether `parentId` is null (the top) or a Document of `tree` other than a Report. Lock the tree first, so it can't be deleted meanwhile. */
 async function isParentIn(db: Queryable, tree: Tree, parentId: string | null): Promise<boolean> {
   if (parentId === null) return true;
-  const { rows } = await db.query("SELECT 1 FROM documents WHERE id = $1 AND workspace_id = $2 AND project_id IS NOT DISTINCT FROM $3", [
+  const { rows } = await db.query("SELECT 1 FROM documents WHERE id = $1 AND workspace_id = $2 AND project_id IS NOT DISTINCT FROM $3 AND ticket_id IS NULL", [
     parentId,
     tree.workspaceId,
     tree.projectId,
@@ -113,7 +120,7 @@ export async function insertDocument(
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO documents (workspace_id, project_id, parent_id, position, title, body, version, created_at, updated_at)
      SELECT $1, $2, $3, coalesce(max(position) + 1, 0), $4, $5, 1, $6, $6
-     FROM documents WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NOT DISTINCT FROM $3
+     FROM documents WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NOT DISTINCT FROM $3 AND ticket_id IS NULL
      RETURNING id`,
     [input.tree.workspaceId, input.tree.projectId, input.parentId, input.title, input.body, input.now],
   );
@@ -122,7 +129,8 @@ export async function insertDocument(
   return (await findDocument(db, input.tree.workspaceId, id))!;
 }
 
-async function insertVersion(
+/** Records Version `number` of a Document. Run inside the transaction that creates or saves it. */
+export async function insertVersion(
   db: Queryable,
   documentId: string,
   v: { number: number; title: string; body: string; actor: Actor; now: Date; restoredFrom: number | null },
@@ -221,7 +229,8 @@ export async function saveVersion(
 /**
  * Moves a Document, with what sits under it, under `parentId` (null for the top) at `position`
  * among its new siblings, counted from 0, or last if left out. Refuses a parent outside its tree,
- * itself or below it, and a position past the end. Changes no Version. Run inside a transaction.
+ * itself or below it, and a position past the end, and a Report, which stays out of the tree. Changes no
+ * Version. Run inside a transaction.
  */
 export async function moveDocument(
   db: Queryable,
@@ -229,6 +238,7 @@ export async function moveDocument(
   document: Document,
   to: { parentId: string | null; position?: number | undefined },
 ): Promise<Document | TreeRefusal> {
+  if (document.ticketKey !== null) return "a report";
   await lockTree(db, tree);
   if (!(await isParentIn(db, tree, to.parentId))) return "no such parent";
   if (to.parentId !== null) {
@@ -244,7 +254,7 @@ export async function moveDocument(
   }
   const { rows: siblings } = await db.query<{ id: string }>(
     `SELECT id FROM documents
-     WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NOT DISTINCT FROM $3 AND id <> $4
+     WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NOT DISTINCT FROM $3 AND id <> $4 AND ticket_id IS NULL
      ORDER BY position`,
     [tree.workspaceId, tree.projectId, to.parentId, document.id],
   );
