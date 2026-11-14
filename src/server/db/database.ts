@@ -1,0 +1,47 @@
+import pg from "pg";
+import { migrations as allMigrations, type Migration } from "./migrations.js";
+
+export type Database = pg.Pool;
+export type Queryable = pg.Pool | pg.PoolClient;
+
+export function createDatabase(databaseUrl: string): Database {
+  return new pg.Pool({ connectionString: databaseUrl });
+}
+
+/** Runs `fn` in a transaction, committing on success and rolling back on error. */
+export async function transaction<T>(db: Database, fn: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Arbitrary constant so concurrent starts against one database migrate one at a time.
+const MIGRATION_LOCK = 0x63726f6e6b;
+
+/** Applies every migration not yet recorded in `schema_migrations`. Safe to run on every start. */
+export async function migrate(db: Database, migrations: Migration[] = allMigrations): Promise<void> {
+  await transaction(db, async (tx) => {
+    await tx.query("SELECT pg_advisory_xact_lock($1)", [MIGRATION_LOCK]);
+    await tx.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id text PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )`);
+    const { rows } = await tx.query<{ id: string }>("SELECT id FROM schema_migrations");
+    const applied = new Set(rows.map((r) => r.id));
+    for (const m of migrations) {
+      if (applied.has(m.id)) continue;
+      await tx.query(m.sql);
+      await tx.query("INSERT INTO schema_migrations (id) VALUES ($1)", [m.id]);
+    }
+  });
+}

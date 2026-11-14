@@ -1,0 +1,39 @@
+# Cronk with its Postgres. Start with: docker compose up
+# Set POSTGRES_PASSWORD (e.g. in a .env file next to this one) before exposing it anywhere.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://cronk:${POSTGRES_PASSWORD:-cronk}@db:5432/cronk
+      PORT: "3000"
+      # Set to "true" when Cronk is served over HTTPS (e.g. behind a reverse proxy).
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "${CRONK_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cronk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cronk}
+      POSTGRES_DB: cronk
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cronk -d cronk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db-data:
