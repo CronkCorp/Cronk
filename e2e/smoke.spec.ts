@@ -25,6 +25,14 @@ test("set up a fresh installation, sign out, sign in and see the application she
 
   await page.reload();
   await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  // The Admin tunes how long a silent Agent Session keeps its Claims.
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("5");
+  await page.getByLabel("Silence threshold (minutes)").fill("10");
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("10");
+  await page.getByRole("button", { name: "Cancel" }).click();
 });
 
 // Runs after the test above on the same server, so the installation is already set up.

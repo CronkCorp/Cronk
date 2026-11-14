@@ -173,7 +173,11 @@ function Page(props: { me: User }) {
 function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Workspace) => void; onCancel: () => void }) {
   const [name, setName] = useState(props.current.name);
   const [agentAccess, setAgentAccess] = useState<AgentAccess>(props.current.agentAccess);
-  const { submit, error, busy } = useSubmit(() => api.updateWorkspace({ name, agentAccess }), props.onDone);
+  const [silenceMinutes, setSilenceMinutes] = useState(String(props.current.silenceThresholdSeconds / 60));
+  const { submit, error, busy } = useSubmit(
+    () => api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) }),
+    props.onDone,
+  );
   return (
     <section className="panel">
       <h2>Workspace settings</h2>
@@ -181,6 +185,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <Field label="Workspace name" value={name} onChange={setName} />
         <AgentAccessSelect value={agentAccess} onChange={setAgentAccess} />
         <p className="muted hint">The most Agents may do in the Workspace outside any Project, such as creating Projects.</p>
+        <Field label="Silence threshold (minutes)" type="number" value={silenceMinutes} onChange={setSilenceMinutes} />
+        <p className="muted hint">How long an Agent Session may stay silent before it ends and its Claims lapse, from 1 minute to 1 day.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
           <button type="submit" disabled={busy}>Save</button>
