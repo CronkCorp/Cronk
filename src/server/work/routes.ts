@@ -12,8 +12,10 @@ import {
   listProjects,
   listStatuses,
   PROJECT_KEY_PATTERN,
+  STATUS_CATEGORIES,
   updateProject,
   type Project,
+  type StatusCategory,
 } from "./projects.js";
 import {
   findTicketByKey,
@@ -41,6 +43,16 @@ const description = { type: "string", maxLength: 100_000 } as const;
 
 /** A Label: non-blank, at most 50 characters. */
 const label = { type: "string", minLength: 1, maxLength: 50, pattern: "\\S" } as const;
+
+/** Filters for a Project's Ticket list; each may be repeated to match any of several values. */
+interface TicketQuery {
+  status?: string[];
+  category?: StatusCategory[];
+  /** User ids, or `none` for unassigned. */
+  assignee?: string[];
+  priority?: Priority[];
+  label?: string[];
+}
 
 export function workRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -102,11 +114,37 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.get<{ Params: { key: string } }>("/api/projects/:key/tickets", async (request) => {
-      const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
-      return { tickets: await listTickets(ctx.db, project.id) };
-    });
+    app.get<{ Params: { key: string }; Querystring: TicketQuery }>(
+      "/api/projects/:key/tickets",
+      {
+        schema: {
+          querystring: {
+            type: "object",
+            properties: {
+              status: { type: "array", items: { type: "string", format: "uuid" } },
+              category: { type: "array", items: { type: "string", enum: STATUS_CATEGORIES } },
+              assignee: { type: "array", items: { type: "string", anyOf: [{ format: "uuid" }, { const: "none" }] } },
+              priority: { type: "array", items: { type: "string", enum: PRIORITIES } },
+              label: { type: "array", items: { type: "string", maxLength: 50 } },
+            },
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
+        const q = request.query;
+        return {
+          tickets: await listTickets(ctx.db, project.id, {
+            statusIds: q.status,
+            categories: q.category,
+            assigneeIds: q.assignee?.map((id) => (id === "none" ? null : id)),
+            priorities: q.priority,
+            labels: q.label,
+          }),
+        };
+      },
+    );
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/labels", async (request) => {
       const user = await requireUser(ctx, request);

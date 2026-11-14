@@ -1,7 +1,7 @@
 import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import type { RelationKind } from "./relations.js";
-import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
+import { PROJECT_KEY_PATTERN, type Project, type Status, type StatusCategory } from "./projects.js";
 
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
@@ -251,9 +251,38 @@ export async function listHistory(db: Queryable, ticketId: string): Promise<Reco
   );
 }
 
-/** A Project's Tickets in key order. */
-export async function listTickets(db: Queryable, projectId: string): Promise<Ticket[]> {
-  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.project_id = $1 ORDER BY t.number`, [projectId]);
+/**
+ * Narrows a Ticket list. A Ticket matches when, for every field given, it has
+ * one of that field's values. Labels match ignoring case.
+ */
+export interface TicketFilter {
+  statusIds?: string[];
+  categories?: StatusCategory[];
+  /** User ids; `null` matches unassigned Tickets. */
+  assigneeIds?: (string | null)[];
+  priorities?: Priority[];
+  labels?: string[];
+}
+
+/** A Project's Tickets matching `filter`, in key order. */
+export async function listTickets(db: Queryable, projectId: string, filter: TicketFilter = {}): Promise<Ticket[]> {
+  const params: unknown[] = [projectId];
+  const conditions = ["t.project_id = $1"];
+  const param = (value: unknown) => `$${params.push(value)}`;
+  if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${param(filter.statusIds)}::uuid[])`);
+  if (filter.categories?.length) conditions.push(`s.category = ANY(${param(filter.categories)}::text[])`);
+  if (filter.assigneeIds?.length) {
+    const ids = filter.assigneeIds.filter((id) => id !== null);
+    const unassigned = ids.length < filter.assigneeIds.length;
+    conditions.push(`(t.assignee_id = ANY(${param(ids)}::uuid[])${unassigned ? " OR t.assignee_id IS NULL" : ""})`);
+  }
+  if (filter.priorities?.length) conditions.push(`t.priority = ANY(${param(filter.priorities)}::text[])`);
+  if (filter.labels?.length) {
+    conditions.push(
+      `EXISTS (SELECT 1 FROM unnest(t.labels) AS l WHERE lower(l) = ANY(${param(filter.labels.map((l) => l.trim().toLowerCase()))}::text[]))`,
+    );
+  }
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, params);
   return rows.map(toTicket);
 }
 
