@@ -16,41 +16,98 @@ export function ownBaseUrl(app: FastifyInstance): string | undefined {
 
 /** How long a stream may take to open with `ready` before it is given up. */
 const READY_TIMEOUT_MS = 5_000;
+/**
+ * How long after a stream ends, or fails to open, it is first opened again; each further try doubles it, up to the
+ * maximum, until a stream stays open for that maximum.
+ */
+const REOPEN_DELAY_MS = 250;
+const MAX_REOPEN_DELAY_MS = 30_000;
 
 /**
  * Follows one of the API's server-sent event streams over real HTTP as `caller`, calling
- * `onEvent` for each event after the opening `ready`. Resolves once the stream is ready,
- * with a function that closes it, or with undefined if the API refused, couldn't be reached
- * or wasn't ready in time.
- * The stream ends on its own when the API ends it, as when the caller loses access.
+ * `onEvent` for each event after the opening `ready`, until the returned function is called.
+ * Resolves once the stream is first ready, or first fails to open.
+ *
+ * A stream the API ends, or that couldn't be opened, is opened again after a short delay,
+ * backing off while it keeps failing. The API ends a stream when the caller loses access, but
+ * also when it can't check that access (a database blip), so opening it again is what tells the
+ * two apart: the API refusing it with a client error (a revoked token, an ended Agent Session)
+ * stops it for good.
  */
-export async function followEvents(baseUrl: string, caller: Caller, path: string, onEvent: (event: LiveEvent) => void): Promise<(() => void) | undefined> {
-  let req: ClientRequest | undefined;
-  const close = () => void req?.destroy();
+export async function followEvents(baseUrl: string, caller: Caller, path: string, onEvent: (event: LiveEvent) => void): Promise<() => void> {
+  let stopped = false;
+  let closeStream = () => {};
+  let reopening: NodeJS.Timeout | undefined;
+  const stop = () => {
+    stopped = true;
+    clearTimeout(reopening);
+    closeStream();
+  };
+
+  let delay = REOPEN_DELAY_MS;
+  // Opens the stream, and settles once it is open or has failed to; after either, it is opened again once it ends.
+  const follow = async (): Promise<void> => {
+    const opened = await openStream(baseUrl, caller, path, onEvent, (close) => (closeStream = close));
+    if (stopped || opened === "refused") return;
+    if (opened === "failed") return reopenLater();
+    const openedAt = Date.now();
+    void opened.ended.then(() => {
+      // Only a stream that stayed open a while counts as recovered; one that keeps ending at once backs off too.
+      if (Date.now() - openedAt >= MAX_REOPEN_DELAY_MS) delay = REOPEN_DELAY_MS;
+      reopenLater();
+    });
+  };
+  const reopenLater = () => {
+    if (stopped) return;
+    reopening = setTimeout(() => void follow(), delay).unref();
+    delay = Math.min(delay * 2, MAX_REOPEN_DELAY_MS);
+  };
+  await follow();
+  return stop;
+}
+
+/**
+ * Opens the stream once, handing `setClose` a function that closes it as soon as there is one.
+ * Answers how it went: open, with a promise that settles when the stream ends; refused by the
+ * API with a client error, so opening it again would be refused too; or failed otherwise (the API
+ * answered with a server error, couldn't be reached, or wasn't ready in time).
+ */
+async function openStream(
+  baseUrl: string,
+  caller: Caller,
+  path: string,
+  onEvent: (event: LiveEvent) => void,
+  setClose: (close: () => void) => void,
+): Promise<{ ended: Promise<void> } | "refused" | "failed"> {
+  // A connection of its own, closed with the stream.
+  const req: ClientRequest = request(new URL(path, baseUrl), { agent: false, headers: { accept: "text/event-stream", ...callerHeaders(caller) } });
+  const close = () => void req.destroy();
+  setClose(close);
   // A stream that doesn't get ready in time is given up, so the caller isn't held up waiting for it.
   const givingUp = setTimeout(close, READY_TIMEOUT_MS);
   try {
-    // A connection of its own, closed with the stream.
-    req = request(new URL(path, baseUrl), { agent: false, headers: { accept: "text/event-stream", ...callerHeaders(caller) } });
-    const opening = req;
-    const res = await new Promise<IncomingMessage>((resolve, reject) => opening.on("response", resolve).on("error", reject).end());
-    if (res.statusCode !== 200) {
+    const res = await new Promise<IncomingMessage>((resolve, reject) => req.on("response", resolve).on("error", reject).end());
+    const status = res.statusCode ?? 0;
+    if (status !== 200) {
       close();
-      return undefined;
+      // 408 and 429 ask to be tried again later; every other client error would only be repeated.
+      return status >= 400 && status < 500 && status !== 408 && status !== 429 ? "refused" : "failed";
     }
     const events = readEvents(res)[Symbol.asyncIterator]();
     const first = await events.next();
     if (first.done || first.value.event !== "ready") {
       close();
-      return undefined;
+      return "failed";
     }
-    void (async () => {
+    const ended = (async () => {
       for (let e = await events.next(); !e.done; e = await events.next()) onEvent(e.value);
-    })().catch(() => {});
-    return close;
+    })()
+      .catch(() => {})
+      .finally(close);
+    return { ended };
   } catch {
     close();
-    return undefined;
+    return "failed";
   } finally {
     clearTimeout(givingUp);
   }

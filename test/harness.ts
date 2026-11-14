@@ -141,6 +141,12 @@ export interface Cronk {
    * it restarts, and waits until they are gone.
    */
   terminateConnections(): Promise<void>;
+  /**
+   * Holds back every query on `table` while `cause` runs, then has Postgres terminate the
+   * connections whose queries are waiting on it, so those queries fail as on a database
+   * blip, and lets the rest through.
+   */
+  interruptQueriesOn(table: string, cause: () => Promise<unknown>): Promise<void>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
 }
@@ -188,6 +194,28 @@ export async function startCronk(): Promise<Cronk> {
       }
       // Give the server's clients a moment to read the termination notice.
       await new Promise((resolve) => setTimeout(resolve, 50));
+    },
+    interruptQueriesOn: async (table, cause) => {
+      const admin = new pg.Client({ connectionString: databaseUrl });
+      await admin.connect();
+      try {
+        await admin.query("BEGIN");
+        await admin.query(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
+        await cause();
+        const deadline = Date.now() + 5_000;
+        for (;;) {
+          const { rows } = await admin.query<{ n: number }>(
+            "SELECT count(pg_terminate_backend(pid))::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
+            [dbName],
+          );
+          if (rows[0]!.n > 0) break;
+          if (Date.now() > deadline) throw new Error(`No query waited on ${table}`);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      } finally {
+        await admin.query("ROLLBACK").catch(() => {});
+        await admin.end();
+      }
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
