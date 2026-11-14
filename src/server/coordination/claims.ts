@@ -91,11 +91,11 @@ export interface ReadyScope {
   projectIds: string[];
 }
 
-/** The ids of the Agent's Ready Tickets in the order they are offered. */
-export async function listReadyTicketIds(db: Queryable, scope: ReadyScope, now: Date): Promise<string[]> {
+/** The ids of the Agent's Ready Tickets in the order they are offered, at most `limit` of them if given. */
+export async function listReadyTicketIds(db: Queryable, scope: ReadyScope, now: Date, limit?: number): Promise<string[]> {
   const { rows } = await db.query<{ id: string }>(
-    `SELECT t.id FROM tickets t JOIN statuses s ON s.id = t.status_id WHERE ${isReady("$1", "$2", "$3")} ORDER BY ${READY_ORDER}`,
-    [scope.agentId, scope.projectIds, now],
+    `SELECT t.id FROM tickets t JOIN statuses s ON s.id = t.status_id WHERE ${isReady("$1", "$2", "$3")} ORDER BY ${READY_ORDER} LIMIT $4`,
+    [scope.agentId, scope.projectIds, now, limit ?? null],
   );
   return rows.map((r) => r.id);
 }

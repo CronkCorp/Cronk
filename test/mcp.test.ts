@@ -145,3 +145,43 @@ describe("the tickets tool", () => {
     expect(listed.body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
   });
 });
+
+describe("working a delegated Ticket over MCP", () => {
+  /** Ada's Project CRONK with `count` Tickets assigned to her and delegated to her Agent claude-laptop, which connects over MCP. */
+  async function delegatedOverMcp(count: number) {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", count);
+    const claude = await registerAgent(admin, "claude-laptop");
+    const adaId = (await admin.get("/api/users")).body.users[0].id;
+    for (let i = 1; i <= count; i++) await admin.patch(`/api/tickets/CRONK-${i}`, { assigneeId: adaId, delegateId: claude.agentId });
+    return { cronk, admin, mcp: await connectMcp(cronk, claude.secret) };
+  }
+
+  it("welcomes the Agent with its Ready Tickets", async () => {
+    const { mcp } = await delegatedOverMcp(2);
+    expect(mcp.client.getInstructions()).toMatch(/Ready Tickets[\s\S]*CRONK-1: Ticket 1[\s\S]*CRONK-2: Ticket 2/);
+  });
+
+  it("Claims the next Ready Ticket, moves it, splits it and releases it", async () => {
+    const { admin, mcp } = await delegatedOverMcp(1);
+
+    const next = await callTool(mcp, "tickets", { action: "next" });
+    expect(next.body.next).toMatchObject({ ticket: { key: "CRONK-1" }, claim: { session: { id: mcp.transport.sessionId } } });
+    expect((await callTool(mcp, "tickets", { action: "next" })).body).toEqual({ next: null });
+
+    const moved = await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "in progress" });
+    expect(moved.body.ticket.status).toMatchObject({ name: "In Progress", category: "started" });
+    expect(await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "Nope" })).toEqual({
+      isError: true,
+      body: expect.stringContaining("CRONK has no Status named Nope"),
+    });
+    expect((await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "Done" })).isError).toBe(true);
+
+    const split = await callTool(mcp, "tickets", { action: "create_sub_ticket", key: "CRONK-1", title: "A smaller step" });
+    expect(split.body.ticket).toMatchObject({ key: "CRONK-2", parent: { key: "CRONK-1" }, delegate: { name: "claude-laptop" } });
+
+    expect((await callTool(mcp, "tickets", { action: "release", key: "CRONK-1" })).isError).toBe(false);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.claim.session.id).toBe(mcp.transport.sessionId);
+  });
+});

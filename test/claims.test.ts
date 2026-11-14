@@ -245,3 +245,17 @@ describe("Sub-Tickets", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.subTickets.map((t: { title: string }) => t.title)).toEqual(["Split by Ada"]);
   });
 });
+
+describe("The welcome", () => {
+  it("lists the Agent's Ready Tickets in the order next offers them", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(3);
+    await admin.patch("/api/tickets/CRONK-3", { priority: "urgent" });
+    await (await session()).post("/api/tickets/CRONK-1/claim");
+
+    const started = await cronk.client(claude.secret).post("/api/agent-sessions");
+    expect(started.body.welcome.readyTickets).toEqual([
+      { key: "CRONK-3", title: "Ticket 3", priority: "urgent", status: expect.objectContaining({ category: "backlog" }) },
+      { key: "CRONK-2", title: "Ticket 2", priority: "none", status: expect.objectContaining({ category: "backlog" }) },
+    ]);
+  });
+});

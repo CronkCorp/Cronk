@@ -13,5 +13,9 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
   lines.push("", "## Projects you can see", "");
   if (projects.length === 0) lines.push("None yet.");
   for (const p of projects) lines.push(`- ${p.key}: ${p.name}${p.access === "read" ? " (read only)" : ""}`);
+  lines.push("", "## Your Ready Tickets", "");
+  if (welcome.readyTickets.length === 0) lines.push("None right now.");
+  else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.", "");
+  for (const t of welcome.readyTickets) lines.push(`- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`);
   return lines.join("\n");
 }

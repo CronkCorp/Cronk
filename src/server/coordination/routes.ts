@@ -8,8 +8,9 @@ import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/routes.js";
-import { claimNextReady, clearClaim, findLiveClaim, setClaim, type ReadyScope } from "./claims.js";
+import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, setClaim, type ReadyScope } from "./claims.js";
 import { findTicketById } from "../work/tickets.js";
+import { PRIORITIES } from "../../shared/values.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -20,10 +21,13 @@ const sessionHeader = {
   properties: { [AGENT_SESSION_HEADER]: { type: "string", description: "The id of one of the Agent's live Agent Sessions" } },
 } as const;
 
+/** How many Ready Tickets the welcome lists. */
+const WELCOME_READY_LIMIT = 20;
+
 /** What an Agent is told when its Agent Session starts (see `welcome`). */
 const welcomeSchema = {
   type: "object",
-  required: ["workspace", "agent", "readOnly", "projects"],
+  required: ["workspace", "agent", "readOnly", "projects", "readyTickets"],
   properties: {
     workspace: {
       anyOf: [{ type: "object", required: ["name"], properties: { name: { type: "string" } } }, { type: "null" }],
@@ -38,6 +42,15 @@ const welcomeSchema = {
         type: "object",
         required: ["key", "name", "access"],
         properties: { key: { type: "string" }, name: { type: "string" }, access: accessSchema },
+      },
+    },
+    readyTickets: {
+      type: "array",
+      description: `The Agent's Ready Tickets in the order \`next\` offers them, at most ${WELCOME_READY_LIMIT}.`,
+      items: {
+        type: "object",
+        required: ["key", "title", "priority", "status"],
+        properties: { key: { type: "string" }, title: { type: "string" }, priority: { type: "string", enum: PRIORITIES }, status: ref("Status") },
       },
     },
   },
@@ -194,8 +207,8 @@ function requireSession(actor: Actor): AgentSession {
 
 /**
  * What an Agent is told when it connects: who it is and for whom, whether it may only
- * read, and the Projects it can see. The Workspace's name is left out if the Workspace's
- * Agent Access is None.
+ * read, the Projects it can see, and its Ready Tickets. The Workspace's name is left out
+ * if the Workspace's Agent Access is None.
  */
 export async function welcome(ctx: AppContext, agent: AgentActor) {
   const workspaceId = agent.owner.workspaceId;
@@ -212,5 +225,13 @@ export async function welcome(ctx: AppContext, agent: AgentActor) {
     agent: publicAgent(agent.agent, agent.owner),
     readOnly: agent.readOnly,
     projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access })),
+    readyTickets: await readyTickets(ctx, agent),
   };
+}
+
+/** The first of the Agent's Ready Tickets, as the welcome lists them. */
+async function readyTickets(ctx: AppContext, agent: AgentActor) {
+  const ids = await listReadyTicketIds(ctx.db, await readyScope(ctx, agent), ctx.clock.now(), WELCOME_READY_LIMIT);
+  const tickets = await Promise.all(ids.map((id) => findTicketById(ctx.db, id)));
+  return tickets.map((t) => ({ key: t!.key, title: t!.title, priority: t!.priority, status: t!.status }));
 }

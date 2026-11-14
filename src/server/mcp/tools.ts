@@ -73,7 +73,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description: "Tickets: the units of work tracked in a Project, keyed like CRONK-12.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK (list)"),
-      key: z.string().optional().describe("Ticket key, such as CRONK-12 (get)"),
+      key: z.string().optional().describe("Ticket key, such as CRONK-12 (get, claim, release, move, create_sub_ticket)"),
+      to: z.string().optional().describe("The Status to move into, by name or id (move)"),
+      title: z.string().optional().describe("The new Sub-Ticket's title (create_sub_ticket)"),
+      description: z.string().optional().describe("The new Sub-Ticket's Markdown description (create_sub_ticket)"),
       status: z.array(z.string()).optional().describe("Only Tickets in one of these Status ids (list)"),
       category: z.array(z.enum(STATUS_CATEGORIES)).optional().describe("Only Tickets whose Status is in one of these Status Categories (list)"),
       priority: z.array(z.enum(PRIORITIES)).optional().describe("Only Tickets with one of these Priorities (list)"),
@@ -94,6 +97,45 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         description: "one Ticket with its Sub-Tickets and Relations",
         writes: false,
         run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "get"))}`),
+      },
+      next: {
+        description: "Claim your next Ready Ticket (highest Priority, then oldest) and get it; `next` is null when none is Ready",
+        writes: true,
+        run: (api) => api("POST", "/api/agent-sessions/current/next"),
+      },
+      claim: {
+        description: "Claim a Ticket delegated to you, so no other Agent Session works on it, and get it",
+        writes: true,
+        run: (api, a) => api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "claim"))}/claim`),
+      },
+      release: {
+        description: "release your Claim on a Ticket, leaving it delegated to you for another Agent Session",
+        writes: true,
+        run: (api, a) => api("DELETE", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "release"))}/claim`),
+      },
+      move: {
+        description: "move a Ticket you hold the Claim on into another Status (Unstarted, Started or In Review only)",
+        writes: true,
+        run: async (api, a) => {
+          const key = required(a.key, "a key", "move");
+          const to = required(a.to, "a Status to move to", "move");
+          const projectKey = key.slice(0, key.lastIndexOf("-"));
+          const project = await api("GET", `/api/projects/${encodeURIComponent(projectKey)}`);
+          if (project.status >= 400) return project;
+          const statuses = project.body.statuses as { id: string; name: string }[];
+          const status = statuses.find((s) => s.id === to) ?? statuses.find((s) => s.name.toLowerCase() === to.trim().toLowerCase());
+          if (!status) throw new ToolError(`${projectKey.toUpperCase()} has no Status named ${to}; it has ${statuses.map((s) => s.name).join(", ")}`);
+          return api("PATCH", `/api/tickets/${encodeURIComponent(key)}`, { statusId: status.id });
+        },
+      },
+      create_sub_ticket: {
+        description: "split a Ticket you hold the Claim on: create a Sub-Ticket that stays delegated to you",
+        writes: true,
+        run: (api, a) => {
+          const key = required(a.key, "a key", "create_sub_ticket");
+          const title = required(a.title, "a title", "create_sub_ticket");
+          return api("POST", `/api/tickets/${encodeURIComponent(key)}/sub-tickets`, { title, ...(a.description !== undefined && { description: a.description }) });
+        },
       },
     },
   });
