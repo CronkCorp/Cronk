@@ -211,3 +211,9 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .merge-conflict h3 { margin: 0 0 8px; }
 .merge-conflict .sides { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .merge-conflict .side { flex: 1 1 200px; min-width: 0; }
+
+.search-box input { font: inherit; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); width: 200px; }
+.search-box input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.search-result { flex-direction: column; align-items: stretch; gap: 4px; }
+.search-result-head { display: flex; align-items: center; gap: 12px; }
+.search-excerpt { margin: 0; font-size: 13px; }

@@ -335,7 +335,7 @@ function FilterBar(props: { projectKey: string; statuses: Status[]; filter: Tick
   );
 }
 
-function FilterSelect(props: { name: string; value: string | undefined; onChange: (value: string) => void; options: [string, string][] }) {
+export function FilterSelect(props: { name: string; value: string | undefined; onChange: (value: string) => void; options: [string, string][] }) {
   return (
     <label className="filter">
       <span>{props.name}</span>
@@ -678,6 +678,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         </>
       )}
       <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
+      <MentionedIn detail={props.detail} />
       <h2>Timeline</h2>
       <TicketTimeline ticketKey={t.key} canWrite={canWrite} />
       <h2>History</h2>
@@ -921,6 +922,27 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean; onCha
       )}
       {(add.error ?? remove.error) && <p className="error" role="alert">{add.error ?? remove.error}</p>}
     </section>
+  );
+}
+
+/** The Documents, other Tickets' Reports included, that mention the Ticket's key; its own Reports show in its timeline. */
+function MentionedIn(props: { detail: TicketDetail }) {
+  const mentions = props.detail.documents.filter((d) => d.ticketKey !== props.detail.ticket.key);
+  if (mentions.length === 0) return null;
+  return (
+    <>
+      <h2>Mentioned in</h2>
+      <ul className="rows" aria-label="Mentioned in">
+        {mentions.map((d) => (
+          <li key={d.id} className="row">
+            <Link to={`/documents/${d.id}`} className="row-link">
+              <span className="grow">{d.title}</span>
+              <span className="muted">{d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace")}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 

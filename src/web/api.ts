@@ -30,6 +30,8 @@ import type {
   Relations,
   Report,
   Role,
+  SearchKind,
+  SearchResult,
   Status,
   StatusCategory,
   Ticket,
@@ -76,6 +78,8 @@ export type {
   Relations,
   Report,
   Role,
+  SearchKind,
+  SearchResult,
   Status,
   StatusCategory,
   Ticket,
@@ -139,6 +143,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
+  search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
+    request<{ results: SearchResult[] }>(
+      "GET",
+      `/api/search?${new URLSearchParams({ q, ...(filter.kind && { kind: filter.kind }), ...(filter.project && { project: filter.project }) })}`,
+    ).then((r) => r.results),
   setupRequired: () => request<{ required: boolean }>("GET", "/api/setup").then((r) => r.required),
   setup: (input: { email: string; password: string; name: string; workspaceName?: string }) =>
     request<{ user: User }>("POST", "/api/setup", input).then((r) => r.user),
