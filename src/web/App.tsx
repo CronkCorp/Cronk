@@ -4,6 +4,7 @@ import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
+import { SearchBox, SearchPage } from "./search.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
 import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
@@ -121,6 +122,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
           <span data-testid="workspace-name">{workspace?.name}</span>
         </Link>
         <div className="topbar-right">
+          <SearchBox />
           <Link to="/documents" className="link">Documents</Link>
           <Link to="/guidance" className="link">Guidance</Link>
           <Link to="/agents" className="link">Agents</Link>
@@ -158,6 +160,7 @@ function Page(props: { me: User }) {
   const { path, search } = useLocation();
   if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   if (path === "/agents") return <AgentsPage me={props.me} />;
+  if (path === "/search") return <SearchPage q={search.get("q") ?? ""} />;
   if (path === "/documents") return <DocumentsPage />;
   const projectDocuments = /^\/projects\/([^/]+)\/documents$/.exec(path);
   if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;

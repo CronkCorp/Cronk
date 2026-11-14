@@ -28,12 +28,14 @@ import type { publicWorkspace } from "./workspace/workspaces.js";
 import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
+import type { SearchResult } from "./search/search.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
-export type { ActivityKind, Priority, RelationKind, StatusCategory } from "../shared/values.js";
+export type { ActivityKind, Priority, RelationKind, SearchKind, StatusCategory } from "../shared/values.js";
+export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
 
 /** A value as JSON carries it: `Date`s arrive as ISO strings. */
