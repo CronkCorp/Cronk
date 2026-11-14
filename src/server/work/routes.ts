@@ -205,15 +205,14 @@ export function workRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         const relations = await transaction(ctx.db, async (tx) => {
           const { ticket, other } = await relationEnds(tx, user.workspaceId, request.params.key, request.body.ticketKey);
-          const result = await addRelation(tx, {
-            workspaceId: user.workspaceId,
+          const added = await addRelation(tx, user.workspaceId, {
             ticket,
             kind: request.body.kind,
             other,
             actor: userActor(user),
             now: ctx.clock.now(),
           });
-          if (result === "cycle") {
+          if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
           }
           return listRelations(tx, ticket.id);

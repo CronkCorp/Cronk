@@ -1,5 +1,5 @@
 import type { Actor } from "../actor.js";
-import type { Queryable } from "../db/database.js";
+import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { listTicketRefs, recordChange, type Ticket, type TicketRef } from "./tickets.js";
 
 /**
@@ -19,8 +19,17 @@ export interface Relations {
   relatesTo: TicketRef[];
 }
 
+/** A relation change: `ticket` relating to `other` as `kind`, made by `actor` at `now`. */
+export interface RelationChange {
+  ticket: Ticket;
+  kind: RelationKind;
+  other: Ticket;
+  actor: Actor;
+  now: Date;
+}
+
 /** The stored row for a relation: blocking runs from blocker to blocked; relating is stored once, lower id first. */
-function stored(ticket: Ticket, kind: RelationKind, other: Ticket): { kind: "blocks" | "relates_to"; from: string; to: string } {
+function storedRow(ticket: Ticket, kind: RelationKind, other: Ticket): { kind: "blocks" | "relates_to"; from: string; to: string } {
   switch (kind) {
     case "blocks":
       return { kind: "blocks", from: ticket.id, to: other.id };
@@ -31,14 +40,6 @@ function stored(ticket: Ticket, kind: RelationKind, other: Ticket): { kind: "blo
         ? { kind: "relates_to", from: ticket.id, to: other.id }
         : { kind: "relates_to", from: other.id, to: ticket.id };
   }
-}
-
-/**
- * Takes the Workspace's lock on blocking relations until the transaction ends,
- * so two relations added at once can't close a cycle between them.
- */
-async function lockBlocking(db: Queryable, workspaceId: string): Promise<void> {
-  await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`ticket-blocking:${workspaceId}`]);
 }
 
 /** Whether `blocker` blocking `blocked` would close a cycle: `blocked` already blocks `blocker`, directly or through others. */
@@ -54,37 +55,30 @@ async function wouldCycle(db: Queryable, blocker: string, blocked: string): Prom
   return rows.length > 0;
 }
 
-export type AddResult = "added" | "already there" | "cycle";
-
 /**
- * Relates `ticket` to `other`, recording it in both Tickets' history. Refuses a
- * blocking relation that would close a cycle. The Tickets must differ and share
- * a Workspace. Run inside a transaction.
+ * Relates `ticket` to `other`, recording it in both Tickets' history unless they
+ * were already related that way. Returns false, changing nothing, for a blocking
+ * relation that would close a cycle. The Tickets must differ and share
+ * `workspaceId`. Run inside a transaction.
  */
-export async function addRelation(
-  db: Queryable,
-  input: { workspaceId: string; ticket: Ticket; kind: RelationKind; other: Ticket; actor: Actor; now: Date },
-): Promise<AddResult> {
-  const row = stored(input.ticket, input.kind, input.other);
+export async function addRelation(db: Queryable, workspaceId: string, input: RelationChange): Promise<boolean> {
+  const row = storedRow(input.ticket, input.kind, input.other);
   if (row.kind === "blocks") {
-    await lockBlocking(db, input.workspaceId);
-    if (await wouldCycle(db, row.from, row.to)) return "cycle";
+    // One blocking change per Workspace at a time, so two added at once can't close a cycle between them.
+    await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
+    if (await wouldCycle(db, row.from, row.to)) return false;
   }
   const { rowCount } = await db.query(
     `INSERT INTO ticket_relations (kind, from_ticket_id, to_ticket_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
     [row.kind, row.from, row.to],
   );
-  if (rowCount === 0) return "already there";
-  await recordBothSides(db, "relation added", input);
-  return "added";
+  if (rowCount !== 0) await recordBothSides(db, "relation added", input);
+  return true;
 }
 
 /** Removes a relation, recording it in both Tickets' history. Returns false if there was no such relation. Run inside a transaction. */
-export async function removeRelation(
-  db: Queryable,
-  input: { ticket: Ticket; kind: RelationKind; other: Ticket; actor: Actor; now: Date },
-): Promise<boolean> {
-  const row = stored(input.ticket, input.kind, input.other);
+export async function removeRelation(db: Queryable, input: RelationChange): Promise<boolean> {
+  const row = storedRow(input.ticket, input.kind, input.other);
   const { rowCount } = await db.query("DELETE FROM ticket_relations WHERE kind = $1 AND from_ticket_id = $2 AND to_ticket_id = $3", [
     row.kind,
     row.from,
@@ -95,11 +89,7 @@ export async function removeRelation(
   return true;
 }
 
-async function recordBothSides(
-  db: Queryable,
-  change: "relation added" | "relation removed",
-  input: { ticket: Ticket; kind: RelationKind; other: Ticket; actor: Actor; now: Date },
-): Promise<void> {
+async function recordBothSides(db: Queryable, change: "relation added" | "relation removed", input: RelationChange): Promise<void> {
   const { ticket, kind, other, actor, now } = input;
   await recordChange(db, ticket.id, actor, now, { change, kind, ticket: { key: other.key, title: other.title } });
   await recordChange(db, other.id, actor, now, { change, kind: inverse[kind], ticket: { key: ticket.key, title: ticket.title } });

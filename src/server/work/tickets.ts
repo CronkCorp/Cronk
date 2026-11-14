@@ -1,5 +1,5 @@
 import type { Actor } from "../actor.js";
-import type { Queryable } from "../db/database.js";
+import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "./relations.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status, type StatusCategory } from "./projects.js";
 
@@ -302,7 +302,7 @@ export async function listLabels(db: Queryable, projectId: string): Promise<stri
  * can't make a loop between them. Run inside a transaction.
  */
 export async function wouldNestUnderItself(db: Queryable, ticket: Ticket, parent: Ticket): Promise<boolean> {
-  await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`ticket-parents:${ticket.projectId}`]);
+  await lockUntilCommit(db, `ticket-parents:${ticket.projectId}`);
   const { rows } = await db.query(
     `WITH RECURSIVE ancestors(id) AS (
        SELECT $1::uuid
