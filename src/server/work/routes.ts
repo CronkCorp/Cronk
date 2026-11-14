@@ -7,11 +7,15 @@ import type { Queryable } from "../db/database.js";
 import {
   findProjectByKey,
   insertProject,
+  insertStatus,
+  lockProject,
   listProjects,
   listStatuses,
   PROJECT_KEY_PATTERN,
+  STATUS_CATEGORIES,
   updateProject,
   type Project,
+  type StatusCategory,
 } from "./projects.js";
 import { findTicketByKey, insertTicket, listHistory, listTickets, updateTicket, type Ticket, type TicketEdit } from "./tickets.js";
 
@@ -79,6 +83,31 @@ export function workRoutes(ctx: AppContext) {
         const { name, archived } = request.body;
         const changes = { ...(name !== undefined && { name: name.trim() }), ...(archived !== undefined && { archived }) };
         return { project: await updateProject(ctx.db, project.id, changes, ctx.clock.now()) };
+      },
+    );
+
+    app.post<{ Params: { key: string }; Body: { name: string; category: StatusCategory } }>(
+      "/api/projects/:key/statuses",
+      {
+        schema: {
+          body: {
+            type: "object",
+            required: ["name", "category"],
+            additionalProperties: false,
+            properties: { name: nameSchema, category: { type: "string", enum: STATUS_CATEGORIES } },
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const name = request.body.name.trim();
+        const status = await transaction(ctx.db, async (tx) => {
+          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          await lockProject(tx, project.id);
+          return insertStatus(tx, project.id, { name, category: request.body.category });
+        });
+        if (!status) throw new HttpError(409, `Another Status is already named ${name}`);
+        return reply.code(201).send({ status });
       },
     );
 

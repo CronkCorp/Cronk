@@ -70,13 +70,46 @@ export async function findProjectByKey(db: Queryable, workspaceId: string, key: 
   return rows[0] && toProject(rows[0]);
 }
 
-/** A Project's Statuses in workflow order. */
+/** Orders Statuses by Status Category, then by their place within it. */
+const STATUS_ORDER = `array_position(ARRAY['${STATUS_CATEGORIES.join("','")}'], category), position`;
+
+/**
+ * A Project's Statuses in workflow order: grouped by Status Category in its
+ * fixed order, then in the order the Project chose within each Category.
+ */
 export async function listStatuses(db: Queryable, projectId: string): Promise<Status[]> {
   const { rows } = await db.query<Status>(
-    "SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY position",
+    `SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY ${STATUS_ORDER}`,
     [projectId],
   );
   return rows;
+}
+
+/**
+ * Locks the Project row until the transaction ends, so changes to its Statuses
+ * (and Ticket creation, which takes the first Status) happen one at a time.
+ */
+export async function lockProject(db: Queryable, projectId: string): Promise<void> {
+  await db.query("SELECT 1 FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
+}
+
+/**
+ * Adds a Status last in its Status Category, or returns undefined if the
+ * Project already has a Status with that name. Lock the Project first.
+ */
+export async function insertStatus(
+  db: Queryable,
+  projectId: string,
+  input: { name: string; category: StatusCategory },
+): Promise<Status | undefined> {
+  const { rows } = await db.query<Status>(
+    `INSERT INTO statuses (project_id, name, category, position)
+     SELECT $1, $2, $3, coalesce(max(position) + 1, 0) FROM statuses WHERE project_id = $1 AND category = $3
+     ON CONFLICT (project_id, lower(name)) DO NOTHING
+     RETURNING id, name, category`,
+    [projectId, input.name, input.category],
+  );
+  return rows[0];
 }
 
 /** The Workspace's Projects by name: those not archived, or with `archived`, only the archived ones. */

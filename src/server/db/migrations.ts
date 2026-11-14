@@ -88,4 +88,11 @@ export const migrations: Migration[] = [
       CREATE INDEX ticket_changes_ticket ON ticket_changes (ticket_id, id);
     `,
   },
+  {
+    id: "0003_status_names_unique",
+    sql: `
+      -- A Project's Statuses are told apart by name, so no two may share one, ignoring case.
+      CREATE UNIQUE INDEX statuses_name_unique ON statuses (project_id, lower(name));
+    `,
+  },
 ];
