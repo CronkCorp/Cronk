@@ -220,7 +220,8 @@ export const api = {
     request<{ document: Document }>("PATCH", documentPath(id), input).then((r) => r.document),
   moveDocument: (id: string, parentId: string | null) =>
     request<{ document: Document }>("POST", `${documentPath(id)}/move`, { parentId }).then((r) => r.document),
-  deleteDocument: (id: string) => request<void>("DELETE", documentPath(id)),
+  /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
+  deleteDocument: (id: string, baseVersion: number) => request<void>("DELETE", `${documentPath(id)}?baseVersion=${baseVersion}`),
   versions: (id: string) => request<{ versions: VersionSummary[] }>("GET", `${documentPath(id)}/versions`).then((r) => r.versions),
   version: (id: string, number: number) =>
     request<{ version: Version }>("GET", `${documentPath(id)}/versions/${number}`).then((r) => r.version),
