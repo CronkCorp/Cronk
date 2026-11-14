@@ -13,6 +13,7 @@ import { mcpRoutes } from "./mcp/server.js";
 import { identityRoutes } from "./identity/routes.js";
 import { guidanceRoutes } from "./knowledge/guidance-routes.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
+import { portabilityRoutes } from "./portability/routes.js";
 import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
@@ -125,6 +126,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(conversationRoutes(ctx));
+  await app.register(portabilityRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 
   const webRoot = opts.config.webRoot;
