@@ -201,7 +201,7 @@ export function identityRoutes(ctx: AppContext) {
 
     // Anyone holding an invitation's token may view and accept it; the token is the proof.
     app.get<{ Params: { token: string } }>(
-      "/api/invitations/:token",
+      "/api/invitations/by-token/:token",
       {
         schema: {
           params: invitationTokenParams,
@@ -225,7 +225,7 @@ export function identityRoutes(ctx: AppContext) {
     );
 
     app.post<{ Params: { token: string }; Body: { name: string; password: string } }>(
-      "/api/invitations/:token/accept",
+      "/api/invitations/by-token/:token/accept",
       {
         schema: {
           params: invitationTokenParams,

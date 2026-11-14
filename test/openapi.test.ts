@@ -28,7 +28,7 @@ describe("the OpenAPI description", () => {
     );
     expect(res.body.paths["/api/projects/{key}"].patch.requestBody.content["application/json"].schema.properties).toHaveProperty("agentAccess");
     // Routes anyone may call say so; the rest need a sign-in or an Agent token.
-    for (const [path, method] of [["/api/setup", "post"], ["/api/sign-in", "post"], ["/api/invitations/{token}/accept", "post"], ["/api/health", "get"]] as const) {
+    for (const [path, method] of [["/api/setup", "post"], ["/api/sign-in", "post"], ["/api/invitations/by-token/{token}/accept", "post"], ["/api/health", "get"]] as const) {
       expect(res.body.paths[path][method].security).toEqual([]);
     }
     expect(res.body.paths["/api/projects"].get.security).toBeUndefined();
@@ -83,8 +83,18 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/tickets/{key}", "get")).toEqual(["400", "401", "404", "410"]);
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
-    expect(errorsOf("/api/invitations/{token}", "get")).toEqual(["400", "404"]);
+    expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["400", "404"]);
     expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toEqual(staleBody);
+  });
+
+  it("has no two paths that differ only in the names of their path parameters", async () => {
+    const doc = await openapi();
+    const shapes = new Map<string, string>();
+    for (const path of Object.keys(doc.paths)) {
+      const shape = path.replace(/\{[^}]+\}/g, "{}");
+      expect(shapes.get(shape), `${path} clashes with ${shapes.get(shape)}`).toBeUndefined();
+      shapes.set(shape, path);
+    }
   });
 
   it("declares and describes every path parameter", async () => {
