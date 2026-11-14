@@ -124,9 +124,9 @@ export const api = {
     request<{ invitation: Invitation; token: string }>("POST", "/api/invitations", input),
   withdrawInvitation: (id: string) => request<void>("DELETE", `/api/invitations/${encodeURIComponent(id)}`),
   invitation: (token: string) =>
-    request<{ email: string; role: Role; workspaceName: string }>("GET", `/api/invitations/${encodeURIComponent(token)}`),
+    request<{ email: string; role: Role; workspaceName: string }>("GET", `/api/invitations/by-token/${encodeURIComponent(token)}`),
   acceptInvitation: (token: string, input: { name: string; password: string }) =>
-    request<{ user: User }>("POST", `/api/invitations/${encodeURIComponent(token)}/accept`, input).then((r) => r.user),
+    request<{ user: User }>("POST", `/api/invitations/by-token/${encodeURIComponent(token)}/accept`, input).then((r) => r.user),
 
   projects: (archived = false) =>
     request<{ projects: Project[] }>("GET", `/api/projects${archived ? "?archived=true" : ""}`).then((r) => r.projects),

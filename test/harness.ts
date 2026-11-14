@@ -162,7 +162,7 @@ export async function joinAs(cronk: Cronk, admin: Client, email: string, role: "
   const invited = await admin.post("/api/invitations", { email, role });
   if (invited.status !== 201) throw new Error(`Inviting ${email} failed: ${JSON.stringify(invited.body)}`);
   const client = cronk.client();
-  const accepted = await client.post(`/api/invitations/${invited.body.token}/accept`, { name: email.split("@")[0], password: memberPassword });
+  const accepted = await client.post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: email.split("@")[0], password: memberPassword });
   if (accepted.status !== 201) throw new Error(`Accepting ${email} failed: ${JSON.stringify(accepted.body)}`);
   return client;
 }

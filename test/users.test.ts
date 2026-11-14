@@ -12,11 +12,11 @@ describe("inviting Users", () => {
     expect(token).toEqual(expect.any(String));
 
     const bob = cronk.client();
-    const viewed = await bob.get(`/api/invitations/${token}`);
+    const viewed = await bob.get(`/api/invitations/by-token/${token}`);
     expect(viewed.status).toBe(200);
     expect(viewed.body).toMatchObject({ email: "bob@example.com", workspaceName: "Acme" });
 
-    const accepted = await bob.post(`/api/invitations/${token}/accept`, { name: "Bob", password: "bobs password" });
+    const accepted = await bob.post(`/api/invitations/by-token/${token}/accept`, { name: "Bob", password: "bobs password" });
     expect(accepted.status).toBe(201);
     expect(accepted.body.user).toMatchObject({ email: "bob@example.com", name: "Bob", role: "member" });
     expect((await bob.get("/api/me")).body.user.name).toBe("Bob");
@@ -38,13 +38,13 @@ describe("invitations", () => {
   it("work once, and not after 7 days", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const first = (await admin.post("/api/invitations", { email: "bob@example.com" })).body.token;
-    expect((await cronk.client().post(`/api/invitations/${first}/accept`, { name: "Bob", password: "bobs password" })).status).toBe(201);
-    expect((await cronk.client().post(`/api/invitations/${first}/accept`, { name: "Bob 2", password: "bobs password" })).status).toBe(404);
+    expect((await cronk.client().post(`/api/invitations/by-token/${first}/accept`, { name: "Bob", password: "bobs password" })).status).toBe(201);
+    expect((await cronk.client().post(`/api/invitations/by-token/${first}/accept`, { name: "Bob 2", password: "bobs password" })).status).toBe(404);
 
     const late = (await admin.post("/api/invitations", { email: "cy@example.com" })).body.token;
     cronk.clock.advance(7 * 24 * 60 * 60 * 1000);
-    expect((await cronk.client().get(`/api/invitations/${late}`)).status).toBe(404);
-    expect((await cronk.client().post(`/api/invitations/${late}/accept`, { name: "Cy", password: "cys password" })).status).toBe(404);
+    expect((await cronk.client().get(`/api/invitations/by-token/${late}`)).status).toBe(404);
+    expect((await cronk.client().post(`/api/invitations/by-token/${late}/accept`, { name: "Cy", password: "cys password" })).status).toBe(404);
   });
 
   it("are refused for an email that already has an account", async () => {
@@ -57,14 +57,14 @@ describe("invitations", () => {
     const { cronk, admin } = await startInstalledCronk();
     const old = (await admin.post("/api/invitations", { email: "bob@example.com" })).body.token;
     const fresh = await admin.post("/api/invitations", { email: "bob@example.com", role: "admin" });
-    expect((await cronk.client().get(`/api/invitations/${old}`)).status).toBe(404);
+    expect((await cronk.client().get(`/api/invitations/by-token/${old}`)).status).toBe(404);
 
     const listed = await admin.get("/api/invitations");
     expect(listed.body.invitations).toEqual([expect.objectContaining({ email: "bob@example.com", role: "admin" })]);
 
     expect((await admin.delete(`/api/invitations/${fresh.body.invitation.id}`)).status).toBe(204);
     expect((await admin.get("/api/invitations")).body.invitations).toEqual([]);
-    expect((await cronk.client().get(`/api/invitations/${fresh.body.token}`)).status).toBe(404);
+    expect((await cronk.client().get(`/api/invitations/by-token/${fresh.body.token}`)).status).toBe(404);
   });
 
   it("can make the invitee an Admin", async () => {
