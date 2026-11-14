@@ -13,6 +13,8 @@ export async function createSignIn(db: Queryable, clock: Clock, userId: string):
   const token = randomBytes(32).toString("base64url");
   const now = clock.now();
   const expiresAt = new Date(now.getTime() + SIGN_IN_TTL_MS);
+  // Expired sign-ins can never be used again; clear them out as new ones arrive.
+  await db.query("DELETE FROM sign_ins WHERE expires_at <= $1", [now]);
   await db.query("INSERT INTO sign_ins (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)", [
     hash(token),
     userId,
