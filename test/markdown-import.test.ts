@@ -80,6 +80,13 @@ describe("importing a folder of Markdown files", () => {
     const damaged = zip({ "a.md": "A".repeat(1000) });
     const cut = await admin.upload("/api/projects/CRONK/documents/import", Buffer.concat([damaged.subarray(0, 40), damaged.subarray(-22)]), "application/zip");
     expect(cut.status).toBe(400);
+    // A zip bomb: a second entry in the central directory pointing at the first file's bytes, so a small upload unpacks many times over.
+    const bomb = zip({ "a.md": "A", "b.md": "B" }, { stored: true });
+    const secondEntry = bomb.readUInt32LE(bomb.length - 22 + 16) + 46 + "a.md".length;
+    bomb.writeUInt32LE(0, secondEntry + 42);
+    const overlapping = await admin.upload("/api/projects/CRONK/documents/import", bomb, "application/zip");
+    expect(overlapping.status).toBe(400);
+    expect(overlapping.body.error).toMatch(/overlap/);
     expect(outline((await admin.get("/api/projects/CRONK/documents")).body.documents)).toEqual([]);
   });
 });
