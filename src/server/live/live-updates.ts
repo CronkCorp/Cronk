@@ -14,7 +14,7 @@ export interface LiveEvent {
 export interface CatchUp {
   /** The events the stream missed, in the order to send them. */
   missed: LiveEvent[];
-  /** The id `ready` carries: where the stream stands once it has sent them. */
+  /** Where the stream stands once it has sent them; `ready` carries this, or the furthest id the stream sent before it if that is further. */
   readyId: string;
 }
 
@@ -65,6 +65,8 @@ export class LiveUpdates {
    * positions, decimal integers: `ready` carries the furthest of the id `catchUp` answers and
    * every id sent, so every event published before `ready` is sent before it, and a stream
    * reopened from `ready`'s id misses nothing published later that has a further position.
+   * Not yet closed: an event whose change committed before `catchUp` read its id, but that is
+   * published only after `ready` is written, can be at or below `ready`'s id.
    */
   stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>, catchUp?: () => Promise<CatchUp>): void {
     reply.hijack();

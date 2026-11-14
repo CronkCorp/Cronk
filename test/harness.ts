@@ -177,15 +177,15 @@ export interface Cronk {
    * Locks the row of `table` with this id, as a transaction updating it would, so writes that
    * reference it (such as rows with a foreign key to it) wait until it is released.
    */
-  holdRow(table: string, id: string): Promise<HeldRow>;
+  holdRow(table: string, id: string): Promise<HeldLock>;
   /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
-  holdTable(table: string): Promise<HeldRow>;
+  holdTable(table: string): Promise<HeldLock>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
 }
 
-/** A row held by `Cronk.holdRow`, or a table held by `Cronk.holdTable`. */
-export interface HeldRow {
+/** A row held by `Cronk.holdRow`, or a table held by `Cronk.holdTable`, until released. */
+export interface HeldLock {
   /** Resolves once at least `n` queries on this test's database are waiting on a lock. */
   waiters(n: number): Promise<void>;
   /** Lets the writes waiting on the row through. */
@@ -273,7 +273,7 @@ export async function startCronk(): Promise<Cronk> {
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
   /** Takes a lock with `sql` in a transaction it keeps open until released. */
-  async function hold(sql: string, params: unknown[]): Promise<HeldRow> {
+  async function hold(sql: string, params: unknown[]): Promise<HeldLock> {
     const holder = new pg.Client({ connectionString: databaseUrl });
     await holder.connect();
     await holder.query("BEGIN");
