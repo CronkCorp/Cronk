@@ -24,7 +24,8 @@ export interface AppConfig {
  * and registers the API. The caller decides whether to listen or inject.
  */
 export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?: boolean }): Promise<FastifyInstance> {
-  const db = createDatabase(opts.config.databaseUrl);
+  const app = Fastify({ logger: opts.logger ?? false });
+  const db = createDatabase(opts.config.databaseUrl, (err) => app.log.warn({ err }, "Lost an idle database connection"));
   try {
     await migrate(db);
   } catch (err) {
@@ -33,7 +34,6 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   }
   const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure };
 
-  const app = Fastify({ logger: opts.logger ?? false });
   app.addHook("onClose", async () => db.end());
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {

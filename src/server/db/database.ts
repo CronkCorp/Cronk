@@ -7,8 +7,15 @@ export type Queryable = pg.Pool | pg.PoolClient;
 /** Postgres's error code for a unique index refusing a row. */
 export const UNIQUE_VIOLATION = "23505";
 
-export function createDatabase(databaseUrl: string): Database {
-  return new pg.Pool({ connectionString: databaseUrl });
+/**
+ * Opens a connection pool. Postgres may drop an idle connection at any time (a
+ * restart, an admin terminating it); the pool discards that connection and opens a
+ * new one when needed, and the error goes to `onIdleError` instead of crashing the process.
+ */
+export function createDatabase(databaseUrl: string, onIdleError: (err: Error) => void = () => {}): Database {
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  pool.on("error", onIdleError);
+  return pool;
 }
 
 /** Runs `fn` in a transaction, committing on success and rolling back on error. */

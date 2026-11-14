@@ -72,6 +72,11 @@ export interface Cronk {
   client(token?: string): Client;
   /** Stops the application and starts it again on the same database. */
   restart(): Promise<void>;
+  /**
+   * Has Postgres terminate every connection to this test's database, as it does when
+   * it restarts, and waits until they are gone.
+   */
+  terminateConnections(): Promise<void>;
 }
 
 /**
@@ -98,6 +103,22 @@ export async function startCronk(): Promise<Cronk> {
     restart: async () => {
       await cronk.app.close();
       cronk.app = await start();
+    },
+    terminateConnections: async () => {
+      const admin = new pg.Client({ connectionString: adminUrl });
+      await admin.connect();
+      try {
+        await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1", [dbName]);
+        for (;;) {
+          const { rows } = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [dbName]);
+          if (rows[0]!.n === 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      } finally {
+        await admin.end();
+      }
+      // Give the server's clients a moment to read the termination notice.
+      await new Promise((resolve) => setTimeout(resolve, 50));
     },
   };
 
