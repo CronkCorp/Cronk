@@ -1,10 +1,16 @@
-import { actingUser, type Actor } from "../actor.js";
+import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
 /** A User as a Ticket shows them. */
 export interface UserRef {
+  id: string;
+  name: string;
+}
+
+/** An Agent as a Ticket shows it. */
+export interface AgentRef {
   id: string;
   name: string;
 }
@@ -34,6 +40,8 @@ export interface Ticket {
   priority: Priority;
   labels: string[];
   assignee: UserRef | null;
+  /** The Agent the Assignee handed the Ticket to; always one of the Assignee's own. */
+  delegate: AgentRef | null;
   /** Set on a Sub-Ticket. */
   parent: TicketName | null;
   createdAt: Date;
@@ -54,6 +62,8 @@ interface TicketRow {
   labels: string[];
   assignee_id: string | null;
   assignee_name: string | null;
+  delegate_id: string | null;
+  delegate_name: string | null;
   parent_number: number | null;
   parent_title: string | null;
   created_at: Date;
@@ -72,6 +82,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   priority: row.priority,
   labels: row.labels,
   assignee: row.assignee_id === null ? null : { id: row.assignee_id, name: row.assignee_name! },
+  delegate: row.delegate_id === null ? null : { id: row.delegate_id, name: row.delegate_name! },
   parent: row.parent_number === null ? null : { key: `${row.project_key}-${row.parent_number}`, title: row.parent_title! },
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -80,9 +91,9 @@ const toTicket = (row: TicketRow): Ticket => ({
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
-         a.id AS assignee_id, a.name AS assignee_name, pt.number AS parent_number, pt.title AS parent_title
+         a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
-  LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN tickets pt ON pt.id = t.parent_id`;
+  LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id`;
 
 /**
  * Creates a Ticket with the Project's next number and records it in the history.
@@ -110,6 +121,13 @@ export async function insertTicket(
     status: input.status,
   });
   return (await findTicketById(db, id))!;
+}
+
+/** The Tickets with these ids, in the order given. */
+export async function findTicketsByIds(db: Queryable, ids: string[]): Promise<Ticket[]> {
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ANY($1::uuid[])`, [ids]);
+  const byId = new Map(rows.map((row) => [row.id, toTicket(row)]));
+  return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
 export async function findTicketById(db: Queryable, id: string): Promise<Ticket | undefined> {
@@ -150,6 +168,7 @@ export interface TicketChanges {
   priority?: Priority;
   labels?: string[];
   assigneeId?: string | null;
+  delegateId?: string | null;
   parentKey?: string | null;
 }
 
@@ -161,6 +180,8 @@ export interface TicketEdit {
   labels?: string[];
   /** A User of the Ticket's Workspace, or null to leave it unassigned. */
   assignee?: UserRef | null;
+  /** One of the Assignee's own Agents, or null. Callers drop the Ticket's Claim when it changes. */
+  delegate?: AgentRef | null;
   /** A Ticket of the same Project that isn't this one or below it (see `wouldNestUnderItself`), or null. */
   parent?: Ticket | null;
 }
@@ -195,6 +216,10 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
   if (changes.assignee !== undefined && changes.assignee?.id !== ticket.assignee?.id) {
     recorded.push({ change: "assignee", from: ticket.assignee, to: changes.assignee });
     columns.push(["assignee_id", changes.assignee?.id ?? null]);
+  }
+  if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) {
+    recorded.push({ change: "delegate", from: ticket.delegate, to: changes.delegate });
+    columns.push(["delegate_id", changes.delegate?.id ?? null]);
   }
   if (changes.parent !== undefined && changes.parent?.key !== ticket.parent?.key) {
     const to = changes.parent && { key: changes.parent.key, title: changes.parent.title };
@@ -235,52 +260,28 @@ export type TicketChange =
   | { change: "priority"; from: Priority; to: Priority }
   | { change: "labels"; from: string[]; to: string[] }
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
+  | { change: "delegate"; from: AgentRef | null; to: AgentRef | null }
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName };
 
-/** Who made a change in history: a User, or an Agent with the Owner it acted for and the Agent Session it was in, if any. */
-export type RecordedActor =
-  | { kind: "user"; id: string; name: string }
-  | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
+export type { RecordedActor };
 
 export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
 
 export async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
-  const agent = actor.kind === "agent" ? actor : undefined;
   await db.query(
     `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [
-      ticketId,
-      at,
-      actor.kind,
-      actingUser(actor).id,
-      agent?.agent.id ?? null,
-      agent?.session?.id ?? null,
-      kind,
-      data,
-    ],
+    [ticketId, at, ...actorColumns(actor), kind, data],
   );
 }
 
-interface HistoryRow {
+interface HistoryRow extends RecordedActorRow {
   at: Date;
-  user_id: string;
-  user_name: string;
-  agent_id: string | null;
-  agent_name: string | null;
-  session_id: string | null;
   change: TicketChange["change"];
   data: object;
 }
-
-const toRecordedActor = (row: HistoryRow): RecordedActor => {
-  const user = { id: row.user_id, name: row.user_name };
-  if (row.agent_id === null) return { kind: "user", ...user };
-  const session = row.session_id === null ? null : { id: row.session_id };
-  return { kind: "agent", id: row.agent_id, name: row.agent_name!, owner: user, session };
-};
 
 /** A Ticket's history, oldest first. */
 export async function listHistory(db: Queryable, ticketId: string): Promise<RecordedChange[]> {

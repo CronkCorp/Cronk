@@ -87,9 +87,10 @@ function GuidanceEditor(props: {
     try {
       props.onDone(await api.saveGuidance(props.projectKey, { markdown, baseVersion: props.current.version }));
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409 && err.body?.guidance) {
-        setTheirs(err.body.guidance);
-        props.onCurrentChanged(err.body.guidance);
+      if (err instanceof ApiError && err.status === 409 && err.body.current) {
+        const current = err.body.current as Guidance;
+        setTheirs(current);
+        props.onCurrentChanged(current);
       } else {
         setError(messageOf(err));
       }

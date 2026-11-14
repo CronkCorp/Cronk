@@ -4,6 +4,7 @@
  * there as a type error. Types only: nothing here may reach the web bundle.
  */
 import type { publicAgentSession } from "./coordination/agent-sessions.js";
+import type { Claim as StoredClaim } from "./coordination/claims.js";
 import type { welcome } from "./coordination/routes.js";
 import type { AgentToken as StoredAgentToken, issueAgentToken, publicAgent } from "./identity/agents.js";
 import type { Access } from "./identity/access.js";
@@ -21,6 +22,7 @@ import type {
   UserRef,
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
+import type { Document as StoredDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
@@ -69,11 +71,24 @@ export type Project = Serialized<StoredProject> & {
 export type Ticket = Serialized<StoredTicket>;
 export type Relations = Serialized<StoredRelations>;
 
-/** A Ticket with the Tickets around it, as its page shows it. */
+/** An Agent Session's hold on a Ticket. */
+export type Claim = Serialized<StoredClaim>;
+
+/** A Ticket with the Tickets around it and its live Claim, as its page shows it. */
 export interface TicketDetail {
   ticket: Ticket;
   subTickets: TicketRef[];
   relations: Relations;
+  claim: Claim | null;
 }
 
 export type RecordedChange = Serialized<StoredRecordedChange>;
+
+/** A Document at its current Version. */
+export type Document = Serialized<StoredDocument>;
+/** One saved state of a Document. */
+export type Version = Serialized<StoredVersion>;
+/** A Version without its body, as a Document's Version list shows it. */
+export type VersionSummary = Omit<Version, "body">;
+/** A Document as its page tree lists it. */
+export type DocumentTreeEntry = TreeEntry;

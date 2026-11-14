@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
+import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
@@ -120,6 +121,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
           <span data-testid="workspace-name">{workspace?.name}</span>
         </Link>
         <div className="topbar-right">
+          <Link to="/documents" className="link">Documents</Link>
           <Link to="/guidance" className="link">Guidance</Link>
           <Link to="/agents" className="link">Agents</Link>
           {props.user.role === "admin" && (
@@ -156,6 +158,11 @@ function Page(props: { me: User }) {
   const { path, search } = useLocation();
   if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
   if (path === "/agents") return <AgentsPage me={props.me} />;
+  if (path === "/documents") return <DocumentsPage />;
+  const projectDocuments = /^\/projects\/([^/]+)\/documents$/.exec(path);
+  if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;
+  const documentMatch = /^\/documents\/([^/]+)$/.exec(path);
+  if (documentMatch) return <DocumentPage id={decodeURIComponent(documentMatch[1]!)} edit={search.get("edit") === "1"} />;
   if (path === "/guidance") return <WorkspaceGuidancePage me={props.me} />;
   const project = /^\/projects\/([^/]+)$/.exec(path);
   if (project) {
@@ -176,7 +183,11 @@ function Page(props: { me: User }) {
 function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Workspace) => void; onCancel: () => void }) {
   const [name, setName] = useState(props.current.name);
   const [agentAccess, setAgentAccess] = useState<AgentAccess>(props.current.agentAccess);
-  const { submit, error, busy } = useSubmit(() => api.updateWorkspace({ name, agentAccess }), props.onDone);
+  const [silenceMinutes, setSilenceMinutes] = useState(String(props.current.silenceThresholdSeconds / 60));
+  const { submit, error, busy } = useSubmit(
+    () => api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) }),
+    props.onDone,
+  );
   return (
     <section className="panel">
       <h2>Workspace settings</h2>
@@ -184,6 +195,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <Field label="Workspace name" value={name} onChange={setName} />
         <AgentAccessSelect value={agentAccess} onChange={setAgentAccess} />
         <p className="muted hint">The most Agents may do in the Workspace outside any Project, such as creating Projects.</p>
+        <Field label="Silence threshold (minutes)" type="number" value={silenceMinutes} onChange={setSilenceMinutes} />
+        <p className="muted hint">How long an Agent Session may stay silent before it ends and its Claims lapse, from 1 minute to 1 day.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
           <button type="submit" disabled={busy}>Save</button>

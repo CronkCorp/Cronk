@@ -6,6 +6,8 @@ import type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  Document,
+  DocumentTreeEntry,
   Guidance,
   GuidanceVersion,
   IssuedAgentToken,
@@ -27,6 +29,8 @@ import type {
   TicketRef,
   User,
   UserRef,
+  Version,
+  VersionSummary,
   Visibility,
   Workspace,
 } from "../server/api-types.js";
@@ -38,6 +42,8 @@ export type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  Document,
+  DocumentTreeEntry,
   Guidance,
   GuidanceVersion,
   IssuedAgentToken,
@@ -59,6 +65,8 @@ export type {
   TicketRef,
   User,
   UserRef,
+  Version,
+  VersionSummary,
   Visibility,
   Workspace,
 };
@@ -79,15 +87,23 @@ const guidancePath = (projectKey?: string) =>
   projectKey === undefined ? "/api/workspace/guidance" : `/api/projects/${encodeURIComponent(projectKey)}/guidance`;
 
 export class ApiError extends Error {
+  /** `body` is the whole error answer, such as `{ error, current }` for a stale save. */
   constructor(
     readonly status: number,
     message: string,
-    /** The error's whole body, for errors carrying more than a message, such as a stale save's current Version. */
-    readonly body?: any,
+    readonly body: Record<string, unknown> = {},
   ) {
     super(message);
   }
 }
+
+/** The current Version a save was refused for, if it was refused for being based on an outdated one. */
+export const staleVersionOf = (err: unknown): Version | undefined =>
+  err instanceof ApiError && err.status === 409 && err.body.current ? (err.body.current as Version) : undefined;
+
+/** Where a page tree's API lives: a Project's, or the Workspace's without a Project key. */
+const treePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -98,7 +114,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   return data as T;
 }
 
@@ -111,13 +127,13 @@ export const api = {
   signOut: () => request<void>("DELETE", "/api/sign-in"),
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
-  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess }) => request<Workspace>("PATCH", "/api/workspace", changes),
+  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
 
   /** The Workspace's Guidance, or with `projectKey` that Project's. */
   guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),
   guidanceVersions: (projectKey?: string) =>
     request<{ versions: GuidanceVersion[] }>("GET", `${guidancePath(projectKey)}/versions`).then((r) => r.versions),
-  /** Refused with a 409 whose body holds the current `guidance` if someone saved since `baseVersion`. */
+  /** Refused with a 409 whose body holds the `current` Guidance if someone saved since `baseVersion`. */
   saveGuidance: (projectKey: string | undefined, input: { markdown: string; baseVersion: number }) =>
     request<{ guidance: Guidance }>("PUT", guidancePath(projectKey), input).then((r) => r.guidance),
 
@@ -194,6 +210,23 @@ export const api = {
       "DELETE",
       `/api/tickets/${encodeURIComponent(key)}/relations/${kind}/${encodeURIComponent(otherKey)}`,
     ).then((r) => r.relations),
+  documentTree: (projectKey?: string) =>
+    request<{ documents: DocumentTreeEntry[] }>("GET", `${treePath(projectKey)}/documents`).then((r) => r.documents),
+  createDocument: (projectKey: string | undefined, input: { title: string; body?: string; parentId?: string }) =>
+    request<{ document: Document }>("POST", `${treePath(projectKey)}/documents`, input).then((r) => r.document),
+  document: (id: string) => request<{ document: Document }>("GET", documentPath(id)).then((r) => r.document),
+  /** Refused with the current Version (see `staleVersionOf`) if `baseVersion` is no longer current. */
+  saveDocument: (id: string, input: { baseVersion: number; title?: string; body?: string }) =>
+    request<{ document: Document }>("PATCH", documentPath(id), input).then((r) => r.document),
+  moveDocument: (id: string, parentId: string | null) =>
+    request<{ document: Document }>("POST", `${documentPath(id)}/move`, { parentId }).then((r) => r.document),
+  deleteDocument: (id: string) => request<void>("DELETE", documentPath(id)),
+  versions: (id: string) => request<{ versions: VersionSummary[] }>("GET", `${documentPath(id)}/versions`).then((r) => r.versions),
+  version: (id: string, number: number) =>
+    request<{ version: Version }>("GET", `${documentPath(id)}/versions/${number}`).then((r) => r.version),
+  restoreVersion: (id: string, number: number, baseVersion: number) =>
+    request<{ document: Document }>("POST", `${documentPath(id)}/versions/${number}/restore`, { baseVersion }).then((r) => r.document),
+
   ticketHistory: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };

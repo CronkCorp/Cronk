@@ -6,18 +6,26 @@ export interface Workspace {
   name: string;
   /** The most Agents may do in the Workspace outside any Project. */
   agentAccess: AgentAccess;
+  /** How long an Agent Session may stay silent before it ends and its Claims lapse. */
+  silenceThresholdSeconds: number;
 }
 
 /** The shape of the Workspace the API returns. */
-export const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess });
+export const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess, silenceThresholdSeconds: w.silenceThresholdSeconds });
 
 interface WorkspaceRow {
   id: string;
   name: string;
   agent_access: AgentAccess;
+  silence_threshold_seconds: number;
 }
 
-const toWorkspace = (row: WorkspaceRow): Workspace => ({ id: row.id, name: row.name, agentAccess: row.agent_access });
+const toWorkspace = (row: WorkspaceRow): Workspace => ({
+  id: row.id,
+  name: row.name,
+  agentAccess: row.agent_access,
+  silenceThresholdSeconds: row.silence_threshold_seconds,
+});
 
 export async function insertWorkspace(db: Queryable, input: { name: string; now: Date }): Promise<Workspace> {
   const { rows } = await db.query<WorkspaceRow>("INSERT INTO workspaces (name, created_at) VALUES ($1, $2) RETURNING *", [
@@ -32,11 +40,17 @@ export async function getWorkspace(db: Queryable, id: string): Promise<Workspace
   return toWorkspace(rows[0]!);
 }
 
-/** Renames the Workspace and/or changes its Agent Access. */
-export async function updateWorkspace(db: Queryable, id: string, changes: { name?: string; agentAccess?: AgentAccess }): Promise<Workspace> {
+/** Renames the Workspace and/or changes its Agent Access or silence threshold. */
+export async function updateWorkspace(
+  db: Queryable,
+  id: string,
+  changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number },
+): Promise<Workspace> {
   const { rows } = await db.query<WorkspaceRow>(
-    "UPDATE workspaces SET name = coalesce($2, name), agent_access = coalesce($3, agent_access) WHERE id = $1 RETURNING *",
-    [id, changes.name ?? null, changes.agentAccess ?? null],
+    `UPDATE workspaces SET name = coalesce($2, name), agent_access = coalesce($3, agent_access),
+       silence_threshold_seconds = coalesce($4, silence_threshold_seconds)
+     WHERE id = $1 RETURNING *`,
+    [id, changes.name ?? null, changes.agentAccess ?? null, changes.silenceThresholdSeconds ?? null],
   );
   return toWorkspace(rows[0]!);
 }

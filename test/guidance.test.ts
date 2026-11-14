@@ -18,7 +18,7 @@ describe("Workspace Guidance", () => {
 
     const stale = await admin.put("/api/workspace/guidance", { markdown: "Mine.", baseVersion: 0 });
     expect(stale.status).toBe(409);
-    expect(stale.body).toEqual({ error: expect.any(String), guidance: { markdown: "First.", version: 1 } });
+    expect(stale.body).toEqual({ error: expect.any(String), current: { markdown: "First.", version: 1 } });
     expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "First.", version: 1 });
   });
 
@@ -88,7 +88,7 @@ describe("Project Guidance", () => {
 
     const stale = await admin.put("/api/projects/CRONK/guidance", { markdown: "Use npm.", baseVersion: 0 });
     expect(stale.status).toBe(409);
-    expect(stale.body.guidance).toEqual({ markdown: "Use pnpm.", version: 1 });
+    expect(stale.body.current).toEqual({ markdown: "Use pnpm.", version: 1 });
   });
 
   it("is read by anyone who can see the Project, and refused to Readers, Agents and those who can't see it", async () => {

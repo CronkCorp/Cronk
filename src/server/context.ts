@@ -20,10 +20,10 @@ export interface AppContext {
 }
 
 export class HttpError extends Error {
+  /** `details` are sent alongside `error` in the answer, such as the current Version a stale save is refused with. */
   constructor(
     readonly statusCode: number,
     message: string,
-    /** More fields for the error's body, beside `error`, such as the current Version a stale edit is refused for. */
     readonly details: Record<string, unknown> = {},
   ) {
     super(message);
