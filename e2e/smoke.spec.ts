@@ -194,4 +194,16 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await expect(page.getByRole("list", { name: "History" })).toContainText(`claude-laptop (session ${session.slice(0, 4)}, for Ada) renamed it`);
   await page.getByRole("link", { name: "Agents" }).click();
   await expect(page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" })).toContainText(`Connected, session ${session.slice(0, 4)}`);
+  // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByTestId("ticket-claim")).toHaveText("Not Claimed");
+  await page.getByLabel("Assignee").selectOption({ label: "Ada" });
+  await page.getByLabel("Delegate").selectOption({ label: "claude-laptop" });
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada delegated it to claude-laptop");
+  const claimed = await request.post(`/api/tickets/${ticket.key}/claim`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+  });
+  expect(claimed.status()).toBe(200);
+  await page.reload();
+  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
 });

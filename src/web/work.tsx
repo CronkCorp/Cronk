@@ -642,7 +642,9 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
               onChange={(priority) => void update.run({ priority: priority as Priority })}
             />
             <AssigneePicker ticket={t} disabled={update.busy || !canWrite} onChange={(assigneeId) => void update.run({ assigneeId })} />
+            <DelegatePicker ticket={t} disabled={update.busy || !canWrite} onChange={(delegateId) => void update.run({ delegateId })} />
           </div>
+          <ClaimLine claim={props.detail.claim} />
           {update.error && <p className="error" role="alert">{update.error}</p>}
           <LabelEditor ticket={t} busy={update.busy} readOnly={!canWrite} onChange={(labels) => void update.run({ labels })} />
           <div className="markdown" data-testid="ticket-description">
@@ -706,6 +708,41 @@ function AssigneePicker(props: { ticket: Ticket; disabled: boolean; onChange: (a
   ];
   return (
     <Picker label="Assignee" value={assignee?.id ?? ""} disabled={props.disabled} options={options} onChange={(id) => props.onChange(id || null)} />
+  );
+}
+
+/** Picks the Delegate among the Assignee's own Agents; the API refuses anyone else's. */
+function DelegatePicker(props: { ticket: Ticket; disabled: boolean; onChange: (delegateId: string | null) => void }) {
+  const [agents] = useLoad(() => api.agents(), []);
+  const { assignee, delegate } = props.ticket;
+  // Only the signed-in User's own Agents are listed to them, so this offers Agents only on their own Tickets.
+  const own = agents.kind === "loaded" ? agents.value.filter((a) => a.owner.id === assignee?.id) : [];
+  const options: [string, string][] = [
+    ["", "Not delegated"],
+    ...(delegate && !own.some((a) => a.id === delegate.id) ? [[delegate.id, delegate.name] as [string, string]] : []),
+    ...own.map((a): [string, string] => [a.id, a.name]),
+  ];
+  return (
+    <Picker
+      label="Delegate"
+      value={delegate?.id ?? ""}
+      disabled={props.disabled || !assignee}
+      options={options}
+      onChange={(id) => props.onChange(id || null)}
+    />
+  );
+}
+
+/** Which Agent Session holds the Ticket's Claim, if any, and until when it lasts without a call. */
+function ClaimLine(props: { claim: TicketDetail["claim"] }) {
+  const { claim } = props;
+  return (
+    <p className="muted claim" data-testid="ticket-claim">
+      {claim
+        ? `Claimed by ${claim.agent.name} (${sessionName(claim.session.id)}) since ${new Date(claim.claimedAt).toLocaleString()}; ` +
+          `lapses if silent until ${new Date(claim.endsIfSilentAt).toLocaleTimeString()}`
+        : "Not Claimed"}
+    </p>
   );
 }
 
