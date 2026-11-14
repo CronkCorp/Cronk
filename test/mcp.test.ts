@@ -219,6 +219,42 @@ describe("working a delegated Ticket over MCP", () => {
   });
 });
 
+describe("the activities tool", () => {
+  it("logs Activities and asks questions on the Ticket the Agent Session holds, and lists them", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const claude = await registerAgent(admin, "claude-laptop");
+    const adaId = (await admin.get("/api/users")).body.users[0].id;
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: claude.agentId });
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect(await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "plan", body: "First" })).toEqual({
+      isError: true,
+      body: expect.stringContaining("Claim CRONK-1"),
+    });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const logged = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "plan", body: "First" });
+    expect(logged.body.activity).toMatchObject({ kind: "plan", body: "First", blocking: false, session: { id: mcp.transport.sessionId } });
+    await callTool(mcp, "activities", { action: "ask", key: "CRONK-1", body: "Postgres or SQLite?", blocking: true });
+    await callTool(mcp, "activities", { action: "ask", key: "CRONK-1", body: "Any naming preference?" });
+
+    const listed = await callTool(mcp, "activities", { action: "list", key: "CRONK-1" });
+    expect(listed.body.activities.map((a: { kind: string; blocking: boolean }) => [a.kind, a.blocking])).toEqual([
+      ["plan", false],
+      ["question", true],
+      ["question", false],
+    ]);
+    expect((await admin.get("/api/tickets/CRONK-1/activities")).body).toEqual(listed.body);
+  });
+
+  it("offers a read-only token only the list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "activities")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
+  });
+});
+
 describe("the documents tool", () => {
   it("creates, lists, gets and updates Documents through the API", async () => {
     const { cronk, admin } = await startInstalledCronk();
