@@ -61,6 +61,31 @@ async function lockTree(db: Queryable, tree: Tree): Promise<void> {
   await lockUntilCommit(db, `document-tree:${tree.workspaceId}:${tree.projectId ?? "workspace"}`);
 }
 
+/** A Document as its page tree lists it. */
+export interface TreeEntry {
+  id: string;
+  parentId: string | null;
+  title: string;
+  /** How deep it sits: 0 at the top. */
+  depth: number;
+}
+
+/** A page tree's Documents depth first: each followed by those under it, siblings in their order. */
+export async function listTree(db: Queryable, tree: Tree): Promise<TreeEntry[]> {
+  const { rows } = await db.query<TreeEntry>(
+    `WITH RECURSIVE tree AS (
+       SELECT id, parent_id, title, 0 AS depth, ARRAY[position] AS path
+       FROM documents WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NULL
+       UNION ALL
+       SELECT d.id, d.parent_id, d.title, t.depth + 1, t.path || d.position
+       FROM documents d JOIN tree t ON d.parent_id = t.id
+     )
+     SELECT id, parent_id AS "parentId", title, depth FROM tree ORDER BY path`,
+    [tree.workspaceId, tree.projectId],
+  );
+  return rows;
+}
+
 /**
  * Creates a Document last among its siblings, with its first Version. `parentId` must
  * be a Document of the same tree (see `findDocument`). Run inside a transaction.

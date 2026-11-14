@@ -123,3 +123,39 @@ describe("Versions", () => {
     expect((await admin.post(`/api/documents/${id}/versions/7/restore`, { baseVersion: 3 })).status).toBe(404);
   });
 });
+
+/** A page tree as `title` (depth by indentation), for comparing arrangements at a glance. */
+const outline = (documents: { title: string; depth: number }[]) => documents.map((d) => `${"  ".repeat(d.depth)}${d.title}`);
+
+describe("the page tree", () => {
+  it("lists a Project's Documents depth first, siblings in the order they were added", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const create = async (title: string, parentId?: string) =>
+      (await admin.post("/api/projects/CRONK/documents", { title, ...(parentId && { parentId }) })).body.document.id as string;
+    const guides = await create("Guides");
+    await create("Roadmap");
+    const setup = await create("Setup", guides);
+    await create("Docker", setup);
+    await create("Style", guides);
+
+    const res = await admin.get("/api/projects/CRONK/documents");
+    expect(res.status).toBe(200);
+    expect(outline(res.body.documents)).toEqual(["Guides", "  Setup", "    Docker", "  Style", "Roadmap"]);
+    expect(res.body.documents[1]).toEqual({ id: setup, parentId: guides, title: "Setup", depth: 1 });
+  });
+
+  it("keeps Workspace Documents in a tree of their own", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/documents", { title: "Project doc" });
+    const handbook = await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" });
+    expect(handbook.status).toBe(201);
+    expect(handbook.body.document).toMatchObject({ projectId: null, projectKey: null, title: "Handbook", version: 1 });
+
+    expect(outline((await admin.get("/api/workspace/documents")).body.documents)).toEqual(["Handbook"]);
+    expect(outline((await admin.get("/api/projects/CRONK/documents")).body.documents)).toEqual(["Project doc"]);
+    const across = await admin.post("/api/projects/CRONK/documents", { title: "Stray", parentId: handbook.body.document.id });
+    expect(across.status).toBe(400);
+  });
+});

@@ -6,7 +6,7 @@ import { requireProjectAccess, requireWorkspaceAccess, type Access } from "../id
 import { answer, documentIdParam, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { projectFor } from "../work/routes.js";
-import { findDocument, findVersion, insertDocument, listVersions, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { findDocument, findVersion, insertDocument, listTree, listVersions, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 
 /** A Document title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -24,6 +24,18 @@ const staleVersionAnswer = {
   description: "The save is based on a Version that is no longer current; the answer carries the current Version",
   ...ref("StaleVersion"),
 };
+
+/** A page tree: its Documents depth first, each followed by those under it. */
+const treeAnswer = listing("documents", {
+  type: "object",
+  required: ["id", "parentId", "title", "depth"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    parentId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }] },
+    title: { type: "string" },
+    depth: { type: "integer", description: "How deep it sits: 0 at the top." },
+  },
+});
 
 const projectParams = pathParams({ key: projectKeyParam });
 const documentParams = pathParams({ id: documentIdParam });
@@ -60,6 +72,51 @@ export function knowledgeRoutes(ctx: AppContext) {
       }
       return insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
     };
+
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/documents",
+      {
+        schema: {
+          params: projectParams,
+          response: { 200: answer("The Project's page tree", treeAnswer), ...errors(401, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        return { documents: await listTree(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }) };
+      },
+    );
+
+    app.get(
+      "/api/workspace/documents",
+      { schema: { response: { 200: answer("The Workspace's page tree", treeAnswer), ...errors(401, 403, 410) } } },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "read");
+        return { documents: await listTree(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: null }) };
+      },
+    );
+
+    app.post<{ Body: NewDocument }>(
+      "/api/workspace/documents",
+      {
+        schema: {
+          body: newDocumentBody,
+          response: {
+            201: answer("The new Workspace Document at Version 1, last among its siblings", holding("document", "Document")),
+            ...errors(400, 401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "write");
+        const tree = { workspaceId: actingUser(actor).workspaceId, projectId: null };
+        const document = await transaction(ctx.db, (tx) => create(tx, actor, tree, request.body));
+        return reply.code(201).send({ document });
+      },
+    );
 
     app.post<{ Params: { key: string }; Body: NewDocument }>(
       "/api/projects/:key/documents",
