@@ -109,9 +109,11 @@ export async function startCronk(): Promise<Cronk> {
       await admin.connect();
       try {
         await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1", [dbName]);
+        const deadline = Date.now() + 5_000;
         for (;;) {
           const { rows } = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [dbName]);
           if (rows[0]!.n === 0) break;
+          if (Date.now() > deadline) throw new Error(`${rows[0]!.n} connections to ${dbName} outlived pg_terminate_backend`);
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
       } finally {
