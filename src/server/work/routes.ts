@@ -4,6 +4,7 @@ import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { userActor } from "../actor.js";
 import { findUserById } from "../identity/users.js";
+import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind } from "./relations.js";
 import type { Queryable } from "../db/database.js";
 import {
   findProjectByKey,
@@ -147,8 +148,63 @@ export function workRoutes(ctx: AppContext) {
     app.get<{ Params: { key: string } }>("/api/tickets/:key", async (request) => {
       const user = await requireUser(ctx, request);
       const ticket = await ticketOr404(ctx, user.workspaceId, request.params.key);
-      return { ticket, subTickets: await listSubTickets(ctx.db, ticket.id) };
+      return { ticket, subTickets: await listSubTickets(ctx.db, ticket.id), relations: await listRelations(ctx.db, ticket.id) };
     });
+
+    app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string } }>(
+      "/api/tickets/:key/relations",
+      {
+        schema: {
+          body: {
+            type: "object",
+            required: ["kind", "ticketKey"],
+            additionalProperties: false,
+            properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const relations = await transaction(ctx.db, async (tx) => {
+          const { ticket, other } = await relationEnds(tx, user.workspaceId, request.params.key, request.body.ticketKey);
+          const result = await addRelation(tx, {
+            workspaceId: user.workspaceId,
+            ticket,
+            kind: request.body.kind,
+            other,
+            actor: userActor(user),
+            now: ctx.clock.now(),
+          });
+          if (result === "cycle") {
+            throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
+          }
+          return listRelations(tx, ticket.id);
+        });
+        return reply.code(201).send({ relations });
+      },
+    );
+
+    app.delete<{ Params: { key: string; kind: RelationKind; otherKey: string } }>(
+      "/api/tickets/:key/relations/:kind/:otherKey",
+      {
+        schema: {
+          params: {
+            type: "object",
+            properties: { key: { type: "string" }, kind: { type: "string", enum: RELATION_KINDS }, otherKey: { type: "string" } },
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const relations = await transaction(ctx.db, async (tx) => {
+          const { ticket, other } = await relationEnds(tx, user.workspaceId, request.params.key, request.params.otherKey);
+          const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: userActor(user), now: ctx.clock.now() });
+          if (!removed) throw new HttpError(404, "No such relation");
+          return listRelations(tx, ticket.id);
+        });
+        return { relations };
+      },
+    );
 
     app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[]; assigneeId?: string | null; parentKey?: string | null } }>(
       "/api/tickets/:key",
@@ -218,6 +274,16 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
     throw new HttpError(409, `${parent.key} is a Sub-Ticket of ${ticket.key}, so it can't be its parent`);
   }
   return parent;
+}
+
+/** The Ticket a relation is changed from (or a 404) and the other Ticket (or a 400). */
+async function relationEnds(tx: Queryable, workspaceId: string, key: string, otherKey: string): Promise<{ ticket: Ticket; other: Ticket }> {
+  const ticket = await findTicketByKey(tx, workspaceId, key);
+  if (!ticket) throw new HttpError(404, "No such Ticket");
+  const other = await findTicketByKey(tx, workspaceId, otherKey);
+  if (!other) throw new HttpError(400, `No such Ticket ${otherKey}`);
+  if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
+  return { ticket, other };
 }
 
 async function projectOr404(db: Queryable, workspaceId: string, key: string): Promise<Project> {

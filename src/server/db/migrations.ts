@@ -99,6 +99,19 @@ export const migrations: Migration[] = [
         -- Set on a Sub-Ticket: its parent, always in the same Project.
         ADD COLUMN parent_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
       CREATE INDEX tickets_parent ON tickets (parent_id);
+
+      -- 'blocks' runs from the blocking Ticket to the blocked one and never forms a cycle.
+      -- 'relates_to' reads the same both ways, so it is stored once with the lower id first.
+      CREATE TABLE ticket_relations (
+        kind text NOT NULL CHECK (kind IN ('blocks', 'relates_to')),
+        from_ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        to_ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        PRIMARY KEY (kind, from_ticket_id, to_ticket_id),
+        CHECK (from_ticket_id <> to_ticket_id),
+        CHECK (kind <> 'relates_to' OR from_ticket_id < to_ticket_id)
+      );
+      CREATE INDEX ticket_relations_to ON ticket_relations (to_ticket_id);
+      CREATE INDEX ticket_relations_from ON ticket_relations (from_ticket_id);
     `,
   },
 ];

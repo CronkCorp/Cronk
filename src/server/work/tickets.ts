@@ -1,5 +1,6 @@
 import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
+import type { RelationKind } from "./relations.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
 /** A Ticket's Priority, most urgent first. */
@@ -12,8 +13,8 @@ export interface UserRef {
   name: string;
 }
 
-/** A Ticket's parent, as the Sub-Ticket shows it. */
-export interface ParentRef {
+/** Another Ticket as a Ticket's parent and history name it. */
+export interface TicketName {
   key: string;
   title: string;
 }
@@ -38,7 +39,7 @@ export interface Ticket {
   labels: string[];
   assignee: UserRef | null;
   /** Set on a Sub-Ticket. */
-  parent: ParentRef | null;
+  parent: TicketName | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -224,11 +225,12 @@ export type TicketChange =
   | { change: "priority"; from: Priority; to: Priority }
   | { change: "labels"; from: string[]; to: string[] }
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
-  | { change: "parent"; from: ParentRef | null; to: ParentRef | null };
+  | { change: "parent"; from: TicketName | null; to: TicketName | null }
+  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName };
 
 export type RecordedChange = { at: Date; actor: { kind: "user"; id: string; name: string } } & TicketChange;
 
-async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
+export async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
   await db.query(
     "INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, change, data) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -284,9 +286,12 @@ export async function wouldNestUnderItself(db: Queryable, ticket: Ticket, parent
 }
 
 /** A Ticket's Sub-Tickets in key order. */
-export async function listSubTickets(db: Queryable, ticketId: string): Promise<TicketRef[]> {
-  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.parent_id = $1 ORDER BY t.number`, [ticketId]);
-  return rows.map(toTicket).map(toRef);
+export function listSubTickets(db: Queryable, ticketId: string): Promise<TicketRef[]> {
+  return listTicketRefs(db, "t.parent_id = $1", [ticketId]);
 }
 
-export const toRef = (ticket: Ticket): TicketRef => ({ key: ticket.key, title: ticket.title, status: ticket.status });
+/** The Tickets matching an SQL condition on `t`, in key order across Projects. */
+export async function listTicketRefs(db: Queryable, where: string, params: unknown[]): Promise<TicketRef[]> {
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${where} ORDER BY p.key, t.number`, params);
+  return rows.map(toTicket).map((ticket) => ({ key: ticket.key, title: ticket.title, status: ticket.status }));
+}
