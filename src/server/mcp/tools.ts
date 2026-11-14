@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
@@ -191,9 +191,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Comments: conversation any User or Agent posts on a Ticket or a Document, kept apart from Activities. Reply to a Comment " +
       "to thread under it. A User answers your question by replying to its Activity. On a Document, a Comment can anchor to a " +
       "passage it is about. Comments that @mention you, answer your questions or land on Tickets delegated to you wait for you " +
-      "in your welcome. To mention an Agent write @name: your Owner's own Agent of that name, or else every other Owner's. " +
-      '@owner/name picks another Owner\'s Agent; quote names with spaces, as in @"claude laptop" or @"Ada Lovelace"/codex. ' +
-      "Mentions inside code and block quotes don't count.",
+      `in your welcome. ${MENTION_SYNTAX}`,
     parameters: {
       key: z.string().optional().describe("Ticket key, such as CRONK-12, for its Comments (list, post)"),
       documentId: z.string().optional().describe("Document id, for its Comments, instead of a key (list, post)"),

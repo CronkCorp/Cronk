@@ -25,7 +25,7 @@ describe("Work waiting for an Agent", () => {
 });
 
 describe("An @mention of an Agent", () => {
-  it("wakes the writer's own Agent of that name, ignoring case, and not other Owners' Agents of that name", async () => {
+  it("waits for the writer's own Agent of that name, ignoring case, and not other Owners' Agents of that name", async () => {
     const { cronk, admin } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const codex = await registerAgent(admin, "Codex");
