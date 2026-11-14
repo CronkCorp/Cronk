@@ -24,13 +24,12 @@ const writeBody = {
   },
 } as const;
 
+/** An edit of Guidance to merge with the current Guidance: its Markdown and the Version it started from. */
 const mergeBody = {
-  type: "object",
-  required: ["markdown", "baseVersion"],
-  additionalProperties: false,
+  ...writeBody,
   properties: {
-    markdown: { type: "string", maxLength: 100_000, description: "The edited Markdown." },
-    baseVersion: { type: "integer", minimum: 0, description: "The Version the edit started from; 0 for an edit of Guidance nobody had written." },
+    markdown: { ...writeBody.properties.markdown, description: "The edited Markdown." },
+    baseVersion: { ...writeBody.properties.baseVersion, description: "The Version the edit started from; 0 for an edit of Guidance nobody had written." },
   },
 } as const;
 
