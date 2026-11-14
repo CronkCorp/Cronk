@@ -4,6 +4,7 @@ import { requireClaimHolder } from "../coordination/claims.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findTicketByKey } from "../work/tickets.js";
 import { documentFor } from "./document-reads.js";
@@ -77,6 +78,10 @@ export function knowledgeRoutes(ctx: AppContext) {
       const ticket = (await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey))!;
       await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "changing its Report");
     };
+
+    /** The Assignee of a Report's Ticket, whose Inbox lists the Report; none for other Documents. */
+    const reportAssignee = async (tx: Queryable, actor: Actor, document: Document) =>
+      document.ticketKey === null ? undefined : (await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey))?.assignee?.id;
 
     /**
      * Locks the Document `id` for a delete by `actor`, who has Write where it belongs. Only a User
@@ -209,17 +214,19 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const document = await transaction(ctx.db, async (tx) => {
+        const { document, assignee } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
-          return saveVersion(tx, current, {
+          const saved = await saveVersion(tx, current, {
             title: request.body.title?.trim() ?? current.title,
             body: request.body.body ?? current.body,
             actor,
             now: ctx.clock.now(),
           });
+          return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
+        inboxesChanged(ctx.live, [assignee]);
         return { document };
       },
     );
@@ -265,14 +272,16 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const document = await transaction(ctx.db, async (tx) => {
+        const { document, assignee } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           const replaced = replaceSection(current.body, request.body.heading, request.body.body);
           if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
-          return saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
+          const saved = await saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
+          return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
+        inboxesChanged(ctx.live, [assignee]);
         return { document };
       },
     );
@@ -367,13 +376,15 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        await transaction(ctx.db, async (tx) => {
+        const assignee = await transaction(ctx.db, async (tx) => {
           const document = await lockForDelete(tx, actor, request.params.id);
           await requireCurrent(tx, document, request.query.baseVersion, "delete");
           if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
             throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
           }
+          return reportAssignee(tx, actor, document);
         });
+        inboxesChanged(ctx.live, [assignee]);
         return reply.code(204).send();
       },
     );
@@ -426,13 +437,15 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const document = await transaction(ctx.db, async (tx) => {
+        const { document, assignee } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           await requireClaimToChangeReport(tx, actor, current);
           const earlier = await requireVersion(tx, current, request.params.number);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
-          return saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
+          const saved = await saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
+          return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
+        inboxesChanged(ctx.live, [assignee]);
         return { document };
       },
     );

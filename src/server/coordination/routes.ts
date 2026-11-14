@@ -354,7 +354,7 @@ export function coordinationRoutes(ctx: AppContext) {
                 "with a `ready` event; each Comment that starts waiting for the Agent arrives as a `waiting` event whose data is " +
                 "`{ waiting }`, a WaitingWork as JSON, with an `id`; `ready` carries one too. Reopened with the last id it got as " +
                 "`Last-Event-ID`, the stream first sends, before `ready`, each `waiting` event it missed meanwhile whose work no welcome " +
-                "has taken since. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
+                "has taken since, then any pushed while it did so. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(400, 401, 403, 410),

@@ -62,7 +62,7 @@ import { findAgent } from "../identity/agents.js";
 import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -191,7 +191,9 @@ export function workRoutes(ctx: AppContext) {
           ...(visibility !== undefined && { visibility }),
           ...(agentAccess !== undefined && { agentAccess }),
         };
-        return { project: { ...(await updateProject(ctx.db, project.id, changes, ctx.clock.now())), access } };
+        const updated = await updateProject(ctx.db, project.id, changes, ctx.clock.now());
+        if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
+        return { project: { ...updated, access } };
       },
     );
 
@@ -244,6 +246,7 @@ export function workRoutes(ctx: AppContext) {
         if (!member || member.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(404, "No such User");
         if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
         await setMembership(ctx.db, project.id, member.id, request.body.access);
+        inboxesChanged(ctx.live, [member.id]);
         return { member: { user: publicUser(member), access: request.body.access } };
       },
     );
@@ -261,6 +264,7 @@ export function workRoutes(ctx: AppContext) {
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         requireAdmin(actor, "change who is in a Project");
         await removeMembership(ctx.db, project.id, request.params.userId);
+        inboxesChanged(ctx.live, [request.params.userId]);
         return reply.code(204).send();
       },
     );
@@ -327,6 +331,7 @@ export function workRoutes(ctx: AppContext) {
           }
           return status;
         });
+        if (name !== undefined) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { statusId: status.id }));
         return { status };
       },
     );
