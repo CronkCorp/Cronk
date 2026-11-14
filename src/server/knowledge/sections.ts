@@ -137,8 +137,10 @@ function chunksOf(markdown: string): Chunk[] {
 const contentLines = (chunk: Chunk) => chunk.text.split("\n").slice(chunk.heading === null ? 0 : 1).map((l) => l.trim()).filter((l) => l !== "");
 
 /** How alike two sections' contents are, from 0 to 1: the share of their lines they have in common; two empty contents are alike. */
-function similarity(a: Chunk, b: Chunk): number {
-  const [x, y] = [contentLines(a), contentLines(b)];
+const similarity = (a: Chunk, b: Chunk) => linesAlike(contentLines(a), contentLines(b));
+
+/** How alike two lists of lines are, from 0 to 1: the share of their lines they have in common; two empty lists are alike. */
+function linesAlike(x: string[], y: string[]): number {
   if (x.length + y.length === 0) return 1;
   const counts = new Map<string, number>();
   for (const line of x) counts.set(line, (counts.get(line) ?? 0) + 1);
@@ -153,6 +155,16 @@ function similarity(a: Chunk, b: Chunk): number {
   return (2 * common) / (x.length + y.length);
 }
 
+/** The content lines found in more than one of `chunks`' sections, such as `- [ ] TODO`: they tell no section apart. */
+function boilerplateIn(chunks: Chunk[]): Set<string> {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const chunk of chunks.slice(1)) {
+    for (const line of new Set(contentLines(chunk))) (seen.has(line) ? repeated : seen).add(line);
+  }
+  return repeated;
+}
+
 /** A section's heading level, 1 to 6; 0 for the text before the first heading. */
 const levelOf = (chunk: Chunk) => /^#*/.exec(chunk.heading ?? "")![0].length;
 
@@ -164,11 +176,14 @@ const RENAME_SIMILARITY = 0.5;
  * pairs at least as well as any rename, and its content weighs double, so one section that kept its
  * content outscores two that only kept their headings.
  */
-function pairScore(base: Chunk, side: Chunk): number {
-  const alike = similarity(base, side);
-  if (base.heading === side.heading) return 1 + 2 * alike;
-  // A renamed heading still pairs with the section it came from, if it had content and most of it stayed.
-  return contentLines(base).length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
+function pairScore(base: Chunk, side: Chunk, boilerplate: Set<string>): number {
+  if (base.heading === side.heading) return 1 + 2 * similarity(base, side);
+  // A renamed heading still pairs with the section it came from, if it had content that tells it
+  // apart from other sections and most of that stayed.
+  const distinct = (chunk: Chunk) => contentLines(chunk).filter((line) => !boilerplate.has(line));
+  const [x, y] = [distinct(base), distinct(side)];
+  const alike = linesAlike(x, y);
+  return x.length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
 }
 
 /**
@@ -181,7 +196,8 @@ function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
   const [n, m] = [base.length, side.length];
-  const scores = base.map((b) => side.map((c) => pairScore(b, c)));
+  const boilerplate = boilerplateIn(base);
+  const scores = base.map((b) => side.map((c) => pairScore(b, c, boilerplate)));
   // best[i][j]: the highest total score aligning base[i..] with side[j..], preambles excluded.
   const best = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 1; i--) {
