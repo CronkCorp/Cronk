@@ -68,6 +68,69 @@ describe("Workspace Guidance", () => {
   });
 });
 
+describe("Merging a stale Guidance edit", () => {
+  const guidance = "## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n";
+
+  it("merges edits to different sections onto the current Version, saving nothing", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.put("/api/workspace/guidance", { markdown: guidance, baseVersion: 0 });
+    await admin.put("/api/workspace/guidance", { markdown: guidance.replace("Use npm.", "Use pnpm."), baseVersion: 1 });
+
+    const res = await admin.post("/api/workspace/guidance/merge", { baseVersion: 1, markdown: guidance.replace("Write tests first.", "Write tests first, always.") });
+
+    expect(res.status).toBe(200);
+    expect(res.body.merge).toMatchObject({
+      onto: { version: 2, markdown: guidance.replace("Use npm.", "Use pnpm.") },
+      markdown: "## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse pnpm.\n",
+      conflicts: 0,
+    });
+    expect((await admin.get("/api/workspace/guidance")).body.guidance.version).toBe(2);
+  });
+
+  it("shows both sides of a section a Project's Guidance edit and the current Version both changed", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const writer = await joinAs(cronk, admin, "bob@example.com");
+    await writer.put("/api/projects/cronk/guidance", { markdown: guidance, baseVersion: 0 });
+    await admin.put("/api/projects/cronk/guidance", { markdown: guidance.replace("Use npm.", "Use pnpm."), baseVersion: 1 });
+
+    const res = await writer.post("/api/projects/cronk/guidance/merge", { baseVersion: 1, markdown: guidance.replace("Use npm.", "Use yarn.") });
+
+    expect(res.status).toBe(200);
+    expect(res.body.merge).toMatchObject({ onto: { version: 2 }, markdown: null, conflicts: 1 });
+    expect(res.body.merge.sections).toEqual([
+      { heading: "## Style", text: "## Style\n\nWrite tests first.\n\n", conflict: null },
+      {
+        heading: "## Tools",
+        text: null,
+        conflict: {
+          base: "## Tools\n\nUse npm.\n",
+          mine: "## Tools\n\nUse yarn.\n",
+          theirs: "## Tools\n\nUse pnpm.\n",
+          both: "## Tools\n\nUse yarn.\n\nUse pnpm.\n",
+        },
+      },
+    ]);
+  });
+
+  it("is open only to those who may write the Guidance, and refuses a Version not saved yet", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.put("/api/workspace/guidance", { markdown: guidance, baseVersion: 0 });
+    const member = await joinAs(cronk, admin, "bob@example.com");
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const edit = { baseVersion: 1, markdown: "Mine." };
+
+    expect((await member.post("/api/workspace/guidance/merge", edit)).status).toBe(403);
+    expect((await claude.post("/api/workspace/guidance/merge", edit)).status).toBe(403);
+    expect((await admin.post("/api/workspace/guidance/merge", { ...edit, baseVersion: 2 })).status).toBe(404);
+    expect((await admin.post("/api/workspace/guidance/merge", { ...edit, baseVersion: 0 })).body.merge).toMatchObject({
+      conflicts: 0,
+      markdown: `Mine.\n\n${guidance}`,
+      onto: { version: 1 },
+    });
+  });
+});
+
 describe("Project Guidance", () => {
   it("is written by Users with Write in the Project, versioned apart from the Workspace's", async () => {
     const { cronk, admin } = await startInstalledCronk();

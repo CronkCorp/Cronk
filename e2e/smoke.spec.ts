@@ -352,3 +352,31 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   await expect(changes).toContainText("- Install it.");
   await expect(changes).toContainText("+ Run it weekly.");
 });
+
+// Runs after the tests above, so CRONK exists.
+test("merge a Guidance edit someone else saved underneath", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("navigation", { name: "View" }).getByRole("link", { name: "Guidance" }).click();
+  await page.getByRole("button", { name: "Edit Guidance" }).click();
+  await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  const guidance = page.getByTestId("guidance");
+  await expect(guidance).toContainText("Use npm.");
+
+  // Edits to different sections merge on their own, onto the Version saved underneath.
+  await page.getByRole("button", { name: "Edit Guidance" }).click();
+  await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse npm.\n");
+  const { guidance: current } = await (await page.request.get("/api/projects/CRONK/guidance")).json();
+  const underneath = { markdown: "## Style\n\nWrite tests first.\n\n## Tools\n\nUse pnpm.\n", baseVersion: current.version };
+  expect((await page.request.put("/api/projects/CRONK/guidance", { data: underneath })).status()).toBe(200);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("alert")).toContainText("merged into yours");
+  await expect(page.getByLabel("Guidance (Markdown)")).toHaveValue("## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse pnpm.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(guidance).toContainText("Write tests first, always.");
+  await expect(guidance).toContainText("Use pnpm.");
+});

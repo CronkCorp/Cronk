@@ -5,7 +5,8 @@ import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/ac
 import type { User } from "../identity/users.js";
 import { answer, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import type { Project } from "../work/projects.js";
-import { getGuidance, listGuidanceVersions, writeGuidance, type Guidance, type GuidanceOwner } from "./guidance.js";
+import { getGuidance, guidanceAt, listGuidanceVersions, writeGuidance, type Guidance, type GuidanceOwner } from "./guidance.js";
+import { mergeMarkdown } from "./sections.js";
 
 /** A save of Guidance: its new Markdown and the Version it is based on. */
 interface GuidanceWrite {
@@ -20,6 +21,15 @@ const writeBody = {
   properties: {
     markdown: { type: "string", maxLength: 100_000 },
     baseVersion: { type: "integer", minimum: 0, description: "The Version this save is based on: the current one, or 0 for the first save." },
+  },
+} as const;
+
+/** An edit of Guidance to merge with the current Guidance: its Markdown and the Version it started from. */
+const mergeBody = {
+  ...writeBody,
+  properties: {
+    markdown: { ...writeBody.properties.markdown, description: "The edited Markdown." },
+    baseVersion: { ...writeBody.properties.baseVersion, description: "The Version the edit started from; 0 for an edit of Guidance nobody had written." },
   },
 } as const;
 
@@ -79,7 +89,7 @@ export function guidanceRoutes(ctx: AppContext) {
 /** A Project's Guidance; `projectFor` found the Project in `user`'s Workspace. */
 const projectGuidance = (user: User, { project }: { project: Project }): GuidanceOwner => ({ workspaceId: user.workspaceId, projectId: project.id });
 
-/** Registers reading a Guidance, listing its Versions, and saving it. */
+/** Registers reading a Guidance, listing its Versions, saving it, and merging a stale edit of it. */
 function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resource: GuidanceResource<Params>) {
   const { url, whose } = resource;
   const params = resource.params ? { params: resource.params } : {};
@@ -121,6 +131,29 @@ function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resourc
       const user = await requireUser(ctx, request);
       const owner = await resource.ownerToWrite(user, request.params as Params);
       return { guidance: await save(ctx, owner, request.body, user.id) };
+    },
+  );
+
+  app.post<{ Params: Params; Body: GuidanceWrite }>(
+    `${url}/merge`,
+    {
+      schema: {
+        ...params,
+        body: mergeBody,
+        response: {
+          200: answer(`An edit of ${whose} Guidance merged section by section with the current Guidance; nothing is saved`, holding("merge", "GuidanceMerge")),
+          ...readErrors,
+          ...errors(400, 404),
+        },
+      },
+    },
+    async (request) => {
+      const user = await requireUser(ctx, request);
+      const owner = await resource.ownerToWrite(user, request.params as Params);
+      const base = await guidanceAt(ctx.db, owner, request.body.baseVersion);
+      if (base === undefined) throw new HttpError(404, `${whose} Guidance has no Version ${request.body.baseVersion}`);
+      const onto = await getGuidance(ctx.db, owner);
+      return { merge: { onto, ...mergeMarkdown(base, request.body.markdown, onto.markdown) } };
     },
   );
 }

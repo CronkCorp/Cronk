@@ -57,6 +57,16 @@ export interface GuidanceVersion extends Guidance {
   actor: { kind: "user"; id: string; name: string };
 }
 
+/** The Markdown `owner`'s Guidance had at `version`: empty at 0, undefined for a Version not saved yet. */
+export async function guidanceAt(db: Queryable, owner: GuidanceOwner, version: number): Promise<string | undefined> {
+  if (version === 0) return "";
+  const { rows } = await db.query<{ markdown: string }>(
+    "SELECT markdown FROM guidance_versions WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND version = $3",
+    [owner.workspaceId, owner.projectId, version],
+  );
+  return rows[0]?.markdown;
+}
+
 /** Every Version of `owner`'s Guidance, oldest first. */
 export async function listGuidanceVersions(db: Queryable, owner: GuidanceOwner): Promise<GuidanceVersion[]> {
   const { rows } = await db.query<Guidance & { at: Date; user_id: string; user_name: string }>(
