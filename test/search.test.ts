@@ -69,6 +69,7 @@ describe("Searching", () => {
     expect(await found("&kind=ticket&kind=comment")).toEqual(["comment CRONK", "comment OPS", "ticket CRONK", "ticket OPS"]);
     expect(await found("&project=ops")).toEqual(["comment OPS", "document OPS", "ticket OPS"]);
     expect(await found("&project=OPS&kind=document")).toEqual(["document OPS"]);
+    expect(await found("&kind=ticket")).toEqual(["ticket CRONK", "ticket OPS"]);
     expect(await found("&kind=document")).toEqual(["document CRONK", "document OPS", "document null"]);
 
     const unknown = await admin.get("/api/search?q=backup&project=NOPE");

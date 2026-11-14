@@ -46,39 +46,39 @@ const columns = (c: { kind: SearchKind; title: string; projectKey: string; ticke
 
 /**
  * One SELECT per kind, with what each finds. They read the query as `q.query`, the readable
- * Project ids as $2 and whether the Workspace outside any Project is readable as $3.
+ * Project ids as `q.projects` and whether the Workspace outside any Project is readable as `q.workspace`.
  */
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
     kind: "ticket",
     sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at" })}
       FROM q, tickets t JOIN projects p ON p.id = t.project_id
-      WHERE t.project_id = ANY($2::uuid[]) AND to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query`,
+      WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query`,
   },
   {
     kind: "document",
     sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d LEFT JOIN projects p ON p.id = d.project_id
-      WHERE d.ticket_id IS NULL AND (d.project_id = ANY($2::uuid[]) OR (d.project_id IS NULL AND $3))
+      WHERE d.ticket_id IS NULL AND (d.project_id = ANY(q.projects) OR (d.project_id IS NULL AND q.workspace))
         AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "report",
     sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
-      WHERE t.project_id = ANY($2::uuid[]) AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
+      WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
     sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
-      WHERE t.project_id = ANY($2::uuid[]) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+      WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
     sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
-      WHERE (d.project_id = ANY($2::uuid[]) OR (d.project_id IS NULL AND $3)) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+      WHERE (d.project_id = ANY(q.projects) OR (d.project_id IS NULL AND q.workspace)) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
 ];
 
@@ -98,7 +98,7 @@ export async function search(
     : readable;
   const selects = SELECTS.filter((s) => !input.kinds || input.kinds.includes(s.kind)).map((s) => s.sql);
   const { rows } = await db.query<SearchResult & { rank: number }>(
-    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query)
+    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::boolean AS workspace)
      SELECT * FROM (${selects.join("\n UNION ALL ")}) found
      ORDER BY rank DESC, at DESC
      LIMIT $4`,
