@@ -200,7 +200,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       replace_section: {
         description:
           "saves a new Version replacing what sits under one heading, its subsections included, down to the next heading " +
-          "of the same or a higher level; the heading stays. Refused, listing the headings, if none or several match",
+          "of the same or a higher level; the heading stays. Refused, listing the headings, if none or several match, and refused " +
+          "if the body holds a heading of the section's level or higher or leaves a code block open",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/documents/${encodeURIComponent(required(a.id, "an id", "replace_section"))}/replace-section`, {

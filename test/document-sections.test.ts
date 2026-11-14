@@ -48,6 +48,26 @@ describe("replacing a section is refused", () => {
     expect(picked.body.document.body).toBe("# Notes\n\nTop.\n\n## Notes\n\nChanged.\n");
   });
 
+  it("with the plain error shape for an invalid request or an unknown Document", async () => {
+    const { admin, id } = await documentWith(plan);
+    const invalid = await admin.post(`/api/documents/${id}/replace-section`, { baseVersion: 1, heading: "Setup" });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error).toMatch(/body/);
+    const unknown = await admin.post("/api/documents/00000000-0000-4000-8000-000000000000/replace-section", { baseVersion: 1, heading: "Setup", body: "x" });
+    expect(unknown).toEqual({ status: 404, body: { error: "No such Document" } });
+  });
+
+  it("when the new body would end the section early or leave a code block open", async () => {
+    const { admin, id } = await documentWith(plan);
+    const replace = (body: string) => admin.post(`/api/documents/${id}/replace-section`, { baseVersion: 1, heading: "Setup", body });
+
+    const sibling = await replace("Moved.\n\n## Elsewhere\n\nMore.");
+    expect(sibling.status).toBe(400);
+    expect(sibling.body.error).toMatch(/## Elsewhere/);
+    expect((await replace("```sh\nnpm install")).body.error).toMatch(/code block/);
+    expect((await replace("Install.\n\n### Podman\n\nOr podman.")).status).toBe(200);
+  });
+
   it("when based on an outdated Version, returning the current Version", async () => {
     const { admin, id } = await documentWith(plan);
     await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: `${plan}\nMore.\n` });
@@ -61,6 +81,15 @@ describe("replacing a section is refused", () => {
 });
 
 describe("sections", () => {
+  it("are found by heading text that itself starts with #", async () => {
+    const { admin, id } = await documentWith("## #1 priority\n\nOld.\n");
+
+    const res = await admin.post(`/api/documents/${id}/replace-section`, { baseVersion: 1, heading: "#1 priority", body: "New." });
+
+    expect(res.status).toBe(200);
+    expect(res.body.document.body).toBe("## #1 priority\n\nNew.\n");
+  });
+
   it("ignore lines inside fenced code blocks that look like headings", async () => {
     const body = "## Script\n\n```sh\n# Setup\necho hi\n```\n\n## Setup\n\nOld.\n";
     const { admin, id } = await documentWith(body);
@@ -158,3 +187,4 @@ describe("merging an edit with the current Version", () => {
     expect((await admin.post(`/api/documents/${id}/merge`, { baseVersion: 5, body: "x" })).status).toBe(404);
   });
 });
+

@@ -234,14 +234,20 @@ export function knowledgeRoutes(ctx: AppContext) {
               },
               body: {
                 ...body,
-                description: "The Markdown to put under the heading, replacing everything down to the next heading of the same or a higher level; the heading itself stays.",
+                description:
+                  "The Markdown to put under the heading, replacing everything down to the next heading of the same or a higher level; the heading itself stays. " +
+                  "It may hold lower-level headings, but none of the section's level or higher, and must close any code block it opens.",
               },
             },
           },
           response: {
             200: answer("The Document at its new Version; unchanged if the replacement changed nothing", holding("document", "Document")),
             ...errors(401, 403, 410),
-            400: { description: "The request is invalid, or several sections have that heading; a refused heading lists the Document's headings", ...ref("SectionRefused") },
+            400: {
+              description:
+                "The request is invalid: several sections have that heading (the Document's headings are listed), or the new body would end the section or leave a code block open",
+              ...ref("SectionRefused"),
+            },
             404: { description: "There is no such Document, or it has no section with that heading, in which case its headings are listed", ...ref("SectionRefused") },
             409: staleVersionAnswer,
           },
@@ -412,6 +418,15 @@ const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId
 /** Refuses a section replacement, listing the Document's headings so the caller can pick one. */
 function sectionRefused(document: Document, heading: string, refusal: SectionRefusal): HttpError {
   const headings = headingsIn(document.body);
+  if (refusal.refused === "open code block") {
+    return new HttpError(400, "The new body leaves a code block open, which would swallow the rest of the Document; close it");
+  }
+  if (refusal.refused === "ends the section") {
+    return new HttpError(
+      400,
+      `The new body has the heading “${refusal.heading}”, which would end the section “${heading.trim()}” and start another; use update to change more than one section`,
+    );
+  }
   if (refusal.refused === "ambiguous") {
     return new HttpError(400, `${refusal.matches} sections of ${document.title} are headed “${heading.trim()}”; put the heading's # marks first to pick one`, { headings });
   }

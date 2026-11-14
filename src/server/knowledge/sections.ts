@@ -18,7 +18,10 @@ const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 /** The ATX headings of `markdown`, in order, skipping fenced code blocks. */
-function headingsOf(markdown: string): Heading[] {
+const headingsOf = (markdown: string): Heading[] => scan(markdown).headings;
+
+/** The ATX headings of `markdown`, skipping fenced code blocks, and whether a code block is still open at its end. */
+function scan(markdown: string): { headings: Heading[]; fenceOpen: boolean } {
   const headings: Heading[] = [];
   let fence: string | undefined;
   let start = 0;
@@ -34,7 +37,7 @@ function headingsOf(markdown: string): Heading[] {
     }
     start += line.length + 1;
   }
-  return headings;
+  return { headings, fenceOpen: fence !== undefined };
 }
 
 /** A heading as the API shows it, such as `## Setup`. */
@@ -43,8 +46,12 @@ const headingLine = (h: { level: number; text: string }) => `${"#".repeat(h.leve
 /** The heading lines of `markdown`, such as `## Setup`, in order. */
 export const headingsIn = (markdown: string): string[] => headingsOf(markdown).map(headingLine);
 
-/** Why a section can't be replaced. */
-export type SectionRefusal = { refused: "no such section" } | { refused: "ambiguous"; matches: number };
+/** Why a section can't be replaced: no heading or several match, or the new body would end the section early or leave a code block open. */
+export type SectionRefusal =
+  | { refused: "no such section" }
+  | { refused: "ambiguous"; matches: number }
+  | { refused: "ends the section"; heading: string }
+  | { refused: "open code block" };
 
 /**
  * Replaces what sits under `heading` in `markdown` (its own subsections included, down to the next
@@ -52,14 +59,21 @@ export type SectionRefusal = { refused: "no such section" } | { refused: "ambigu
  * `heading` is the heading's text, optionally preceded by its `#` marks to pick a level.
  */
 export function replaceSection(markdown: string, heading: string, content: string): string | SectionRefusal {
-  const wanted = /^\s*(#{1,6})?\s*(.*?)\s*$/.exec(heading)!;
-  const level = wanted[1]?.length;
-  const text = wanted[2]!;
   const headings = headingsOf(markdown);
-  const matches = headings.filter((h) => h.text === text && (level === undefined || h.level === level));
+  // Heading text that itself starts with # (`#1 priority`) matches as it is; otherwise leading # marks pick a level.
+  let matches = headings.filter((h) => h.text === heading.trim());
+  if (matches.length === 0) {
+    const wanted = /^\s*(#{1,6})?\s*(.*?)\s*$/.exec(heading)!;
+    const level = wanted[1]?.length;
+    matches = headings.filter((h) => h.text === wanted[2] && (level === undefined || h.level === level));
+  }
   if (matches.length === 0) return { refused: "no such section" };
   if (matches.length > 1) return { refused: "ambiguous", matches: matches.length };
   const target = matches[0]!;
+  const added = scan(content);
+  if (added.fenceOpen) return { refused: "open code block" };
+  const early = added.headings.find((h) => h.level <= target.level);
+  if (early) return { refused: "ends the section", heading: headingLine(early) };
   const lineEnd = markdown.indexOf("\n", target.start);
   const contentStart = lineEnd < 0 ? markdown.length : lineEnd + 1;
   const next = headings.find((h) => h.start > target.start && h.level <= target.level);
