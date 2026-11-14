@@ -200,11 +200,58 @@ describe("An Agent Session's live updates", () => {
 
     const posted = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." })).body.comment;
 
-    const pushed = { event: "waiting", data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null } } };
+    const pushed = { event: "waiting", id: expect.stringMatching(/^\d+$/), data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null } } };
     expect(await first.next()).toEqual(pushed);
     expect(await second.next()).toEqual(pushed);
     await admin.post("/api/tickets/CRONK-1/comments", { body: "@codex too" });
     expect((await other.next())?.data.waiting.comment.body).toBe("@codex too");
+  });
+
+  it("replay the work that started waiting while the stream was closed, before `ready`, when reopened from the last event's id", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Seen live." });
+    const live = await stream.next();
+    stream.close();
+
+    const missed = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Missed." })).body.comment;
+    const reopened = await agent.events("/api/agent-sessions/current/events", { "last-event-id": live!.id! });
+
+    const replayed = await reopened.next();
+    expect(replayed).toMatchObject({ event: "waiting", data: { waiting: { reason: "comment", comment: missed, ticket: { key: "CRONK-1" } } } });
+    expect(replayed?.id).toEqual(expect.any(String));
+    expect((await reopened.next())?.event).toBe("ready");
+  });
+
+  it("replay, from `ready`'s id, what was missed by a stream that never got an event, but not what a welcome has since taken", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    const ready = await stream.next();
+    stream.close();
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Taken by a welcome." });
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toHaveLength(1);
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Still waiting." });
+    const reopened = await agent.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! });
+
+    expect((await reopened.next())?.data.waiting.comment.body).toBe("Still waiting.");
+    expect((await reopened.next())?.event).toBe("ready");
+  });
+
+  it("replay nothing to a caller without access to the work", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
+    const ready = await (await agent.events("/api/agent-sessions/current/events")).next();
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "For claude only." });
+
+    const others = await codex.events("/api/agent-sessions/current/events", { "last-event-id": "0" });
+    expect((await others.next())?.event).toBe("ready");
+    await agent.delete("/api/agent-sessions/current");
+    expect((await agent.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! })).status).toBe(410);
   });
 
   it("are refused outside an Agent Session, and end once the Session does", async () => {

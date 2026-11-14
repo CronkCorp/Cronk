@@ -95,9 +95,9 @@ export function conversationRoutes(ctx: AppContext) {
 
     /** Tells each Agent the Comment now waits for, through its live Agent Sessions. Call once committed. */
     const pushWaiting = (posted: Posted, on: Omit<WaitingWork, "reason" | "comment">) => {
-      for (const { agentId, reason } of posted.waiting) {
+      for (const { agentId, reason, seq } of posted.waiting) {
         const waiting: WaitingWork = { reason, comment: publicComment(posted.comment), ...on };
-        ctx.live.publish(agentTopic(agentId), { event: "waiting", data: { waiting } });
+        ctx.live.publish(agentTopic(agentId), { event: "waiting", id: seq, data: { waiting } });
       }
     };
 
