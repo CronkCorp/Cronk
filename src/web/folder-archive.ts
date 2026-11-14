@@ -3,11 +3,10 @@
  * `<input webkitdirectory>` uploads as one archive, the way the import API takes it.
  */
 
+import { MARKDOWN_FILE } from "../shared/values.js";
+
 const BLOCK = 512;
 const encoder = new TextEncoder();
-
-/** The Markdown files among `files`, the way the import reads them; the rest would only make the upload bigger. */
-const MARKDOWN = /\.(md|markdown)$/i;
 
 /** The path a picked file has within the picked folder, starting with the folder's own name. */
 const pathOf = (file: File) => file.webkitRelativePath || file.name;
@@ -17,7 +16,7 @@ export async function packMarkdownFolder(files: Iterable<File>): Promise<Blob | 
   const parts: BlobPart[] = [];
   for (const file of files) {
     const path = pathOf(file);
-    if (!MARKDOWN.test(path)) continue;
+    if (!MARKDOWN_FILE.test(path)) continue;
     const bytes = new Uint8Array(await file.arrayBuffer());
     parts.push(...entry(path, bytes));
   }
