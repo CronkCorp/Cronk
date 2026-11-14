@@ -164,3 +164,84 @@ describe("A Ticket's live updates", () => {
     expect(await stream.next()).toEqual({ event: "report", data: { report: listed } });
   });
 });
+
+describe("Deleting a Report", () => {
+  it("is refused to Agents, even the Claim holder, and allowed to Users", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." })).body.report;
+
+    const refused = await agent.delete(`/api/documents/${report.id}?baseVersion=1`);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Report/);
+    expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toHaveLength(1);
+
+    expect((await admin.delete(`/api/documents/${report.id}?baseVersion=1`)).status).toBe(204);
+    expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toEqual([]);
+  });
+});
+
+describe("Editing a Report", () => {
+  it("is refused to an Agent unless it calls from the Agent Session holding the Ticket's live Claim", async () => {
+    const { cronk, claude, session } = await delegatedSetup();
+    const holder = await session();
+    const other = await session();
+    await holder.post("/api/tickets/CRONK-1/claim");
+    const report = (await holder.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." })).body.report;
+    const path = `/api/documents/${report.id}`;
+
+    const refused = await other.patch(path, { baseVersion: 1, body: "Rewritten." });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/Claim CRONK-1/);
+    expect((await cronk.client(claude.secret).patch(path, { baseVersion: 1, body: "Rewritten." })).status).toBe(409);
+
+    const edited = await holder.patch(path, { baseVersion: 1, body: "Done, and tested." });
+    expect(edited.status).toBe(200);
+    expect(edited.body.document).toMatchObject({ version: 2, body: "Done, and tested." });
+
+    await holder.delete("/api/tickets/CRONK-1/claim");
+    expect((await holder.patch(path, { baseVersion: 2, body: "Rewritten." })).status).toBe(409);
+  });
+});
+
+describe("Replacing a section of or restoring a Report", () => {
+  it("is refused to an Agent outside the Ticket's Claim and allowed within it", async () => {
+    const { session } = await delegatedSetup();
+    const holder = await session();
+    const other = await session();
+    await holder.post("/api/tickets/CRONK-1/claim");
+    const report = (await holder.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "## Cause\n\nThe cache.\n" })).body.report;
+    const path = `/api/documents/${report.id}`;
+    await holder.patch(path, { baseVersion: 1, body: "## Cause\n\nThe network.\n" });
+
+    const section = { baseVersion: 2, heading: "Cause", body: "Nothing." };
+    const refusedSection = await other.post(`${path}/replace-section`, section);
+    expect(refusedSection.status).toBe(409);
+    expect(refusedSection.body.error).toMatch(/Claim CRONK-1/);
+    const refusedRestore = await other.post(`${path}/versions/1/restore`, { baseVersion: 2 });
+    expect(refusedRestore.status).toBe(409);
+    expect(refusedRestore.body.error).toMatch(/Claim CRONK-1/);
+    expect((await holder.get(path)).body.document).toMatchObject({ version: 2, body: "## Cause\n\nThe network.\n" });
+
+    expect((await holder.post(`${path}/versions/1/restore`, { baseVersion: 2 })).body.document).toMatchObject({ version: 3, body: "## Cause\n\nThe cache.\n" });
+    expect((await holder.post(`${path}/replace-section`, { ...section, baseVersion: 3 })).body.document).toMatchObject({ version: 4, body: "## Cause\n\nNothing.\n" });
+  });
+});
+
+describe("A User changing a Report", () => {
+  it("edits and restores a Report like any Document, without a Claim", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "## Cause\n\nThe cache.\n" })).body.report;
+    await agent.delete("/api/tickets/CRONK-1/claim");
+    const path = `/api/documents/${report.id}`;
+
+    expect((await admin.patch(path, { baseVersion: 1, body: "## Cause\n\n[redacted]\n" })).status).toBe(200);
+    expect((await admin.post(`${path}/replace-section`, { baseVersion: 2, heading: "Cause", body: "The network." })).status).toBe(200);
+    const restored = await admin.post(`${path}/versions/1/restore`, { baseVersion: 3 });
+    expect(restored.status).toBe(200);
+    expect(restored.body.document).toMatchObject({ version: 4, body: "## Cause\n\nThe cache.\n", ticketKey: "CRONK-1" });
+  });
+});

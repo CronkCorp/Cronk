@@ -16,12 +16,17 @@ export interface ApiResponse {
 /** Calls one API operation as a fixed caller. */
 export type ApiCall = (method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: object) => Promise<ApiResponse>;
 
+/** The headers that make a request the caller's: its token, and its Agent Session once there is one. */
+export function callerHeaders(caller: Caller): Record<string, string> {
+  return { authorization: `Bearer ${caller.token}`, ...(caller.sessionId && { [AGENT_SESSION_HEADER]: caller.sessionId }) };
+}
+
 /** Calls Cronk's own HTTP API in-process, exactly as the Agent could over the network. */
 export async function callApi(app: FastifyInstance, caller: Caller, ...[method, url, body]: Parameters<ApiCall>): Promise<ApiResponse> {
   const res = await app.inject({
     method,
     url,
-    headers: { authorization: `Bearer ${caller.token}`, ...(caller.sessionId && { [AGENT_SESSION_HEADER]: caller.sessionId }) },
+    headers: callerHeaders(caller),
     ...(body && { payload: body }),
   });
   return { status: res.statusCode, body: parseBody(res.body) };
