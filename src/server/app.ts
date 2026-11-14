@@ -4,6 +4,7 @@ import type { Clock } from "./clock.js";
 import { HttpError, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { identityRoutes } from "./identity/routes.js";
+import { workspaceRoutes } from "./workspace/routes.js";
 
 export interface AppConfig {
   databaseUrl: string;
@@ -28,5 +29,6 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   });
   await app.register(cookie);
   await app.register(identityRoutes(ctx));
+  await app.register(workspaceRoutes(ctx));
   return app;
 }

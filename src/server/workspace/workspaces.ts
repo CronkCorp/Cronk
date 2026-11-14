@@ -12,3 +12,13 @@ export async function insertWorkspace(db: Queryable, input: { name: string; now:
   );
   return rows[0]!;
 }
+
+export async function getWorkspace(db: Queryable, id: string): Promise<Workspace> {
+  const { rows } = await db.query<Workspace>("SELECT id, name FROM workspaces WHERE id = $1", [id]);
+  return rows[0]!;
+}
+
+export async function renameWorkspace(db: Queryable, id: string, name: string): Promise<Workspace> {
+  const { rows } = await db.query<Workspace>("UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING id, name", [id, name]);
+  return rows[0]!;
+}
