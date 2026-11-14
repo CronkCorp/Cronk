@@ -71,3 +71,90 @@ describe("sections", () => {
     expect(res.body.document.body).toBe("## Script\n\n```sh\n# Setup\necho hi\n```\n\n## Setup\n\nNew.\n");
   });
 });
+
+/** A Document at Version 1, then `theirs` saved as Version 2 by someone else. */
+async function editedUnderneath(base: string, theirs: string) {
+  const setup = await documentWith(base);
+  await setup.admin.patch(`/api/documents/${setup.id}`, { baseVersion: 1, body: theirs });
+  return setup;
+}
+
+describe("merging an edit with the current Version", () => {
+  it("combines edits to different sections without a conflict", async () => {
+    const { admin, id } = await editedUnderneath(plan, plan.replace("Run it.", "Run it daily."));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, title: "Plan", body: plan.replace("Use compose.", "Use podman.") });
+
+    expect(res.status).toBe(200);
+    expect(res.body.merge).toMatchObject({
+      onto: { number: 2, body: plan.replace("Run it.", "Run it daily.") },
+      conflicts: 0,
+      title: "Plan",
+      titleConflict: null,
+      body: plan.replace("Use compose.", "Use podman.").replace("Run it.", "Run it daily."),
+    });
+    expect((await admin.get(`/api/documents/${id}`)).body.document.version).toBe(2);
+  });
+
+  it("reports a section both edits changed differently as a conflict, with the base's, mine and theirs", async () => {
+    const { admin, id } = await editedUnderneath(plan, plan.replace("Run it.", "Run it daily."));
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: plan.replace("Run it.", "Run it weekly.").replace("Intro line.", "Intro.") });
+
+    const { merge } = res.body;
+    expect(merge).toMatchObject({ conflicts: 1, body: null, title: "Plan" });
+    expect(merge.sections).toEqual([
+      { heading: null, text: "Intro.\n\n", conflict: null },
+      { heading: "## Setup", text: "## Setup\n\nInstall it.\n\n", conflict: null },
+      { heading: "### Docker", text: "### Docker\n\nUse compose.\n\n", conflict: null },
+      {
+        heading: "## Usage",
+        text: null,
+        conflict: { base: "## Usage\n\nRun it.\n", mine: "## Usage\n\nRun it weekly.\n", theirs: "## Usage\n\nRun it daily.\n" },
+      },
+    ]);
+  });
+
+  it("keeps sections either edit added and drops those one removed and the other left alone", async () => {
+    const base = "## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n## New\n\nnew\n\n## B\n\nb\n\n## C\n\nc\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## A\n\na\n\n## C\n\nc\n\n## Last\n\nlast" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## A\n\na\n\n## New\n\nnew\n\n## C\n\nc\n\n## Last\n\nlast" });
+  });
+
+  it("reports a section one edit removed and the other changed as a conflict", async () => {
+    const base = "## A\n\na\n\n## B\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## A\n\na\n\n## B\n\nb changed\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## A\n\na\n" });
+
+    expect(res.body.merge.sections[1]).toEqual({ heading: "## B", text: null, conflict: { base: "## B\n\nb\n", mine: null, theirs: "## B\n\nb changed\n" } });
+  });
+
+  it("reports a title both edits changed differently as a conflict", async () => {
+    const { admin, id } = await documentWith("Body.");
+    await admin.patch(`/api/documents/${id}`, { baseVersion: 1, title: "Their plan" });
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, title: "My plan", body: "Body." });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 1, title: null, titleConflict: { base: "Plan", mine: "My plan", theirs: "Their plan" }, body: "Body." });
+  });
+
+  it("reports the whole body as one conflict when both edits rearranged the sections differently", async () => {
+    const base = "## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n";
+    const theirs = "## B\n\nb\n\n## A\n\na\n\n## C\n\nc\n";
+    const mine = "## A\n\na\n\n## C\n\nc\n\n## B\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, theirs);
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: mine });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 1, sections: [{ heading: null, text: null, conflict: { base, mine, theirs } }] });
+  });
+
+  it("refuses a base Version the Document never had", async () => {
+    const { admin, id } = await documentWith(plan);
+    expect((await admin.post(`/api/documents/${id}/merge`, { baseVersion: 5, body: "x" })).status).toBe(404);
+  });
+});

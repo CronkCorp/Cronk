@@ -6,7 +6,7 @@ import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access }
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
-import { headingsIn, replaceSection, type SectionRefusal } from "./sections.js";
+import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -24,6 +24,44 @@ const staleVersionAnswer = {
   description: "The save is based on a Version that is no longer current; the answer carries the current Version",
   ...ref("StaleVersion"),
 };
+
+/** Both sides' text of a part they changed differently, and the base's; null where a side has no such part. */
+const conflict = {
+  type: "object",
+  required: ["base", "mine", "theirs"],
+  properties: Object.fromEntries(["base", "mine", "theirs"].map((side) => [side, { type: ["string", "null"] }])),
+} as const;
+
+const mergeAnswer = {
+  type: "object",
+  required: ["merge"],
+  properties: {
+    merge: {
+      type: "object",
+      required: ["onto", "title", "titleConflict", "body", "sections", "conflicts"],
+      properties: {
+        onto: { ...ref("Version"), description: "The current Version merged onto; save the result with its number as `baseVersion`." },
+        title: { type: ["string", "null"], description: "The merged title; null when it conflicts." },
+        titleConflict: { anyOf: [conflict, { type: "null" }] },
+        body: { type: ["string", "null"], description: "The merged Markdown; null while any section conflicts." },
+        conflicts: { type: "integer", description: "How many sections conflict, plus one if the title does." },
+        sections: {
+          type: "array",
+          description: "The merged sections in order, each from one heading to the next; joined, their texts make the body.",
+          items: {
+            type: "object",
+            required: ["heading", "text", "conflict"],
+            properties: {
+              heading: { type: ["string", "null"], description: "Its heading line, such as `## Setup`; null for the text before the first heading." },
+              text: { type: ["string", "null"], description: "The merged text, heading line included; null when it conflicts." },
+              conflict: { anyOf: [conflict, { type: "null" }] },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 /** A page tree: its Documents depth first, each followed by those under it. */
 const treeAnswer = listing("documents", ref("DocumentTreeEntry"));
@@ -219,6 +257,37 @@ export function knowledgeRoutes(ctx: AppContext) {
           return saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
         });
         return { document };
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: { baseVersion: number; title?: string; body?: string } }>(
+      "/api/documents/:id/merge",
+      {
+        schema: {
+          params: documentParams,
+          body: {
+            type: "object",
+            required: ["baseVersion"],
+            additionalProperties: false,
+            properties: {
+              baseVersion: { ...baseVersion, description: "The number of the Version the edit started from." },
+              title: { ...title, description: "The edited title; the base Version's if left out." },
+              body: { ...body, description: "The edited Markdown; the base Version's if left out." },
+            },
+          },
+          response: {
+            200: answer("The edit merged section by section with the current Version; nothing is saved", mergeAnswer),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await documentFor(ctx.db, actor, request.params.id, "read");
+        const base = await requireVersion(ctx.db, document, String(request.body.baseVersion));
+        const onto = (await findVersion(ctx.db, document.id, document.version))!;
+        const mine = { title: request.body.title?.trim() ?? base.title, body: request.body.body ?? base.body };
+        return { merge: { onto, ...mergeEdits(base, mine, onto) } };
       },
     );
 

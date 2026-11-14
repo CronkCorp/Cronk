@@ -69,3 +69,141 @@ export function replaceSection(markdown: string, heading: string, content: strin
   const before = markdown.slice(0, contentStart);
   return (lineEnd < 0 ? `${before}\n` : before) + replacement + markdown.slice(end);
 }
+
+/** One side's text of a part both sides changed differently; null where that side has no such part. */
+export interface Conflict {
+  base: string | null;
+  mine: string | null;
+  theirs: string | null;
+}
+
+/** A section of a merged body: its merged text, or the conflict a User must settle. */
+export interface MergedSection {
+  /** Its heading line, such as `## Setup`; null for the text before the first heading. */
+  heading: string | null;
+  /** The merged text, heading line included; null when it conflicts. */
+  text: string | null;
+  conflict: Conflict | null;
+}
+
+/** A section of one Version's body: everything from one heading line up to the next heading, of any level. */
+interface Chunk {
+  /** Its heading line, counted when repeated, so sections can be matched across Versions; "" before the first heading. */
+  key: string;
+  heading: string | null;
+  text: string;
+  /** Whether it ends its Version's body. */
+  last: boolean;
+}
+
+/** `markdown` cut at every heading, always starting with the (perhaps empty) text before the first one. */
+function chunksOf(markdown: string): Chunk[] {
+  const headings = headingsOf(markdown);
+  const seen = new Map<string, number>();
+  const chunks: Chunk[] = [{ key: "", heading: null, text: markdown.slice(0, headings[0]?.start ?? markdown.length), last: headings.length === 0 }];
+  headings.forEach((h, i) => {
+    const line = headingLine(h);
+    const n = (seen.get(line) ?? 0) + 1;
+    seen.set(line, n);
+    const end = headings[i + 1]?.start ?? markdown.length;
+    chunks.push({ key: `${line}\u0000${n}`, heading: line, text: markdown.slice(h.start, end), last: i === headings.length - 1 });
+  });
+  return chunks;
+}
+
+/** Whether two sides' texts say the same, ignoring trailing blank space; undefined (no such part) only equals undefined. */
+const same = (a: string | undefined, b: string | undefined) => (a === undefined || b === undefined ? a === b : a.trimEnd() === b.trimEnd());
+
+/** The three-way merge of one part: the side that changed it, or a conflict when both did, differently. */
+function mergePart<T extends { text: string }>(base: T | undefined, mine: T | undefined, theirs: T | undefined): { merged: T | undefined } | "conflict" {
+  if (same(mine?.text, theirs?.text)) return { merged: theirs ?? mine };
+  if (same(mine?.text, base?.text)) return { merged: theirs };
+  if (same(theirs?.text, base?.text)) return { merged: mine };
+  return "conflict";
+}
+
+/** Whether `a` and `b` put the sections they share in the same order. */
+function sameOrder(a: string[], b: string[]): boolean {
+  const shared = (x: string[], y: string[]) => x.filter((k) => y.includes(k));
+  return shared(a, b).join("\n") === shared(b, a).join("\n");
+}
+
+/**
+ * The order of the merged sections: that of the side which rearranged them (theirs if neither did),
+ * with each section only the other side or the base has put after the section it follows there.
+ * Undefined when both sides rearranged them differently.
+ */
+function mergedOrder(base: string[], mine: string[], theirs: string[]): string[] | undefined {
+  const [leader, follower] = sameOrder(mine, base) ? [theirs, mine] : sameOrder(theirs, base) || sameOrder(mine, theirs) ? [mine, theirs] : [];
+  if (!leader || !follower) return undefined;
+  const order = [...leader];
+  for (const other of [follower, base]) {
+    other.forEach((key, i) => {
+      if (order.includes(key)) return;
+      const before = other.slice(0, i).reverse().find((k) => order.includes(k));
+      order.splice(before === undefined ? 0 : order.indexOf(before) + 1, 0, key);
+    });
+  }
+  return order;
+}
+
+/** A merge of a Document's title and body. */
+export interface Merge {
+  /** The merged title; null when it conflicts. */
+  title: string | null;
+  titleConflict: Conflict | null;
+  /** The merged body; null while any section conflicts. */
+  body: string | null;
+  /** Its sections, in order; joined, the texts (with the chosen side of each conflict) make the body. */
+  sections: MergedSection[];
+  /** How many parts conflict, the title included. */
+  conflicts: number;
+}
+
+/**
+ * Three-way merges `mine` and `theirs`, both edited from `base`, section by section: a section only
+ * one side changed takes that side's text, and a section both changed differently is a conflict.
+ * Sections either side added or removed are added or removed; if both sides rearranged the sections
+ * differently, the whole body is one conflict.
+ */
+export function mergeEdits(base: { title: string; body: string }, mine: { title: string; body: string }, theirs: { title: string; body: string }): Merge {
+  const title = mergePart({ text: base.title }, { text: mine.title }, { text: theirs.title });
+  const titleConflict = title === "conflict" ? { base: base.title, mine: mine.title, theirs: theirs.title } : null;
+  const sections = mergeBodies(base.body, mine.body, theirs.body);
+  const conflicts = sections.filter((s) => s.conflict).length + (titleConflict ? 1 : 0);
+  const clean = sections.every((s) => s.text !== null);
+  return {
+    title: title === "conflict" ? null : title.merged!.text,
+    titleConflict,
+    body: clean ? sections.map((s) => s.text).join("") : null,
+    sections,
+    conflicts,
+  };
+}
+
+function mergeBodies(base: string, mine: string, theirs: string): MergedSection[] {
+  const [b, m, t] = [base, mine, theirs].map(chunksOf) as [Chunk[], Chunk[], Chunk[]];
+  const order = mergedOrder(...([b, m, t].map((chunks) => chunks.map((c) => c.key)) as [string[], string[], string[]]));
+  if (!order) return [{ heading: null, text: null, conflict: { base, mine, theirs } }];
+  const find = (chunks: Chunk[], key: string) => chunks.find((c) => c.key === key);
+  const merged: { heading: string | null; chunk?: Chunk; conflict?: { base?: Chunk; mine?: Chunk; theirs?: Chunk } }[] = [];
+  for (const key of order) {
+    const sides = { base: find(b, key), mine: find(m, key), theirs: find(t, key) };
+    const heading = (sides.mine ?? sides.theirs ?? sides.base)!.heading;
+    const part = mergePart(sides.base, sides.mine, sides.theirs);
+    if (part === "conflict") merged.push({ heading, conflict: sides });
+    else if (part.merged && !(key === "" && part.merged.text === "")) merged.push({ heading, chunk: part.merged });
+  }
+  // A section that ended its Version's body may now have one after it: keep a blank line between them.
+  const spaced = (chunk: Chunk | undefined, last: boolean) => {
+    if (!chunk) return null;
+    if (last || chunk.text.endsWith("\n\n") || (!chunk.last && chunk.text.endsWith("\n"))) return chunk.text;
+    return chunk.text.replace(/\n?$/, "\n\n");
+  };
+  return merged.map((s, i) => {
+    const last = i === merged.length - 1;
+    if (s.chunk) return { heading: s.heading, text: spaced(s.chunk, last), conflict: null };
+    const c = s.conflict!;
+    return { heading: s.heading, text: null, conflict: { base: spaced(c.base, last), mine: spaced(c.mine, last), theirs: spaced(c.theirs, last) } };
+  });
+}
