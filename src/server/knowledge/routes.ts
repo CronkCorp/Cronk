@@ -6,6 +6,7 @@ import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access }
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { listProjectReports } from "./reports.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
@@ -74,6 +75,24 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         return { documents: await listTree(ctx.db, treeFor(actor, project.id)) };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/reports",
+      {
+        schema: {
+          params: projectParams,
+          response: {
+            200: answer("The Reports on the Project's Tickets, newest first, without their bodies", listing("reports", ref("Report"))),
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        return { reports: await listProjectReports(ctx.db, project.id) };
       },
     );
 

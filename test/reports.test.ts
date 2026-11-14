@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, startSession, type Client } from "./harness.js";
 
 describe("Reports", () => {
   it("are written by the Claim holder as Documents of the Ticket's Project, listed on the Ticket and kept out of the page tree", async () => {
@@ -120,5 +120,32 @@ describe("Writing a Report", () => {
     expect((await holder.post("/api/tickets/CRONK-1/reports", { title: " ", body: "Done." })).status).toBe(400);
 
     expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toEqual([]);
+  });
+});
+
+describe("A Project's Reports", () => {
+  it("lists every Report on the Project's Tickets, newest first, to those who can see the Project", async () => {
+    const { cronk, admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-2/claim");
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "First", body: "One." });
+    cronk.clock.advance(60_000);
+    await agent.post("/api/tickets/CRONK-2/reports", { title: "Second", body: "Two." });
+    await admin.post("/api/projects", { name: "Other", key: "OTHER" });
+
+    const listed = await admin.get("/api/projects/CRONK/reports");
+    expect(listed.status).toBe(200);
+    expect(listed.body.reports).toMatchObject([
+      { title: "Second", ticketKey: "CRONK-2", ticketTitle: "Ticket 2", createdAt: "2026-01-01T09:01:00.000Z" },
+      { title: "First", ticketKey: "CRONK-1", ticketTitle: "Ticket 1", createdAt: "2026-01-01T09:00:00.000Z" },
+    ]);
+    expect((await admin.get("/api/projects/OTHER/reports")).body.reports).toEqual([]);
+
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.get("/api/projects/CRONK/reports")).body.reports).toHaveLength(2);
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect((await bob.get("/api/projects/CRONK/reports")).status).toBe(404);
+    expect((await bob.get("/api/tickets/CRONK-1/reports")).status).toBe(404);
   });
 });
