@@ -30,9 +30,9 @@ const STAGE_ADVICE: Record<MergeStage, string> = {
 
 /**
  * Tells the User their save was refused because `by` saved `theirs` since `base`, shows what they
- * changed, and offers to drop the draft and edit their Version instead.
+ * changed, and offers to drop the draft and edit their Version instead (not while `disabled`, as during a save).
  */
-export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void }) {
+export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
   const { base, theirs } = props;
   return (
     <div className={props.stage === "conflict" ? "conflict" : "merged"} role="alert">
@@ -44,7 +44,7 @@ export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: Sa
         <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
       </details>
       <div className="actions">
-        <button type="button" className="secondary" onClick={props.onDiscardMine}>Discard mine and edit theirs</button>
+        <button type="button" className="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</button>
       </div>
     </div>
   );

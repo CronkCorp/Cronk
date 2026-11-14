@@ -296,6 +296,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
           theirs={other.theirs}
           stage={resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged"}
           onDiscardMine={() => takeTheirs(other.theirs)}
+          disabled={busy}
         />
       )}
       {resolving ? (
