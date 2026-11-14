@@ -14,6 +14,9 @@ const ARCHIVE_TYPES = ["application/gzip", "application/x-gzip", "application/x-
 /** The largest archive an import takes. */
 const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
+/** The request body of an import: an archive, which the content-type parser hands over as bytes (so it has no type to check). */
+const archiveBodySchema = { description: "The folder as a tar archive, gzipped or not." };
+
 const archiveUpload =
   "The request body is the folder as a tar archive, gzipped (`tar czf`) or not, sent as `application/gzip`, `application/x-tar` or `application/octet-stream`.";
 
@@ -84,6 +87,8 @@ export function portabilityRoutes(ctx: AppContext) {
       {
         bodyLimit: MAX_ARCHIVE_BYTES,
         schema: {
+          consumes: ARCHIVE_TYPES,
+          body: archiveBodySchema,
           description:
             "Imports an export made by GET /api/export or GET /api/projects/{key}/export, all of it or nothing. A Workspace export goes into a Workspace " +
             "with no Projects, Documents or Guidance yet, as in a fresh installation; a Project export becomes a new Project, refused if its key is taken. " +
@@ -124,6 +129,8 @@ export function portabilityRoutes(ctx: AppContext) {
       {
         bodyLimit: MAX_ARCHIVE_BYTES,
         schema: {
+          consumes: ARCHIVE_TYPES,
+          body: archiveBodySchema,
           description: `Imports a folder of Markdown files as Workspace Documents: each file becomes a Document and each folder one too, with what it holds under it. ${IMPORT_RULES} ${archiveUpload}`,
           response: { 201: importedAnswer, ...errors(400, 401, 403, 410) },
         },
@@ -143,6 +150,8 @@ export function portabilityRoutes(ctx: AppContext) {
       {
         bodyLimit: MAX_ARCHIVE_BYTES,
         schema: {
+          consumes: ARCHIVE_TYPES,
+          body: archiveBodySchema,
           description: `Imports a folder of Markdown files as Documents of the Project: each file becomes a Document and each folder one too, with what it holds under it. ${IMPORT_RULES} ${archiveUpload}`,
           params: pathParams({ key: projectKeyParam }),
           response: { 201: importedAnswer, ...errors(400, 401, 403, 404, 410) },
