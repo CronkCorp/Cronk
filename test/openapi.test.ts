@@ -93,4 +93,14 @@ describe("the OpenAPI description", () => {
       }
     }
   });
+
+  it("lists only the query parameters an operation takes", async () => {
+    const doc = await openapi();
+    const query = (path: string, method: string) =>
+      (doc.paths[path][method].parameters ?? []).filter((p: { in: string }) => p.in === "query").map((p: { name: string }) => p.name);
+    expect(query("/api/tickets/{key}", "get")).toEqual([]);
+    expect(query("/api/projects", "post")).toEqual([]);
+    expect(query("/api/projects", "get")).toEqual(["archived"]);
+    expect(query("/api/projects/{key}/tickets", "get")).toEqual(["status", "category", "assignee", "priority", "label"]);
+  });
 });

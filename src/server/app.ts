@@ -45,6 +45,14 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure };
 
   app.addHook("onClose", async () => db.end());
+  // Every API route refuses query parameters it doesn't declare, including routes that declare none,
+  // so a new route can't forget to. The web shell and the OpenAPI document take any query string.
+  app.addHook("onRoute", (route) => {
+    if (!route.url.startsWith("/api/") || route.url === "/api/openapi.json") return;
+    // `properties: {}` so the OpenAPI description lists no query parameters rather than reading the schema as one.
+    const querystring = (route.schema?.querystring ?? { type: "object", properties: {} }) as Record<string, unknown>;
+    route.schema = { ...route.schema, querystring: { additionalProperties: false, ...querystring } };
+  });
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
