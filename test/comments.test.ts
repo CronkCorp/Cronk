@@ -160,3 +160,21 @@ describe("Comments on a Document", () => {
     expect((await admin.get(`/api/documents/${doc.id}/comments`)).body.comments).toEqual([]);
   });
 });
+
+describe("A Ticket's live updates", () => {
+  it("push each new Comment, and a question again once a Comment answers it", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which one?" })).body.activity;
+    const stream = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The first.", replyToActivityId: question.id })).body.comment;
+
+    expect(await stream.next()).toEqual({ event: "comment", data: { comment: answer } });
+    const answered = (await admin.get("/api/tickets/CRONK-1/activities")).body.activities[0];
+    expect(answered.answer).not.toBeNull();
+    expect(await stream.next()).toEqual({ event: "activity", data: { activity: answered } });
+  });
+});

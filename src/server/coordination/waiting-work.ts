@@ -48,7 +48,7 @@ export function mentionedNames(body: string): string[] {
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the
  * Agent whose question it answers (`answered`), every Agent it @mentions by name, and the
  * Delegate of the Ticket it is on. Never for the Agent that posted it, and only for Agents
- * that can see where it was posted. Returns the Agents it now waits for.
+ * that can see where it was posted. Returns the Agents it now waits for, and why.
  */
 export async function markWaiting(
   db: Queryable,

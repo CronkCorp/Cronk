@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
 
 describe("Work waiting for an Agent", () => {
   it("includes a Comment on a Ticket delegated to it, in the welcome of its next Agent Session only", async () => {
@@ -65,5 +65,37 @@ describe("An answer to an Agent's question", () => {
     expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([
       { reason: "answer", comment: answer, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null },
     ]);
+  });
+});
+
+describe("An Agent Session's live updates", () => {
+  it("push work as it starts waiting for the Agent, to each of its connected Sessions, and only its own", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
+    const first = await (await session()).events("/api/agent-sessions/current/events");
+    const second = await (await session()).events("/api/agent-sessions/current/events");
+    const other = await codex.events("/api/agent-sessions/current/events");
+    for (const stream of [first, second, other]) expect((await stream.next())?.event).toBe("ready");
+
+    const posted = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." })).body.comment;
+
+    const pushed = { event: "waiting", data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null } } };
+    expect(await first.next()).toEqual(pushed);
+    expect(await second.next()).toEqual(pushed);
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "@codex too" });
+    expect((await other.next())?.data.waiting.comment.body).toBe("@codex too");
+  });
+
+  it("are refused outside an Agent Session, and end once the Session does", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    expect((await admin.events("/api/agent-sessions/current/events")).status).toBe(400);
+    expect((await cronk.client(claude.secret).events("/api/agent-sessions/current/events")).status).toBe(400);
+
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+    await agent.delete("/api/agent-sessions/current");
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Anyone there?" });
+    expect(await stream.next()).toBeNull();
   });
 });

@@ -5,8 +5,9 @@ import { transaction, type Queryable } from "../db/database.js";
 import { answer, documentIdParam, errors, holding, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
-import { findActivity, markAnswered } from "../coordination/activities.js";
-import { markWaiting, type CommentPlace } from "../coordination/waiting-work.js";
+import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
+import { agentTopic, ticketTopic } from "../coordination/routes.js";
+import { markWaiting, type CommentPlace, type WaitingReason, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
@@ -43,6 +44,13 @@ const newCommentBody = {
   },
 } as const;
 
+/** A Comment just posted: the question it answered, if any, and the Agents it now waits for. */
+interface Posted {
+  comment: Comment;
+  answered: Activity | undefined;
+  waiting: { agentId: string; reason: WaitingReason }[];
+}
+
 /** Comments: conversation on Tickets and Documents, from any Actor. */
 export function conversationRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -57,7 +65,7 @@ export function conversationRoutes(ctx: AppContext) {
       place: CommentPlace,
       input: NewComment,
       document?: Document,
-    ): Promise<Comment> => {
+    ): Promise<Posted> => {
       const replyToCommentId = input.replyToCommentId ?? null;
       const replyToActivityId = input.replyToActivityId ?? null;
       if (replyToCommentId && replyToActivityId) throw new HttpError(400, "Reply to a Comment or an Activity, not both");
@@ -73,10 +81,17 @@ export function conversationRoutes(ctx: AppContext) {
       const anchor = input.anchor ? { passage: input.anchor.passage, version: document!.version } : null;
       const comment = await insertComment(tx, target, actor, { body: input.body, replyToCommentId, replyToActivityId, anchor }, ctx.clock.now());
       const askedIt = actor.kind === "agent" && actor.agent.id === activity?.agent.id;
-      if (activity && !askedIt) await markAnswered(tx, activity, comment.id);
-      const answered = activity?.kind === "question" ? { agentId: activity.agent.id } : null;
-      await markWaiting(tx, actor, comment, place, answered, comment.at);
-      return comment;
+      const answered = activity && !askedIt && (await markAnswered(tx, activity, comment.id)) ? await findActivity(tx, activity.ticketId, activity.id) : undefined;
+      const asker = activity?.kind === "question" ? { agentId: activity.agent.id } : null;
+      return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at) };
+    };
+
+    /** Tells each Agent the Comment now waits for, through its connected Agent Sessions. Call once committed. */
+    const pushWaiting = (posted: Posted, on: Omit<WaitingWork, "reason" | "comment">) => {
+      for (const { agentId, reason } of posted.waiting) {
+        const waiting: WaitingWork = { reason, comment: publicComment(posted.comment), ...on };
+        ctx.live.publish(agentTopic(agentId), { event: "waiting", data: { waiting } });
+      }
     };
 
     app.post<{ Params: { key: string }; Body: NewComment }>(
@@ -90,11 +105,15 @@ export function conversationRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const comment = await transaction(ctx.db, async (tx) => {
+        const { ticket, posted } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write");
-          return post(tx, actor, { ticketId: ticket.id }, { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null }, request.body);
+          const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+          return { ticket, posted: await post(tx, actor, { ticketId: ticket.id }, place, request.body) };
         });
-        return reply.code(201).send({ comment: publicComment(comment) });
+        ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
+        if (posted.answered) ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
+        pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+        return reply.code(201).send({ comment: publicComment(posted.comment) });
       },
     );
 
@@ -123,11 +142,13 @@ export function conversationRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const comment = await transaction(ctx.db, async (tx) => {
+        const { document, posted } = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
-          return post(tx, actor, { documentId: document.id }, { projectId: document.projectId, delegateId: null }, request.body, document);
+          const place = { projectId: document.projectId, delegateId: null };
+          return { document, posted: await post(tx, actor, { documentId: document.id }, place, request.body, document) };
         });
-        return reply.code(201).send({ comment: publicComment(comment) });
+        pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } });
+        return reply.code(201).send({ comment: publicComment(posted.comment) });
       },
     );
 

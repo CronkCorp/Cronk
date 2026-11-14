@@ -259,7 +259,8 @@ export function coordinationRoutes(ctx: AppContext) {
             200: {
               description:
                 "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
-                "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON.",
+                "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON, " +
+                "and arrives again once a Comment answers it. Each new Comment arrives as a `comment` event whose data is `{ comment }`.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(401, 404, 410),
@@ -276,6 +277,31 @@ export function coordinationRoutes(ctx: AppContext) {
       },
     );
 
+    app.get(
+      "/api/agent-sessions/current/events",
+      {
+        schema: {
+          headers: sessionHeader,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of work as it starts waiting for the Agent, for as long as the Agent Session is live. It opens " +
+                "with a `ready` event; each Comment that starts waiting for the Agent arrives as a `waiting` event whose data is " +
+                "`{ waiting }`, a WaitingWork as JSON. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(400, 401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const agent = requireAgent(await requireActor(ctx, request));
+        requireSession(agent);
+        const canSee = async () => !!requireSession(await requireActor(ctx, request, { refreshSession: false }));
+        ctx.live.stream(reply, agentTopic(agent.agent.id), canSee);
+      },
+    );
+
     app.delete(
       "/api/agent-sessions/current",
       { schema: { headers: sessionHeader, response: { 204: noContent("The Agent Session has ended"), ...errors(400, 401, 403, 410) } } },
@@ -289,7 +315,10 @@ export function coordinationRoutes(ctx: AppContext) {
 }
 
 /** The live-update topic of one Ticket's changes. */
-const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
+export const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
+
+/** The live-update topic of the work starting to wait for one Agent, which each of its connected Agent Sessions watches. */
+export const agentTopic = (agentId: string) => `agent:${agentId}`;
 
 /** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
 async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {
