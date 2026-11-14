@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Agent, type AgentAccess, type User } from "./api.js";
+import { api, sessionName, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
 import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
 
 /** The signed-in User's Agents and their tokens; an Admin also sees everyone else's Agents. */
@@ -97,6 +97,7 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
         )}
       </div>
       <div className="agent-tokens">
+        <LiveSessions agent={a} />
         <Show state={tokens}>
           {(list) => (
             <ul className="token-list" aria-label={`Tokens of ${a.name}`}>
@@ -129,6 +130,27 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
   );
 }
 
+/** An Agent's live Agent Sessions: what is connected right now. */
+function LiveSessions(props: { agent: Agent }) {
+  const sessions: AgentSession[] = props.agent.sessions;
+  return (
+    <ul className="session-list" aria-label={`Live Agent Sessions of ${props.agent.name}`}>
+      {sessions.length === 0 && <li className="muted">Not connected.</li>}
+      {sessions.map((s) => (
+        <li key={s.id} className="session">
+          <span className="live-dot" aria-hidden="true" />
+          <span className="grow">
+            Connected, {sessionName(s.id)}{" "}
+            <span className="muted">
+              since {new Date(s.startedAt).toLocaleString()}, last heard from {new Date(s.lastSeenAt).toLocaleTimeString()}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Every other User's Agents, for an Admin to see. Only an Agent's Owner can change it. */
 function OthersAgents(props: { me: User }) {
   const [agents] = useLoad(() => api.agents(true), []);
@@ -143,9 +165,14 @@ function OthersAgents(props: { me: User }) {
           ) : (
             <ul className="rows" aria-label="Everyone else's Agents">
               {others.map((a) => (
-                <li key={a.id} className="row">
-                  <strong className="grow">{a.name}</strong>
-                  <span className="muted">owned by {a.owner.name}</span>
+                <li key={a.id} className="agent" aria-label={a.name}>
+                  <div className="row">
+                    <strong className="grow">{a.name}</strong>
+                    <span className="muted">owned by {a.owner.name}</span>
+                  </div>
+                  <div className="agent-tokens">
+                    <LiveSessions agent={a} />
+                  </div>
                 </li>
               ))}
             </ul>

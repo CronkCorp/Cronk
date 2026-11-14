@@ -1,17 +1,20 @@
+import type { AgentSession } from "./coordination/agent-sessions.js";
 import type { Agent } from "./identity/agents.js";
 import type { User } from "./identity/users.js";
 
 /**
  * Whoever performed an action: a User, or an Agent acting for its Owner through
- * one of its tokens. (Agent Sessions join the Agent case when they arrive.)
+ * one of its tokens, possibly within one of its Agent Sessions.
  */
 export type Actor = { kind: "user"; user: User } | AgentActor;
 
-/** An Agent calling through one of its tokens, with the Owner it acts for. */
-export type AgentActor = { kind: "agent" } & AgentCredential;
+/** An Agent calling through one of its tokens, with the Owner it acts for and the Agent Session it calls in, if any. */
+export type AgentActor = { kind: "agent"; session: AgentSession | null } & AgentCredential;
 
 /** What an Agent token stands for: the Agent, its Owner, and whether the token is read-only. */
 export interface AgentCredential {
+  /** The token's id. */
+  tokenId: string;
   agent: Agent;
   owner: User;
   readOnly: boolean;

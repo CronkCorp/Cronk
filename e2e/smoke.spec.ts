@@ -180,4 +180,18 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
 
   await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop (Agent of Ada) created the Ticket");
+
+  // An Agent Session (one per MCP connection) shows on the Agents page and in the history of what it changed.
+  const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
+  expect(started.status()).toBe(201);
+  const session = (await started.json()).session.id as string;
+  const renamed = await request.patch(`/api/tickets/${ticket.key}`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+    data: { title: "Filed and renamed by an Agent" },
+  });
+  expect(renamed.status()).toBe(200);
+  await page.reload();
+  await expect(page.getByRole("list", { name: "History" })).toContainText(`claude-laptop (session ${session.slice(0, 4)}, for Ada) renamed it`);
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" })).toContainText(`Connected, session ${session.slice(0, 4)}`);
 });
