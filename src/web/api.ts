@@ -14,6 +14,8 @@ import type {
   Guidance,
   GuidanceMerge,
   GuidanceVersion,
+  InboxItem,
+  InboxKind,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -58,6 +60,8 @@ export type {
   Guidance,
   GuidanceMerge,
   GuidanceVersion,
+  InboxItem,
+  InboxKind,
   IssuedAgentToken,
   Invitation,
   Member,
@@ -268,9 +272,25 @@ export const api = {
   postDocumentComment: (id: string, input: NewComment & { anchor?: { passage: string } }) =>
     request<{ comment: Comment }>("POST", `${documentPath(id)}/comments`, input).then((r) => r.comment),
 
+  /** The signed-in User's Inbox, narrowed by any of the filters given. */
+  inbox: (filter: InboxFilter = {}) => {
+    const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    return request<{ items: InboxItem[] }>("GET", `/api/inbox${query.size ? `?${query}` : ""}`).then((r) => r.items);
+  },
+  /** Sends a Ticket under review back to a Started Status (the Project's first, unless named), with a Comment. */
+  sendBack: (key: string, input: { comment: string; statusId?: string }) =>
+    request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
+
   ticketHistory: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
 };
+
+/** Narrows the Inbox: an item kind, a Project key, an Agent id. */
+export interface InboxFilter {
+  kind?: InboxKind;
+  project?: string;
+  agent?: string;
+}
 
 /** A Comment to post: its Markdown, and what it replies to, if anything. */
 export interface NewComment {
@@ -301,6 +321,9 @@ function watch<Events>(path: string, handlers: { ready: () => void; on: { [E in 
   }
   return () => source.close();
 }
+
+/** Watches the signed-in User's Inbox; `changed` arrives whenever it may have changed (see `watch`). */
+export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/inbox/events", handlers);
 
 /** Watches one Ticket's changes as they happen (see `watch`). */
 export const watchTicket = (key: string, handlers: Parameters<typeof watch<TicketEvents>>[1]) =>
