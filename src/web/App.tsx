@@ -1,24 +1,40 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, type User } from "./api.js";
 
-type State = { kind: "loading" } | { kind: "setup" } | { kind: "signIn" } | { kind: "signedIn"; user: User };
+type State =
+  | { kind: "loading" }
+  | { kind: "unavailable"; message: string }
+  | { kind: "setup" }
+  | { kind: "signIn" }
+  | { kind: "signedIn"; user: User };
+
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
-    api
-      .me()
-      .then((user) => setState({ kind: "signedIn", user }))
-      .catch(async (err) => {
+    const start = async (): Promise<State> => {
+      try {
+        return { kind: "signedIn", user: await api.me() };
+      } catch (err) {
         if (!(err instanceof ApiError) || err.status !== 401) throw err;
-        setState({ kind: (await api.setupRequired()) ? "setup" : "signIn" });
-      });
+        return { kind: (await api.setupRequired()) ? "setup" : "signIn" };
+      }
+    };
+    start().then(setState, (err) => setState({ kind: "unavailable", message: messageOf(err) }));
   }, []);
 
   switch (state.kind) {
     case "loading":
       return null;
+    case "unavailable":
+      return (
+        <AuthCard title="Cronk is unavailable" intro="It could not be reached. Try again in a moment.">
+          <p className="error" role="alert">{state.message}</p>
+          <button onClick={() => location.reload()}>Try again</button>
+        </AuthCard>
+      );
     case "setup":
       return <SetupPage onDone={(user) => setState({ kind: "signedIn", user })} />;
     case "signIn":
@@ -39,7 +55,7 @@ function useSubmit<T>(action: () => Promise<T>, onDone: (result: T) => void) {
     try {
       onDone(await action());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(messageOf(err));
     } finally {
       setBusy(false);
     }
@@ -116,16 +132,17 @@ function SignInPage(props: { onDone: (user: User) => void }) {
 
 function Shell(props: { user: User; onSignedOut: () => void }) {
   const [workspaceName, setWorkspaceName] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
   const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
-    void api.workspace().then((w) => setWorkspaceName(w.name));
+    api.workspace().then(
+      (w) => setWorkspaceName(w.name),
+      (err) => setLoadError(messageOf(err)),
+    );
   }, []);
 
-  const signOut = async () => {
-    await api.signOut();
-    props.onSignedOut();
-  };
+  const signOut = () => api.signOut().then(props.onSignedOut, (err) => setLoadError(messageOf(err)));
 
   return (
     <div className="shell">
@@ -140,6 +157,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
         </div>
       </header>
       <main className="content">
+        {loadError && <p className="error" role="alert">{loadError}</p>}
         {renaming && workspaceName !== undefined ? (
           <RenameWorkspace
             current={workspaceName}
