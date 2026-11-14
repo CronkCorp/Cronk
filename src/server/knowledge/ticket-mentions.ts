@@ -20,8 +20,8 @@ function linkableText(node: Nodes): string[] {
  * The Ticket keys a Document's Version mentions, without repeats: those in its title, and those
  * its Markdown body shows as links to Tickets, as the web client renders it.
  */
-export function ticketKeysIn(title: string, body: string): string[] {
-  const texts = [title, ...linkableText(fromMarkdown(body))];
+export function ticketKeysIn(version: { title: string; body: string }): string[] {
+  const texts = [version.title, ...linkableText(fromMarkdown(version.body))];
   return [...new Set(texts.flatMap((text) => [...text.matchAll(TICKET_REFERENCE)].map((m) => m[0])))];
 }
 
@@ -30,12 +30,26 @@ export async function recordTicketMentions(db: Queryable, documentId: string, ve
   await db.query("DELETE FROM document_ticket_mentions WHERE document_id = $1", [documentId]);
   await db.query("INSERT INTO document_ticket_mentions (document_id, ticket_key) SELECT $1, unnest($2::text[])", [
     documentId,
-    ticketKeysIn(version.title, version.body),
+    ticketKeysIn(version),
   ]);
 }
 
-/** Records the mentions of every Document from its current Version, for a database that didn't record them yet. */
+/** How many Documents the backfill reads at a time, so a large Workspace isn't held in memory at once. */
+const BACKFILL_BATCH = 200;
+
+/**
+ * Records the mentions of every Document from its current Version, for a database that didn't
+ * record them yet. It parses as `ticketKeysIn` does now, not as it did when its migration shipped:
+ * if what counts as a mention changes, add a migration that runs it again.
+ */
 export async function backfillTicketMentions(db: Queryable): Promise<void> {
-  const { rows } = await db.query<{ id: string; title: string; body: string }>("SELECT id, title, body FROM documents");
-  for (const d of rows) await recordTicketMentions(db, d.id, d);
+  for (let after = "00000000-0000-0000-0000-000000000000"; ; ) {
+    const { rows } = await db.query<{ id: string; title: string; body: string }>(
+      "SELECT id, title, body FROM documents WHERE id > $1 ORDER BY id LIMIT $2",
+      [after, BACKFILL_BATCH],
+    );
+    for (const d of rows) await recordTicketMentions(db, d.id, d);
+    if (rows.length < BACKFILL_BATCH) return;
+    after = rows[rows.length - 1]!.id;
+  }
 }

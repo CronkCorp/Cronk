@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, startInstalledCronk } from "./harness.js";
+import { delegatedSetup, joinAs, startInstalledCronk, type Client } from "./harness.js";
 
-/** The titles of the Documents a Ticket lists as linked to it, as `admin` reads the Ticket. */
-async function linkedTitles(admin: { get(path: string): Promise<{ body: any }> }, key: string): Promise<string[]> {
-  return (await admin.get(`/api/tickets/${key}`)).body.documents.map((d: { title: string }) => d.title);
+/** The titles of a Ticket detail's linked Documents. */
+const titles = (detail: { documents: { title: string }[] }) => detail.documents.map((d) => d.title);
+
+/** The titles of the Documents a Ticket lists as linked to it, as `reader` reads the Ticket. */
+async function linkedTitles(reader: Client, key: string): Promise<string[]> {
+  return titles((await reader.get(`/api/tickets/${key}`)).body);
 }
 
 describe("The Documents that mention a Ticket", () => {
@@ -72,7 +75,7 @@ describe("The Documents that mention a Ticket", () => {
 
     await admin.patch("/api/workspace", { agentAccess: "none" });
     const agent = await session();
-    expect((await agent.post("/api/tickets/CRONK-1/claim")).body.documents.map((d: { title: string }) => d.title)).toEqual(["Secret notes"]);
+    expect(titles((await agent.post("/api/tickets/CRONK-1/claim")).body)).toEqual(["Secret notes"]);
   });
 
   it("are found for Documents written before Cronk recorded mentions, after an upgrade", async () => {
