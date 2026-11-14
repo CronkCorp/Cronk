@@ -219,6 +219,8 @@ describe("The Inbox's live updates", () => {
     expect(await stream.next()).toMatchObject({ event: "changed" });
     await admin.patch(`/api/users/${bobId}`, { role: "admin" });
     expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.patch(`/api/users/${bobId}`, { role: "member" });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
   });
 
   it("tell the Users with items in a Project when it becomes private or open", async () => {
@@ -267,7 +269,7 @@ describe("The Inbox's live updates", () => {
     expect(await adasStream.next()).toMatchObject({ event: "changed" });
   });
 
-  it("tell a Ticket's Assignee when a User changes or deletes its Report", async () => {
+  it("tell a Ticket's Assignee when a User edits, restores or deletes its Report", async () => {
     const { cronk, admin, session } = await delegatedSetup();
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
