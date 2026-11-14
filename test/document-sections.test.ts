@@ -205,6 +205,24 @@ describe("merging an edit with the current Version", () => {
     expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\na\n\n## Notes\n\nb changed\n" });
   });
 
+  it("pairs a repeated heading with the base section whose content it kept, not merely with the most sections of that heading", async () => {
+    const base = "## Notes\n\na\n\n## Notes\n\nb\n";
+    const { admin, id } = await editedUnderneath(base, "## Notes\n\na changed\n\n## Notes\n\nb\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: "## Notes\n\nfirst\n\n## Notes\n\na\n" });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\na changed\n" });
+  });
+
+  it("pairs empty sections under a repeated heading with the empty sections they were", async () => {
+    const base = "## Notes\n\n## Notes\n";
+    const { admin, id } = await editedUnderneath(base, "## Notes\n\n## Notes\n\nfilled\n");
+
+    const res = await admin.post(`/api/documents/${id}/merge`, { baseVersion: 1, body: `## Notes\n\nfirst\n\n${base}` });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, body: "## Notes\n\nfirst\n\n## Notes\n\n## Notes\n\nfilled\n" });
+  });
+
   it("combines a renamed heading with an edit to that section's content", async () => {
     const base = "## Setup\n\nInstall it.\nThen run it.\n\n## Usage\n\nUse it.\n";
     const { admin, id } = await editedUnderneath(base, base.replace("Install it.", "Download it."));

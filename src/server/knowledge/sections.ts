@@ -114,7 +114,7 @@ export interface MergedSection {
 
 /** A section of one Version's body: everything from one heading line up to the next heading, of any level. */
 interface Chunk {
-  /** Which section it is, the same across Versions for sections paired by `pairedWithBase`; "" before the first heading. */
+  /** Which section it is, the same across Versions for sections paired by `keyAgainstBase`; "" before the first heading. */
   key: string;
   heading: string | null;
   text: string;
@@ -122,7 +122,7 @@ interface Chunk {
   last: boolean;
 }
 
-/** `markdown` cut at every heading, always starting with the (perhaps empty) text before the first one; keys are left to `pairedWithBase`. */
+/** `markdown` cut at every heading, always starting with the (perhaps empty) text before the first one; keys are left to `keyAgainstBase`. */
 function chunksOf(markdown: string): Chunk[] {
   const headings = headingsOf(markdown);
   const chunks: Chunk[] = [{ key: "", heading: null, text: markdown.slice(0, headings[0]?.start ?? markdown.length), last: headings.length === 0 }];
@@ -136,10 +136,10 @@ function chunksOf(markdown: string): Chunk[] {
 /** The lines under a section's heading that say something, ignoring surrounding space. */
 const contentLines = (chunk: Chunk) => chunk.text.split("\n").slice(chunk.heading === null ? 0 : 1).map((l) => l.trim()).filter((l) => l !== "");
 
-/** How alike two sections' contents are, from 0 to 1: the share of their lines they have in common. Empty contents are not alike. */
+/** How alike two sections' contents are, from 0 to 1: the share of their lines they have in common; two empty contents are alike. */
 function similarity(a: Chunk, b: Chunk): number {
   const [x, y] = [contentLines(a), contentLines(b)];
-  if (x.length + y.length === 0) return 0;
+  if (x.length + y.length === 0) return 1;
   const counts = new Map<string, number>();
   for (const line of x) counts.set(line, (counts.get(line) ?? 0) + 1);
   let common = 0;
@@ -153,56 +153,66 @@ function similarity(a: Chunk, b: Chunk): number {
   return (2 * common) / (x.length + y.length);
 }
 
-/** How well a side's section pairs with a base section: sharing the heading counts most, then alike content; 0 when they don't pair. */
+/** How alike a renamed section's content must stay to still pair with the base section it came from. */
+const RENAME_SIMILARITY = 0.5;
+
+/**
+ * How well a side's section pairs with a base section; 0 when they don't pair. A shared heading
+ * pairs at least as well as any rename, and its content weighs double, so one section that kept its
+ * content outscores two that only kept their headings.
+ */
 function pairScore(base: Chunk, side: Chunk): number {
-  if (base.heading === side.heading) return 2 + similarity(base, side);
-  // A renamed heading still pairs with the section it came from, if its content mostly stayed.
   const alike = similarity(base, side);
-  return alike >= 0.5 ? alike : 0;
+  if (base.heading === side.heading) return 1 + 2 * alike;
+  // A renamed heading still pairs with the section it came from, if it had content and most of it stayed.
+  return contentLines(base).length > 0 && alike >= RENAME_SIMILARITY ? alike : 0;
 }
 
 /**
- * Keys `base` by position and each section of `side` after the base section it came from: first by
- * a best-scoring alignment that keeps both orders, then by heading among what is left (a section
- * moved elsewhere). Sections `side` added are keyed by their heading and how often it was added, so
- * both sides adding the same section pair too.
+ * Keys `base` by position, then keys each section of `side` after the base section it came from:
+ * first by a best-scoring alignment that keeps both orders, then by heading among what is left (a
+ * section moved elsewhere). Sections `side` added are keyed by their heading and how often it was
+ * added, so both sides adding the same section pair too.
  */
-function pairedWithBase(base: Chunk[], side: Chunk[]): void {
+function keyAgainstBase(base: Chunk[], side: Chunk[]): void {
   base.forEach((c, i) => (c.key = i === 0 ? "" : `base\u0000${i}`));
   side[0]!.key = "";
   const [n, m] = [base.length, side.length];
+  const scores = base.map((b) => side.map((c) => pairScore(b, c)));
   // best[i][j]: the highest total score aligning base[i..] with side[j..], preambles excluded.
   const best = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 1; i--) {
     for (let j = m - 1; j >= 1; j--) {
-      const score = pairScore(base[i]!, side[j]!);
+      const score = scores[i]![j]!;
       best[i]![j] = Math.max(best[i + 1]![j]!, best[i]![j + 1]!, score > 0 ? score + best[i + 1]![j + 1]! : 0);
     }
   }
-  const paired = new Set<number>();
+  const pairedBase = new Set<number>();
+  const pairedSide = new Set<number>([0]);
   for (let i = 1, j = 1; i < n && j < m; ) {
-    const score = pairScore(base[i]!, side[j]!);
+    const score = scores[i]![j]!;
     if (score > 0 && best[i]![j] === score + best[i + 1]![j + 1]!) {
       side[j]!.key = base[i]!.key;
-      paired.add(i);
+      pairedBase.add(i);
+      pairedSide.add(j);
       i++;
       j++;
     } else if (best[i]![j] === best[i + 1]![j]) i++;
     else j++;
   }
   const added = new Map<string, number>();
-  for (const chunk of side.slice(1)) {
-    if (chunk.key !== "") continue;
-    const moved = base.findIndex((b, i) => i > 0 && !paired.has(i) && b.heading === chunk.heading);
+  side.forEach((chunk, j) => {
+    if (pairedSide.has(j)) return;
+    const moved = base.findIndex((b, i) => i > 0 && !pairedBase.has(i) && b.heading === chunk.heading);
     if (moved > 0) {
       chunk.key = base[moved]!.key;
-      paired.add(moved);
-      continue;
+      pairedBase.add(moved);
+      return;
     }
     const count = (added.get(chunk.heading!) ?? 0) + 1;
     added.set(chunk.heading!, count);
     chunk.key = `added\u0000${chunk.heading}\u0000${count}`;
-  }
+  });
 }
 
 /** Whether two sides' texts say the same, ignoring trailing blank space; undefined (no such part) only equals undefined. */
@@ -217,7 +227,7 @@ function mergePart<T extends { text: string }>(base: T | undefined, mine: T | un
 }
 
 /** A section cut into its heading line (with its line break) and what follows it. */
-function split(chunk: Chunk): { head: Chunk; rest: Chunk } {
+function headAndRest(chunk: Chunk): { head: Chunk; rest: Chunk } {
   const cut = chunk.heading === null ? 0 : chunk.text.indexOf("\n") + 1 || chunk.text.length;
   return { head: { ...chunk, text: chunk.text.slice(0, cut) }, rest: { ...chunk, text: chunk.text.slice(cut) } };
 }
@@ -229,7 +239,7 @@ function split(chunk: Chunk): { head: Chunk; rest: Chunk } {
 function mergeSection(base: Chunk | undefined, mine: Chunk | undefined, theirs: Chunk | undefined): { merged: Chunk | undefined } | "conflict" {
   const whole = mergePart(base, mine, theirs);
   if (whole !== "conflict" || !base || !mine || !theirs) return whole;
-  const [b, m, t] = [base, mine, theirs].map(split) as [ReturnType<typeof split>, ReturnType<typeof split>, ReturnType<typeof split>];
+  const [b, m, t] = [base, mine, theirs].map(headAndRest) as [ReturnType<typeof headAndRest>, ReturnType<typeof headAndRest>, ReturnType<typeof headAndRest>];
   const head = mergePart(b.head, m.head, t.head);
   const rest = mergePart(b.rest, m.rest, t.rest);
   if (head === "conflict" || rest === "conflict") return "conflict";
@@ -300,8 +310,8 @@ export function mergeEdits(base: { title: string; body: string }, mine: { title:
 /** The sections of a three-way merge of bodies, in their merged order; see `mergeEdits`. */
 function mergeBodies(base: string, mine: string, theirs: string): MergedSection[] {
   const [b, m, t] = [base, mine, theirs].map(chunksOf) as [Chunk[], Chunk[], Chunk[]];
-  pairedWithBase(b, m);
-  pairedWithBase(b, t);
+  keyAgainstBase(b, m);
+  keyAgainstBase(b, t);
   const order = mergedOrder(...([b, m, t].map((chunks) => chunks.map((c) => c.key)) as [string[], string[], string[]]));
   if (!order) return [{ heading: null, text: null, conflict: sectionConflict(base, mine, theirs) }];
   const find = (chunks: Chunk[], key: string) => chunks.find((c) => c.key === key);
