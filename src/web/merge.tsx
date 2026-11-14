@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
-import type { Conflict, MergedSection } from "./api.js";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
 import { diffLines } from "./diff.js";
-import { TextArea } from "./ui.js";
+import { TextArea, messageOf } from "./ui.js";
 
 /**
  * Settling a save refused because someone saved since: what changed between two Versions, and the
@@ -48,6 +48,124 @@ export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: Sa
       </div>
     </div>
   );
+}
+
+/** A draft as settling a stale save sees it: its text, and for a Document its title. */
+export interface Draft {
+  title?: string;
+  text: string;
+}
+
+/** A merge of a refused draft, adapted from a Document's or Guidance's to one shape. */
+export interface StaleMerge {
+  /** The Version editing started from. */
+  base: SavedText;
+  /** The Version someone else saved meanwhile, which the merge is onto. */
+  theirs: SavedText;
+  /** Who saved their Version. */
+  by: string;
+  /** The merge, for `ResolveMerge` to settle. */
+  merge: Mergeable;
+  /** The merged draft, or null when the merge left conflicts for the User to settle. */
+  merged: Draft | null;
+}
+
+/** Someone else's save that refused this one, and how settling it stands. */
+interface OtherEdit extends Pick<StaleMerge, "base" | "theirs" | "by"> {
+  /** Whether the merge left conflicts for the User to settle. */
+  conflicted: boolean;
+  /** The User left the conflict unsettled and went back to their draft. */
+  wentBack?: boolean;
+}
+
+/**
+ * The draft of an editor whose save names the Version editing started from, and what to do when
+ * that save is refused because someone saved since: show their edit, and merge it into the draft
+ * section by section, leaving sections both changed differently for the User to choose or combine.
+ * Documents and Guidance share it; each passes its own save and merge calls, adapted to a `Draft`.
+ * The merge call runs once per refused save and may also tell the page what the Version now is.
+ * Hands back the draft, the save handler, and the props for `StaleSaveNotice` and `ResolveMerge`
+ * while there is a refused save to settle.
+ */
+export function useStaleSave<D extends Draft, T>(options: {
+  draft: D;
+  baseVersion: number;
+  save: (draft: D, baseVersion: number) => Promise<T>;
+  merge: (draft: D, baseVersion: number) => Promise<StaleMerge>;
+  onSaved: (saved: T) => void;
+}) {
+  const [draft, setDraft] = useState<D>(options.draft);
+  const [base, setBase] = useState(options.baseVersion);
+  const [other, setOther] = useState<OtherEdit>();
+  const [resolving, setResolving] = useState<{ merge: Mergeable; onto: number }>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  /** Replaces the draft's text, and its title when it has one. */
+  const replaceDraft = (text: string, title: string | undefined) =>
+    setDraft((d) => ({ ...d, text, ...(d.title !== undefined && title !== undefined && { title }) }));
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(undefined);
+    try {
+      options.onSaved(await options.save(draft, base));
+    } catch (err) {
+      if (!staleVersionOf(err)) {
+        setError(messageOf(err));
+        return;
+      }
+      try {
+        const m = await options.merge(draft, base);
+        const { base: started, theirs, by } = m;
+        setOther({ base: started, theirs, by, conflicted: m.merged === null });
+        if (m.merged) {
+          replaceDraft(m.merged.text, m.merged.title);
+          setBase(m.theirs.number);
+        } else {
+          setResolving({ merge: m.merge, onto: m.theirs.number });
+        }
+      } catch (mergeErr) {
+        setError(messageOf(mergeErr));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const takeTheirs = (theirs: SavedText) => {
+    replaceDraft(theirs.body, theirs.title);
+    setBase(theirs.number);
+    setResolving(undefined);
+    setOther(undefined);
+  };
+
+  // The draft is still based on the Version editing started from, so its next save is refused and merges again.
+  const backToDraft = () => {
+    setResolving(undefined);
+    setOther((o) => o && { ...o, wentBack: true });
+  };
+
+  const notice: Parameters<typeof StaleSaveNotice>[0] | undefined = other && {
+    by: other.by,
+    base: other.base,
+    theirs: other.theirs,
+    stage: resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged",
+    onDiscardMine: () => takeTheirs(other.theirs),
+    disabled: busy,
+  };
+  const resolve: Parameters<typeof ResolveMerge>[0] | undefined = resolving && {
+    merge: resolving.merge,
+    onResolved: (resolved) => {
+      replaceDraft(resolved.body, resolved.title);
+      setBase(resolving.onto);
+      setResolving(undefined);
+    },
+    onBack: backToDraft,
+  };
+
+  return { draft, setDraft, save, busy, error, notice, resolve };
 }
 
 /** One conflicting part: base, mine and theirs side by side, and the text to keep, which starts as mine. */
