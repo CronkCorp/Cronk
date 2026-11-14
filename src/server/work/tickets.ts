@@ -1,6 +1,6 @@
 import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import type { Project, Status } from "./projects.js";
+import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 
 export interface Ticket {
   id: string;
@@ -80,6 +80,9 @@ export async function findTicketById(db: Queryable, id: string): Promise<Ticket 
   return rows[0] && toTicket(rows[0]);
 }
 
+/** `<PROJECT KEY>-<n>`; the number is capped at 9 digits so it fits the integer column. */
+const TICKET_KEY = new RegExp(`^(${PROJECT_KEY_PATTERN})-([1-9][0-9]{0,8})$`);
+
 /**
  * Finds a Ticket by its key, such as `CRONK-12`, ignoring case. With `forUpdate`,
  * locks it until the transaction ends so concurrent edits see each other's changes.
@@ -90,7 +93,7 @@ export async function findTicketByKey(
   key: string,
   opts: { forUpdate?: boolean } = {},
 ): Promise<Ticket | undefined> {
-  const match = /^([A-Za-z][A-Za-z0-9]{1,9})-([1-9][0-9]{0,8})$/.exec(key);
+  const match = TICKET_KEY.exec(key);
   if (!match) return undefined;
   const { rows } = await db.query<TicketRow>(
     `${SELECT_TICKETS} WHERE p.workspace_id = $1 AND p.key = $2 AND t.number = $3${opts.forUpdate ? " FOR UPDATE OF t" : ""}`,

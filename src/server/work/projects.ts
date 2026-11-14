@@ -14,6 +14,9 @@ const DEFAULT_STATUSES: { name: string; category: StatusCategory }[] = [
   { name: "Canceled", category: "canceled" },
 ];
 
+/** A Project key: a letter then letters or digits, 2 to 10 characters. Stored upper case; Ticket keys are built from it. */
+export const PROJECT_KEY_PATTERN = "[A-Za-z][A-Za-z0-9]{1,9}";
+
 export interface Project {
   id: string;
   name: string;

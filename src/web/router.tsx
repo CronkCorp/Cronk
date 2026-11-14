@@ -1,6 +1,6 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-
 /** A minimal client-side router over the History API; the server answers every page path with the app shell. */
+
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 
 const listeners = new Set<() => void>();
 

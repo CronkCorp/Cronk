@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { startInstalledCronk, type Client } from "./harness.js";
 
-async function project(client: Client, key: string) {
+async function createProject(client: Client, key: string) {
   const res = await client.post("/api/projects", { name: key, key });
   if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
 }
@@ -9,8 +9,8 @@ async function project(client: Client, key: string) {
 describe("Tickets", () => {
   it("get keys numbered in order per Project", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
-    await project(admin, "WEB");
+    await createProject(admin, "CRONK");
+    await createProject(admin, "WEB");
 
     const keys = [];
     for (const [key, title] of [["CRONK", "First"], ["CRONK", "Second"], ["WEB", "Other"], ["CRONK", "Third"]] as const) {
@@ -23,7 +23,7 @@ describe("Tickets", () => {
 
   it("never share a key when created at the same time", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
+    await createProject(admin, "CRONK");
 
     const results = await Promise.all(Array.from({ length: 10 }, (_, i) => admin.post("/api/projects/CRONK/tickets", { title: `T${i}` })));
     const keys = results.map((r) => r.body.ticket.key).sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
@@ -32,7 +32,7 @@ describe("Tickets", () => {
 
   it("have a title and Markdown description that can be viewed and edited", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
+    await createProject(admin, "CRONK");
     await admin.post("/api/projects/CRONK/tickets", { title: " Add login ", description: "# Why\n\nUsers need *access*." });
 
     const viewed = await admin.get("/api/tickets/CRONK-1");
@@ -53,7 +53,7 @@ describe("Tickets", () => {
 
   it("refuse a blank title, and answer 404 for keys that don't exist", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
+    await createProject(admin, "CRONK");
     expect((await admin.post("/api/projects/CRONK/tickets", { title: "  " })).status).toBe(400);
     await admin.post("/api/projects/CRONK/tickets", { title: "Real" });
     expect((await admin.patch("/api/tickets/CRONK-1", { title: "" })).status).toBe(400);
@@ -66,7 +66,7 @@ describe("Tickets", () => {
 
   it("can be moved by a User to any of their Project's Statuses", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
+    await createProject(admin, "CRONK");
     await admin.post("/api/projects/CRONK/tickets", { title: "Ship it" });
     const { statuses } = (await admin.get("/api/projects/CRONK")).body;
 
@@ -80,8 +80,8 @@ describe("Tickets", () => {
 
   it("can't be moved to another Project's Status", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
-    await project(admin, "WEB");
+    await createProject(admin, "CRONK");
+    await createProject(admin, "WEB");
     await admin.post("/api/projects/CRONK/tickets", { title: "Stay home" });
     const webDone = (await admin.get("/api/projects/WEB")).body.statuses.find((s: { name: string }) => s.name === "Done");
 
@@ -93,8 +93,8 @@ describe("Tickets", () => {
 
   it("are listed per Project in key order, each with its Status, for the list and board views", async () => {
     const { admin } = await startInstalledCronk();
-    await project(admin, "CRONK");
-    await project(admin, "WEB");
+    await createProject(admin, "CRONK");
+    await createProject(admin, "WEB");
     const [, todo] = (await admin.get("/api/projects/CRONK")).body.statuses;
     for (let i = 1; i <= 11; i++) await admin.post("/api/projects/CRONK/tickets", { title: `Ticket ${i}` });
     await admin.post("/api/projects/WEB/tickets", { title: "Elsewhere" });

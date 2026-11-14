@@ -2,12 +2,20 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
-import { findProjectByKey, insertProject, listProjects, listStatuses, updateProject, type Project } from "./projects.js";
 import { userActor } from "../actor.js";
+import type { Queryable } from "../db/database.js";
+import {
+  findProjectByKey,
+  insertProject,
+  listProjects,
+  listStatuses,
+  PROJECT_KEY_PATTERN,
+  updateProject,
+  type Project,
+} from "./projects.js";
 import { findTicketByKey, insertTicket, listHistory, listTickets, updateTicket, type Ticket, type TicketEdit } from "./tickets.js";
 
-/** A Project key: a letter then letters or digits, 2 to 10 characters. Stored upper case. */
-const projectKey = { type: "string", pattern: "^[A-Za-z][A-Za-z0-9]{1,9}$" } as const;
+const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
 /** A Ticket title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -50,7 +58,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/projects/:key", async (request) => {
       const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx, user.workspaceId, request.params.key);
+      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
       return { project, statuses: await listStatuses(ctx.db, project.id) };
     });
 
@@ -67,7 +75,7 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const project = await projectOr404(ctx, user.workspaceId, request.params.key);
+        const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
         const { name, archived } = request.body;
         const changes = { ...(name !== undefined && { name: name.trim() }), ...(archived !== undefined && { archived }) };
         return { project: await updateProject(ctx.db, project.id, changes, ctx.clock.now()) };
@@ -76,7 +84,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.get<{ Params: { key: string } }>("/api/projects/:key/tickets", async (request) => {
       const user = await requireUser(ctx, request);
-      const project = await projectOr404(ctx, user.workspaceId, request.params.key);
+      const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
       return { tickets: await listTickets(ctx.db, project.id) };
     });
 
@@ -94,18 +102,19 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
-        const project = await projectOr404(ctx, user.workspaceId, request.params.key);
-        const [firstStatus] = await listStatuses(ctx.db, project.id);
-        const ticket = await transaction(ctx.db, (tx) =>
-          insertTicket(tx, {
+        const ticket = await transaction(ctx.db, async (tx) => {
+          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          // New Tickets start in the Project's first Status.
+          const [firstStatus] = await listStatuses(tx, project.id);
+          return insertTicket(tx, {
             project,
             title: request.body.title.trim(),
             description: request.body.description ?? "",
             status: firstStatus!,
             actor: userActor(user),
             now: ctx.clock.now(),
-          }),
-        );
+          });
+        });
         return reply.code(201).send({ ticket });
       },
     );
@@ -155,8 +164,8 @@ export function workRoutes(ctx: AppContext) {
   };
 }
 
-async function projectOr404(ctx: AppContext, workspaceId: string, key: string): Promise<Project> {
-  const project = await findProjectByKey(ctx.db, workspaceId, key);
+async function projectOr404(db: Queryable, workspaceId: string, key: string): Promise<Project> {
+  const project = await findProjectByKey(db, workspaceId, key);
   if (!project) throw new HttpError(404, "No such Project");
   return project;
 }
