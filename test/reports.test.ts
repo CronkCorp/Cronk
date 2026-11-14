@@ -229,7 +229,7 @@ describe("Replacing a section of or restoring a Report", () => {
   });
 });
 
-describe("A User", () => {
+describe("A User changing a Report", () => {
   it("edits and restores a Report like any Document, without a Claim", async () => {
     const { admin, session } = await delegatedSetup();
     const agent = await session();

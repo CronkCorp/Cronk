@@ -72,10 +72,23 @@ export function knowledgeRoutes(ctx: AppContext) {
      * Refuses an Agent's edit or restore of a Report unless it calls from the Agent Session holding
      * the live Claim on the Report's Ticket (a 409), so a Report stays the record of its hand-over.
      */
-    const requireReportRewriter = async (tx: Queryable, actor: Actor, document: Document) => {
+    const requireClaimToChangeReport = async (tx: Queryable, actor: Actor, document: Document) => {
       if (document.ticketKey === null || actor.kind !== "agent") return;
       const ticket = (await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey))!;
       await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "changing its Report");
+    };
+
+    /**
+     * Locks the Document `id` for a delete by `actor`, who has Write where it belongs. Only a User
+     * may delete a Report (a 403), and its Ticket is locked first, as a move into In Review locks
+     * it before checking for a Report, so the two can't interleave.
+     */
+    const lockForDelete = async (tx: Queryable, actor: Actor, id: string) => {
+      const document = await documentFor(tx, actor, id, "write");
+      if (document.ticketKey === null) return documentFor(tx, actor, id, "write", { forUpdate: true });
+      if (actor.kind === "agent") throw new HttpError(403, `A Report records the work handed over on ${document.ticketKey}, so only a User may delete it`);
+      await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey, { forUpdate: true });
+      return documentFor(tx, actor, id, "write", { forUpdate: true });
     };
 
     app.get<{ Params: { key: string } }>(
@@ -198,7 +211,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
-          await requireReportRewriter(tx, actor, current);
+          await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           return saveVersion(tx, current, {
             title: request.body.title?.trim() ?? current.title,
@@ -254,7 +267,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
-          await requireReportRewriter(tx, actor, current);
+          await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           const replaced = replaceSection(current.body, request.body.heading, request.body.body);
           if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
@@ -355,15 +368,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await transaction(ctx.db, async (tx) => {
-          const found = await documentFor(tx, actor, request.params.id, "write");
-          if (found.ticketKey !== null) {
-            if (actor.kind === "agent") {
-              throw new HttpError(403, `A Report records the work handed over on ${found.ticketKey}, so only a User may delete it`);
-            }
-            // Lock the Report's Ticket before the Report, as a move into In Review does before checking for a Report.
-            await findTicketByKey(tx, actingUser(actor).workspaceId, found.ticketKey, { forUpdate: true });
-          }
-          const document = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          const document = await lockForDelete(tx, actor, request.params.id);
           await requireCurrent(tx, document, request.query.baseVersion, "delete");
           if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
             throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
@@ -423,7 +428,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
-          await requireReportRewriter(tx, actor, current);
+          await requireClaimToChangeReport(tx, actor, current);
           const earlier = await requireVersion(tx, current, request.params.number);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           return saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
