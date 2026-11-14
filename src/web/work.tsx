@@ -116,6 +116,9 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
 
 export type ProjectView = "list" | "board" | "statuses" | "guidance";
 
+/** Whether a view shows the Project's Tickets, and so takes a filter: the list and the board do. */
+const showsTickets = (view: ProjectView) => view === "list" || view === "board";
+
 /** The filter fields a Project page keeps in its address, in the order the filter bar shows them. */
 const FILTER_FIELDS = ["status", "category", "assignee", "priority", "label"] as const;
 
@@ -133,7 +136,7 @@ export function filterFrom(search: URLSearchParams): TicketFilter {
 function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter): string {
   const query = new URLSearchParams();
   if (view !== "list") query.set("view", view);
-  if (view === "list" || view === "board") for (const field of FILTER_FIELDS) if (filter[field]) query.set(field, filter[field]);
+  if (showsTickets(view)) for (const field of FILTER_FIELDS) if (filter[field]) query.set(field, filter[field]);
   return `/projects/${projectKey}${query.size ? `?${query}` : ""}`;
 }
 
@@ -142,7 +145,7 @@ function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter
  * filters in its address; or its Statuses to tailor, counting all its Tickets.
  */
 export function ProjectPage(props: { projectKey: string; view: ProjectView; filter: TicketFilter; me: User }) {
-  const filter = props.view === "list" || props.view === "board" ? props.filter : {};
+  const filter = showsTickets(props.view) ? props.filter : {};
   const filterKey = JSON.stringify(filter);
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
@@ -224,7 +227,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
               intro="Standing instructions for Agents working in this Project, on top of the Workspace Guidance. Every Agent Session gets them when it connects."
             />
           )}
-          {(props.view === "list" || props.view === "board") && (
+          {showsTickets(props.view) && (
             <FilterBar
               projectKey={p.key}
               statuses={statuses}
