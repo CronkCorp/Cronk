@@ -32,7 +32,7 @@ const MAX_REOPEN_DELAY_MS = 30_000;
  * backing off while it keeps failing. The API ends a stream when the caller loses access, but
  * also when it can't check that access (a database blip), so opening it again is what tells the
  * two apart: the API refusing it with a client error (a revoked token, an ended Agent Session)
- * stops it for good. A stream is opened again from the id of the last event that had one
+ * stops it for good. A stream is opened again from the furthest id of the events that had one
  * (`Last-Event-ID`), so the API can first send what was missed meanwhile, before its `ready`.
  */
 export async function followEvents(baseUrl: string, caller: Caller, path: string, onEvent: (event: LiveEvent) => void): Promise<() => void> {
@@ -69,8 +69,8 @@ export async function followEvents(baseUrl: string, caller: Caller, path: string
 }
 
 /**
- * Opens the stream once from `last.id`, if there is one, keeping it up to date with the id of
- * each event that has one, and handing `setClose` a function that closes it as soon as there is one.
+ * Opens the stream once from `last.id`, if there is one, keeping it at the furthest id of the
+ * events that have one, and handing `setClose` a function that closes it as soon as there is one.
  * Answers how it went: open, with a promise that settles when the stream ends; refused by the
  * API with a client error, so opening it again would be refused too; or failed otherwise (the API
  * answered with a server error, couldn't be reached, or wasn't ready in time).
@@ -100,7 +100,8 @@ async function openStream(
     }
     const events = readEvents(res)[Symbol.asyncIterator]();
     const take = (event: LiveEvent) => {
-      if (event.id !== undefined) last.id = event.id;
+      // Work can be pushed out of the order it started waiting in, so resume from the furthest id, not the latest.
+      if (event.id !== undefined && (last.id === undefined || furthest(last.id, event.id) === event.id)) last.id = event.id;
       if (event.event !== "ready") onEvent(event);
     };
     // What was missed while the stream was down comes first, then `ready`.
@@ -123,6 +124,11 @@ async function openStream(
   } finally {
     clearTimeout(givingUp);
   }
+}
+
+/** The further of two event ids: positions written in decimal, or otherwise `b`, the later one. */
+function furthest(a: string, b: string): string {
+  return /^\d+$/.test(a) && /^\d+$/.test(b) && BigInt(a) > BigInt(b) ? a : b;
 }
 
 /** The events of a server-sent event stream, as the API writes them: an `event` line, an optional `id` line, a JSON `data` line, a blank line. */
