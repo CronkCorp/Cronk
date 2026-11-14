@@ -38,6 +38,12 @@ export function toUser(row: UserRow): User {
   };
 }
 
+/**
+ * The password hash of a User who has none yet, as an import creates them. No password matches it,
+ * so they can't sign in until they accept an invitation.
+ */
+export const NO_PASSWORD = "!";
+
 export async function countUsers(db: Queryable): Promise<number> {
   const { rows } = await db.query<{ count: string }>("SELECT count(*) FROM users");
   return Number(rows[0]!.count);
@@ -60,6 +66,25 @@ export async function findUserByEmail(db: Queryable, email: string): Promise<{ u
   const { rows } = await db.query<UserRow>("SELECT * FROM users WHERE lower(email) = lower($1)", [email]);
   const row = rows[0];
   return row && { user: toUser(row), passwordHash: row.password_hash };
+}
+
+/**
+ * Gives a User who has no password yet (one an import brought in) the name, password and role
+ * from an accepted invitation, and reactivates them, keeping their id. As in `updateUser`, an
+ * Admin's Project listings are dropped. Returns undefined if the email has no User without a password.
+ */
+export async function claimUserWithoutPassword(
+  db: Queryable,
+  input: { workspaceId: string; email: string; name: string; passwordHash: string; role: Role },
+): Promise<User | undefined> {
+  const { rows } = await db.query<UserRow>(
+    `UPDATE users SET name = $3, password_hash = $4, role = $5, deactivated_at = NULL
+     WHERE workspace_id = $1 AND lower(email) = lower($2) AND password_hash = $6 RETURNING *`,
+    [input.workspaceId, input.email, input.name, input.passwordHash, input.role, NO_PASSWORD],
+  );
+  if (!rows[0]) return undefined;
+  if (input.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [rows[0].id]);
+  return toUser(rows[0]);
 }
 
 export async function findUserById(db: Queryable, id: string): Promise<User | undefined> {

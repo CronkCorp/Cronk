@@ -279,3 +279,36 @@ describe("an export taken apart and archived again", () => {
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.title).toBe("Edited by hand");
   });
 });
+
+describe("a User an import brought in", () => {
+  /** A fresh installation holding an import of a Workspace where Grace was assigned CRONK-1. */
+  async function importedGrace() {
+    const { cronk: before, admin: beforeAdmin } = await startInstalledCronk();
+    const grace = await joinAs(before, beforeAdmin, "grace@example.com", "member", "Grace");
+    const graceId = (await grace.get("/api/me")).body.user.id;
+    await beforeAdmin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await beforeAdmin.post("/api/projects/CRONK/tickets", { title: "Grace's job" });
+    await beforeAdmin.patch("/api/tickets/CRONK-1", { assigneeId: graceId });
+    const exported = await beforeAdmin.download("/api/export");
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", exported.body)).status).toBe(201);
+    const imported = (await admin.get("/api/users")).body.users.find((u: { email: string }) => u.email === "grace@example.com");
+    return { cronk, admin, imported };
+  }
+
+  it("can be invited, and accepting sets their password, reactivates them and keeps their id and history", async () => {
+    const { cronk, admin, imported } = await importedGrace();
+    expect(imported).toMatchObject({ name: "Grace", active: false });
+
+    const invited = await admin.post("/api/invitations", { email: "grace@example.com" });
+    expect(invited.status).toBe(201);
+    const accepted = await cronk.client().post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: "Grace H", password: "graces password" });
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true });
+
+    const grace = cronk.client();
+    expect((await grace.post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
+    expect((await grace.get(`/api/projects/CRONK/tickets?assignee=${imported.id}`)).body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1"]);
+  });
+});
