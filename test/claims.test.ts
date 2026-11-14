@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Client, type Cronk, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { type Client, type Cronk, joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
 /**
  * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
@@ -71,5 +71,48 @@ describe("Claiming a Ticket", () => {
 
     expect((await cronk.client(claude.secret).post("/api/tickets/CRONK-1/claim")).status).toBe(400);
     expect((await admin.post("/api/tickets/CRONK-1/claim")).status).toBe(400);
+  });
+});
+
+describe("A Claim", () => {
+  it("is kept alive by any call from its Agent Session, and lapses after the silence threshold, keeping the Delegate", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+
+    cronk.clock.advance(4 * 60_000);
+    await first.get("/api/projects");
+    cronk.clock.advance(4 * 60_000);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:09:00.000Z" });
+    const second = await session();
+    expect((await second.post("/api/tickets/CRONK-1/claim")).status).toBe(409);
+
+    cronk.clock.advance(60_000);
+    const lapsed = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(lapsed.claim).toBeNull();
+    expect(lapsed.ticket.delegate).toEqual({ id: claude.agentId, name: "claude-laptop" });
+    expect((await second.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  });
+
+  it("lapses after the silence threshold the Admin sets for the Workspace", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);
+    const set = await admin.patch("/api/workspace", { silenceThresholdSeconds: 120 });
+    expect(set.status).toBe(200);
+    expect(set.body.silenceThresholdSeconds).toBe(120);
+    expect((await admin.patch("/api/workspace", { silenceThresholdSeconds: 0 })).status).toBe(400);
+
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    cronk.clock.advance(2 * 60_000);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+  });
+
+  it("has its silence threshold set only by Admins", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.patch("/api/workspace", { silenceThresholdSeconds: 120 })).status).toBe(403);
+    expect((await cronk.client(claude.secret).patch("/api/workspace", { silenceThresholdSeconds: 120 })).status).toBe(403);
+    expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);
   });
 });

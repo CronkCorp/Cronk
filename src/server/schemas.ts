@@ -77,7 +77,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     createdAt: timestamp,
     expiresAt: timestamp,
   }),
-  Workspace: object({ name: { type: "string" }, agentAccess: agentAccessSchema }),
+  Workspace: object({
+    name: { type: "string" },
+    agentAccess: agentAccessSchema,
+    silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+  }),
   Agent: object(
     {
       id,
