@@ -3,7 +3,7 @@
  * client imports these with `import type`, so a change to a response shows up
  * there as a type error. Types only: nothing here may reach the web bundle.
  */
-import type { AgentToken as StoredAgentToken, publicAgent } from "./identity/agents.js";
+import type { AgentToken as StoredAgentToken, issueAgentToken, publicAgent } from "./identity/agents.js";
 import type { Access } from "./identity/access.js";
 import type { publicInvitation } from "./identity/invitations.js";
 import type { publicUser } from "./identity/users.js";
@@ -38,6 +38,8 @@ export type Serialized<T> = T extends Date
 export type User = Serialized<ReturnType<typeof publicUser>>;
 export type Agent = Serialized<ReturnType<typeof publicAgent>>;
 export type AgentToken = Serialized<StoredAgentToken>;
+/** A newly issued Agent token with its secret, which the API returns only this once. */
+export type IssuedAgentToken = Serialized<Awaited<ReturnType<typeof issueAgentToken>>>;
 export type Invitation = Serialized<ReturnType<typeof publicInvitation>>;
 export type Workspace = Serialized<ReturnType<typeof publicWorkspace>>;
 

@@ -5,6 +5,7 @@ import type {
   Agent,
   AgentAccess,
   AgentToken,
+  IssuedAgentToken,
   Invitation,
   Member,
   Priority,
@@ -33,6 +34,7 @@ export type {
   Agent,
   AgentAccess,
   AgentToken,
+  IssuedAgentToken,
   Invitation,
   Member,
   Priority,
@@ -105,7 +107,7 @@ export const api = {
   agentTokens: (id: string) =>
     request<{ tokens: AgentToken[] }>("GET", `/api/agents/${encodeURIComponent(id)}/tokens`).then((r) => r.tokens),
   issueAgentToken: (id: string, readOnly: boolean) =>
-    request<{ token: AgentToken; secret: string }>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
+    request<IssuedAgentToken>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
   revokeAgentToken: (id: string, tokenId: string) =>
     request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`),
 
