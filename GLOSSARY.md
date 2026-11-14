@@ -45,7 +45,7 @@ A Delegation in which the Delegate may complete Tickets itself rather than stopp
 _Avoid_: Auto mode, unattended mode, YOLO mode
 
 **Report**:
-The Document of findings an Agent writes on a Ticket it worked on, with supporting evidence such as Artifacts and Attachments. Lives with its Ticket rather than in the Project's page tree. Required for every completion an Agent makes.
+The Document of findings an Agent writes on a Ticket it worked on, with supporting evidence such as Artifacts and Attachments. Lives with its Ticket rather than in the Project's page tree. Required whenever an Agent hands work over, by moving a Ticket to In Review or completing it.
 _Avoid_: Summary, write-up, result
 
 **Verification**:
