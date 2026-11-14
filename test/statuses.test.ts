@@ -52,4 +52,35 @@ describe("Statuses", () => {
     expect((await admin.post("/api/projects/CRONK/statuses", { name: " ", category: "started" })).status).toBe(400);
     expect((await admin.post("/api/projects/NOPE/statuses", { name: "Shipped", category: "completed" })).status).toBe(404);
   });
+
+  it("can be renamed, and their Tickets show the new name", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add sign-in" });
+    const backlog = await statusNamed(admin, "Backlog");
+
+    const renamed = await admin.patch(`/api/projects/CRONK/statuses/${backlog.id}`, { name: " Ideas " });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.status).toEqual({ id: backlog.id, name: "Ideas", category: "backlog" });
+    expect(names(await statuses(admin))[0]).toBe("Ideas");
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.status.name).toBe("Ideas");
+
+    expect((await admin.patch(`/api/projects/CRONK/statuses/${backlog.id}`, { name: "IDEAS" })).status).toBe(200);
+    const clash = await admin.patch(`/api/projects/CRONK/statuses/${backlog.id}`, { name: "done" });
+    expect(clash.status).toBe(409);
+    // A Status keeps its Status Category for life: moving it could empty a Category.
+    await admin.patch(`/api/projects/CRONK/statuses/${backlog.id}`, { category: "completed" });
+    expect((await statusNamed(admin, "IDEAS")).category).toBe("backlog");
+  });
+
+  it("are only changed through their own Project", async () => {
+    const { admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    await createProject(admin, "WEB");
+    const webBacklog = await statusNamed(admin, "Backlog", "WEB");
+
+    expect((await admin.patch(`/api/projects/CRONK/statuses/${webBacklog.id}`, { name: "Mine" })).status).toBe(404);
+    expect((await admin.patch("/api/projects/CRONK/statuses/not-a-uuid", { name: "Mine" })).status).toBe(404);
+    expect((await statusNamed(admin, "Backlog", "WEB")).id).toBe(webBacklog.id);
+  });
 });

@@ -9,12 +9,14 @@ import {
   insertProject,
   insertStatus,
   lockProject,
+  renameStatus,
   listProjects,
   listStatuses,
   PROJECT_KEY_PATTERN,
   STATUS_CATEGORIES,
   updateProject,
   type Project,
+  type Status,
   type StatusCategory,
 } from "./projects.js";
 import { findTicketByKey, insertTicket, listHistory, listTickets, updateTicket, type Ticket, type TicketEdit } from "./tickets.js";
@@ -111,6 +113,31 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
+    app.patch<{ Params: { key: string; statusId: string }; Body: { name?: string } }>(
+      "/api/projects/:key/statuses/:statusId",
+      {
+        schema: {
+          body: { type: "object", additionalProperties: false, properties: { name: nameSchema } },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const name = request.body.name?.trim();
+        const status = await transaction(ctx.db, async (tx) => {
+          const project = await projectOr404(tx, user.workspaceId, request.params.key);
+          await lockProject(tx, project.id);
+          let status = await statusOr404(tx, project, request.params.statusId);
+          if (name !== undefined) {
+            const renamed = await renameStatus(tx, project.id, status.id, name);
+            if (!renamed) throw new HttpError(409, `Another Status is already named ${name}`);
+            status = renamed;
+          }
+          return status;
+        });
+        return { status };
+      },
+    );
+
     app.get<{ Params: { key: string } }>("/api/projects/:key/tickets", async (request) => {
       const user = await requireUser(ctx, request);
       const project = await projectOr404(ctx.db, user.workspaceId, request.params.key);
@@ -197,6 +224,13 @@ async function projectOr404(db: Queryable, workspaceId: string, key: string): Pr
   const project = await findProjectByKey(db, workspaceId, key);
   if (!project) throw new HttpError(404, "No such Project");
   return project;
+}
+
+/** One of the Project's Statuses, by id. */
+async function statusOr404(db: Queryable, project: Project, statusId: string): Promise<Status> {
+  const status = (await listStatuses(db, project.id)).find((s) => s.id === statusId);
+  if (!status) throw new HttpError(404, "No such Status in this Project");
+  return status;
 }
 
 async function ticketOr404(ctx: AppContext, workspaceId: string, key: string): Promise<Ticket> {

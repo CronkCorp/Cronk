@@ -121,6 +121,23 @@ export async function listProjects(db: Queryable, workspaceId: string, archived:
   return rows.map(toProject);
 }
 
+/**
+ * Renames a Status, or returns undefined if another Status of its Project
+ * already has that name. Lock the Project first.
+ */
+export async function renameStatus(db: Queryable, projectId: string, statusId: string, name: string): Promise<Status | undefined> {
+  const { rows: clashes } = await db.query(
+    "SELECT 1 FROM statuses WHERE project_id = $1 AND lower(name) = lower($2) AND id <> $3",
+    [projectId, name, statusId],
+  );
+  if (clashes.length > 0) return undefined;
+  const { rows } = await db.query<Status>("UPDATE statuses SET name = $2 WHERE id = $1 RETURNING id, name, category", [
+    statusId,
+    name,
+  ]);
+  return rows[0]!;
+}
+
 /** Renames and/or archives or restores a Project. Its key never changes, since Ticket keys are built from it. */
 export async function updateProject(
   db: Queryable,
