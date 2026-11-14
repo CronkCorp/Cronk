@@ -16,6 +16,7 @@ import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
 import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } from "./waiting-work.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -235,6 +236,7 @@ export function coordinationRoutes(ctx: AppContext) {
           return insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
         });
         ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
+        if (kind === "question") inboxesChanged(ctx.live, [actor.owner.id]);
         return reply.code(201).send({ activity: publicActivity(activity) });
       },
     );
@@ -287,6 +289,7 @@ export function coordinationRoutes(ctx: AppContext) {
           return { ticket, report: await insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now }) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "report", data: { report: (await findReport(ctx.db, report.id))! } });
+        inboxesChanged(ctx.live, [ticket.assignee?.id]);
         return reply.code(201).send({ report });
       },
     );

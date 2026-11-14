@@ -62,6 +62,7 @@ import { findAgent } from "../identity/agents.js";
 import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -343,7 +344,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { moveTo } = request.query;
-        await transaction(ctx.db, async (tx) => {
+        const moved = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
@@ -356,8 +357,9 @@ export function workRoutes(ctx: AppContext) {
           if (moveTo !== undefined && !target) {
             throw new HttpError(400, "Tickets can only move to another Status of this Project");
           }
+          let moved: Ticket[] = [];
           if (target) {
-            await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
+            moved = await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
           } else {
             const inUse = await countTicketsInStatus(tx, status.id);
             if (inUse > 0) {
@@ -365,7 +367,10 @@ export function workRoutes(ctx: AppContext) {
             }
           }
           await deleteStatus(tx, status.id);
+          return moved;
         });
+        // Moved Tickets may have entered or left an In Review Status.
+        inboxesChanged(ctx.live, moved.map((t) => t.assignee?.id));
         return reply.code(204).send();
       },
     );
@@ -626,7 +631,7 @@ export function workRoutes(ctx: AppContext) {
         if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
           throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
         }
-        const ticket = await transaction(ctx.db, async (tx) => {
+        const { before, ticket } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
@@ -651,8 +656,10 @@ export function workRoutes(ctx: AppContext) {
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
           if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) await clearClaim(tx, ticket.id);
-          return updateTicket(tx, ticket, changes, actor, ctx.clock.now());
+          return { before: ticket, ticket: await updateTicket(tx, ticket, changes, actor, ctx.clock.now()) };
         });
+        // Any change may show in the Inbox of whoever was or is now its Assignee.
+        if (ticket !== before) inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
         return { ticket };
       },
     );

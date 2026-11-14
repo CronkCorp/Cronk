@@ -16,7 +16,8 @@ const DEFAULT_STATUSES: { name: string; category: StatusCategory }[] = [
 export const PROJECT_KEY_PATTERN = "[A-Za-z][A-Za-z0-9]{1,9}";
 
 /** Open Projects are open to every Member; private ones only to the Members invited to them. */
-export type Visibility = "open" | "private";
+export const VISIBILITIES = ["open", "private"] as const;
+export type Visibility = (typeof VISIBILITIES)[number];
 
 export interface Project {
   id: string;
@@ -136,6 +137,11 @@ export async function listProjects(db: Queryable, workspaceId: string, archived:
     [workspaceId, archived],
   );
   return rows.map(toProject);
+}
+
+/** All the Workspace's Projects, archived or not: those not archived first, each group by name. */
+export async function listAllProjects(db: Queryable, workspaceId: string): Promise<Project[]> {
+  return [...(await listProjects(db, workspaceId, false)), ...(await listProjects(db, workspaceId, true))];
 }
 
 /**

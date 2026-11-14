@@ -378,6 +378,26 @@ describe("the comments tool", () => {
   });
 });
 
+describe("the search tool", () => {
+  it("searches what the Agent may read, with the API's filters, also with a read-only token", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await projectWithTickets(admin, "SECRET", 0);
+    await admin.post("/api/projects/CRONK/tickets", { title: "Rotate the keys" });
+    await admin.post("/api/projects/CRONK/documents", { title: "Key rotation", body: "Rotate them monthly." });
+    await admin.post("/api/projects/SECRET/tickets", { title: "Rotate the secret keys" });
+    await admin.patch("/api/projects/SECRET", { agentAccess: "none" });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    const all = await callTool(mcp, "search", { query: "rotate" });
+    expect(all.body).toEqual((await admin.get("/api/search?q=rotate&project=CRONK")).body);
+    expect(all.body.results).toHaveLength(2);
+    const tickets = await callTool(mcp, "search", { query: "rotate", kind: ["ticket"], project: ["CRONK"], limit: 5 });
+    expect(tickets.body.results.map((r: { ticketKey: string }) => r.ticketKey)).toEqual(["CRONK-1"]);
+    expect(await callTool(mcp, "search", { query: "rotate", project: ["SECRET"] })).toEqual({ isError: true, body: "No such Project" });
+  });
+});
+
 describe("work waiting for an Agent over MCP", () => {
   it("is listed in the welcome of its next Agent Session", async () => {
     const { cronk, admin, claude } = await delegatedSetup();

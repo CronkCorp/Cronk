@@ -42,8 +42,8 @@ describe("the OpenAPI description", () => {
       expect(success, label).toHaveLength(1);
       const response = op.responses[success[0]!];
       expect(response.description, label).toBeTruthy();
-      // A 204 has no body; a live-update stream answers server-sent events; every other success answers JSON with a schema.
-      const type = label.endsWith("/events") ? "text/event-stream" : "application/json";
+      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive; every other success answers JSON with a schema.
+      const type = label.endsWith("/events") ? "text/event-stream" : label.endsWith("/export") ? "application/gzip" : "application/json";
       if (success[0] !== "204") expect(response.content?.[type]?.schema, label).toBeDefined();
     }
   });
@@ -103,6 +103,13 @@ describe("the OpenAPI description", () => {
     });
     const deleteParams = doc.paths["/api/documents/{id}"].delete.parameters.filter((p: { in: string }) => p.in === "query");
     expect(deleteParams).toEqual([expect.objectContaining({ name: "baseVersion", required: true })]);
+  });
+
+  it("describes the archives imports take", async () => {
+    const doc = await openapi();
+    for (const path of ["/api/import", "/api/workspace/documents/import", "/api/projects/{key}/documents/import"]) {
+      expect(Object.keys(doc.paths[path].post.requestBody.content), path).toEqual(expect.arrayContaining(["application/gzip", "application/x-tar"]));
+    }
   });
 
   it("has no two paths that differ only in the names of their path parameters", async () => {
