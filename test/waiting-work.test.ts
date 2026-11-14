@@ -241,17 +241,26 @@ describe("An Agent Session's live updates", () => {
     expect((await reopened.next())?.event).toBe("ready");
   });
 
-  it("replay nothing to a caller without access to the work", async () => {
-    const { cronk, admin, session } = await delegatedSetup();
-    const agent = await session();
+  it("replay none of an Agent's work to another Agent", async () => {
+    const { cronk, admin } = await delegatedSetup();
     const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
-    const ready = await (await agent.events("/api/agent-sessions/current/events")).next();
     await admin.post("/api/tickets/CRONK-1/comments", { body: "For claude only." });
 
     const others = await codex.events("/api/agent-sessions/current/events", { "last-event-id": "0" });
     expect((await others.next())?.event).toBe("ready");
-    await agent.delete("/api/agent-sessions/current");
-    expect((await agent.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! })).status).toBe(410);
+  });
+
+  it("replay nothing once the Agent's token is revoked or its Session has ended", async () => {
+    const { admin, claude, session } = await delegatedSetup();
+    const ended = await session();
+    const ready = await (await ended.events("/api/agent-sessions/current/events")).next();
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Missed." });
+
+    await ended.delete("/api/agent-sessions/current");
+    expect((await ended.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! })).status).toBe(410);
+    const revoked = await session();
+    await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`);
+    expect((await revoked.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! })).status).toBe(401);
   });
 
   it("are refused outside an Agent Session, and end once the Session does", async () => {
