@@ -13,6 +13,9 @@ import type {
   IssuedAgentToken,
   Invitation,
   Member,
+  Merge,
+  MergedSection,
+  Conflict,
   Priority,
   Project,
   RecordedActor,
@@ -49,6 +52,9 @@ export type {
   IssuedAgentToken,
   Invitation,
   Member,
+  Merge,
+  MergedSection,
+  Conflict,
   Priority,
   Project,
   RecordedActor,
@@ -218,6 +224,9 @@ export const api = {
   /** Refused with the current Version (see `staleVersionOf`) if `baseVersion` is no longer current. */
   saveDocument: (id: string, input: { baseVersion: number; title?: string; body?: string }) =>
     request<{ document: Document }>("PATCH", documentPath(id), input).then((r) => r.document),
+  /** Merges an edit started from `baseVersion` with the current Version, section by section, without saving. */
+  mergeDocument: (id: string, input: { baseVersion: number; title: string; body: string }) =>
+    request<{ merge: Merge }>("POST", `${documentPath(id)}/merge`, input).then((r) => r.merge),
   moveDocument: (id: string, parentId: string | null) =>
     request<{ document: Document }>("POST", `${documentPath(id)}/move`, { parentId }).then((r) => r.document),
   deleteDocument: (id: string) => request<void>("DELETE", documentPath(id)),

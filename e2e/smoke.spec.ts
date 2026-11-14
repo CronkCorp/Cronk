@@ -255,3 +255,58 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await page.getByRole("link", { name: "Documents", exact: true }).last().click();
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
 });
+
+// Runs after the test above, so CRONK holds Documents already.
+test("compare two Versions, and merge an edit someone else saved underneath", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: "Documents" }).last().click();
+  await page.getByRole("button", { name: "New Document" }).click();
+  await page.getByLabel("Title").fill("Runbook");
+  await page.getByRole("button", { name: "Create Document" }).click();
+  await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it.\n\n## Usage\n\nRun it.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  const body = page.getByTestId("document-body");
+  await expect(body).toContainText("Run it.");
+  const id = new URL(page.url()).pathname.split("/").pop()!;
+  /** Saves `text` as the next Version behind the editor's back, as another User or an Agent would. */
+  const saveUnderneath = async (text: string) => {
+    const { document } = await (await page.request.get(`/api/documents/${id}`)).json();
+    expect((await page.request.patch(`/api/documents/${id}`, { data: { baseVersion: document.version, body: text } })).status()).toBe(200);
+  };
+
+  // Edits to different sections merge on their own.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it.\n");
+  await saveUnderneath("## Setup\n\nInstall it.\n\n## Usage\n\nRun it daily.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("alert")).toContainText("merged into yours");
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it daily.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Install it with npm.");
+  await expect(body).toContainText("Run it daily.");
+
+  // Edits to the same section wait for the User to choose.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it hourly.\n");
+  await saveUnderneath("## Setup\n\nInstall it with npm.\n\n## Usage\n\nRun it weekly.\n");
+  await page.getByRole("button", { name: "Save" }).click();
+  const usage = page.getByRole("region", { name: "## Usage" });
+  await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n");
+  await usage.getByRole("button", { name: "Use both" }).click();
+  await expect(usage.getByLabel("Keep for ## Usage")).toHaveValue("## Usage\n\nRun it hourly.\n\nRun it weekly.\n");
+  await page.getByRole("button", { name: "Use these and keep editing" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Run it hourly.");
+  await expect(body).toContainText("Run it weekly.");
+
+  await page.getByRole("button", { name: "Versions" }).click();
+  await page.getByLabel("Compare").selectOption({ label: "Version 2" });
+  await page.getByRole("button", { name: "Compare", exact: true }).click();
+  const changes = page.getByRole("list", { name: /Changes from Version 2 to Version 6/ });
+  await expect(changes).toContainText("- Install it.");
+  await expect(changes).toContainText("+ Run it weekly.");
+});

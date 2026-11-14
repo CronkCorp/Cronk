@@ -170,3 +170,17 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .conflict { border: 1px solid var(--error); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
 .conflict p { margin: 0 0 8px; }
 .theirs { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 14px; }
+
+.merged { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.merged p { margin: 0 0 8px; }
+.compare { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 12px; }
+.compare .field { margin-bottom: 0; }
+.diff-lines { list-style: none; margin: 8px 0 0; padding: 8px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-family: ui-monospace, monospace; font-size: 13px; max-height: 420px; overflow: auto; }
+.diff-lines li { padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-added { background: color-mix(in srgb, var(--live) 18%, transparent); }
+.diff-removed { background: color-mix(in srgb, var(--error) 18%, transparent); }
+.diff-fold { font-style: italic; }
+.merge-conflict { border: 1px solid var(--error); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.merge-conflict h3 { margin: 0 0 8px; }
+.merge-conflict .sides { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.merge-conflict .side { flex: 1 1 200px; min-width: 0; }
