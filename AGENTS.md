@@ -3,6 +3,10 @@
 A self-hosted platform where humans and AI agents share Tickets, Documents, Terms,
 Decisions and Artifacts. See `GLOSSARY.md` for vocabulary and `docs/adr/` for decisions.
 
+- `docs/roadmap.md`: phase scope, what is decided and what is still open for later phases, and the loop each phase follows.
+- `docs/testing.md`: how to test; read before writing tests.
+- `docs/research/existing-platforms.md`: research on comparable platforms behind the design.
+
 ## Agent skills
 
 ### Issue tracker

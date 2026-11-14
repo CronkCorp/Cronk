@@ -7,6 +7,37 @@ Cronk is built in three phases. Vocabulary follows `GLOSSARY.md`; decisions are 
 3. **Spec** with `/to-spec`, then **tickets** with `/to-tickets`, in the same session as the grilling, since both synthesise from that conversation.
 4. **Build**, then update this roadmap.
 
+## Where the design lives
+
+A session starting a later phase should read, in order:
+
+1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
+2. `docs/adr/`: decisions that are hard to reverse (0001–0011).
+3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
+4. `.scratch/phase-1-core-loop/spec.md`: the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
+5. `docs/testing.md`: the test seams every phase uses.
+6. `docs/research/existing-platforms.md`: what comparable tools do, with sources, for when an open question needs outside examples.
+
+## Settled across all phases
+
+Choices made in the initial design that are not ADRs (easy to reverse or unsurprising) but should not be reopened without reason:
+
+- **Vocabulary.** The unit of work is a Ticket (not Issue, Task or Work item), partly to avoid clashing with GitHub and GitLab Issues.
+- **Structure.** The Workspace holds Projects plus knowledge spanning them (Documents, Terms, Decisions, Guidance) but never Tickets. Project knowledge layers over the Workspace's.
+- **Agent Sessions.** One MCP connection is one Agent Session; the Claim silence threshold defaults to 5 minutes and is configurable per Workspace. Activities and tool calls keep Claims alive.
+- **Ticket keys.** `<PROJECT KEY>-<n>`, numbered in order per Project by the server.
+- **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise.
+- **Reports.** Required whenever an Agent hands work over: moving a Ticket to In Review, or completing it under Autonomous Delegation. Not required when an Agent just releases its Claim.
+- **Documents.** Human-curated Documents live in a page tree per Project and Workspace; Reports live with their Ticket; Terms and Decisions get their own views. Agents follow Guidance about where new Documents go.
+- **Comments.** Threaded, on Tickets and Documents, from any Actor, optionally anchored to a passage. Answers to Agent questions are Comment replies. Comments, @mentions and answers mark work as waiting for an Agent.
+- **Inbox and Triage.** One Inbox per User for everything waiting on them, blocking questions first; Triage for waiting items without a clear User.
+- **Access.** Workspace roles Admin and Member; open or private Projects; Read or Write per Member. Protected means "Agents can't edit", not "only Admins can edit".
+- **Sign-in.** Email and password, with optional OIDC in Phase 3.
+- **Search.** Postgres full-text search plus context on claim. Semantic search is optional and off by default; Cronk must never require an extra AI service.
+- **Notifications.** In-app live updates. Outside the app only from Phase 3, via webhooks or optional email, defaulting to urgent events only. No native apps for now.
+- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders.
+- **Deployment.** Docker Compose first; standalone servers and Proxmox later, so nothing may assume Docker (ADR 0006).
+
 ## Phase 1: Core loop
 
 Spec and tickets: `.scratch/phase-1-core-loop/`.
