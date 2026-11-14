@@ -21,7 +21,7 @@ interface Connection {
   tokenHash: string;
   endsIfSilentAt: Date;
   /** Stops pushing waiting work to it. */
-  unsubscribe: () => void;
+  stopNotifying: () => void;
 }
 
 /** How often connections whose Agent Session went silent are forgotten. */
@@ -44,7 +44,7 @@ export function mcpRoutes(ctx: AppContext) {
     const drop = async (id: string) => {
       const connection = connections.get(id);
       connections.delete(id);
-      connection?.unsubscribe();
+      connection?.stopNotifying();
       await connection?.server.close();
     };
     // A Session that stayed silent has ended on the API's side; forget its connection too.
@@ -78,7 +78,7 @@ export function mcpRoutes(ctx: AppContext) {
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
         // Work starting to wait for the Agent reaches it as a log message, from the API's own stream
-        // of it, which ends as soon as the Session does or its token is revoked. That stream needs
+        // of it, which ends as soon as the Agent Session does or its token is revoked. That stream needs
         // real HTTP, so when Cronk doesn't listen (its requests are only injected) nothing is pushed.
         const baseUrl = ownBaseUrl(app);
         const notify = ({ event, data }: LiveEvent) => {
@@ -88,13 +88,13 @@ export function mcpRoutes(ctx: AppContext) {
           void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message: `Work is waiting for you:\n${text}`, waiting } }).catch(() => {});
         };
         const closeEvents = baseUrl && (await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify));
-        const unsubscribe = closeEvents || (() => {});
+        const stopNotifying = closeEvents || (() => {});
         connections.set(session.id, {
           transport,
           server,
           tokenHash: hashToken(token),
           endsIfSilentAt: new Date(session.endsIfSilentAt),
-          unsubscribe,
+          stopNotifying,
         });
         await server.connect(transport);
         return serve(transport, request, reply, token);

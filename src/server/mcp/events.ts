@@ -1,8 +1,7 @@
 import { request, type IncomingMessage } from "node:http";
 import type { FastifyInstance } from "fastify";
-import { AGENT_SESSION_HEADER } from "../context.js";
 import type { LiveEvent } from "../live/live-updates.js";
-import type { Caller } from "./api.js";
+import { callerHeaders, type Caller } from "./api.js";
 
 /**
  * Cronk's own base URL, from the address it listens on, or undefined when it doesn't listen
@@ -25,11 +24,7 @@ export async function followEvents(baseUrl: string, caller: Caller, path: string
   // A connection of its own, closed with the stream.
   const req = request(new URL(path, baseUrl), {
     agent: false,
-    headers: {
-      accept: "text/event-stream",
-      authorization: `Bearer ${caller.token}`,
-      ...(caller.sessionId && { [AGENT_SESSION_HEADER]: caller.sessionId }),
-    },
+    headers: { accept: "text/event-stream", ...callerHeaders(caller) },
   });
   const close = () => void req.destroy();
   try {
