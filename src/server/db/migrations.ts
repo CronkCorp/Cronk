@@ -38,4 +38,54 @@ export const migrations: Migration[] = [
       CREATE INDEX sign_ins_user ON sign_ins (user_id);
     `,
   },
+  {
+    id: "0002_projects_statuses_tickets",
+    sql: `
+      CREATE TABLE projects (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        name text NOT NULL,
+        key text NOT NULL,
+        archived_at timestamptz,
+        -- The number the Project's next Ticket gets; taken and bumped in one UPDATE so keys never repeat.
+        next_ticket_number integer NOT NULL DEFAULT 1,
+        created_at timestamptz NOT NULL
+      );
+      CREATE UNIQUE INDEX projects_key_unique ON projects (workspace_id, key);
+
+      CREATE TABLE statuses (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        category text NOT NULL CHECK (category IN ('backlog', 'unstarted', 'started', 'in_review', 'completed', 'canceled')),
+        position integer NOT NULL
+      );
+      CREATE INDEX statuses_project ON statuses (project_id, position);
+
+      CREATE TABLE tickets (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        number integer NOT NULL,
+        title text NOT NULL,
+        description text NOT NULL DEFAULT '',
+        status_id uuid NOT NULL REFERENCES statuses(id),
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        UNIQUE (project_id, number)
+      );
+
+      -- A Ticket's history: one row per change, oldest first by id.
+      -- Statuses are copied in (not referenced) so history survives renaming or removing them.
+      CREATE TABLE ticket_events (
+        id bigserial PRIMARY KEY,
+        ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user')),
+        actor_user_id uuid REFERENCES users(id),
+        change text NOT NULL,
+        data jsonb NOT NULL
+      );
+      CREATE INDEX ticket_events_ticket ON ticket_events (ticket_id, id);
+    `,
+  },
 ];

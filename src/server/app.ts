@@ -5,6 +5,7 @@ import type { Clock } from "./clock.js";
 import { HttpError, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { identityRoutes } from "./identity/routes.js";
+import { workRoutes } from "./work/routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 
 export interface AppConfig {
@@ -48,6 +49,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   });
   await app.register(identityRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
+  await app.register(workRoutes(ctx));
 
   const webRoot = opts.config.webRoot;
   if (webRoot) await app.register(staticFiles, { root: webRoot });
