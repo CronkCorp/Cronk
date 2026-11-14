@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { delegatedSetup, joinAs, startInstalledCronk, untarGz, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, startInstalledCronk, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
@@ -182,5 +182,83 @@ describe("importing an export", () => {
       value?.email === "grace@example.com" ? { ...value, active: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
+  });
+});
+
+describe("importing a Project export", () => {
+  it("adds the Project, matching Users by email and Agents by Owner and name", async () => {
+    const before = await busyWorkspace();
+    const exported = await before.admin.download("/api/projects/CRONK/export");
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
+    const laptop = (await admin.post("/api/agents", { name: "claude-laptop" })).body.agent;
+    await admin.post("/api/projects", { name: "Other", key: "OTHER" });
+
+    const imported = await admin.upload("/api/import", exported.body);
+    expect(imported.status).toBe(201);
+    expect(imported.body).toEqual({ scope: "project", projects: ["CRONK"] });
+    expect((await admin.get("/api/users")).body.users.map((u: { email: string; active: boolean }) => [u.email, u.active])).toEqual([
+      ["ada@example.com", true],
+      ["grace@example.com", true],
+    ]);
+    expect((await admin.get("/api/agents?all=true")).body.agents.map((a: { id: string }) => a.id)).toEqual([laptop.id]);
+    const ticket = (await admin.get("/api/tickets/CRONK-1")).body.ticket;
+    expect(ticket).toMatchObject({ title: "Ticket 1", status: { category: "in_review" }, delegate: { id: laptop.id } });
+    // The relation to OLD-1 is left out: OLD isn't in the export.
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations).toMatchObject({ blocks: [{ key: "CRONK-3" }], relatesTo: [] });
+    expect((await grace.get("/api/projects/CRONK/members")).status).toBe(200);
+    // Tickets go on numbering where they left off.
+    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-4");
+  });
+
+  it("is refused when the key is taken, and a Workspace export is refused once the Workspace holds anything", async () => {
+    const before = await busyWorkspace();
+    const project = (await before.admin.download("/api/projects/CRONK/export")).body;
+    const workspace = (await before.admin.download("/api/export")).body;
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    await admin.post("/api/projects", { name: "Mine", key: "CRONK" });
+    const taken = await admin.upload("/api/import", project);
+    expect(taken.status).toBe(409);
+    expect(taken.body.error).toMatch(/CRONK/);
+    const full = await admin.upload("/api/import", workspace);
+    expect(full.status).toBe(409);
+    expect((await admin.get("/api/tickets/CRONK-1")).status).toBe(404);
+    expect((await admin.get("/api/users")).body.users).toHaveLength(1);
+  });
+
+  it("is only for Admins, and only for Cronk exports", async () => {
+    const before = await busyWorkspace();
+    const project = (await before.admin.download("/api/projects/CRONK/export")).body;
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    const member = await joinAs(cronk, admin, "grace@example.com");
+    expect((await member.upload("/api/import", project)).status).toBe(403);
+    const plain = await admin.upload("/api/import", await tarGz({ "notes/a.md": "# A" }));
+    expect(plain.status).toBe(400);
+    expect(plain.body.error).toMatch(/isn't a Cronk export/);
+  });
+});
+
+describe("an export without Versions", () => {
+  it("imports each Document and Report at a single Version holding what it says now, by whoever first wrote it", async () => {
+    const before = await busyWorkspace();
+    const exported = await before.admin.download("/api/export");
+    const files = await untarGz(exported.body);
+    expect(Object.keys(files).filter((path) => path.includes(".versions/"))).toEqual([]);
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", exported.body)).status).toBe(201);
+    const [report] = (await admin.get("/api/tickets/CRONK-1/reports")).body.reports;
+    expect(report).toMatchObject({ title: "Findings", version: 1, agent: { name: "claude-laptop", owner: { name: "Ada" } } });
+    expect((await admin.get(`/api/documents/${report.id}`)).body.document.body).toBe("It was the disk cache.");
+    const guide = (await admin.get("/api/projects/CRONK/documents")).body.documents.find((d: { title: string }) => d.title === "Guide");
+    expect((await admin.get(`/api/documents/${guide.id}/versions`)).body.versions).toMatchObject([{ number: 1, title: "Guide" }]);
+    expect((await admin.get(`/api/documents/${guide.id}/comments`)).body.comments[0]).toMatchObject({
+      body: "Which here?",
+      anchor: { passage: "Start here", version: 1, inCurrentVersion: true },
+    });
+    expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Be kind. Be brief.", version: 1 });
   });
 });
