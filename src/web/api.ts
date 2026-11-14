@@ -98,14 +98,14 @@ export const api = {
     request<{ status: Status }>("POST", `/api/projects/${encodeURIComponent(projectKey)}/statuses`, input).then((r) => r.status),
   /** `position` counts from 0 among the Statuses of the same Status Category. */
   updateStatus: (projectKey: string, statusId: string, changes: { name?: string; position?: number }) =>
-    request<{ status: Status }>("PATCH", `/api/projects/${encodeURIComponent(projectKey)}/statuses/${statusId}`, changes).then(
+    request<{ status: Status }>("PATCH", `/api/projects/${encodeURIComponent(projectKey)}/statuses/${encodeURIComponent(statusId)}`, changes).then(
       (r) => r.status,
     ),
   /** `moveTo` is where the Status's Tickets go; required while any Ticket is in it. */
   removeStatus: (projectKey: string, statusId: string, moveTo?: string) =>
     request<void>(
       "DELETE",
-      `/api/projects/${encodeURIComponent(projectKey)}/statuses/${statusId}${moveTo ? `?moveTo=${moveTo}` : ""}`,
+      `/api/projects/${encodeURIComponent(projectKey)}/statuses/${encodeURIComponent(statusId)}${moveTo ? `?moveTo=${encodeURIComponent(moveTo)}` : ""}`,
     ),
 
   tickets: (projectKey: string) =>

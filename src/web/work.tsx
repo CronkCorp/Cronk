@@ -259,13 +259,23 @@ function StatusRow(props: {
   const [mode, setMode] = useState<"view" | "rename" | "remove">("view");
   const [name, setName] = useState(s.name);
   const others = props.statuses.filter((o) => o.id !== s.id);
-  const [moveTo, setMoveTo] = useState(others[0]?.id ?? "");
+  const [chosen, setChosen] = useState<string>();
+  // The chosen Status may have been removed since; fall back to the first other one.
+  const moveTo = others.some((o) => o.id === chosen) ? chosen! : (others[0]?.id ?? "");
   const done = () => {
     setMode("view");
     props.onChanged();
   };
   const update = useAction((changes: { name?: string; position?: number }) => api.updateStatus(props.projectKey, s.id, changes), done);
-  const remove = useAction(() => api.removeStatus(props.projectKey, s.id, props.ticketCount > 0 ? moveTo : undefined), done);
+  const remove = useAction(async () => {
+    try {
+      await api.removeStatus(props.projectKey, s.id, props.ticketCount > 0 ? moveTo : undefined);
+    } catch (err) {
+      // Our Ticket counts may be out of date; reload so the picker shows if Tickets need moving.
+      props.onChanged();
+      throw err;
+    }
+  }, done);
   const error = update.error ?? remove.error;
 
   return (
@@ -302,8 +312,20 @@ function StatusRow(props: {
           >
             ↓
           </button>
-          <button className="link" aria-label={`Rename ${s.name}`} onClick={() => setMode("rename")}>Rename</button>
-          <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+          <button
+            className="link"
+            aria-label={`Rename ${s.name}`}
+            onClick={() => {
+              setName(s.name);
+              setMode("rename");
+            }}
+          >
+            Rename
+          </button>
+          {/* A Status Category keeps at least one Status, so its last can't be removed. */}
+          {props.inCategory.length > 1 && (
+            <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+          )}
         </div>
       )}
       {mode === "remove" && (
@@ -311,7 +333,7 @@ function StatusRow(props: {
           {props.ticketCount > 0 ? (
             <label className="field inline grow">
               <span>Move its Tickets to</span>
-              <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+              <select value={moveTo} onChange={(e) => setChosen(e.target.value)}>
                 {others.map((o) => (
                   <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
