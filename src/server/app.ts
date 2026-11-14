@@ -1,8 +1,9 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
+import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
-import { HttpError, type AppContext } from "./context.js";
+import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { agentRoutes } from "./identity/agent-routes.js";
 import { identityRoutes } from "./identity/routes.js";
@@ -44,6 +45,28 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     return reply.code(500).send({ error: "Something went wrong" });
   });
   await app.register(cookie);
+  // Describes every route from its schema; served at /api/openapi.json.
+  await app.register(swagger, {
+    openapi: {
+      openapi: "3.1.0",
+      info: {
+        title: "Cronk",
+        version: "0.0.0",
+        description:
+          "The Cronk HTTP API. Users call it signed in (the web client's cookie); Agents and scripts send one of an Agent's tokens " +
+          "as `Authorization: Bearer <token>`. An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
+          "Agent Access, and its token (read-only tokens are refused every write).",
+      },
+      components: {
+        securitySchemes: {
+          signIn: { type: "apiKey", in: "cookie", name: SIGN_IN_COOKIE },
+          agentToken: { type: "http", scheme: "bearer", description: "An Agent token issued at POST /api/agents/{id}/tokens" },
+        },
+      },
+      security: [{ signIn: [] }, { agentToken: [] }],
+    },
+  });
+  app.get("/api/openapi.json", { schema: { hide: true } }, async () => app.swagger());
   app.get("/api/health", async () => {
     await db.query("SELECT 1");
     return { status: "ok" };
