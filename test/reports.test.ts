@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, type Client } from "./harness.js";
+import { delegatedSetup, startSession, type Client } from "./harness.js";
 
 describe("Reports", () => {
   it("are written by the Claim holder as Documents of the Ticket's Project, listed on the Ticket and kept out of the page tree", async () => {
@@ -98,5 +98,27 @@ describe("An Agent's move into In Review", () => {
     expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "started") })).status).toBe(200);
     expect((await agent.delete("/api/tickets/CRONK-1/claim")).status).toBe(204);
     expect((await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") })).status).toBe(200);
+  });
+});
+
+describe("Writing a Report", () => {
+  it("is refused to anyone but the Agent Session holding the Ticket's Claim", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const holder = await session();
+    const other = await session();
+    const report = { title: "Findings", body: "Done." };
+
+    expect((await holder.post("/api/tickets/CRONK-1/reports", report)).status).toBe(409);
+    await holder.post("/api/tickets/CRONK-1/claim");
+    const refused = await other.post("/api/tickets/CRONK-1/reports", report);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/Claim CRONK-1/);
+    expect((await cronk.client(claude.secret).post("/api/tickets/CRONK-1/reports", report)).status).toBe(400);
+    expect((await admin.post("/api/tickets/CRONK-1/reports", report)).status).toBe(400);
+    const readOnly = (await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret;
+    expect((await (await startSession(cronk, readOnly)).post("/api/tickets/CRONK-1/reports", report)).status).toBe(403);
+    expect((await holder.post("/api/tickets/CRONK-1/reports", { title: " ", body: "Done." })).status).toBe(400);
+
+    expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toEqual([]);
   });
 });

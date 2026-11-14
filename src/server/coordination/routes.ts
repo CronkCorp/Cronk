@@ -268,8 +268,7 @@ export function coordinationRoutes(ctx: AppContext) {
         },
       },
       async (request, reply) => {
-        const actor = await requireActor(ctx, request);
-        if (actor.kind !== "agent") throw new HttpError(403, "Only an Agent writes Reports; a User comments instead");
+        const actor = requireAgent(await requireActor(ctx, request));
         requireSession(actor);
         const now = ctx.clock.now();
         const report = await transaction(ctx.db, async (tx) => {
