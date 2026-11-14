@@ -2,6 +2,7 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import type { Visibility } from "../work/projects.js";
+import { getWorkspace } from "../workspace/workspaces.js";
 import type { User } from "./users.js";
 
 /**
@@ -102,12 +103,10 @@ export async function visibleProjects<P extends AccessTarget>(db: Queryable, act
  */
 export async function requireWorkspaceAccess(db: Queryable, actor: Actor, need: Access): Promise<void> {
   if (actor.kind === "user") return;
-  const { rows } = await db.query<{ agent_access: AgentAccess }>("SELECT agent_access FROM workspaces WHERE id = $1", [
-    actor.owner.workspaceId,
-  ]);
+  const workspace = await getWorkspace(db, actor.owner.workspaceId);
   const limits: Limit[] = [
     { access: actor.readOnly ? "read" : "write", readOnlyBecause: "This Agent's token is read-only" },
-    { access: rows[0]!.agent_access, readOnlyBecause: "The Workspace's Agent Access is Read" },
+    { access: workspace.agentAccess, readOnlyBecause: "The Workspace's Agent Access is Read" },
   ];
   if (lowest(limits) === "none") throw new HttpError(403, "The Workspace's Agent Access is None, so Agents can't use it");
   const blocking = need === "write" && limits.find((l) => l.access === "read");

@@ -5,7 +5,7 @@ import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import { nameSchema } from "../schemas.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
-import { requireAdmin } from "./access.js";
+import { requireAdmin, requireWorkspaceAccess } from "./access.js";
 import { publicAgent } from "./agents.js";
 import {
   createInvitation,
@@ -189,6 +189,7 @@ export function identityRoutes(ctx: AppContext) {
 
     app.get("/api/users", async (request) => {
       const actor = await requireActor(ctx, request);
+      await requireWorkspaceAccess(ctx.db, actor, "read");
       return { users: (await listUsers(ctx.db, actingUser(actor).workspaceId)).map(publicUser) };
     });
 

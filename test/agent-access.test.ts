@@ -110,3 +110,36 @@ describe("an Agent's access", () => {
     expect((await writer.post("/api/projects/CRONK/tickets", { title: "New" })).status).toBe(201);
   });
 });
+
+describe("Workspace Agent Access", () => {
+  it("is Write by default and only an Admin can change it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.get("/api/workspace")).body.agentAccess).toBe("write");
+    expect((await bob.patch("/api/workspace", { agentAccess: "read" })).status).toBe(403);
+    const set = await admin.patch("/api/workspace", { agentAccess: "read" });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ name: "Acme", agentAccess: "read" });
+    expect((await bob.get("/api/workspace")).body.agentAccess).toBe("read");
+  });
+
+  it("caps what Agents do outside any Project", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    await admin.patch("/api/workspace", { agentAccess: "read" });
+    expect((await claude.get("/api/workspace")).status).toBe(200);
+    expect((await claude.get("/api/users")).status).toBe(200);
+    const refused = await claude.post("/api/projects", { name: "Mine", key: "MINE" });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Workspace's Agent Access is Read/);
+
+    await admin.patch("/api/workspace", { agentAccess: "none" });
+    for (const res of [await claude.get("/api/workspace"), await claude.get("/api/users"), await claude.post("/api/projects", { name: "Mine", key: "MINE" })]) {
+      expect(res.status).toBe(403);
+    }
+    // Projects have their own Agent Access, so their work goes on.
+    expect((await claude.post("/api/projects/CRONK/tickets", { title: "Still fine" })).status).toBe(201);
+  });
+});

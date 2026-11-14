@@ -6,19 +6,19 @@ describe("the Workspace", () => {
     const cronk = await startCronk();
     const browser = cronk.client();
     await browser.post("/api/setup", { ...admin, workspaceName: "Acme" });
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme" });
+    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme", agentAccess: "write" });
 
     const renamed = await browser.patch("/api/workspace", { name: "  Acme Labs " });
     expect(renamed.status).toBe(200);
-    expect(renamed.body).toEqual({ name: "Acme Labs" });
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme Labs" });
+    expect(renamed.body).toEqual({ name: "Acme Labs", agentAccess: "write" });
+    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme Labs", agentAccess: "write" });
   });
 
   it("gets a default name when setup gives none", async () => {
     const cronk = await startCronk();
     const browser = cronk.client();
     await browser.post("/api/setup", admin);
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Cronk" });
+    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Cronk", agentAccess: "write" });
   });
 
   it("refuses a blank name", async () => {
