@@ -17,7 +17,8 @@ import {
   userIdParam,
 } from "../schemas.js";
 import { actingUser, userActor, type Actor } from "../actor.js";
-import { addRelation, listRelations, RELATION_KINDS, removeRelation, type RelationKind, type Relations } from "./relations.js";
+import { addRelation, listRelations, removeRelation, type Relations } from "./relations.js";
+import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
@@ -37,11 +38,9 @@ import {
   listProjects,
   listStatuses,
   PROJECT_KEY_PATTERN,
-  STATUS_CATEGORIES,
   updateProject,
   type Project,
   type Status,
-  type StatusCategory,
   type Visibility,
 } from "./projects.js";
 import {
@@ -54,11 +53,10 @@ import {
   wouldNestUnderItself,
   normalizeLabels,
   listTickets,
-  PRIORITIES,
   updateTicket,
-  type Priority,
   type RecordedChange,
   type Ticket,
+  type TicketChanges,
   type TicketEdit,
   type TicketRef,
   type UserRef,
@@ -97,7 +95,7 @@ export function workRoutes(ctx: AppContext) {
       "/api/projects",
       {
         schema: {
-          querystring: { type: "object", properties: { archived: { type: "boolean" } } },
+          querystring: { type: "object", additionalProperties: false, properties: { archived: { type: "boolean" } } },
           response: { 200: answer("The Projects the caller can see", listing("projects", ref("Project"))), ...errors(400, 401) },
         },
       },
@@ -334,7 +332,7 @@ export function workRoutes(ctx: AppContext) {
       {
         schema: {
           params: statusParams,
-          querystring: { type: "object", properties: { moveTo: { type: "string" } } },
+          querystring: { type: "object", additionalProperties: false, properties: { moveTo: { type: "string" } } },
           response: { 204: noContent("The Status is removed, and any Tickets in it moved"), ...errors(400, 401, 403, 404, 409) },
         },
       },
@@ -375,6 +373,7 @@ export function workRoutes(ctx: AppContext) {
           params: projectParams,
           querystring: {
             type: "object",
+            additionalProperties: false,
             properties: {
               status: { type: "array", items: { type: "string", format: "uuid" } },
               category: { type: "array", items: { type: "string", enum: STATUS_CATEGORIES } },
@@ -554,7 +553,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.patch<{ Params: { key: string }; Body: { title?: string; description?: string; statusId?: string; priority?: Priority; labels?: string[]; assigneeId?: string | null; parentKey?: string | null } }>(
+    app.patch<{ Params: { key: string }; Body: TicketChanges }>(
       "/api/tickets/:key",
       {
         schema: {

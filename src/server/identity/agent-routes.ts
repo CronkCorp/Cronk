@@ -29,7 +29,7 @@ export function agentRoutes(ctx: AppContext) {
       "/api/agents",
       {
         schema: {
-          querystring: { type: "object", properties: { all: { type: "boolean" } } },
+          querystring: { type: "object", additionalProperties: false, properties: { all: { type: "boolean" } } },
           response: {
             200: answer("The Agents, by Owner then name", listing("agents", ref("Agent"))),
             ...errors(400, 401, 403),

@@ -1,7 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { STATUS_CATEGORIES } from "./work/projects.js";
-import { RELATION_KINDS } from "./work/relations.js";
-import { PRIORITIES } from "./work/tickets.js";
+import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 

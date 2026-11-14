@@ -2,9 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "lib": ["es2023"],
-    "rootDir": "src/server",
-    "outDir": "dist/server",
+    "rootDir": "src",
+    "outDir": "dist",
     "noEmit": false
   },
-  "include": ["src/server"]
+  "include": ["src/server", "src/shared"]
 }
