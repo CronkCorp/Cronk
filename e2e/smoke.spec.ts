@@ -384,4 +384,21 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByRole("button", { name: "Save" }).click();
   await expect(guidance).toContainText("Write tests first, always.");
   await expect(guidance).toContainText("Use pnpm.");
+
+  // Leaving a conflict keeps the draft; saving it again is refused and merges again.
+  await page.getByRole("button", { name: "Edit Guidance" }).click();
+  const draft = "## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse pnpm and tsc.\n";
+  await page.getByLabel("Guidance (Markdown)").fill(draft);
+  const { guidance: latest } = await (await page.request.get("/api/projects/CRONK/guidance")).json();
+  const clashing = { markdown: "## Style\n\nWrite tests first, always.\n\n## Tools\n\nUse pnpm and vitest.\n", baseVersion: latest.version };
+  expect((await page.request.put("/api/projects/CRONK/guidance", { data: clashing })).status()).toBe(200);
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Back to my draft" }).click();
+  await expect(page.getByLabel("Guidance (Markdown)")).toHaveValue(draft);
+  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("region", { name: "## Tools" }).getByRole("button", { name: "Use both" }).click();
+  await page.getByRole("button", { name: "Use these and keep editing" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(guidance).toContainText("Use pnpm and tsc.");
+  await expect(guidance).toContainText("Use pnpm and vitest.");
 });
