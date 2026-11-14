@@ -200,7 +200,12 @@ export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterS
 /**
  * The position of the work that last started waiting for the Agent, taken or not; "0" if none has.
  * Work for the Agent still uncommitted when this is read will have a higher position, as
- * `markWaiting` serializes it per Agent, so a replay from it never skips that work.
+ * `markWaiting` serializes it per Agent, so a replay from it never skips that work. Work that
+ * committed but whose `waiting` event a stream has yet to send may have this position or lower:
+ * a stream's `ready` must not carry this alone, but the furthest of it and every id the stream
+ * sent before `ready`, having sent everything published meanwhile (see `LiveUpdates.stream`).
+ * Work that committed before this read but is pushed only after `ready` is written is still
+ * at or below it: the gap between a post's COMMIT and its push stays open.
  */
 export async function latestWaitingSeq(db: Queryable, agentId: string): Promise<string> {
   const { rows } = await db.query<{ seq: string | null }>("SELECT max(seq)::text AS seq FROM waiting_work WHERE agent_id = $1", [agentId]);

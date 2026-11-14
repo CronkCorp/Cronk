@@ -288,6 +288,38 @@ describe("An Agent Session's live updates", () => {
     expect(replayed.sort()).toEqual(["@claude-laptop @codex, first.", "Second."]);
   });
 
+  it("send, before `ready`, work pushed while a reopened stream was still catching up, and replay what follows from `ready`'s id", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const doc = (await admin.post("/api/workspace/documents", { title: "Notes" })).body.document;
+    const agent = await session();
+    const first = await agent.events("/api/agent-sessions/current/events");
+    const opened = await first.next();
+    first.close();
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "Missed." });
+
+    // Checking whether the Agent may still see the missed work's Project waits, so the catch-up stalls there.
+    const held = await cronk.holdTable("project_members");
+    const reopening = agent.events("/api/agent-sessions/current/events", { "last-event-id": opened!.id! });
+    await held.waiters(1);
+    // Meanwhile a post on a Workspace Document, which doesn't wait, commits and is pushed.
+    expect((await admin.post(`/api/documents/${doc.id}/comments`, { body: "@claude-laptop, during the catch-up." })).status).toBe(201);
+    await held.release();
+    const reopened = await reopening;
+
+    const sent = [];
+    for (let event = await reopened.next(); event; event = await reopened.next()) {
+      sent.push(event);
+      if (event.event === "ready") break;
+    }
+    expect(sent.map((e) => e.data.waiting?.comment.body ?? e.event)).toEqual(["Missed.", "@claude-laptop, during the catch-up.", "ready"]);
+    reopened.close();
+
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "After ready." });
+    const again = await agent.events("/api/agent-sessions/current/events", { "last-event-id": sent.at(-1)!.id! });
+    expect((await again.next())?.data.waiting.comment.body).toBe("After ready.");
+    expect((await again.next())?.event).toBe("ready");
+  });
+
   it("push work for one Agent while a post for another Agent is still uncommitted", async () => {
     const { cronk, admin, session } = await delegatedSetup();
     const codex = await registerAgent(admin, "codex");
