@@ -145,7 +145,7 @@ export function identityRoutes(ctx: AppContext) {
               required: ["invitation", "token"],
               properties: { invitation: ref("Invitation"), token: { type: "string" } },
             }),
-            ...errors(400, 401, 403, 409),
+            ...errors(400, 401, 403, 409, 410),
           },
         },
       },
@@ -171,7 +171,7 @@ export function identityRoutes(ctx: AppContext) {
         schema: {
           response: {
             200: answer("The Workspace's unexpired invitations, newest first", listing("invitations", ref("Invitation"))),
-            ...errors(401, 403),
+            ...errors(401, 403, 410),
           },
         },
       },
@@ -188,7 +188,7 @@ export function identityRoutes(ctx: AppContext) {
       {
         schema: {
           params: pathParams({ id: { type: "string", format: "uuid", description: "The invitation's id." } }),
-          response: { 204: noContent("The invitation is withdrawn"), ...errors(400, 401, 403, 404) },
+          response: { 204: noContent("The invitation is withdrawn"), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request, reply) => {
@@ -273,7 +273,7 @@ export function identityRoutes(ctx: AppContext) {
         schema: {
           response: {
             200: answer("The Workspace's Users", listing("users", ref("User"))),
-            ...errors(401, 403),
+            ...errors(401, 403, 410),
           },
         },
       },
@@ -290,7 +290,7 @@ export function identityRoutes(ctx: AppContext) {
         schema: {
           params: pathParams({ id: userIdParam }),
           body: { type: "object", additionalProperties: false, properties: { role, active: { type: "boolean" } } },
-          response: { 200: answer("The changed User", userAnswer), ...errors(400, 401, 403, 404, 409) },
+          response: { 200: answer("The changed User", userAnswer), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
       async (request) => {
@@ -315,7 +315,7 @@ export function identityRoutes(ctx: AppContext) {
               type: "object",
               properties: { user: ref("User"), agent: ref("Agent"), readOnly: { type: "boolean" } },
             }),
-            ...errors(401),
+            ...errors(401, 410),
           },
         },
       },

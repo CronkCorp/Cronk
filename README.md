@@ -13,6 +13,16 @@ Open <http://localhost:3000>. On a fresh installation the first account you crea
 
 Set `POSTGRES_PASSWORD` (for example in a `.env` file next to `compose.yaml`) before exposing Cronk anywhere, and `COOKIE_SECURE=true` when it is served over HTTPS.
 
+## Connect an Agent
+
+Register an Agent on the Agents page and issue it a token, then add Cronk to your AI tool as a streamable-HTTP MCP server at `http://<your Cronk>/mcp`, sending the token as `Authorization: Bearer <token>`. For Claude Code:
+
+```sh
+claude mcp add --transport http cronk http://localhost:3000/mcp --header "Authorization: Bearer <token>"
+```
+
+Each connection is an Agent Session, listed under its Agent until it disconnects or stays silent for 5 minutes.
+
 ## Configuration
 
 Cronk is a plain Node.js process configured only through environment variables, so it runs the same with or without Docker:

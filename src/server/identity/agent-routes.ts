@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
+import { endAgentSessionsOf, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
 import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
 import { requireAdmin } from "./access.js";
 import {
@@ -24,7 +25,7 @@ const agentBody = { type: "object", required: ["name"], additionalProperties: fa
 
 export function agentRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    // Each User's own Agents; with `all`, an Admin sees every User's.
+    // Each User's own Agents with their live Agent Sessions; with `all`, an Admin sees every User's.
     app.get<{ Querystring: { all?: boolean } }>(
       "/api/agents",
       {
@@ -32,7 +33,7 @@ export function agentRoutes(ctx: AppContext) {
           querystring: { type: "object", additionalProperties: false, properties: { all: { type: "boolean" } } },
           response: {
             200: answer("The Agents, by Owner then name", listing("agents", ref("Agent"))),
-            ...errors(400, 401, 403),
+            ...errors(400, 401, 403, 410),
           },
         },
       },
@@ -40,7 +41,10 @@ export function agentRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");
         const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id);
-        return { agents: agents.map((a) => publicAgent(a.agent, a.owner)) };
+        const sessions = await liveAgentSessions(ctx.db, agents.map((a) => a.agent.id), ctx.clock.now());
+        return {
+          agents: agents.map((a) => ({ ...publicAgent(a.agent, a.owner), sessions: sessions.get(a.agent.id)!.map(publicAgentSession) })),
+        };
       },
     );
 
@@ -49,7 +53,7 @@ export function agentRoutes(ctx: AppContext) {
       {
         schema: {
           body: agentBody,
-          response: { 201: answer("The new Agent, owned by the caller", agentAnswer), ...errors(400, 401, 403, 409) },
+          response: { 201: answer("The new Agent, owned by the caller", agentAnswer), ...errors(400, 401, 403, 409, 410) },
         },
       },
       async (request, reply) => {
@@ -66,7 +70,7 @@ export function agentRoutes(ctx: AppContext) {
         schema: {
           params: agentParams,
           body: agentBody,
-          response: { 200: answer("The renamed Agent", agentAnswer), ...errors(400, 401, 403, 404, 409) },
+          response: { 200: answer("The renamed Agent", agentAnswer), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
       async (request) => {
@@ -82,12 +86,20 @@ export function agentRoutes(ctx: AppContext) {
       {
         schema: {
           params: agentParams,
-          response: { 204: noContent("The Agent is removed and its tokens revoked"), ...errors(400, 401, 403, 404) },
+          response: {
+            204: noContent("The Agent is removed, its tokens revoked and its Agent Sessions ended"),
+            ...errors(400, 401, 403, 404, 410),
+          },
         },
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
-        await transaction(ctx.db, async (tx) => removeAgent(tx, await ownAgent(ctx, user, request.params.id), ctx.clock.now()));
+        await transaction(ctx.db, async (tx) => {
+          const agent = await ownAgent(ctx, user, request.params.id);
+          const now = ctx.clock.now();
+          await removeAgent(tx, agent, now);
+          await endAgentSessionsOf(tx, agent.id, now);
+        });
         return reply.code(204).send();
       },
     );
@@ -99,7 +111,7 @@ export function agentRoutes(ctx: AppContext) {
           params: agentParams,
           response: {
             200: answer("The Agent's tokens, oldest first, without their secrets", listing("tokens", ref("AgentToken"))),
-            ...errors(400, 401, 403, 404),
+            ...errors(400, 401, 403, 404, 410),
           },
         },
       },
@@ -122,7 +134,7 @@ export function agentRoutes(ctx: AppContext) {
               required: ["token", "secret"],
               properties: { token: ref("AgentToken"), secret: { type: "string" } },
             }),
-            ...errors(400, 401, 403, 404),
+            ...errors(400, 401, 403, 404, 410),
           },
         },
       },
@@ -139,13 +151,13 @@ export function agentRoutes(ctx: AppContext) {
       {
         schema: {
           params: pathParams({ id: agentId, tokenId: { type: "string", format: "uuid", description: "The token's id." } }),
-          response: { 204: noContent("The token is revoked"), ...errors(400, 401, 403, 404) },
+          response: { 204: noContent("The token is revoked"), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
-        if (!(await revokeAgentToken(ctx.db, agent, request.params.tokenId))) throw new HttpError(404, "No such token");
+        if (!(await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now()))) throw new HttpError(404, "No such token");
         return reply.code(204).send();
       },
     );

@@ -15,6 +15,7 @@ import {
   type TicketFilter,
   type TicketRef,
   type User,
+  sessionName,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
@@ -664,7 +665,12 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
             {changes.map((change, i) => (
               <li key={i}>
                 <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>
-                {change.actor.kind === "agent" && <span className="muted"> (Agent of {change.actor.owner.name})</span>}{" "}
+                {change.actor.kind === "agent" && (
+                  <span className="muted">
+                    {" "}
+                    ({change.actor.session ? `${sessionName(change.actor.session.id)}, for` : "Agent of"} {change.actor.owner.name})
+                  </span>
+                )}{" "}
                 {describe(change)}
               </li>
             ))}

@@ -9,7 +9,7 @@ export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     app.get(
       "/api/workspace",
-      { schema: { response: { 200: answer("The caller's Workspace", ref("Workspace")), ...errors(401, 403) } } },
+      { schema: { response: { 200: answer("The caller's Workspace", ref("Workspace")), ...errors(401, 403, 410) } } },
       async (request) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "read");
@@ -26,7 +26,7 @@ export function workspaceRoutes(ctx: AppContext) {
             additionalProperties: false,
             properties: { name: nameSchema, agentAccess: agentAccessSchema },
           },
-          response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403) },
+          response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403, 410) },
         },
       },
       async (request) => {

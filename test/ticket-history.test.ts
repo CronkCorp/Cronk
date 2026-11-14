@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, startInstalledCronk } from "./harness.js";
+import { agentOf, registerAgent, startInstalledCronk } from "./harness.js";
 
 describe("Ticket history", () => {
   it("records every change with the Actor who made it and when", async () => {
@@ -50,10 +50,41 @@ describe("Ticket history", () => {
     await admin.delete(`/api/agents/${agent.id}`);
 
     const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
-    const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" } };
+    const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" }, session: null };
     expect(changes).toEqual([
       expect.objectContaining({ actor, change: "created" }),
       expect.objectContaining({ actor, change: "title", from: "Found a bug", to: "Fix the bug" }),
     ]);
+  });
+
+  it("records the Agent Session an Agent's change was made in", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add login" });
+    const { secret } = await registerAgent(admin, "claude-laptop");
+    const session = (await cronk.client(secret).post("/api/agent-sessions")).body.session;
+
+    const inSession = await cronk.client(secret, { "cronk-agent-session": session.id }).patch("/api/tickets/CRONK-1", { title: "Add sign-in" });
+    expect(inSession.status).toBe(200);
+    await cronk.client(secret).patch("/api/tickets/CRONK-1", { title: "Add sign-in and sign-out" });
+
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    expect(changes.slice(1).map((c: { actor: { session: unknown } }) => c.actor.session)).toEqual([{ id: session.id }, null]);
+  });
+
+  it("refuses a change in an Agent Session that has ended or isn't the Agent's", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add login" });
+    const claude = await registerAgent(admin, "claude-laptop");
+    const codex = await registerAgent(admin, "codex");
+    const session = (await cronk.client(claude.secret).post("/api/agent-sessions")).body.session;
+
+    const asCodex = cronk.client(codex.secret, { "cronk-agent-session": session.id });
+    expect((await asCodex.patch("/api/tickets/CRONK-1", { title: "Taken" })).status).toBe(410);
+    const inSession = cronk.client(claude.secret, { "cronk-agent-session": session.id });
+    expect((await inSession.delete("/api/agent-sessions/current")).status).toBe(204);
+    expect((await inSession.patch("/api/tickets/CRONK-1", { title: "Taken" })).status).toBe(410);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.title).toBe("Add login");
   });
 });

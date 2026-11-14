@@ -32,6 +32,7 @@ export type SharedSchemaName =
   | "Invitation"
   | "Workspace"
   | "Agent"
+  | "AgentSession"
   | "AgentToken"
   | "Project"
   | "Status"
@@ -76,7 +77,29 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     expiresAt: timestamp,
   }),
   Workspace: object({ name: { type: "string" }, agentAccess: agentAccessSchema }),
-  Agent: object({ id, name: { type: "string" }, owner: named, createdAt: timestamp }),
+  Agent: object(
+    {
+      id,
+      name: { type: "string" },
+      owner: named,
+      createdAt: timestamp,
+      sessions: {
+        type: "array",
+        items: ref("AgentSession"),
+        description: "Its live Agent Sessions, oldest first; only the Agents list has it.",
+      },
+    },
+    ["sessions"],
+  ),
+  AgentSession: {
+    description: "One continuous connection of an Agent, from connect to disconnect.",
+    ...object({
+      id,
+      startedAt: timestamp,
+      lastSeenAt: timestamp,
+      endsIfSilentAt: { ...timestamp, description: "When the Session ends if it stays silent until then." },
+    }),
+  },
   AgentToken: {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
     ...object({ id, readOnly: { type: "boolean" }, createdAt: timestamp }),
@@ -128,8 +151,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     ...object({
       at: timestamp,
       actor: {
-        description: "Who made the change: a User, or an Agent with the Owner it acted for.",
-        ...object({ kind: { type: "string", enum: ["user", "agent"] }, id, name: { type: "string" }, owner: named }, ["owner"]),
+        description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in.",
+        ...object(
+          {
+            kind: { type: "string", enum: ["user", "agent"] },
+            id,
+            name: { type: "string" },
+            owner: named,
+            session: { ...nullable(object({ id })), description: "The Agent Session an Agent's change was made in, if any." },
+          },
+          ["owner", "session"],
+        ),
       },
       change: {
         type: "string",
@@ -180,6 +212,7 @@ const ERROR_MEANINGS = {
   403: "The caller may not do this: an Admin-only change, Read access where Write is needed, or an Agent where only a User may act",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
+  410: "The Agent Session named in the Cronk-Agent-Session header has ended or isn't the Agent's",
 } as const;
 
 /** The error answers of a route, each with the shared `Error` shape. */

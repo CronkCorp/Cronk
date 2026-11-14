@@ -4,6 +4,7 @@ import type {
   Access,
   Agent,
   AgentAccess,
+  AgentSession,
   AgentToken,
   IssuedAgentToken,
   Invitation,
@@ -33,6 +34,7 @@ export type {
   Access,
   Agent,
   AgentAccess,
+  AgentSession,
   AgentToken,
   IssuedAgentToken,
   Invitation,
@@ -56,6 +58,9 @@ export type {
   Visibility,
   Workspace,
 };
+
+/** How the UI names an Agent Session: by the start of its id, e.g. "session a3f2". */
+export const sessionName = (id: string) => `session ${id.slice(0, 4)}`;
 
 /** Narrows a Project's Ticket list; `assignee` takes a User id or `none`. */
 export interface TicketFilter {

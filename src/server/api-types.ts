@@ -3,6 +3,8 @@
  * client imports these with `import type`, so a change to a response shows up
  * there as a type error. Types only: nothing here may reach the web bundle.
  */
+import type { publicAgentSession } from "./coordination/agent-sessions.js";
+import type { welcome } from "./coordination/routes.js";
 import type { AgentToken as StoredAgentToken, issueAgentToken, publicAgent } from "./identity/agents.js";
 import type { Access } from "./identity/access.js";
 import type { publicInvitation } from "./identity/invitations.js";
@@ -36,7 +38,12 @@ export type Serialized<T> = T extends Date
       : T;
 
 export type User = Serialized<ReturnType<typeof publicUser>>;
-export type Agent = Serialized<ReturnType<typeof publicAgent>>;
+/** One continuous connection of an Agent, from connect to disconnect. */
+export type AgentSession = Serialized<ReturnType<typeof publicAgentSession>>;
+/** An Agent, with its live Agent Sessions oldest first as the Agents list returns them. */
+export type Agent = Serialized<ReturnType<typeof publicAgent>> & { sessions: AgentSession[] };
+/** What an Agent is told when its Agent Session starts. */
+export type Welcome = Serialized<Awaited<ReturnType<typeof welcome>>>;
 export type AgentToken = Serialized<StoredAgentToken>;
 /** A newly issued Agent token with its secret, which the API returns only this once. */
 export type IssuedAgentToken = Serialized<Awaited<ReturnType<typeof issueAgentToken>>>;

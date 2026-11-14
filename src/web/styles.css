@@ -7,6 +7,7 @@
   --accent: #3b5bdb;
   --accent-text: #ffffff;
   --error: #c92a2a;
+  --live: #2f9e44;
   color-scheme: light dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 15px;
@@ -21,6 +22,7 @@
     --border: #2e3237;
     --accent: #5c7cfa;
     --error: #ff8787;
+    --live: #51cf66;
   }
 }
 * { box-sizing: border-box; }
@@ -146,6 +148,9 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .token-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: 14px; }
 .token { display: flex; align-items: center; gap: 8px; }
 .secret { margin-top: 8px; }
+.session-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: 14px; }
+.session { display: flex; align-items: center; gap: 8px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); flex: none; }
 .secret p { margin: 0 0 6px; font-size: 14px; }
 .inline-input { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 .field.inline select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }

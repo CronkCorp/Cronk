@@ -18,3 +18,13 @@ describe("starting the application", () => {
     expect(await cronk.client().get("/api/health")).toEqual({ status: 200, body: { status: "ok" } });
   });
 });
+
+describe("losing database connections", () => {
+  it("keeps answering after Postgres terminates its idle connections, as on a Postgres restart", async () => {
+    const { cronk, admin } = await startInstalledCronk("Acme");
+
+    await cronk.terminateConnections();
+
+    expect((await admin.get("/api/workspace")).body).toMatchObject({ name: "Acme" });
+  });
+});
