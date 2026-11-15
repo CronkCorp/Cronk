@@ -1,3 +1,4 @@
+import { changeAccess } from "../coordination/ready.js";
 import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
@@ -297,7 +298,8 @@ export function identityRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change Users");
-        const updated = await transaction(ctx.db, (tx) =>
+        // Becoming an Admin, or active again, can make Tickets delegated to the User's Agents Ready.
+        const updated = await changeAccess(ctx, { ownerId: request.params.id }, (tx) =>
           updateUser(tx, user.workspaceId, request.params.id, request.body, ctx.clock.now()),
         );
         if (updated === "last admin") throw new HttpError(409, "The Workspace needs at least one active Admin");

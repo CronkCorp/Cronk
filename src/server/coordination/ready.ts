@@ -12,8 +12,9 @@ import { findDelegatedTicketsInTheClear, type ReadyScope } from "./claims.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 
 /**
- * Telling an Agent when a Ticket becomes Ready for it (delegated to it, unblocked, or its Claim
- * released or lapsed), through its live Agent Sessions' event stream, as a `ticketReady` event.
+ * Telling an Agent when a Ticket becomes Ready for it (delegated to it, unblocked, its Claim
+ * released or lapsed, or its Project opened up to it by an access or archive change), through its
+ * live Agent Sessions' event stream, as a `ticketReady` event.
  *
  * A route that may make Tickets Ready asks which of them already are (`readyNow`) inside its
  * transaction, before changing anything, and after it commits passes that answer to

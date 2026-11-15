@@ -364,7 +364,9 @@ export function coordinationRoutes(ctx: AppContext) {
                 "`Last-Event-ID`, the stream first sends, before `ready`, each `waiting` event it missed meanwhile whose work no welcome " +
                 "has taken since, then any pushed while it did so. Pushed work is still listed in the welcome of the Agent's next Agent Session. " +
                 "Each time one of the Agent's Tickets becomes Ready for it (delegated to it, unblocked, moved back into unfinished work, or its " +
-                "Claim released, ended or lapsed), a `ticketReady` event arrives whose data is `{ ticket }`, the Ticket as the welcome lists it; " +
+                "Claim released, ended or lapsed) or its Project opens up to it (unarchived, made open, or its Agent Access raised; or the Agent's " +
+                "Owner granted Write there, unlisted from an open Project, made an Admin or reactivated), " +
+                "a `ticketReady` event arrives whose data is `{ ticket }`, the Ticket as the welcome lists it; " +
                 "it has no `id` and isn't sent again on reopening, as the next welcome lists Ready Tickets anyway. A read-only token's stream " +
                 "gets none, as it can't Claim them. " +
                 "While it is open the Agent Session isn't silent: the stream refreshes it on its heartbeat (every 25 seconds), so it and its Claims stay alive.",

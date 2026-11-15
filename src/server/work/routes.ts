@@ -250,7 +250,8 @@ export function workRoutes(ctx: AppContext) {
         const member = await findUserById(ctx.db, request.params.userId);
         if (!member || member.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(404, "No such User");
         if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
-        await setMembership(ctx.db, project.id, member.id, request.body.access);
+        // Write for the Owner can make Tickets delegated to their Agents here Ready.
+        await changeAccess(ctx, { ownerId: member.id }, (tx) => setMembership(tx, project.id, member.id, request.body.access));
         inboxesChanged(ctx.live, [member.id]);
         return { member: { user: publicUser(member), access: request.body.access } };
       },
@@ -268,7 +269,8 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         requireAdmin(actor, "change who is in a Project");
-        await removeMembership(ctx.db, project.id, request.params.userId);
+        // In an open Project, no longer being listed with Read gives Write, which can make Tickets Ready.
+        await changeAccess(ctx, { ownerId: request.params.userId }, (tx) => removeMembership(tx, project.id, request.params.userId));
         inboxesChanged(ctx.live, [request.params.userId]);
         return reply.code(204).send();
       },
