@@ -61,4 +61,39 @@ describe("Agent Sessions", () => {
     await busy.delete("/api/tickets/CRONK-1/claim");
     expect(claimsOf((await bob.get("/api/agents")).body.agents)[busy.sessionId]).toEqual([]);
   });
+
+  it("are listed with when the Agent's last one ended, by disconnecting or falling silent", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const lastEnded = async () => (await admin.get("/api/agents")).body.agents[0].lastSessionEndedAt;
+    expect(await lastEnded()).toBeNull();
+
+    const first = await startSession(cronk, claude.secret);
+    cronk.clock.advance(60_000);
+    await first.delete("/api/agent-sessions/current");
+    expect(await lastEnded()).toBe("2026-01-01T09:01:00.000Z");
+
+    await startSession(cronk, claude.secret);
+    expect(await lastEnded()).toBe("2026-01-01T09:01:00.000Z");
+    cronk.clock.advance(10 * 60_000);
+    expect(await lastEnded()).toBe("2026-01-01T09:06:00.000Z");
+  });
+});
+
+describe("Agents", () => {
+  it("are listed with how many unfinished Tickets they are Delegate on that the caller can read", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await projectWithTickets(admin, "CRONK", 3);
+    await projectWithTickets(admin, "SECRET", 1);
+    const claude = await registerAgent(bob, "claude-laptop");
+    for (const key of ["CRONK-1", "CRONK-2", "CRONK-3", "SECRET-1"]) await admin.patch(`/api/tickets/${key}`, { assigneeId: bobId, delegateId: claude.agentId });
+    const completed = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed").id;
+    await admin.patch("/api/tickets/CRONK-3", { statusId: completed });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+
+    expect((await bob.get("/api/agents")).body.agents[0].delegateTicketCount).toBe(2);
+    expect((await admin.get("/api/agents?all=true")).body.agents[0].delegateTicketCount).toBe(3);
+  });
 });

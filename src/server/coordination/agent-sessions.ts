@@ -131,6 +131,19 @@ export async function liveAgentSessions(db: Queryable, agentIds: string[], now: 
   return byAgent;
 }
 
+/**
+ * When each of these Agents' last Session that is no longer live ended: when it was ended, or when it
+ * fell silent if that came first. Agents with no such Session are left out.
+ */
+export async function lastAgentSessionEnds(db: Queryable, agentIds: string[], now: Date): Promise<Map<string, Date>> {
+  const { rows } = await db.query<{ agent_id: string; ended: Date }>(
+    `SELECT s.agent_id, max(LEAST(s.ended_at, s.last_seen_at + make_interval(secs => w.silence_threshold_seconds))) AS ended
+     FROM agent_sessions s ${WITH_WORKSPACE} WHERE s.agent_id = ANY($1::uuid[]) AND NOT (${isLiveAt("$2")}) GROUP BY s.agent_id`,
+    [agentIds, now],
+  );
+  return new Map(rows.map((r) => [r.agent_id, r.ended]));
+}
+
 /** What the Agents page shows of a live Session, to notice when it changes: its Agent's Owner, when it would fall silent, and its Claims. */
 export interface SessionLook {
   ownerId: string;

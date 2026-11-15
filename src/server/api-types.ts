@@ -57,7 +57,13 @@ export interface HeldClaim {
   title: string;
 }
 /** An Agent, with its live Agent Sessions oldest first and their Claims, as the Agents list returns them. */
-export type Agent = Serialized<ReturnType<typeof publicAgent>> & { sessions: (AgentSession & { claims: HeldClaim[] })[] };
+export type Agent = Serialized<ReturnType<typeof publicAgent>> & {
+  sessions: (AgentSession & { claims: HeldClaim[] })[];
+  /** When its last Agent Session that is no longer live ended or fell silent; null if it has had none. */
+  lastSessionEndedAt: string | null;
+  /** How many unfinished Tickets it is Delegate on that the caller can read. */
+  delegateTicketCount: number;
+};
 /** What an Agent is told when its Agent Session starts. */
 export type Welcome = Serialized<Awaited<ReturnType<typeof welcome>>>;
 export type AgentToken = Serialized<StoredAgentToken>;

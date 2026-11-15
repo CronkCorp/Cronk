@@ -182,8 +182,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         items: ref("AgentSession"),
         description: "Its live Agent Sessions, oldest first; only the Agents list has it.",
       },
+      lastSessionEndedAt: {
+        ...nullable(timestamp),
+        description:
+          "When its last Agent Session that is no longer live ended or fell silent, or null if it has had none; only the Agents list has it.",
+      },
+      delegateTicketCount: {
+        type: "integer",
+        description: "How many unfinished Tickets it is Delegate on in Projects the caller can read; only the Agents list has it.",
+      },
     },
-    ["sessions"],
+    ["sessions", "lastSessionEndedAt", "delegateTicketCount"],
   ),
   AgentSession: {
     description: "One continuous connection of an Agent, from connect to disconnect.",

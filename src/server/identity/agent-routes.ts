@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { endAgentSessionsOf, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
+import { endAgentSessionsOf, lastAgentSessionEnds, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
 import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
 import { readablePlaces, requireAdmin } from "./access.js";
 import { userActor } from "../actor.js";
-import { listClaimsOfSessions } from "../coordination/claims.js";
+import { countDelegatedTickets, listClaimsOfSessions } from "../coordination/claims.js";
 import {
   findAgent,
   insertAgent,
@@ -46,16 +46,24 @@ export function agentRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");
         const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id);
-        const sessions = await liveAgentSessions(ctx.db, agents.map((a) => a.agent.id), ctx.clock.now());
+        const agentIds = agents.map((a) => a.agent.id);
+        const now = ctx.clock.now();
+        const sessions = await liveAgentSessions(ctx.db, agentIds, now);
+        const lastEnded = await lastAgentSessionEnds(ctx.db, agentIds, now);
         const claims = await listClaimsOfSessions(ctx.db, [...sessions.values()].flat().map((s) => s.id));
-        // Claims on Tickets the caller can't read are left out, as the Tickets themselves are.
+        const delegated = await countDelegatedTickets(ctx.db, agentIds);
+        // Tickets the caller can't read are left out of Claims and counts, as they are everywhere else.
         const readable = new Set((await readablePlaces(ctx.db, userActor(user))).projectIds);
         const readableClaims = (sessionId: string) =>
           claims.get(sessionId)!.flatMap((c) => (readable.has(c.projectId) ? [{ ticketKey: c.ticketKey, title: c.title }] : []));
+        const readableCount = (agentId: string) =>
+          [...delegated.get(agentId)!].reduce((sum, [projectId, count]) => sum + (readable.has(projectId) ? count : 0), 0);
         return {
           agents: agents.map((a) => ({
             ...publicAgent(a.agent, a.owner),
             sessions: sessions.get(a.agent.id)!.map((s) => ({ ...publicAgentSession(s), claims: readableClaims(s.id) })),
+            lastSessionEndedAt: lastEnded.get(a.agent.id) ?? null,
+            delegateTicketCount: readableCount(a.agent.id),
           })),
         };
       },

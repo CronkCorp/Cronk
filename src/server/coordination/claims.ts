@@ -104,6 +104,21 @@ export async function listClaimsOfSessions(db: Queryable, sessionIds: string[]):
 }
 
 /**
+ * How many unfinished Tickets each of these Agents is Delegate on, per Agent and then per Project, so
+ * callers can leave out the Projects they can't read.
+ */
+export async function countDelegatedTickets(db: Queryable, agentIds: string[]): Promise<Map<string, Map<string, number>>> {
+  const { rows } = await db.query<{ delegate_id: string; project_id: string; count: number }>(
+    `SELECT t.delegate_id, t.project_id, count(*)::int AS count FROM tickets t JOIN statuses s ON s.id = t.status_id
+     WHERE t.delegate_id = ANY($1::uuid[]) AND s.category NOT IN ${FINISHED} GROUP BY t.delegate_id, t.project_id`,
+    [agentIds],
+  );
+  const byAgent = new Map<string, Map<string, number>>(agentIds.map((id) => [id, new Map()]));
+  for (const row of rows) byAgent.get(row.delegate_id)!.set(row.project_id, row.count);
+  return byAgent;
+}
+
+/**
  * The Tickets whose Claims lapsed since the last look, at `since`, when `claims` (Ticket id to
  * Agent Session id) were live: the Ticket still names the Session, which nobody ended, and it
  * is no longer live at `now`, having been live at `since` or having lapsed after it. Claims
