@@ -34,46 +34,47 @@ function decodeEntity(entity: string): string {
 export function alignToSource(value: string, source: string, from: number, to: number): SourceBounds | undefined {
   const starts: number[] = [];
   const ends: number[] = [from];
-  let j = from;
+  // Two cursors: `shown` walks the rendered value, `at` the Markdown source.
+  let at = from;
   let lineStart = false;
-  for (let i = 0; i < value.length; ) {
-    const want = value[i]!;
+  for (let shown = 0; shown < value.length; ) {
+    const want = value[shown]!;
     // The prefix of a continued line: `> ` in a blockquote, indentation in a list item.
-    if (lineStart && j < to && source[j] !== want && " \t>".includes(source[j]!)) {
-      j++;
+    if (lineStart && at < to && source[at] !== want && " \t>".includes(source[at]!)) {
+      at++;
       continue;
     }
     // Spaces at the end of a line, which Markdown drops before the line break.
-    if (want === "\n" && (source[j] === " " || source[j] === "\t")) {
-      j++;
+    if (want === "\n" && (source[at] === " " || source[at] === "\t")) {
+      at++;
       continue;
     }
-    ENTITY.lastIndex = j;
-    const entity = source[j] === "&" ? ENTITY.exec(source)?.[0] : undefined;
+    ENTITY.lastIndex = at;
+    const entity = source[at] === "&" ? ENTITY.exec(source)?.[0] : undefined;
     // Something that only looks like an entity, as `&foo;`, reads as it is, so it is matched character by character.
-    const decoded = entity && j + entity.length <= to ? decodeEntity(entity) : undefined;
-    if (entity && decoded && decoded !== entity && value.startsWith(decoded, i)) {
+    const decoded = entity && at + entity.length <= to ? decodeEntity(entity) : undefined;
+    if (entity && decoded && decoded !== entity && value.startsWith(decoded, shown)) {
       for (let k = 0; k < decoded.length; k++) {
-        starts.push(j);
-        ends.push(j + entity.length);
+        starts.push(at);
+        ends.push(at + entity.length);
       }
-      j += entity.length;
-      i += decoded.length;
+      at += entity.length;
+      shown += decoded.length;
       lineStart = false;
       continue;
     }
-    const escaped = source[j] === "\\" && source[j + 1] === want && ASCII_PUNCTUATION.test(want);
-    if (!escaped && source[j] !== want) return undefined;
+    const escaped = source[at] === "\\" && source[at + 1] === want && ASCII_PUNCTUATION.test(want);
+    if (!escaped && source[at] !== want) return undefined;
     const length = escaped ? 2 : 1;
-    if (j + length > to) return undefined;
-    starts.push(j);
-    j += length;
-    ends.push(j);
+    if (at + length > to) return undefined;
+    starts.push(at);
+    at += length;
+    ends.push(at);
     lineStart = want === "\n";
-    i++;
+    shown++;
   }
-  if (j !== to) return undefined;
-  starts.push(j);
+  if (at !== to) return undefined;
+  starts.push(at);
   return { starts, ends };
 }
 

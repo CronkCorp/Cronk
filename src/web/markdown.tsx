@@ -18,36 +18,35 @@ function pointIn(source: string, offset: number): MarkdownPoint {
 }
 
 /**
- * Where `length` characters from `from` in a text node's value sit in `source`, if the node's position
- * is known and its value can be tied to the source character by character.
- */
-function positionWithin(node: MarkdownNode, source: string, from: number, length: number): Pick<MarkdownNode, "position"> {
-  const start = node.position?.start.offset;
-  const end = node.position?.end.offset;
-  if (start === undefined || end === undefined) return {};
-  const bounds = alignToSource(node.value ?? "", source, start, end);
-  if (!bounds) return {};
-  return { position: { start: pointIn(source, bounds.starts[from]!), end: pointIn(source, bounds.ends[from + length]!) } };
-}
-
-/**
  * A remark plugin that turns references to Tickets of known Projects into links
  * to those Tickets. Only keys of real Projects count, so text like `UTF-8`
  * stays plain. Code is never touched, as it isn't text in the tree.
  */
 function linkTicketReferences(projectKeys: Set<string>, source: string) {
+  /**
+   * Where `length` characters from `from` in a text node's value sit in the source, if the node's position
+   * is known and its value can be tied to the source character by character.
+   */
+  const positionWithin = (node: MarkdownNode, from: number, length: number): Pick<MarkdownNode, "position"> => {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) return {};
+    const bounds = alignToSource(node.value ?? "", source, start, end);
+    if (!bounds) return {};
+    return { position: { start: pointIn(source, bounds.starts[from]!), end: pointIn(source, bounds.ends[from + length]!) } };
+  };
   const split = (text: string, node: MarkdownNode): MdNode[] => {
     const parts: MdNode[] = [];
     let last = 0;
     for (const match of text.matchAll(TICKET_REFERENCE)) {
       if (!projectKeys.has(match[1]!)) continue;
-      if (match.index > last) parts.push({ type: "text", value: text.slice(last, match.index), ...positionWithin(node, source, last, match.index - last) });
-      const at = positionWithin(node, source, match.index, match[0].length);
+      if (match.index > last) parts.push({ type: "text", value: text.slice(last, match.index), ...positionWithin(node, last, match.index - last) });
+      const at = positionWithin(node, match.index, match[0].length);
       parts.push({ type: "link", url: `/tickets/${match[0]}`, children: [{ type: "text", value: match[0], ...at }], ...at });
       last = match.index + match[0].length;
     }
     if (last === 0) return [node];
-    if (last < text.length) parts.push({ type: "text", value: text.slice(last), ...positionWithin(node, source, last, text.length - last) });
+    if (last < text.length) parts.push({ type: "text", value: text.slice(last), ...positionWithin(node, last, text.length - last) });
     return parts;
   };
   return () => (tree: MdNode) => replaceReferenceText(tree, split);
