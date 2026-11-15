@@ -5,10 +5,27 @@ import { join } from "node:path";
 
 const ada = { email: "ada@example.com", password: "correct horse battery" };
 
-test("set up a fresh installation, sign out, sign in and see the application shell", async ({ page }) => {
+test("set up a fresh installation, sign out, sign in and see the application shell", async ({ page, baseURL }) => {
+  const fontRequests: string[] = [];
+  page.on("request", (r) => r.resourceType() === "font" && fontRequests.push(r.url()));
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Set up Cronk" })).toBeVisible();
+  // The IBM Plex faces come from Cronk's own build, never a CDN, so an offline installation still has them.
+  const loadedFaces = () =>
+    page.evaluate(async () => {
+      await document.fonts.ready;
+      return [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family.replace(/"/g, ""));
+    });
+  await expect.poll(loadedFaces).toContain("IBM Plex Sans");
+  await page.locator("body").evaluate((body) => {
+    const code = document.createElement("code");
+    code.textContent = "CRONK-1";
+    body.append(code);
+  });
+  await expect.poll(loadedFaces).toContain("IBM Plex Mono");
+  expect(fontRequests.length).toBeGreaterThan(0);
+  for (const url of fontRequests) expect(url.startsWith(baseURL!)).toBe(true);
   await page.getByLabel("Workspace name").fill("Acme");
   await page.getByLabel("Your name").fill("Ada");
   await page.getByLabel("Email").fill("ada@example.com");
