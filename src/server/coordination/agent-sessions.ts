@@ -86,19 +86,34 @@ export async function findLiveAgentSession(db: Queryable, agentId: string, id: s
   return rows[0] && toAgentSession(rows[0]);
 }
 
+/** Ends the Sessions `column` picks, and returns the Tickets whose Claims they held. */
+async function endSessions(db: Queryable, column: "id" | "token_id" | "agent_id", value: string, now: Date): Promise<ClaimHolders> {
+  const { rows } = await db.query<{ id: string }>(
+    `WITH ended AS (UPDATE agent_sessions SET ended_at = $2 WHERE ${column} = $1 AND ended_at IS NULL RETURNING id)
+     SELECT t.id FROM tickets t JOIN ended ON ended.id = t.claim_session_id`,
+    [value, now],
+  );
+  return { ticketIds: rows.map((r) => r.id) };
+}
+
+/** What ending Agent Sessions changed: the Tickets whose Claims they held, which no longer have one. */
+export interface ClaimHolders {
+  ticketIds: string[];
+}
+
 /** Ends a Session now. */
-export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE id = $1 AND ended_at IS NULL", [id, now]);
+export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "id", id, now);
 }
 
 /** Ends every Session a token started, as when it is revoked. */
-export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE token_id = $1 AND ended_at IS NULL", [tokenId, now]);
+export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "token_id", tokenId, now);
 }
 
 /** Ends every Session of an Agent, as when it is removed. */
-export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE agent_id = $1 AND ended_at IS NULL", [agentId, now]);
+export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "agent_id", agentId, now);
 }
 
 /** The live Sessions of each of these Agents, oldest first. */

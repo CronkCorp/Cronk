@@ -17,6 +17,7 @@ import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } fr
 import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } from "./waiting-work.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
 import { inboxesChanged } from "../inbox/inbox.js";
+import { ticketsChanged } from "../work/ticket-changes.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -146,7 +147,9 @@ export function coordinationRoutes(ctx: AppContext) {
         const now = ctx.clock.now();
         const scope = await readyScope(ctx, actor);
         const id = await transaction(ctx.db, (tx) => claimNextReady(tx, scope, session.id, now));
-        return { next: id ? await ticketDetail(ctx.db, actor, (await findTicketById(ctx.db, id))!, now) : null };
+        const ticket = id ? (await findTicketById(ctx.db, id))! : null;
+        ticketsChanged(ctx.live, [ticket]);
+        return { next: ticket ? await ticketDetail(ctx.db, actor, ticket, now) : null };
       },
     );
 
@@ -166,7 +169,7 @@ export function coordinationRoutes(ctx: AppContext) {
         const actor = requireAgent(await requireActor(ctx, request));
         const session = requireSession(actor);
         const now = ctx.clock.now();
-        return transaction(ctx.db, async (tx) => {
+        const claimed = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (ticket.delegate?.id !== actor.agent.id) throw new HttpError(409, `${ticket.key} isn't delegated to ${actor.agent.name}`);
           if (FINISHED_CATEGORIES.includes(ticket.status.category)) {
@@ -175,8 +178,10 @@ export function coordinationRoutes(ctx: AppContext) {
           const held = await findLiveClaim(tx, ticket.id, now);
           if (held && held.session.id !== session.id) throw new HttpError(409, `${ticket.key} is Claimed by another Agent Session`);
           await setClaim(tx, ticket.id, session.id, now);
-          return ticketDetail(tx, actor, ticket, now);
+          return { ticket, detail: await ticketDetail(tx, actor, ticket, now) };
         });
+        ticketsChanged(ctx.live, [claimed.ticket]);
+        return claimed.detail;
       },
     );
 
@@ -192,12 +197,14 @@ export function coordinationRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = requireAgent(await requireActor(ctx, request));
         const session = requireSession(actor);
-        await transaction(ctx.db, async (tx) => {
+        const released = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const held = await findLiveClaim(tx, ticket.id, ctx.clock.now());
           if (held?.session.id !== session.id) throw new HttpError(409, `This Agent Session doesn't hold ${ticket.key}'s Claim`);
           await clearClaim(tx, ticket.id);
+          return ticket;
         });
+        ticketsChanged(ctx.live, [released]);
         return reply.code(204).send();
       },
     );
@@ -382,7 +389,8 @@ export function coordinationRoutes(ctx: AppContext) {
       { schema: { headers: sessionHeader, response: { 204: noContent("The Agent Session has ended"), ...errors(400, 401, 403, 410) } } },
       async (request, reply) => {
         const session = requireSession(await requireActor(ctx, request));
-        await endAgentSession(ctx.db, session.id, ctx.clock.now());
+        const { ticketIds } = await endAgentSession(ctx.db, session.id, ctx.clock.now());
+        ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
         return reply.code(204).send();
       },
     );

@@ -18,6 +18,8 @@ import {
 } from "./agents.js";
 import type { User } from "./users.js";
 import { inboxesChanged } from "../inbox/inbox.js";
+import { ticketsChanged } from "../work/ticket-changes.js";
+import { findTicketsByIds } from "../work/tickets.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
 const agentParams = pathParams({ id: agentId });
@@ -95,12 +97,13 @@ export function agentRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
-        await transaction(ctx.db, async (tx) => {
+        const { ticketIds } = await transaction(ctx.db, async (tx) => {
           const agent = await ownAgent(ctx, user, request.params.id);
           const now = ctx.clock.now();
           await removeAgent(tx, agent, now);
-          await endAgentSessionsOf(tx, agent.id, now);
+          return endAgentSessionsOf(tx, agent.id, now);
         });
+        ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
         // Its open questions leave its Owner's Inbox.
         inboxesChanged(ctx.live, [user.id]);
         return reply.code(204).send();
@@ -160,7 +163,9 @@ export function agentRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
-        if (!(await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now()))) throw new HttpError(404, "No such token");
+        const ended = await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now());
+        if (!ended) throw new HttpError(404, "No such token");
+        ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ended.ticketIds));
         return reply.code(204).send();
       },
     );
