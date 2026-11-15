@@ -3,7 +3,9 @@ import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import { endAgentSessionsOf, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
 import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
-import { requireAdmin } from "./access.js";
+import { readablePlaces, requireAdmin } from "./access.js";
+import { userActor } from "../actor.js";
+import { listClaimsOfSessions } from "../coordination/claims.js";
 import {
   findAgent,
   insertAgent,
@@ -44,8 +46,16 @@ export function agentRoutes(ctx: AppContext) {
         if (request.query.all) requireAdmin(user, "see every User's Agents");
         const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id);
         const sessions = await liveAgentSessions(ctx.db, agents.map((a) => a.agent.id), ctx.clock.now());
+        const claims = await listClaimsOfSessions(ctx.db, [...sessions.values()].flat().map((s) => s.id));
+        // Claims on Tickets the caller can't read are left out, as the Tickets themselves are.
+        const readable = new Set((await readablePlaces(ctx.db, userActor(user))).projectIds);
+        const readableClaims = (sessionId: string) =>
+          claims.get(sessionId)!.flatMap((c) => (readable.has(c.projectId) ? [{ ticketKey: c.ticketKey, title: c.title }] : []));
         return {
-          agents: agents.map((a) => ({ ...publicAgent(a.agent, a.owner), sessions: sessions.get(a.agent.id)!.map(publicAgentSession) })),
+          agents: agents.map((a) => ({
+            ...publicAgent(a.agent, a.owner),
+            sessions: sessions.get(a.agent.id)!.map((s) => ({ ...publicAgentSession(s), claims: readableClaims(s.id) })),
+          })),
         };
       },
     );

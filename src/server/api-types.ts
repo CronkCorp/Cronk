@@ -51,8 +51,13 @@ export type Serialized<T> = T extends Date
 export type User = Serialized<ReturnType<typeof publicUser>>;
 /** One continuous connection of an Agent, from connect to disconnect. */
 export type AgentSession = Serialized<ReturnType<typeof publicAgentSession>>;
-/** An Agent, with its live Agent Sessions oldest first as the Agents list returns them. */
-export type Agent = Serialized<ReturnType<typeof publicAgent>> & { sessions: AgentSession[] };
+/** A Ticket a live Agent Session holds the Claim on, as the Agents list shows it. */
+export interface HeldClaim {
+  ticketKey: string;
+  title: string;
+}
+/** An Agent, with its live Agent Sessions oldest first and their Claims, as the Agents list returns them. */
+export type Agent = Serialized<ReturnType<typeof publicAgent>> & { sessions: (AgentSession & { claims: HeldClaim[] })[] };
 /** What an Agent is told when its Agent Session starts. */
 export type Welcome = Serialized<Awaited<ReturnType<typeof welcome>>>;
 export type AgentToken = Serialized<StoredAgentToken>;

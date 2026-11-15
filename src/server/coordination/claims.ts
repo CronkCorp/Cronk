@@ -2,7 +2,7 @@ import type { AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
-import type { AgentRef, Ticket } from "../work/tickets.js";
+import { ticketKeySql, type AgentRef, type Ticket } from "../work/tickets.js";
 import { isLiveAt, WITH_WORKSPACE } from "./agent-sessions.js";
 
 /**
@@ -78,6 +78,29 @@ export async function listLiveClaims(db: Queryable, now: Date): Promise<Map<stri
     [now],
   );
   return new Map(rows.map((r) => [r.id, r.session_id]));
+}
+
+/** A Ticket an Agent Session holds the Claim on, as the Agents list shows it. */
+export interface HeldTicket {
+  ticketKey: string;
+  title: string;
+  projectId: string;
+}
+
+/**
+ * The Tickets each of these Agent Sessions holds the Claim on, in key order. Pass only live Sessions:
+ * a Claim is live exactly while its Session is.
+ */
+export async function listClaimsOfSessions(db: Queryable, sessionIds: string[]): Promise<Map<string, HeldTicket[]>> {
+  const { rows } = await db.query<{ session_id: string; ticket_key: string; title: string; project_id: string }>(
+    `SELECT t.claim_session_id AS session_id, ${ticketKeySql("p", "t")} AS ticket_key, t.title, t.project_id
+     FROM tickets t JOIN projects p ON p.id = t.project_id
+     WHERE t.claim_session_id = ANY($1::uuid[]) ORDER BY p.key, t.number`,
+    [sessionIds],
+  );
+  const bySession = new Map<string, HeldTicket[]>(sessionIds.map((id) => [id, []]));
+  for (const row of rows) bySession.get(row.session_id)!.push({ ticketKey: row.ticket_key, title: row.title, projectId: row.project_id });
+  return bySession;
 }
 
 /**

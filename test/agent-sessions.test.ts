@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, registerAgent, startInstalledCronk } from "./harness.js";
+import { joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("Agent Sessions", () => {
   it("are started only by Agents, and shown with their Agent to its Owner and to Admins", async () => {
@@ -12,7 +12,7 @@ describe("Agent Sessions", () => {
     expect(started.status).toBe(201);
     expect(started.body.welcome).toMatchObject({ workspace: { name: "Acme" }, agent: { name: "claude-laptop", owner: { name: "bob" } }, readOnly: false });
 
-    const expected = [{ id: started.body.session.id, startedAt: "2026-01-01T09:00:00.000Z", lastSeenAt: "2026-01-01T09:00:00.000Z", endsIfSilentAt: "2026-01-01T09:05:00.000Z" }];
+    const expected = [{ id: started.body.session.id, startedAt: "2026-01-01T09:00:00.000Z", lastSeenAt: "2026-01-01T09:00:00.000Z", endsIfSilentAt: "2026-01-01T09:05:00.000Z", claims: [] }];
     expect((await bob.get("/api/agents")).body.agents[0].sessions).toEqual(expected);
     expect((await admin.get("/api/agents?all=true")).body.agents[0].sessions).toEqual(expected);
   });
@@ -30,5 +30,35 @@ describe("Agent Sessions", () => {
 
     cronk.clock.advance(5 * 60_000);
     expect((await inSession.get("/api/agent-sessions/current")).status).toBe(410);
+  });
+
+  it("are listed with their live Claims, leaving out Tickets in Projects the caller can't read", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 1);
+    await projectWithTickets(admin, "SECRET", 1);
+    const claude = await registerAgent(bob, "claude-laptop");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    for (const key of ["CRONK-1", "SECRET-1"]) await admin.patch(`/api/tickets/${key}`, { assigneeId: bobId, delegateId: claude.agentId });
+    const busy = await startSession(cronk, claude.secret);
+    const idle = await startSession(cronk, claude.secret);
+    for (const key of ["CRONK-1", "SECRET-1"]) expect((await busy.post(`/api/tickets/${key}/claim`)).status).toBe(200);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+
+    const claimsOf = (agents: { sessions: { id: string; claims: unknown[] }[] }[]) => Object.fromEntries(agents[0]!.sessions.map((s) => [s.id, s.claims]));
+    expect(claimsOf((await bob.get("/api/agents")).body.agents)).toEqual({
+      [busy.sessionId]: [{ ticketKey: "CRONK-1", title: "Ticket 1" }],
+      [idle.sessionId]: [],
+    });
+    expect(claimsOf((await admin.get("/api/agents?all=true")).body.agents)).toEqual({
+      [busy.sessionId]: [
+        { ticketKey: "CRONK-1", title: "Ticket 1" },
+        { ticketKey: "SECRET-1", title: "Ticket 1" },
+      ],
+      [idle.sessionId]: [],
+    });
+
+    await busy.delete("/api/tickets/CRONK-1/claim");
+    expect(claimsOf((await bob.get("/api/agents")).body.agents)[busy.sessionId]).toEqual([]);
   });
 });

@@ -192,7 +192,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       startedAt: timestamp,
       lastSeenAt: timestamp,
       endsIfSilentAt: { ...timestamp, description: "When the Session ends if it stays silent until then." },
-    }),
+      claims: {
+        type: "array",
+        description:
+          "The Tickets it holds the live Claims on, in key order, leaving out those in Projects the caller can't read; only the Agents list has it.",
+        items: object({ ticketKey: { type: "string" }, title: { type: "string" } }),
+      },
+    }, ["claims"]),
   },
   AgentToken: {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
