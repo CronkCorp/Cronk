@@ -83,7 +83,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
 - **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
-  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
+  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
   - Ghost is text in `--accent`, for Reply, Rename and the like.
   - Danger is filled `--danger`, and only inside a confirming dialog.
