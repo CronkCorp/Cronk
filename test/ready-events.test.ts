@@ -30,7 +30,7 @@ async function memberAgentSetup(visibility: "open" | "private") {
   const agent = await startSession(cronk, claude.secret);
   const stream = await agent.events("/api/agent-sessions/current/events");
   expect((await stream.next())?.event).toBe("ready");
-  return { cronk, admin, bobId, stream };
+  return { admin, bobId, stream };
 }
 
 describe("An Agent Session's event stream", () => {
@@ -133,6 +133,7 @@ describe("An Agent Session's event stream, on access and archive changes", () =>
     const told = [await stream.next(), await stream.next()];
     expect(told).toEqual(expect.arrayContaining([readyEvent("CRONK-1"), readyEvent("CRONK-2")]));
   });
+
   it("tells the Agent of its Tickets in a Project whose Agent Access goes from Read to Write", async () => {
     const { admin, session } = await delegatedSetup(1);
     await admin.patch("/api/projects/CRONK", { agentAccess: "read" });
@@ -156,11 +157,13 @@ describe("An Agent Session's event stream, on access and archive changes", () =>
     await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId });
     expect(await stream.next()).toEqual(readyEvent("CRONK-2"));
   });
+
   it("tells the Agent of its Tickets in a private Project when its Owner is granted Write there", async () => {
     const { stream, bobId, admin } = await memberAgentSetup("private");
     await admin.put(`/api/projects/SECRET/members/${bobId}`, { access: "write" });
     expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
   });
+
   it("tells the Agent of its Tickets in an open Project when its Owner's Read listing there is removed", async () => {
     const { stream, bobId, admin } = await memberAgentSetup("open");
     await admin.delete(`/api/projects/SECRET/members/${bobId}`);
@@ -170,6 +173,21 @@ describe("An Agent Session's event stream, on access and archive changes", () =>
   it("tells the Agent of its Tickets in a private Project when its Owner becomes an Admin", async () => {
     const { stream, bobId, admin } = await memberAgentSetup("private");
     await admin.patch(`/api/users/${bobId}`, { role: "admin" });
+    expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
+  });
+
+  it("tells the Agent of its Tickets in a private Project made open, where its Owner isn't listed", async () => {
+    const { stream, bobId, admin } = await memberAgentSetup("private");
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    await admin.patch("/api/projects/SECRET", { visibility: "open" });
+    expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
+  });
+  it("tells the Agent of its Tickets when its Owner is reactivated", async () => {
+    const { stream, bobId, admin } = await memberAgentSetup("open");
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
+    await admin.patch(`/api/users/${bobId}`, { active: false });
+    await admin.patch(`/api/users/${bobId}`, { active: true });
     expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
   });
 });
