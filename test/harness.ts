@@ -440,6 +440,8 @@ export interface McpConnection {
 /**
  * Connects a real MCP client to Cronk's MCP endpoint with `token`; closed when the test ends.
  * With `listening`, also waits until the client has opened the stream it hears notifications on.
+ * Without it, the client never opens that stream (its GET is answered 405, as by a server that
+ * offers none), so its Agent Session stays silent between its requests whatever heartbeats run.
  */
 export async function connectMcp(cronk: Cronk, token: string, opts: { listening?: boolean } = {}): Promise<McpConnection> {
   let listening!: () => void;
@@ -447,6 +449,7 @@ export async function connectMcp(cronk: Cronk, token: string, opts: { listening?
   const transport = new StreamableHTTPClientTransport(new URL("/mcp", await cronk.url()), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
     fetch: async (url, init) => {
+      if (init?.method === "GET" && !opts.listening) return new globalThis.Response(null, { status: 405 });
       const res = await fetch(url, init);
       if (init?.method === "GET" && res.ok) listening();
       return res;
