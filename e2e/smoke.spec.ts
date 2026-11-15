@@ -729,6 +729,42 @@ test("change a Ticket's Status and Delegate from its side panel and see each as 
   await expect(page.getByRole("list", { name: "History" })).toHaveCount(0);
 });
 
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("see the Claim card on a Claimed Ticket, and see it go once the Claim is released", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket, agentCall, session } = await delegatedTicket(page, request, "claim-bot", "Claimed by a bot");
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("heading", { name: "Claimed by a bot" })).toBeVisible();
+  await expect(page.getByTestId("ticket-claim")).toHaveCount(0);
+
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  // The card shows the Agent, its Agent Session, and how long the Claim lasts if the Session stays silent.
+  const card = page.getByTestId("ticket-claim");
+  await expect(card).toContainText("Claimed");
+  await expect(card).toContainText("claim-bot since");
+  await expect(card.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
+  await expect(card.getByRole("meter", { name: "Time until the Claim lapses if silent" })).toHaveAttribute("aria-valuetext", /^(\d+ min )?\d+ s$/);
+  await expect(card).toContainText(/Lapses if silent for (\d+ min )?\d+ s more/);
+
+  expect((await request.delete(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(204);
+  await expect(card).toHaveCount(0);
+});
+
+/**
+ * Registers an Agent of Ada's with a full token, starts an Agent Session for it, and files a Ticket assigned
+ * to Ada and delegated to the Agent. Calls with `agentCall` act as that Agent Session.
+ */
+async function delegatedTicket(page: import("@playwright/test").Page, request: import("@playwright/test").APIRequestContext, agentName: string, title: string) {
+  const { user } = await (await page.request.get("/api/me")).json();
+  const { agent } = await (await page.request.post("/api/agents", { data: { name: agentName } })).json();
+  const { secret } = await (await page.request.post(`/api/agents/${agent.id}/tokens`, { data: { readOnly: false } })).json();
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title } })).json();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { assigneeId: user.id, delegateId: agent.id } });
+  const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${secret}` } });
+  const session = (await started.json()).session.id as string;
+  return { ticket, session, agentCall: { authorization: `Bearer ${secret}`, "cronk-agent-session": session } };
+}
+
 /** Picks `option` for the Ticket field `field` in the open Ticket's side panel. */
 async function pickField(page: import("@playwright/test").Page, field: string, option: string) {
   await page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: new RegExp(`^${field}`) }).click();
