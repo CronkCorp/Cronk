@@ -930,6 +930,10 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean; onCha
  * The Documents linked to the Ticket and those that mention its key, other Tickets' Reports included; its own Reports
  * show in its timeline. With Write, Documents found by search can be linked, and linked ones unlinked.
  */
+/** Where a Document belongs, as a list of them says: the Ticket a Report is on, its Project, or the Workspace. */
+const whereDocumentIs = (d: { ticketKey: string | null; projectKey: string | null }) =>
+  d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace");
+
 function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onChanged: () => void }) {
   const t = props.detail.ticket;
   const documents = props.detail.documents.filter((d) => d.reason !== "report");
@@ -938,7 +942,12 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
   const search = useAction(
     () => api.search(query.trim()),
     (results) =>
-      setFound(results.filter((r) => (r.kind === "document" || r.kind === "report") && !documents.some((d) => d.id === r.documentId))),
+      // Its own Reports are listed already, in its timeline.
+      setFound(
+        results.filter(
+          (r) => (r.kind === "document" || r.kind === "report") && r.ticketKey !== t.key && !props.detail.documents.some((d) => d.id === r.documentId),
+        ),
+      ),
   );
   const link = useAction((documentId: string) => api.linkDocument(t.key, documentId), () => {
     setQuery("");
@@ -946,6 +955,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
     props.onChanged();
   });
   const unlink = useAction((documentId: string) => api.unlinkDocument(t.key, documentId), props.onChanged);
+  const error = search.error ?? link.error ?? unlink.error;
   if (props.readOnly && documents.length === 0) return null;
   return (
     <section>
@@ -956,7 +966,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
             <li key={d.id} className="row">
               <Link to={`/documents/${d.id}`} className="row-link">
                 <span className="grow">{d.title}</span>
-                <span className="muted">{d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace")}</span>
+                <span className="muted">{whereDocumentIs(d)}</span>
                 <span className="badge">{d.reason === "linked" ? "Linked" : "Mentions it"}</span>
               </Link>
               {d.reason === "linked" && !props.readOnly && (
@@ -988,7 +998,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
             {found.map((r) => (
               <li key={r.documentId} className="row">
                 <span className="grow">{r.title}</span>
-                <span className="muted">{r.ticketKey ? `Report on ${r.ticketKey}` : (r.projectKey ?? "Workspace")}</span>
+                <span className="muted">{whereDocumentIs(r)}</span>
                 <button className="link" aria-label={`Link ${r.title}`} disabled={link.busy} onClick={() => void link.run(r.documentId!)}>
                   Link
                 </button>
@@ -997,7 +1007,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
           </ul>
         )
       )}
-      {(search.error ?? link.error ?? unlink.error) && <p className="error" role="alert">{search.error ?? link.error ?? unlink.error}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
 }

@@ -30,6 +30,7 @@ export function documentLinkRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const documents = await transaction(ctx.db, async (tx) => {
           const { ticket, document } = await linkEnds(tx, actor, request.params.key, request.params.documentId);
+          if (document.ticketKey === ticket.key) throw new HttpError(400, `That Document is a Report on ${ticket.key}, which lists it already`);
           await linkDocument(tx, { ticket, document, actor, now: ctx.clock.now() });
           return listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor));
         });

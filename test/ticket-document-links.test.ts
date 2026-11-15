@@ -23,6 +23,18 @@ describe("Linking a Document to a Ticket", () => {
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`)).status).toBe(404);
   });
 
+  it("refuses linking one of the Ticket's own Reports, which it lists already", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report.id;
+
+    const res = await admin.post(`/api/tickets/CRONK-1/documents/${report}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Report on CRONK-1/);
+    expect(listed((await admin.get("/api/tickets/CRONK-1")).body.documents)).toEqual(["Findings (report)"]);
+  });
+
   it("shows it in the context a Claim gives an Agent", async () => {
     const { admin, session } = await delegatedSetup(1);
     const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan" })).body.document.id;
