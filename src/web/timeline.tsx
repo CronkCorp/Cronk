@@ -20,41 +20,20 @@ const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "
 type Entry =
   | { kind: "activity"; key: string; at: string; activity: Activity }
   | { kind: "report"; key: string; at: string; report: Report }
-  | { kind: "comment"; key: string; at: string; comment: Comment; sentBack: boolean }
+  | { kind: "comment"; key: string; at: string; comment: Comment }
   | { kind: "change"; key: string; at: string; change: RecordedChange; sentBack: boolean };
 
-/** How close a Send back's Comment is to its move back to a Started Status: both are written in one request. */
-const SEND_BACK_WINDOW_MS = 1_000;
-
 /**
- * The Send backs among a Ticket's Changes and Comments. A Send back moves the Ticket from In Review to a
- * Started Status and posts a Comment by the same User in the same request; the API marks neither, so each
- * such move is paired with that User's nearest Comment written within a second of it. Returns the paired
- * Comments' ids and the paired Changes' indexes.
+ * The indexes of the Changes that moved the Ticket back in a Send back: a Send back records its move and its
+ * Comment, which the API marks `sendBack`, at one instant, by one User.
  */
-function findSendBacks(changes: RecordedChange[], comments: Comment[]): { comments: Set<string>; changes: Set<number> } {
-  const found = { comments: new Set<string>(), changes: new Set<number>() };
+function findSendBackMoves(changes: RecordedChange[], comments: Comment[]): Set<number> {
+  const sentBack = new Set(comments.filter((c) => c.sendBack && c.actor.kind === "user").map((c) => `${c.actor.id} ${c.at}`));
+  const moves = new Set<number>();
   changes.forEach((change, index) => {
-    if (change.change !== "status" || change.from.category !== "in_review" || change.to.category !== "started" || change.actor.kind !== "user") return;
-    const at = Date.parse(change.at);
-    const distance = (c: Comment) => Math.abs(Date.parse(c.at) - at);
-    const nearest = comments
-      .filter(
-        (c) =>
-          !found.comments.has(c.id) &&
-          !c.replyToCommentId &&
-          !c.replyToActivityId &&
-          c.actor.kind === "user" &&
-          c.actor.id === change.actor.id &&
-          distance(c) <= SEND_BACK_WINDOW_MS,
-      )
-      .sort((a, b) => distance(a) - distance(b))[0];
-    if (nearest) {
-      found.comments.add(nearest.id);
-      found.changes.add(index);
-    }
+    if (change.change === "status" && change.actor.kind === "user" && sentBack.has(`${change.actor.id} ${change.at}`)) moves.add(index);
   });
-  return found;
+  return moves;
 }
 
 /**
@@ -88,15 +67,16 @@ export function TicketTimeline(props: {
   canWrite: boolean;
   onPosted: (comment: Comment) => void;
 }) {
-  const sendBacks = findSendBacks(props.changes, props.comments);
+  const sendBackMoves = findSendBackMoves(props.changes, props.comments);
   const entries: Entry[] = [
     ...props.activities.map((activity): Entry => ({ kind: "activity", key: `activity-${activity.id}`, at: activity.at, activity })),
     ...props.reports.map((report): Entry => ({ kind: "report", key: `report-${report.id}`, at: report.createdAt, report })),
+    // A Ticket's Changes only ever grow, oldest first, so each keeps its index. Before the Comments, so a Send back's
+    // move, written first, stays above its Comment at the same instant.
+    ...props.changes.map((change, i): Entry => ({ kind: "change", key: `change-${i}`, at: change.at, change, sentBack: sendBackMoves.has(i) })),
     ...props.comments
       .filter((c) => !c.replyToCommentId && !c.replyToActivityId)
-      .map((comment): Entry => ({ kind: "comment", key: `comment-${comment.id}`, at: comment.at, comment, sentBack: sendBacks.comments.has(comment.id) })),
-    // A Ticket's Changes only ever grow, oldest first, so each keeps its index.
-    ...props.changes.map((change, i): Entry => ({ kind: "change", key: `change-${i}`, at: change.at, change, sentBack: sendBacks.changes.has(i) })),
+      .map((comment): Entry => ({ kind: "comment", key: `comment-${comment.id}`, at: comment.at, comment })),
     // Stable, so entries at the same instant keep the order they were written or arrived in.
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const arrived = useArrivals(entries.map((e) => e.key));
@@ -129,7 +109,7 @@ export function TicketTimeline(props: {
               ) : e.kind === "report" ? (
                 <ReportEntry report={e.report} className={className} />
               ) : e.kind === "comment" ? (
-                <CommentEntry comment={e.comment} sentBack={e.sentBack} className={className} {...thread} />
+                <CommentEntry comment={e.comment} className={className} {...thread} />
               ) : (
                 <ChangeEntry change={e.change} sentBack={e.sentBack} className={className} />
               )}
@@ -227,13 +207,13 @@ function ReportEntry(props: { report: Report; className: string }) {
 }
 
 /** A Comment: its body in a bubble, its replies indented under it inside the bubble, and Reply. */
-function CommentEntry(props: { comment: Comment; sentBack: boolean; className: string } & Thread) {
+function CommentEntry(props: { comment: Comment; className: string } & Thread) {
   const c = props.comment;
   const replies = props.comments.filter((r) => r.replyToCommentId === c.id);
   return (
     <TimelineEntry className={`tl-comment-entry${props.className}`} gutter={<Avatar actor={recordedActor(c.actor)} />}>
       <div className="tl-head">
-        <KindLabel kind="comment">{props.sentBack ? "Sent back" : "Comment"}</KindLabel>
+        <KindLabel kind="comment">{c.sendBack ? "Sent back" : "Comment"}</KindLabel>
         <Actor actor={recordedActor(c.actor)} />
         <RelativeTime at={c.at} clock />
       </div>
