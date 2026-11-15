@@ -1,9 +1,14 @@
 import { useEffect, useState, type RefObject } from "react";
+import { sourceAt } from "./source-map.js";
 
-/** Where a run of rendered text starts in the Markdown source, as `CronkMarkdown` with `sourceOffsets` marks it. */
-function sourceStartOf(text: Text): number | undefined {
-  const start = text.parentElement?.dataset.sourceStart;
-  return start === undefined ? undefined : Number(start);
+/**
+ * Where a selection starting or ending at character `k` of a run of rendered text sits in the Markdown
+ * source, as `CronkMarkdown` with `sourceOffsets` marks it, if it does.
+ */
+function sourceOf(text: Text, k: number, edge: "start" | "end"): number | undefined {
+  const marks = text.parentElement?.dataset;
+  if (marks?.sourceStart === undefined) return undefined;
+  return sourceAt(Number(marks.sourceStart), marks.sourceMap, k, edge);
 }
 
 /** The first or last run of text with something in it inside `element`. */
@@ -48,13 +53,13 @@ export function passageOf(range: Range, root: HTMLElement, source: string): stri
   const first = texts[0];
   const last = texts[texts.length - 1];
   if (first && last) {
-    const from = sourceStartOf(first);
-    const to = sourceStartOf(last);
+    const startOffset = first === range.startContainer ? range.startOffset : 0;
+    const endOffset = last === range.endContainer ? range.endOffset : last.length;
+    const from = sourceOf(first, startOffset, "start");
+    const to = sourceOf(last, endOffset, "end");
     if (from !== undefined && to !== undefined) {
-      const startOffset = first === range.startContainer ? range.startOffset : 0;
-      const endOffset = last === range.endContainer ? range.endOffset : last.length;
-      const start = startOffset === 0 ? widen(first, root, "first", from) : from + startOffset;
-      const end = endOffset === last.length ? widen(last, root, "last", to + endOffset) : to + endOffset;
+      const start = startOffset === 0 ? widen(first, root, "first", from) : from;
+      const end = endOffset === last.length ? widen(last, root, "last", to) : to;
       const passage = source.slice(start, end).trim();
       if (passage) return passage;
     }

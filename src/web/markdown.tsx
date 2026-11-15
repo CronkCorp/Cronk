@@ -1,7 +1,8 @@
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
+import { alignToSource, encodeBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
@@ -10,31 +11,30 @@ interface MdNode extends MarkdownNode {
   children?: MdNode[];
 }
 
-/**
- * Where `length` characters from `from` in a text node's value sit in the source, if the node's
- * position is known, counting as if the value were the source text it was parsed from. Lines and
- * columns are counted too: without them the rest of the pipeline drops the position.
- */
-function positionWithin(node: MarkdownNode, from: number, length: number): Pick<MarkdownNode, "position"> {
-  const start = node.position?.start;
-  if (start?.offset === undefined) return {};
-  const value = node.value ?? "";
-  const pointAt = (at: number): MarkdownPoint => {
-    const before = value.slice(0, at);
-    const lineStart = before.lastIndexOf("\n");
-    const lines = before.split("\n").length - 1;
-    return { line: start.line + lines, column: lineStart < 0 ? start.column + at : at - lineStart, offset: start.offset! + at };
-  };
-  return { position: { start: pointAt(from), end: pointAt(from + length) } };
+/** A point in `source` at `offset`, with its line and column: without them the rest of the pipeline drops the position. */
+function pointIn(source: string, offset: number): MarkdownPoint {
+  const before = source.slice(0, offset);
+  return { line: before.split("\n").length, column: offset - before.lastIndexOf("\n"), offset };
 }
-
 
 /**
  * A remark plugin that turns references to Tickets of known Projects into links
  * to those Tickets. Only keys of real Projects count, so text like `UTF-8`
  * stays plain. Code is never touched, as it isn't text in the tree.
  */
-function linkTicketReferences(projectKeys: Set<string>) {
+function linkTicketReferences(projectKeys: Set<string>, source: string) {
+  /**
+   * Where `length` characters from `from` in a text node's value sit in the source, if the node's position
+   * is known and its value can be tied to the source character by character.
+   */
+  const positionWithin = (node: MarkdownNode, from: number, length: number): Pick<MarkdownNode, "position"> => {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) return {};
+    const bounds = alignToSource(node.value ?? "", source, start, end);
+    if (!bounds) return {};
+    return { position: { start: pointIn(source, bounds.starts[from]!), end: pointIn(source, bounds.ends[from + length]!) } };
+  };
   const split = (text: string, node: MarkdownNode): MdNode[] => {
     const parts: MdNode[] = [];
     let last = 0;
@@ -52,8 +52,13 @@ function linkTicketReferences(projectKeys: Set<string>) {
   return () => (tree: MdNode) => replaceReferenceText(tree, split);
 }
 
-/** The text a hast node shows. */
-const textOf = (node: HastNode): string => node.value ?? (node.children ?? []).map(textOf).join("");
+/** Whether every run of text a hast node shows was parsed from between `start` and `end` in the source. */
+const textWithin = (node: HastNode, start: number, end: number): boolean => {
+  if (node.type !== "text") return (node.children ?? []).every((child) => textWithin(child, start, end));
+  const from = node.position?.start.offset;
+  const to = node.position?.end.offset;
+  return from !== undefined && to !== undefined && start <= from && to <= end;
+};
 
 /** The hast nodes `markSourceOffsets` touches. */
 interface HastNode {
@@ -70,10 +75,11 @@ const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
 
 /**
  * A rehype plugin that wraps each run of text in a span naming where the text sits in the Markdown
- * source (`data-source-start`), when that is known for certain: the text is either the whole stretch
- * it was parsed from, or found exactly once inside it, as code is inside its backticks. Inline
- * elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
- * the Markdown there holds their text as shown; a code block's fences are left out of it.
+ * source (`data-source-start`), when that is known for certain: each of its characters can be tied to
+ * the stretch it was parsed from, skipping what Markdown dropped (`data-source-map`, as `encodeBounds`
+ * writes it), or, for code, the text is found exactly once inside that stretch, as inside its
+ * backticks. Inline elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
+ * every run of their text was parsed from inside it; a code block's fences are left out of it.
  */
 function markSourceOffsets(source: string) {
   const mark = (node: HastNode, parent?: HastNode): HastNode => {
@@ -81,7 +87,7 @@ function markSourceOffsets(source: string) {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       const inline = node.tagName && INLINE_MARKUP.has(node.tagName) && !(node.tagName === "code" && parent?.tagName === "pre");
-      if (inline && start !== undefined && end !== undefined && source.slice(start, end).includes(textOf(node))) {
+      if (inline && start !== undefined && end !== undefined && textWithin(node, start, end)) {
         node.properties = { ...node.properties, dataMarkupStart: start, dataMarkupEnd: end };
       }
       node.children = node.children?.map((child) => mark(child, node));
@@ -91,6 +97,13 @@ function markSourceOffsets(source: string) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (!value.trim() || start === undefined || end === undefined) return node;
+    const bounds = alignToSource(value, source, start, end);
+    if (bounds) {
+      const map = encodeBounds(bounds, start);
+      return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [node] };
+    }
+    // Code shows its Markdown as it is, inside backticks or fences the run's stretch includes.
+    if (parent?.tagName !== "code") return node;
     const stretch = source.slice(start, end);
     const at = stretch.indexOf(value);
     if (at < 0 || stretch.indexOf(value, at + 1) >= 0) return node;
@@ -120,6 +133,19 @@ export function forgetProjectKeys(): void {
 }
 
 /**
+ * How rendered Markdown shows its elements. Defined once, not per render: a new component each render
+ * would remount every link, and a selection ending inside one would lose its end.
+ */
+const COMPONENTS: Components = {
+  a: ({ href, children }) =>
+    href?.startsWith("/") ? (
+      <Link to={href} className="link">{children}</Link>
+    ) : (
+      <a href={href} className="link">{children}</a>
+    ),
+};
+
+/**
  * Renders Cronk Markdown: CommonMark plus Ticket references as links. With `sourceOffsets`, each run of
  * text says where it sits in the Markdown, so a selection can be read back as the Markdown it shows.
  */
@@ -128,16 +154,9 @@ export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean
   const known = keys.kind === "loaded" ? keys.value : new Set<string>();
   return (
     <Markdown
-      remarkPlugins={[linkTicketReferences(known)]}
+      remarkPlugins={[linkTicketReferences(known, props.children)]}
       rehypePlugins={props.sourceOffsets ? [markSourceOffsets(props.children)] : []}
-      components={{
-        a: ({ href, children }) =>
-          href?.startsWith("/") ? (
-            <Link to={href} className="link">{children}</Link>
-          ) : (
-            <a href={href} className="link">{children}</a>
-          ),
-      }}
+      components={COMPONENTS}
     >
       {props.children}
     </Markdown>
