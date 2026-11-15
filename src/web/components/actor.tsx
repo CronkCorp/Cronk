@@ -42,6 +42,9 @@ export type ActorLike =
   | { kind: "user"; name: string }
   | { kind: "agent"; name: string; owner?: { name: string }; session?: { id: string } | null };
 
+/** A User, by name, made into an Actor. */
+export const userActor = (name: string): ActorLike => ({ kind: "user", name });
+
 /** An Agent as Activities, Reports and Claims carry it, made into an Actor. */
 export const agentActor = (agent: { name: string; owner?: { name: string } }, session?: { id: string } | null): ActorLike => ({
   kind: "agent",

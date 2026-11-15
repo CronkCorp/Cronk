@@ -53,8 +53,16 @@ export function Menu(props: { trigger: ReactNode; items: MenuItem[]; label?: str
   );
 }
 
+/** What every dialog takes: whether it is open, who hears it close, its title and an optional line under it. */
+interface DialogFrame {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description?: ReactNode;
+}
+
 /** A modal dialog named by `title`, with an optional line under it and its content. */
-export function Dialog(props: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description?: ReactNode; children: ReactNode }) {
+export function Dialog(props: DialogFrame & { children: ReactNode }) {
   return (
     <RadixDialog.Root open={props.open} onOpenChange={props.onOpenChange}>
       <RadixDialog.Portal>
@@ -70,17 +78,9 @@ export function Dialog(props: { open: boolean; onOpenChange: (open: boolean) => 
 }
 
 /** A `Dialog` asking to confirm a destructive action, whose button is the only place the danger variant is used. */
-export function ConfirmDialog(props: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description: ReactNode;
-  confirmLabel: string;
-  busy?: boolean;
-  onConfirm: () => void;
-}) {
+export function ConfirmDialog(props: DialogFrame & { confirmLabel: string; busy?: boolean; onConfirm: () => void }) {
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.title} description={props.description}>
+    <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.title} {...(props.description ? { description: props.description } : {})}>
       <div className="actions dialog-actions">
         <RadixDialog.Close asChild>
           <Button variant="secondary">Cancel</Button>

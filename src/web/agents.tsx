@@ -2,7 +2,7 @@ import { Button } from "./components/button.js";
 import { LiveIndicator } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useState } from "react";
-import { Actor, SessionName } from "./components/actor.js";
+import { Actor, agentActor, SessionName } from "./components/actor.js";
 import { api, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
 import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -94,7 +94,7 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
           </form>
         ) : (
           <>
-            <span className="grow"><Actor actor={{ kind: "agent", name: a.name }} /></span>
+            <span className="grow"><Actor actor={agentActor(a)} owner={false} /></span>
             <Button variant="ghost" onClick={() => setRenaming(true)}>Rename</Button>
             <Button variant="ghost" disabled={remove.busy} onClick={() => void remove.run()}>Remove</Button>
           </>
@@ -170,7 +170,7 @@ function OthersAgents(props: { me: User }) {
               {others.map((a) => (
                 <li key={a.id} className="agent" aria-label={a.name}>
                   <div className="row">
-                    <span className="grow"><Actor actor={{ kind: "agent", name: a.name, owner: a.owner }} /></span>
+                    <span className="grow"><Actor actor={agentActor(a)} /></span>
                   </div>
                   <div className="agent-tokens">
                     <LiveSessions agent={a} />

@@ -2,7 +2,7 @@ import { Button } from "./components/button.js";
 import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
-import { Actor, agentActor } from "./components/actor.js";
+import { Actor, agentActor, userActor } from "./components/actor.js";
 import { useEffect, useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
@@ -299,7 +299,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                               <span className="key">{ticket.key}</span>
                               <span className="grow">{ticket.title}</span>
                               <LabelChips labels={ticket.labels} />
-                              {ticket.assignee && <span className="assignee"><Actor actor={{ kind: "user", name: ticket.assignee.name }} /></span>}
+                              {ticket.assignee && <span className="assignee"><Actor actor={userActor(ticket.assignee.name)} /></span>}
                               <StatusPill status={ticket.status} />
                             </Link>
                           </li>

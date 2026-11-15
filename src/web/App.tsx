@@ -1,4 +1,4 @@
-import { Actor } from "./components/actor.js";
+import { Actor, userActor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
@@ -136,7 +136,7 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
               <Button variant="ghost" onClick={() => setRenaming(true)}>Workspace settings</Button>
             </>
           )}
-          <Actor actor={{ kind: "user", name: props.user.name }} />
+          <Actor actor={userActor(props.user.name)} />
           <Button variant="ghost" onClick={signOut}>Sign out</Button>
         </div>
       </header>

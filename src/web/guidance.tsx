@@ -1,6 +1,6 @@
 import { Button } from "./components/button.js";
 import { RelativeTime } from "./components/time.js";
-import { Actor } from "./components/actor.js";
+import { Actor, userActor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Guidance } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -97,7 +97,7 @@ function GuidanceEditor(props: {
       return {
         base: at(baseVersion),
         theirs: { number: merge.onto.version, body: merge.onto.markdown },
-        by: versions.find((v) => v.version === merge.onto.version)?.actor ?? { kind: "user", name: "Someone" },
+        by: versions.find((v) => v.version === merge.onto.version)?.actor ?? userActor("Someone"),
         merge,
         merged: merge.conflicts === 0 ? { text: merge.markdown! } : null,
       };

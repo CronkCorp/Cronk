@@ -1,7 +1,7 @@
 import { Button } from "./components/button.js";
 import { Chip } from "./components/tags.js";
 import { RelativeTime } from "./components/time.js";
-import { Actor } from "./components/actor.js";
+import { Actor, userActor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Access, type Invitation, type Member, type Project, type Role, type User } from "./api.js";
 import { AuthCard, Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
@@ -103,7 +103,7 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
   return (
     <li className="row">
       <span className="grow">
-        <Actor actor={{ kind: "user", name: u.name }} />
+        <Actor actor={userActor(u.name)} />
         {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>
         {!u.joined ? (
           <Chip>Imported, not signed in yet</Chip>
@@ -188,7 +188,7 @@ function MemberList(props: { projectKey: string; members: Member[]; users: User[
         <ul className="rows" aria-label="Project members">
           {props.members.map((m) => (
             <li key={m.user.id} className="row">
-              <span className="grow"><Actor actor={{ kind: "user", name: m.user.name }} /></span>
+              <span className="grow"><Actor actor={userActor(m.user.name)} /></span>
               <AccessSelect label={`Access of ${m.user.name}`} value={m.access} disabled={busy} onChange={(a) => void set.run(m.user.id, a)} />
               <Button variant="ghost" disabled={busy} onClick={() => void remove.run(m.user.id)}>Remove</Button>
             </li>
