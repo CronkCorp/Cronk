@@ -229,3 +229,7 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .markdown-editor .markdown { flex: 1; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
 .toolbar button { padding: 4px 10px; font-size: 13px; }
+
+/* A Document's body, with the button that comments on the passage selected in it. */
+.selectable { position: relative; }
+.comment-on-selection { position: absolute; z-index: 1; padding: 4px 10px; font-size: 13px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); }

@@ -15,16 +15,25 @@ export interface MarkdownNode {
   type: string;
   value?: string;
   children?: MarkdownNode[];
+  /** Where the node sits in the Markdown it was parsed from, when the parser recorded it. */
+  position?: { start: MarkdownPoint; end: MarkdownPoint };
+}
+
+/** A place in Markdown source, as the parser records it. */
+export interface MarkdownPoint {
+  line: number;
+  column: number;
+  offset?: number;
 }
 
 /**
  * Replaces each text node under `node` whose Ticket keys count as references with the nodes
- * `replace` makes of its text. Code isn't text in the tree, and text inside links is left alone.
+ * `replace` makes of its text (the node is passed too, for its position). Code isn't text in the tree, and text inside links is left alone.
  */
-export function replaceReferenceText(node: MarkdownNode, replace: (text: string) => MarkdownNode[]): void {
+export function replaceReferenceText(node: MarkdownNode, replace: (text: string, node: MarkdownNode) => MarkdownNode[]): void {
   if (!node.children || NOT_LINKED.has(node.type)) return;
   node.children = node.children.flatMap((child) => {
-    if (child.type === "text") return replace(child.value ?? "");
+    if (child.type === "text") return replace(child.value ?? "", child);
     replaceReferenceText(child, replace);
     return [child];
   });

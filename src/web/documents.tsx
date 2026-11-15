@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   api,
   sessionName,
@@ -13,6 +13,7 @@ import { DocumentComments } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
+import { useSelectedPassage } from "./selected-passage.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Field, Show, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -192,6 +193,17 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
     (deleted) => deleted && navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
   );
   const toggle = (p: Panel) => setPanel(panel === p ? "none" : p);
+  const bodyAt = useRef<HTMLDivElement>(null);
+  const commentAt = useRef<HTMLTextAreaElement>(null);
+  const selected = useSelectedPassage(bodyAt, d.body);
+  // The passage a new Comment anchors to, forgotten once the Document moves on to another Version.
+  const [anchor, setAnchor] = useState({ version: d.version, passage: "" });
+  const passage = anchor.version === d.version ? anchor.passage : "";
+  const commentOnSelection = (selectedPassage: string) => {
+    setAnchor({ version: d.version, passage: selectedPassage });
+    getSelection()?.removeAllRanges();
+    commentAt.current?.focus();
+  };
 
   return (
     <article className="document">
@@ -241,12 +253,33 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
             />
           )}
           {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} onOutdated={props.onReload} />}
-          <div className="markdown" data-testid="document-body">
-            {d.body.trim() ? <CronkMarkdown>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
+          <div className="selectable">
+            <div className="markdown" data-testid="document-body" ref={bodyAt}>
+              {d.body.trim() ? <CronkMarkdown sourceOffsets>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
+            </div>
+            {canWrite && selected && (
+              <button
+                type="button"
+                className="comment-on-selection"
+                style={{ top: selected.top, left: selected.left }}
+                // Pressing the button would otherwise clear the selection before it is read.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => commentOnSelection(selected.passage)}
+              >
+                Comment on this passage
+              </button>
+            )}
           </div>
           <h2>Comments</h2>
           {/* Keyed by Version, so whether each anchor is still in the Document is asked again after a save. */}
-          <DocumentComments key={d.version} documentId={d.id} canWrite={canWrite} />
+          <DocumentComments
+            key={d.version}
+            documentId={d.id}
+            canWrite={canWrite}
+            passage={passage}
+            onPassageChange={(p) => setAnchor({ version: d.version, passage: p })}
+            commentRef={commentAt}
+          />
         </>
       )}
     </article>

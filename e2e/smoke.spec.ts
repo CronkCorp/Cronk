@@ -342,13 +342,24 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(versions).toContainText("Version 4");
   await expect(versions).toContainText("restored Version 2");
 
+  // Selecting text in the Document offers to comment on it, quoting the Markdown the selection reads from.
+  await body.evaluate((el) => {
+    const range = document.createRange();
+    const reference = el.querySelector("a")!;
+    range.setStart(el.querySelector("strong")!, 0);
+    range.setEnd(reference, reference.childNodes.length);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  });
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**Start** with CRONK-1");
+  await expect(page.getByLabel("Comment", { exact: true })).toBeFocused();
   // A Comment anchored to a passage shows the passage it is about.
-  await page.getByLabel("About the passage (optional)").fill("CRONK-1");
   await page.getByLabel("Comment", { exact: true }).fill("Which Ticket is this?");
   await page.getByRole("button", { name: "Post Comment" }).click();
   const comments = page.getByRole("list", { name: "Comments" });
   await expect(comments).toContainText("Which Ticket is this?");
-  await expect(comments.locator("blockquote")).toHaveText("CRONK-1");
+  await expect(comments.locator("blockquote")).toHaveText("**Start** with CRONK-1");
 
   await page.getByRole("link", { name: "Documents", exact: true }).last().click();
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
