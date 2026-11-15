@@ -44,6 +44,7 @@ import {
 } from "./projects.js";
 import {
   findTicketByKey,
+  findTicketsByIds,
   insertTicket,
   listHistory,
   listLabels,
@@ -388,7 +389,8 @@ export function workRoutes(ctx: AppContext) {
           return { projectId: project.id, moved, mayBecomeReady, readyBefore };
         });
         statusesChanged(ctx.live, projectId);
-        ticketsChanged(ctx.live, moved);
+        // Moved Tickets, and those they block, which show their Status and may now be unblocked.
+        ticketsChanged(ctx.live, [...moved, ...(await findTicketsByIds(ctx.db, mayBecomeReady))]);
         await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         // Moved Tickets may have entered or left an In Review Status.
         inboxesChanged(ctx.live, moved.map((t) => t.assignee?.id));
@@ -689,7 +691,7 @@ export function workRoutes(ctx: AppContext) {
         if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
           throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
         }
-        const { before, ticket, parents, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
+        const { before, ticket, parents, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
@@ -717,15 +719,17 @@ export function workRoutes(ctx: AppContext) {
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
           if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) await clearClaim(tx, ticket.id);
           // A new Delegate or Status may make the Ticket Ready, and finishing it may unblock others.
-          const mayBecomeReady = [ticket.id, ...(changes.status ? await ticketsBlockedBy(tx, [ticket.id]) : [])];
+          const blockedIds = changes.status ? await ticketsBlockedBy(tx, [ticket.id]) : [];
+          const mayBecomeReady = [ticket.id, ...blockedIds];
           const readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
           const updated = await updateTicket(tx, ticket, changes, actor, ctx.clock.now());
-          return { before: ticket, ticket: updated, parents, mayBecomeReady, readyBefore };
+          return { before: ticket, ticket: updated, parents, blockedIds, mayBecomeReady, readyBefore };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
         if (ticket !== before) {
           inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
-          ticketsChanged(ctx.live, [ticket, ...parents]);
+          // The Tickets it blocks show its Status, and may now be unblocked.
+          ticketsChanged(ctx.live, [ticket, ...parents, ...(await findTicketsByIds(ctx.db, blockedIds))]);
           await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         }
         return { ticket };

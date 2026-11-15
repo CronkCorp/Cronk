@@ -10,6 +10,7 @@ import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
+import { ticketsChanged } from "../work/ticket-changes.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
@@ -207,6 +208,7 @@ export function conversationRoutes(ctx: AppContext) {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
             inboxesChanged(ctx.live, [ticket.assignee?.id]);
+            ticketsChanged(ctx.live, [ticket]);
           },
         );
         return { ticket, comment: publicComment(posted.comment) };
