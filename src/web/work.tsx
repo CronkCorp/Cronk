@@ -227,11 +227,10 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                 trigger={<Button variant="secondary" aria-label="Project actions">…</Button>}
                 items={[
                   { label: "Documents", onSelect: () => navigate(`/projects/${p.key}/documents`) },
+                  // Everyone who sees the Project may read its settings; only Write access changes them or archives it.
+                  { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
                   ...(p.access === "write"
-                    ? [
-                        { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
-                        { label: archiveOrRestore(p).label, danger: !p.archived, onSelect: () => setConfirmingArchive(true) },
-                      ]
+                    ? [{ label: archiveOrRestore(p).label, danger: !p.archived, onSelect: () => setConfirmingArchive(true) }]
                     : []),
                 ]}
               />

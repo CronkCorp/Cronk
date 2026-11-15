@@ -107,7 +107,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 
 The Project page is shown in `docs/ui/frame.png`.
 
-- **Page head:** the title, a List / Board / Reports segmented control, a "…" menu, and New Ticket as the only primary action, last. The "…" menu holds Documents (the Project's page tree), and for those with Write access Project settings and Archive Project (Restore Project once archived), which asks for confirmation.
+- **Page head:** the title, a List / Board / Reports segmented control, a "…" menu, and New Ticket as the only primary action, last. The "…" menu holds Documents (the Project's page tree), Project settings (read-only without Write access), and for those with Write access Archive Project (Restore Project once archived), which asks for confirmation.
 - **Project settings** (`?view=settings`): one section each for Access (Admins), Agent Access, Statuses and Guidance. The old addresses `?view=statuses` and `?view=guidance` open it at that section.
 - **List rows:** Status dot, key, title, Labels, Priority tag, and the Delegate's and Assignee's avatars, each named in its tooltip ("Delegate: claude-laptop").
 - **Board:** open columns share the main column's width. Columns in the Completed and Canceled Status Categories start collapsed to their dot and count, and clicking one opens it until the User leaves the page; nothing is stored. So a 1280px screen shows every Status without sideways scrolling. Cards show the key, Priority, title, Labels and the avatars.
