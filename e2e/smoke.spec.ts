@@ -217,15 +217,30 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await page.getByRole("link", { name: "Agents" }).click();
-  await page.getByLabel("Agent name").fill("claude-laptop");
+  // Registering happens in a dialog opened from the page head.
+  await page.getByRole("button", { name: "Register an Agent" }).click();
+  const registerDialog = page.getByRole("dialog", { name: "Register an Agent" });
+  await registerDialog.getByLabel("Agent name").fill("claude-laptop");
   // Outside the sign-in forms a button sizes to its label rather than filling its form.
-  const register = (await page.getByRole("button", { name: "Register Agent" }).boundingBox())!;
-  const agentName = (await page.getByLabel("Agent name").boundingBox())!;
+  const register = (await registerDialog.getByRole("button", { name: "Register Agent" }).boundingBox())!;
+  const agentName = (await registerDialog.getByLabel("Agent name").boundingBox())!;
   expect(register.width).toBeLessThan(agentName.width / 2);
-  await page.getByRole("button", { name: "Register Agent" }).click();
-  await page.getByRole("button", { name: "Issue full token" }).click();
-  const token = await page.getByLabel("New token").inputValue();
-  await expect(page.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+  await registerDialog.getByRole("button", { name: "Register Agent" }).click();
+  await expect(registerDialog).toBeHidden();
+  const card = page.getByRole("listitem", { name: "claude-laptop" });
+  await expect(card).toContainText("Not connected");
+  // Tokens are issued in the Manage tokens dialog, which shows a new secret once.
+  await card.getByRole("button", { name: "Manage tokens" }).click();
+  const tokensDialog = page.getByRole("dialog", { name: "Tokens of claude-laptop" });
+  await tokensDialog.getByRole("button", { name: "Issue full token" }).click();
+  const token = await tokensDialog.getByLabel("New token").inputValue();
+  await expect(tokensDialog.getByRole("button", { name: "Copy" })).toBeVisible();
+  await expect(tokensDialog.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+  await tokensDialog.getByRole("button", { name: "Done" }).click();
+  await expect(card).toContainText("1 token: full");
+  await card.getByRole("button", { name: "Manage tokens" }).click();
+  await expect(tokensDialog.getByLabel("New token")).toHaveCount(0);
+  await tokensDialog.getByRole("button", { name: "Done" }).click();
 
   const created = await request.post("/api/projects/CRONK/tickets", {
     headers: { authorization: `Bearer ${token}` },
@@ -270,6 +285,17 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(claimed.status()).toBe(200);
   // The Claim shows in the side panel as soon as it is made, without a reload.
   await expect(page.getByTestId("ticket-claim")).toContainText(`claude-laptop since`);
+  await expect(page.getByTestId("ticket-claim").getByTitle(session)).toHaveText(sessionName);
+  // The open Agents page shows what the Session works on, and follows it as it releases and Claims again, without a reload.
+  // The server notices Agent Session changes every 5 seconds, so these wait a little longer than usual.
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(liveSessions).toContainText(`Working on ${ticket.key}`);
+  await expect(page.getByText("Live", { exact: true }).first()).toBeVisible();
+  expect((await request.delete(`/api/tickets/${ticket.key}/claim`, { headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session } })).status()).toBe(204);
+  await expect(liveSessions).toContainText("Connected, no Claim", { timeout: 10_000 });
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session } })).status()).toBe(200);
+  await expect(liveSessions).toContainText(`Working on ${ticket.key}`, { timeout: 10_000 });
+  await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByTestId("ticket-claim").getByTitle(session)).toHaveText(sessionName);
   // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
   const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
@@ -486,6 +512,128 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await selectText(body, "strong", "bold", "strong", "a*b");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**bold a\\*b**");
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("see a Comment in the margin beside the passage it is about", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const intro = "Cronk stores every password as an **Argon2id** hash.\n\n";
+  const { document } = await (
+    await page.request.post("/api/projects/CRONK/documents", {
+      data: { title: "Security notes", body: `${intro.repeat(12)}## Rate limits\n\nFailed sign-ins are limited to five per minute. The limit slides.\n` },
+    })
+  ).json();
+  const passage = "Failed sign-ins are limited to five per minute";
+  await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Per IP too?", anchor: { passage } } });
+  await page.goto(`/documents/${document.id}`);
+
+  // The passage is highlighted in the body, and its Comment's card sits in the margin beside it.
+  const highlighted = page.getByTestId("document-body").locator("mark");
+  await expect(highlighted).toHaveText(passage);
+  const card = page.getByRole("list", { name: "Comments" }).getByRole("listitem").filter({ hasText: "Per IP too?" });
+  await expect(card).toBeVisible();
+  const passageBox = (await highlighted.boundingBox())!;
+  const cardBox = (await card.boundingBox())!;
+  expect(cardBox.x).toBeGreaterThan(passageBox.x + passageBox.width);
+  expect(Math.abs(cardBox.y - passageBox.y)).toBeLessThan(24);
+
+  // Hovering or focusing either one highlights both.
+  await highlighted.hover();
+  await expect(highlighted).toHaveClass(/active/);
+  await expect(card).toHaveClass(/active/);
+  await page.mouse.move(0, 0);
+  await expect(highlighted).not.toHaveClass(/active/);
+  await card.focus();
+  await expect(highlighted).toHaveClass(/active/);
+
+  // On a narrow screen the Comments move under the body.
+  await page.setViewportSize({ width: 800, height: 900 });
+  const narrowBody = (await page.getByTestId("document-body").boundingBox())!;
+  expect((await card.boundingBox())!.y).toBeGreaterThan(narrowBody.y + narrowBody.height);
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("highlight a repeated passage once, and list passages that can't be placed at the end of the margin", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const first = "Old wording.\n\nRotate the keys yearly.\n\n```js\njs\n```\n";
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Key rotation", body: first } })).json();
+  const comment = (body: string, passage: string) => page.request.post(`/api/documents/${document.id}/comments`, { data: { body, anchor: { passage } } });
+  await comment("Is this still true?", "Old wording.");
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: `Rotate the keys yearly.\n\n${first.slice(14)}\n## Again\n\nRotate the keys yearly.\n` } });
+  // The info string of a code block shows nowhere on the page, so this passage can't be placed.
+  await comment("Which language?", "```js");
+  await comment("Why yearly?", "Rotate the keys");
+  await page.goto(`/documents/${document.id}`);
+
+  // The passage appears twice, but only its first place in the Markdown is highlighted.
+  const body = page.getByTestId("document-body");
+  await expect(body.locator("mark")).toHaveCount(1);
+  await expect(body.locator("p").first().locator("mark")).toHaveText("Rotate the keys");
+
+  // The placed card comes first; the passage that can't be placed and the detached one follow, unhighlighted.
+  const cards = page.getByRole("list", { name: "Comments" }).locator("> li");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.nth(0)).toContainText("Why yearly?");
+  await expect(cards.nth(1)).toContainText("Is this still true?");
+  await expect(cards.nth(1)).toContainText("No longer in the Document (was in Version 1)");
+  await expect(cards.nth(2)).toContainText("Which language?");
+  await expect(cards.nth(1).locator("blockquote")).toHaveCSS("text-decoration-line", "line-through");
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("settle a stale save by using their side of the conflict", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const original = "## Setup\n\nInstall it.\n\n## Limits\n\nFive per minute.\n";
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Rate limits", body: original } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Title").fill("Rate limits per IP");
+  await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it.\n\n## Limits\n\nFive per minute, sliding.\n");
+  const theirs = "## Setup\n\nInstall it with npm.\n\n## Limits\n\nFive per email and fifty per IP.\n";
+  expect((await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: theirs } })).status()).toBe(200);
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // An information banner, under the Document's title, says who saved which Version and what needs a choice.
+  await expect(page.getByRole("heading", { name: "Rate limits" })).toBeVisible();
+  const banner = page.getByRole("alert");
+  await expect(banner).toContainText("Ada saved Version 2 while you were editing");
+  await expect(banner).toContainText("1 section needs your choice");
+  await expect(banner).toHaveClass(/banner info/);
+  // The conflict shows both sides next to each other; the section that merged cleanly is folded.
+  const limits = page.getByRole("region", { name: "## Limits" });
+  await expect(limits.getByText("Both changed")).toBeVisible();
+  const yours = limits.getByRole("region", { name: "Yours" });
+  const theirSide = limits.getByRole("region", { name: "Ada, Version 2" });
+  await expect(yours).toContainText("Five per minute, sliding.");
+  await expect(theirSide).toContainText("Five per email and fifty per IP.");
+  expect((await theirSide.boundingBox())!.x).toBeGreaterThan((await yours.boundingBox())!.x);
+  const clean = page.getByRole("group", { name: "Merged cleanly" });
+  await expect(clean.getByRole("list")).toBeHidden();
+  await clean.getByText("Merged cleanly").click();
+  await expect(clean).toContainText("+ Install it with npm.");
+  await expect(page.getByRole("button", { name: "Discard mine and edit theirs" })).toBeVisible();
+
+  await limits.getByRole("button", { name: "Use theirs" }).click();
+  await expect(limits.getByLabel("Keep for ## Limits")).toHaveValue("## Limits\n\nFive per email and fifty per IP.\n");
+  await page.getByRole("button", { name: "Use these and keep editing" }).click();
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue(theirs);
+  await page.getByRole("button", { name: "Save" }).click();
+  // Their body is kept, with the title only this edit changed.
+  await expect(page.getByRole("heading", { name: "Rate limits per IP" })).toBeVisible();
+  await expect(page.getByTestId("document-body")).toContainText("Five per email and fifty per IP.");
+  expect((await (await page.request.get(`/api/documents/${document.id}`)).json()).document.version).toBe(3);
 });
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
