@@ -5,10 +5,27 @@ import { join } from "node:path";
 
 const ada = { email: "ada@example.com", password: "correct horse battery" };
 
-test("set up a fresh installation, sign out, sign in and see the application shell", async ({ page }) => {
+test("set up a fresh installation, sign out, sign in and see the application shell", async ({ page, baseURL }) => {
+  const fontRequests: string[] = [];
+  page.on("request", (r) => r.resourceType() === "font" && fontRequests.push(r.url()));
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Set up Cronk" })).toBeVisible();
+  // The IBM Plex faces come from Cronk's own build, never a CDN, so an offline installation still has them.
+  const loadedFaces = () =>
+    page.evaluate(async () => {
+      await document.fonts.ready;
+      return [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family.replace(/"/g, ""));
+    });
+  await expect.poll(loadedFaces).toContain("IBM Plex Sans");
+  await page.locator("body").evaluate((body) => {
+    const code = document.createElement("code");
+    code.textContent = "CRONK-1";
+    body.append(code);
+  });
+  await expect.poll(loadedFaces).toContain("IBM Plex Mono");
+  expect(fontRequests.length).toBeGreaterThan(0);
+  for (const url of fontRequests) expect(url.startsWith(baseURL!)).toBe(true);
   await page.getByLabel("Workspace name").fill("Acme");
   await page.getByLabel("Your name").fill("Ada");
   await page.getByLabel("Email").fill("ada@example.com");
@@ -192,6 +209,10 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
 
   await page.getByRole("link", { name: "Agents" }).click();
   await page.getByLabel("Agent name").fill("claude-laptop");
+  // Outside the sign-in forms a button sizes to its label rather than filling its form.
+  const register = (await page.getByRole("button", { name: "Register Agent" }).boundingBox())!;
+  const agentName = (await page.getByLabel("Agent name").boundingBox())!;
+  expect(register.width).toBeLessThan(agentName.width / 2);
   await page.getByRole("button", { name: "Register Agent" }).click();
   await page.getByRole("button", { name: "Issue full token" }).click();
   const token = await page.getByLabel("New token").inputValue();
@@ -205,7 +226,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   const { ticket } = await created.json();
 
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop (Agent of Ada) created the Ticket");
+  await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop for Ada created the Ticket");
 
   // An Agent Session (one per MCP connection) shows on the Agents page and in the history of what it changed.
   const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
@@ -217,9 +238,15 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   });
   expect(renamed.status()).toBe(200);
   await page.reload();
-  await expect(page.getByRole("list", { name: "History" })).toContainText(`claude-laptop (session ${session.slice(0, 4)}, for Ada) renamed it`);
+  // The Session goes by a readable two-word name, the same everywhere, with its full id in the tooltip.
+  const renamedBy = page.getByRole("list", { name: "History" }).getByRole("listitem").filter({ hasText: "renamed it" });
+  await expect(renamedBy).toContainText(/claude-laptop [a-z]+-[a-z]+ for Ada renamed it/);
+  await expect(renamedBy.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
+  const sessionName = (await renamedBy.getByTitle(session).textContent())!;
   await page.getByRole("link", { name: "Agents" }).click();
-  await expect(page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" })).toContainText(`Connected, session ${session.slice(0, 4)}`);
+  const liveSessions = page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" });
+  await expect(liveSessions).toContainText(`Live ${sessionName}`);
+  await expect(liveSessions.getByTitle(session)).toHaveText(sessionName);
   // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
   await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByTestId("ticket-claim")).toHaveText("Not Claimed");
@@ -231,7 +258,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   });
   expect(claimed.status()).toBe(200);
   await page.reload();
-  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
+  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop ${sessionName}`);
   // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
   const timeline = page.getByRole("list", { name: "Timeline" });
   await expect(timeline).toContainText("Nothing yet.");
@@ -241,6 +268,10 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   });
   expect(asked.status()).toBe(201);
   await expect(timeline).toContainText("Blocking question");
+  // A recent time reads relatively, with the exact time in its tooltip.
+  const askedAt = timeline.getByRole("listitem").first().locator("time");
+  await expect(askedAt).toHaveText(/^(just now|\d+ min ago)$/);
+  await expect(askedAt).toHaveAttribute("title", new RegExp(String(new Date().getFullYear())));
   await expect(timeline.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
   await expect(timeline).toContainText("Waiting for an answer");
   // Ada answers the question by replying to it; the answer shows under it as a Comment.
@@ -273,6 +304,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
   expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
   await page.getByRole("link", { name: "Inbox" }).click();
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   const inbox = page.getByRole("list", { name: "Inbox" });
   const review = inbox.getByRole("listitem", { name: `Review ${ticket.key}` });
   await expect(review.getByRole("list", { name: `Reports on ${ticket.key}` })).toContainText("What I found");
@@ -549,17 +581,21 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   // Changes come through the API behind the page's back, as another User or an Agent would make them.
   await page.goto("/projects/CRONK?view=board");
   await expect(page.getByRole("region", { name: "Backlog" })).toBeVisible();
+  // Each view that follows changes says it is live.
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Arrived live" } })).json();
   await expect(page.getByRole("region", { name: "Backlog" })).toContainText("Arrived live");
 
   await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByRole("heading", { name: "Arrived live" })).toBeVisible();
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
   await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
 
   const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
   await page.goto(`/documents/${document.id}`);
   await expect(page.getByTestId("document-body")).toContainText("First.");
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Seen from afar." } });
   await expect(page.getByRole("list", { name: "Comments" })).toContainText("Seen from afar.");
   await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: "Second." } });
@@ -642,6 +678,18 @@ test("import a folder of Markdown files picked in the browser", async ({ page })
     await expect(tree).toContainText("Installing");
     await tree.getByRole("link", { name: "Installing" }).click();
     await expect(page.getByTestId("document-body")).toContainText("Run it.");
+
+    // Deleting asks first; cancelling keeps the Document, confirming removes it from the tree.
+    await page.getByRole("button", { name: "Delete" }).click();
+    const confirmDelete = page.getByRole("dialog", { name: "Delete Installing?" });
+    await expect(confirmDelete).toContainText("and all its Versions");
+    await confirmDelete.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirmDelete).toHaveCount(0);
+    await expect(page.getByTestId("document-body")).toContainText("Run it.");
+    await page.getByRole("button", { name: "Delete" }).click();
+    await confirmDelete.getByRole("button", { name: "Delete" }).click();
+    await expect(tree).toContainText("Handbook");
+    await expect(tree).not.toContainText("Installing");
   } finally {
     await rm(picked, { recursive: true, force: true });
   }

@@ -1,5 +1,9 @@
+import { Button } from "./components/button.js";
+import { LiveIndicator } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
 import { useState } from "react";
-import { api, sessionName, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
+import { Actor, agentActor, SessionName } from "./components/actor.js";
+import { api, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
 import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
 
 /** The signed-in User's Agents and their tokens; an Admin also sees everyone else's Agents. */
@@ -49,7 +53,7 @@ function NewAgent(props: { onDone: () => void }) {
       <form onSubmit={submit}>
         <Field label="Agent name" value={name} onChange={setName} placeholder="claude-laptop" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Register Agent</button>
+        <Button type="submit" disabled={busy}>Register Agent</Button>
       </form>
     </section>
   );
@@ -85,14 +89,14 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
         {renaming ? (
           <form className="actions grow" onSubmit={rename.submit}>
             <input className="inline-input grow" aria-label="New name" value={name} onChange={(e) => setName(e.target.value)} />
-            <button type="submit" disabled={rename.busy}>Save</button>
-            <button type="button" className="secondary" onClick={() => setRenaming(false)}>Cancel</button>
+            <Button type="submit" disabled={rename.busy}>Save</Button>
+            <Button type="button" variant="secondary" onClick={() => setRenaming(false)}>Cancel</Button>
           </form>
         ) : (
           <>
-            <strong className="grow">{a.name}</strong>
-            <button className="link" onClick={() => setRenaming(true)}>Rename</button>
-            <button className="link" disabled={remove.busy} onClick={() => void remove.run()}>Remove</button>
+            <span className="grow"><Actor actor={agentActor(a)} owner={false} /></span>
+            <Button variant="ghost" onClick={() => setRenaming(true)}>Rename</Button>
+            <Button variant="ghost" disabled={remove.busy} onClick={() => void remove.run()}>Remove</Button>
           </>
         )}
       </div>
@@ -106,17 +110,17 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
                 <li key={t.id} className="token">
                   <span className="grow">
                     {t.readOnly ? "Read-only token" : "Full token"}{" "}
-                    <span className="muted">issued {new Date(t.createdAt).toLocaleString()}</span>
+                    <span className="muted">issued <RelativeTime at={t.createdAt} /></span>
                   </span>
-                  <button className="link" disabled={revoke.busy} onClick={() => void revoke.run(t.id)}>Revoke</button>
+                  <Button variant="ghost" disabled={revoke.busy} onClick={() => void revoke.run(t.id)}>Revoke</Button>
                 </li>
               ))}
             </ul>
           )}
         </Show>
         <div className="actions">
-          <button className="secondary" disabled={issue.busy} onClick={() => void issue.run(false)}>Issue full token</button>
-          <button className="secondary" disabled={issue.busy} onClick={() => void issue.run(true)}>Issue read-only token</button>
+          <Button variant="secondary" disabled={issue.busy} onClick={() => void issue.run(false)}>Issue full token</Button>
+          <Button variant="secondary" disabled={issue.busy} onClick={() => void issue.run(true)}>Issue read-only token</Button>
         </div>
         {secret && (
           <div role="status" className="secret">
@@ -138,11 +142,10 @@ function LiveSessions(props: { agent: Agent }) {
       {sessions.length === 0 && <li className="muted">Not connected.</li>}
       {sessions.map((s) => (
         <li key={s.id} className="session">
-          <span className="live-dot" aria-hidden="true" />
           <span className="grow">
-            Connected, {sessionName(s.id)}{" "}
+            <LiveIndicator state="live" /> <SessionName id={s.id} />{" "}
             <span className="muted">
-              since {new Date(s.startedAt).toLocaleString()}, last heard from {new Date(s.lastSeenAt).toLocaleTimeString()}
+              connected <RelativeTime at={s.startedAt} />, last heard <RelativeTime at={s.lastSeenAt} />
             </span>
           </span>
         </li>
@@ -167,8 +170,7 @@ function OthersAgents(props: { me: User }) {
               {others.map((a) => (
                 <li key={a.id} className="agent" aria-label={a.name}>
                   <div className="row">
-                    <strong className="grow">{a.name}</strong>
-                    <span className="muted">owned by {a.owner.name}</span>
+                    <span className="grow"><Actor actor={agentActor(a)} /></span>
                   </div>
                   <div className="agent-tokens">
                     <LiveSessions agent={a} />

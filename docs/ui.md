@@ -2,7 +2,7 @@
 
 How Cronk's web UI looks and behaves. Read this before changing anything under `src/web/`. Vocabulary follows `GLOSSARY.md`; the UI holds no rules (ADR 0010, `docs/testing.md`), so everything here is about presentation.
 
-The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 for the tokens, fonts and components, then #105 to #110 for the screens. Until then, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main.
+The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 brought the tokens, fonts and components, and #105 to #110 rework the screens. Until those land, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main.
 
 ## Principles
 
@@ -33,7 +33,7 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
 
 ## Design tokens
 
-All colours are CSS custom properties on `:root` in `src/web/styles.css` (the values below arrive with #104). Components use only tokens, never literal colours. The dark values apply under `prefers-color-scheme: dark`.
+All colours are CSS custom properties on `:root` in `src/web/styles.css`. Components use only tokens, never literal colours. The dark values apply under `prefers-color-scheme: dark`.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -68,20 +68,20 @@ The Status Categories use their own dot colours: Backlog is a dashed muted ring,
 
 ## Typography
 
-- **Faces:** IBM Plex Sans for UI and prose, and IBM Plex Mono for Ticket keys, Agent Sessions, code and Markdown sources. They are bundled from npm (`@fontsource/ibm-plex-sans`, `@fontsource/ibm-plex-mono`, added by #104) and served by Cronk itself. Never load fonts from a CDN, since installations may be offline. The fallbacks are `system-ui` and `ui-monospace`.
+- **Faces:** IBM Plex Sans for UI and prose, and IBM Plex Mono for Ticket keys, Agent Sessions, code and Markdown sources. They are bundled from npm (`@fontsource/ibm-plex-sans`, `@fontsource/ibm-plex-mono`), imported in `src/web/main.tsx` and served by Cronk itself. Never load fonts from a CDN, since installations may be offline. The fallbacks are `system-ui` and `ui-monospace`.
 - **Scale:** 24/600 (Ticket and Document titles), 20/600 (`h1`), 16/600 (`h2`), 14/600 (`h3`), 14/400 (body), 13 (meta and controls), 12 (small meta, chips, keys), and 11/600 uppercase with 0.06em letter-spacing (kind labels and nav group labels).
 - **Line height:** 1.5 for UI and 1.65 for Document bodies. Document text is 15px with a 720px measure.
 
 ## Component conventions
 
-The app keeps its own small component set in `src/web/`, styled with the tokens in plain CSS. Accessibility-heavy primitives come from Radix UI's headless packages (`@radix-ui/react-popover`, `-dropdown-menu`, `-dialog`, `-tabs`, added by #104), styled by our classes. Cronk uses no styled component library and no Tailwind. A new component goes in that set before a second screen copies it.
+The app keeps its own small component set in `src/web/components/`, styled with the tokens in plain CSS. Accessibility-heavy primitives come from Radix UI's headless packages (`@radix-ui/react-popover`, `-dropdown-menu`, `-dialog`, `-tabs`), each wrapped once in `components/overlays.tsx` (`Popover`, `Menu`, `Dialog` and `ConfirmDialog`, `Tabs`) and styled by our classes. Cronk uses no styled component library and no Tailwind. A new component goes in that set before a second screen copies it.
 
 - **Actor** (`<Actor>`): avatar plus name. A User is round. An Agent is square, violet, and followed by "for <Owner>" where the Owner isn't obvious. Never write "Ada (session d152, for Ada)" as prose.
-- **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper computes it everywhere, replacing `sessionName` in `src/web/api.ts` (#104).
-- **Status** (`<StatusPill>`): dot and name. **Priority:** a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
-- **Label:** a neutral chip on `--surface-2`.
-- **Kind label:** 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
-- **Buttons:**
+- **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper, `sessionName` in `src/web/components/actor.tsx`, computes it everywhere, and `<SessionName>` renders it.
+- **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
+- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip.
+- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
+- **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
   - Secondary is `--surface` with a border.
   - Ghost is text in `--accent`, for Reply, Rename and the like.
@@ -90,14 +90,14 @@ The app keeps its own small component set in `src/web/`, styled with the tokens 
   - Buttons size to their label and are never full width outside sign-in forms.
 - **Forms:** the label sits above the field, in 12px `--muted`. Inputs have a `--surface` background and a 1px border, and show the `--accent` focus ring. Markdown inputs use the mono face. Each error sits under its form in `--danger` with `role="alert"`.
 - **Pickers:** Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter. Bare `<select>` rows are not used for this.
-- **Times:**
+- **Times** (`<RelativeTime>`):
   - Relative under an hour ("12 min ago").
   - Then clock time for today ("10:18") and "yesterday".
   - Then day and time ("14 Nov 09:52"), with the year only when it differs from the current one.
   - The exact time is always in `title`.
   - A timeline shows clock times with a separator for each day.
 - **Empty states:** a short heading saying what will appear and one line saying how it gets there ("Agents write a Report when they hand work over").
-- **Live indicator:** a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
+- **Live indicator** (`<LiveIndicator>`): a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
 
 ## Screens
 

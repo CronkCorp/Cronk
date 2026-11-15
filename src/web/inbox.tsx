@@ -1,9 +1,13 @@
+import { Button } from "./components/button.js";
+import { KindLabel, StatusPill } from "./components/tags.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
 import { useEffect, useState } from "react";
-import { api, sessionName, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
+import { Actor, agentActor } from "./components/actor.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
-import { StatusPill } from "./work.js";
 
 const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "Tickets to review" };
 
@@ -32,13 +36,15 @@ export function InboxPage(props: { filter: InboxFilter }) {
   const [projects] = useLoad(() => api.projects(), []);
   const [agents] = useLoad(() => api.agents(), []);
   // Reload on every (re)connect, so changes made while the stream was away aren't missed, and on each change.
-  useEffect(() => watchInbox({ ready: reload, on: { changed: reload } }), [filter.kind, filter.project, filter.agent]);
+  const [live, onLive] = useLiveState();
+  useEffect(() => watchInbox({ ready: reload, onLive, on: { changed: reload } }), [filter.kind, filter.project, filter.agent]);
   const setFilter = (changes: InboxFilter) => navigate(inboxPath({ ...filter, ...changes }));
 
   return (
     <section>
       <div className="page-head">
         <h1>Inbox</h1>
+        <LiveIndicator state={live} />
       </div>
       <div className="filters">
         <label className="filter">
@@ -97,11 +103,10 @@ function QuestionEntry(props: { item: Extract<InboxItem, { kind: "question" }>; 
   return (
     <li className={`activity question${question.blocking ? " blocking" : ""}`} aria-label={`Question on ${ticket.key}`}>
       <div className="activity-head">
-        <span className="activity-kind">{question.blocking ? "Blocking question" : "Question"}</span>
-        <strong>{question.agent.name}</strong>
-        <span className="muted">({sessionName(question.session.id)})</span>
+        <KindLabel kind={question.blocking ? "blocking" : "question"}>{question.blocking ? "Blocking question" : "Question"}</KindLabel>
+        <Actor actor={agentActor(question.agent, question.session)} owner={false} />
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
-        <span className="muted">{new Date(question.at).toLocaleString()}</span>
+        <RelativeTime at={question.at} />
       </div>
       <div className="activity-body">
         <CronkMarkdown>{question.body}</CronkMarkdown>
@@ -117,13 +122,13 @@ function QuestionEntry(props: { item: Extract<InboxItem, { kind: "question" }>; 
           <TextArea label="Answer" value={body} onChange={setBody} rows={3} />
           {answer.error && <p className="error" role="alert">{answer.error}</p>}
           <div className="actions">
-            <button type="submit" disabled={answer.busy || !body.trim()}>Post answer</button>
-            <button type="button" className="secondary" onClick={() => setAnswering(false)}>Cancel</button>
+            <Button type="submit" disabled={answer.busy || !body.trim()}>Post answer</Button>
+            <Button type="button" variant="secondary" onClick={() => setAnswering(false)}>Cancel</Button>
           </div>
         </form>
       ) : (
         <div className="actions">
-          <button className="link" onClick={() => setAnswering(true)}>Answer</button>
+          <Button variant="ghost" onClick={() => setAnswering(true)}>Answer</Button>
         </div>
       )}
     </li>
@@ -145,10 +150,10 @@ function ReviewEntry(props: { item: Extract<InboxItem, { kind: "review" }>; onDo
   return (
     <li className="activity review" aria-label={`Review ${ticket.key}`}>
       <div className="activity-head">
-        <span className="activity-kind">To review</span>
+        <KindLabel kind="review">To review</KindLabel>
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
         <StatusPill status={ticket.status} />
-        {ticket.delegate && <span className="muted">by {ticket.delegate.name}</span>}
+        {ticket.delegate && <span className="muted">by <Actor actor={agentActor(ticket.delegate)} /></span>}
       </div>
       {reports.length > 0 ? (
         <ul className="history" aria-label={`Reports on ${ticket.key}`}>
@@ -172,14 +177,14 @@ function ReviewEntry(props: { item: Extract<InboxItem, { kind: "review" }>; onDo
         >
           <TextArea label="What is left to do" value={comment} onChange={setComment} rows={3} />
           <div className="actions">
-            <button type="submit" disabled={sendBack.busy || !comment.trim()}>Send back</button>
-            <button type="button" className="secondary" onClick={() => setSendingBack(false)}>Cancel</button>
+            <Button type="submit" disabled={sendBack.busy || !comment.trim()}>Send back</Button>
+            <Button type="button" variant="secondary" onClick={() => setSendingBack(false)}>Cancel</Button>
           </div>
         </form>
       ) : (
         <div className="actions">
-          <button onClick={() => void complete.run()} disabled={complete.busy}>Complete</button>
-          <button className="secondary" onClick={() => setSendingBack(true)}>Send back</button>
+          <Button onClick={() => void complete.run()} disabled={complete.busy}>Complete</Button>
+          <Button variant="secondary" onClick={() => setSendingBack(true)}>Send back</Button>
         </div>
       )}
     </li>

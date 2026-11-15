@@ -1,3 +1,7 @@
+import { Button } from "./components/button.js";
+import { Chip } from "./components/tags.js";
+import { RelativeTime } from "./components/time.js";
+import { Actor, userActor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Access, type Invitation, type Member, type Project, type Role, type User } from "./api.js";
 import { AuthCard, Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
@@ -66,7 +70,7 @@ function InviteUser(props: { onDone: (token: string) => void }) {
           </select>
         </label>
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Invite</button>
+        <Button type="submit" disabled={busy}>Invite</Button>
       </form>
     </section>
   );
@@ -82,8 +86,8 @@ function Invitations(props: { invitations: Invitation[]; onChanged: () => void }
         {props.invitations.map((i) => (
           <li key={i.id} className="row">
             <span className="grow">{i.email}</span>
-            <span className="muted">{roleName(i.role)}, until {new Date(i.expiresAt).toLocaleDateString()}</span>
-            <button className="link" disabled={withdraw.busy} onClick={() => void withdraw.run(i.id)}>Withdraw</button>
+            <span className="muted">{roleName(i.role)}, until <RelativeTime at={i.expiresAt} /></span>
+            <Button variant="ghost" disabled={withdraw.busy} onClick={() => void withdraw.run(i.id)}>Withdraw</Button>
           </li>
         ))}
       </ul>
@@ -99,12 +103,12 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
   return (
     <li className="row">
       <span className="grow">
-        <strong>{u.name}</strong>
+        <Actor actor={userActor(u.name)} />
         {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>
         {!u.joined ? (
-          <span className="badge">Imported, not signed in yet</span>
+          <Chip>Imported, not signed in yet</Chip>
         ) : (
-          !u.active && <span className="badge">Deactivated</span>
+          !u.active && <Chip>Deactivated</Chip>
         )}
         {change.error && <span className="error" role="alert"> {change.error}</span>}
         {invite.error && <span className="error" role="alert"> {invite.error}</span>}
@@ -119,14 +123,14 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
         <option value="admin">Admin</option>
       </select>
       {(u.joined || u.active) && (
-        <button className="link" disabled={change.busy} onClick={() => void change.run({ active: !u.active })}>
+        <Button variant="ghost" disabled={change.busy} onClick={() => void change.run({ active: !u.active })}>
           {u.active ? "Deactivate" : "Reactivate"}
-        </button>
+        </Button>
       )}
       {!u.joined && (
-        <button className="link" disabled={invite.busy} onClick={() => void invite.run()}>
+        <Button variant="ghost" disabled={invite.busy} onClick={() => void invite.run()}>
           Invite
-        </button>
+        </Button>
       )}
     </li>
   );
@@ -152,9 +156,9 @@ export function ProjectAccessPanel(props: { project: Project; onProjectChanged: 
           ? "Open: every Member has Write access, unless listed below with other access."
           : "Private: only Admins and the Members listed below can see this Project."}
       </p>
-      <button className="secondary" disabled={visibility.busy} onClick={() => void visibility.run()}>
+      <Button variant="secondary" disabled={visibility.busy} onClick={() => void visibility.run()}>
         {p.visibility === "open" ? "Make private" : "Make open"}
-      </button>
+      </Button>
       {visibility.error && <p className="error" role="alert">{visibility.error}</p>}
       <Show state={members}>
         {(list) => (
@@ -184,9 +188,9 @@ function MemberList(props: { projectKey: string; members: Member[]; users: User[
         <ul className="rows" aria-label="Project members">
           {props.members.map((m) => (
             <li key={m.user.id} className="row">
-              <span className="grow">{m.user.name}</span>
+              <span className="grow"><Actor actor={userActor(m.user.name)} /></span>
               <AccessSelect label={`Access of ${m.user.name}`} value={m.access} disabled={busy} onChange={(a) => void set.run(m.user.id, a)} />
-              <button className="link" disabled={busy} onClick={() => void remove.run(m.user.id)}>Remove</button>
+              <Button variant="ghost" disabled={busy} onClick={() => void remove.run(m.user.id)}>Remove</Button>
             </li>
           ))}
         </ul>
@@ -199,10 +203,10 @@ function MemberList(props: { projectKey: string; members: Member[]; users: User[
               <option key={u.id} value={u.id}>{u.name}</option>
             ))}
           </select>
-          <button disabled={busy || !adding} onClick={() => void set.run(adding, "write").then(() => setAdding(""))}>Add with Write</button>
-          <button className="secondary" disabled={busy || !adding} onClick={() => void set.run(adding, "read").then(() => setAdding(""))}>
+          <Button disabled={busy || !adding} onClick={() => void set.run(adding, "write").then(() => setAdding(""))}>Add with Write</Button>
+          <Button variant="secondary" disabled={busy || !adding} onClick={() => void set.run(adding, "read").then(() => setAdding(""))}>
             Add with Read
-          </button>
+          </Button>
         </div>
       )}
       {(set.error ?? remove.error) && <p className="error" role="alert">{set.error ?? remove.error}</p>}
@@ -241,7 +245,7 @@ export function AcceptInvitationPage(props: { token: string; onDone: (user: User
         <Field label="Your name" value={name} onChange={setName} autoComplete="name" />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Join</button>
+        <Button type="submit" disabled={busy}>Join</Button>
       </form>
     </AuthCard>
   );

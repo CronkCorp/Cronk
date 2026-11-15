@@ -97,9 +97,6 @@ export type {
   Workspace,
 };
 
-/** How the UI names an Agent Session: by the start of its id, e.g. "session a3f2". */
-export const sessionName = (id: string) => `session ${id.slice(0, 4)}`;
-
 /** Narrows a Project's Ticket list; `assignee` takes a User id or `none`. */
 export interface TicketFilter {
   status?: string;
@@ -367,15 +364,26 @@ export interface DocumentEvents {
   version: { version: number };
 }
 
+/** Where a live-update stream is: in place, away and reconnecting, or closed for good. */
+export type StreamState = "live" | "away" | "closed";
+
 /**
  * Watches a live-update stream (server-sent events) until the returned function is called.
  * `ready` is called each time the stream (re)connects, so whatever it shows can be loaded
  * again to catch up on what happened while it was away; `on` maps event names to handlers
- * of their JSON data. The browser reconnects by itself after the connection drops.
+ * of their JSON data. The browser reconnects by itself after the connection drops; `onLive`
+ * hears when the stream is in place, away and reconnecting, or closed for good (such as when refused).
  */
-function watch<Events>(path: string, handlers: { ready: () => void; on: { [E in keyof Events]?: (data: Events[E]) => void } }): () => void {
+function watch<Events>(
+  path: string,
+  handlers: { ready: () => void; onLive?: (state: StreamState) => void; on: { [E in keyof Events]?: (data: Events[E]) => void } },
+): () => void {
   const source = new EventSource(path, { withCredentials: true });
-  source.addEventListener("ready", () => handlers.ready());
+  source.addEventListener("ready", () => {
+    handlers.onLive?.("live");
+    handlers.ready();
+  });
+  source.addEventListener("error", () => handlers.onLive?.(source.readyState === EventSource.CLOSED ? "closed" : "away"));
   for (const [event, handle] of Object.entries(handlers.on) as [string, (data: unknown) => void][]) {
     source.addEventListener(event, (e) => handle(JSON.parse((e as MessageEvent<string>).data)));
   }

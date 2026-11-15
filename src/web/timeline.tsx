@@ -1,5 +1,10 @@
+import { Button } from "./components/button.js";
+import { Chip, KindLabel } from "./components/tags.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState, type Ref } from "react";
-import { api, sessionName, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
+import { Actor, agentActor } from "./components/actor.js";
+import { api, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
@@ -43,6 +48,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; on
   const [arrivedActivities, setArrivedActivities] = useState<Activity[]>([]);
   const [arrivedReports, setArrivedReports] = useState<Report[]>([]);
   const [arrivedComments, setArrivedComments] = useState<Comment[]>([]);
+  const [live, onLive] = useLiveState();
   // The latest handler, so the stream, opened once per Ticket, never calls an outdated one.
   const onTicketChanged = useRef(props.onTicketChanged);
   onTicketChanged.current = props.onTicketChanged;
@@ -51,6 +57,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; on
     setArrivedReports([]);
     setArrivedComments([]);
     return watchTicket(props.ticketKey, {
+      onLive,
       // Load the lists again once watching, and on every reconnect, so nothing posted before the stream was
       // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
       ready: () => {
@@ -83,6 +90,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; on
         const posted = (comment: Comment) => setArrivedComments((list) => [...list, comment]);
         return (
           <>
+            <LiveIndicator state={live} />
             <ol className="timeline" aria-label="Timeline">
               {entries.length === 0 && <li className="muted">Nothing yet.</li>}
               {entries.map((e) =>
@@ -119,11 +127,10 @@ function ActivityItem(props: { activity: Activity } & Thread) {
   return (
     <li className={`activity ${a.kind}${a.blocking ? " blocking" : ""}${a.answer ? " answered" : ""}`}>
       <div className="activity-head">
-        <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
-        <strong>{a.agent.name}</strong>
-        <span className="muted">({sessionName(a.session.id)}, for {a.agent.owner.name})</span>
-        <span className="muted">{new Date(a.at).toLocaleString()}</span>
-        {isQuestion && (a.answer ? <span className="badge answered">Answered</span> : <span className="badge">Waiting for an answer</span>)}
+        <KindLabel kind={a.blocking ? "blocking" : a.kind}>{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</KindLabel>
+        <Actor actor={agentActor(a.agent, a.session)} />
+        <RelativeTime at={a.at} />
+        {isQuestion && (a.answer ? <Chip tone="ok">Answered</Chip> : <Chip>Waiting for an answer</Chip>)}
       </div>
       <div className="activity-body">
         <CronkMarkdown>{a.body}</CronkMarkdown>
@@ -140,10 +147,9 @@ function ReportItem(props: { report: Report }) {
   return (
     <li className="activity report" aria-label={`Report: ${r.title}`}>
       <div className="activity-head">
-        <span className="activity-kind">Report</span>
-        <strong>{r.agent.name}</strong>
-        <span className="muted">({sessionName(r.session.id)}, for {r.agent.owner.name})</span>
-        <span className="muted">{new Date(r.createdAt).toLocaleString()}</span>
+        <KindLabel kind="report">Report</KindLabel>
+        <Actor actor={agentActor(r.agent, r.session)} />
+        <RelativeTime at={r.createdAt} />
       </div>
       <h3 className="report-title">
         <Link to={`/documents/${r.id}`} className="link">{r.title}</Link>
@@ -161,14 +167,9 @@ function CommentItem(props: { comment: Comment } & Thread) {
   return (
     <li className="comment">
       <div className="comment-head">
-        <span className="comment-kind">Comment</span>
-        <strong>{c.actor.name}</strong>
-        {c.actor.kind === "agent" && (
-          <span className="muted">
-            ({c.actor.session ? `${sessionName(c.actor.session.id)}, for` : "Agent of"} {c.actor.owner.name})
-          </span>
-        )}
-        <span className="muted">{new Date(c.at).toLocaleString()}</span>
+        <KindLabel kind="comment">Comment</KindLabel>
+        <Actor actor={c.actor} />
+        <RelativeTime at={c.at} />
       </div>
       {c.anchor && (
         <blockquote className={`anchor${c.anchor.inCurrentVersion ? "" : " detached"}`}>
@@ -209,9 +210,9 @@ function Replies(props: Thread & { replies: Comment[]; replyTo: Omit<NewComment,
             onCancel={() => setReplying(false)}
           />
         ) : (
-          <button className="link" onClick={() => setReplying(true)}>
+          <Button variant="ghost" onClick={() => setReplying(true)}>
             {props.replyLabel}
-          </button>
+          </Button>
         ))}
     </>
   );
@@ -238,8 +239,8 @@ function CommentForm(props: {
       <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} placeholder='Markdown; @name, @owner/name or @"name with spaces" mentions an Agent' />
       {send.error && <p className="error" role="alert">{send.error}</p>}
       <div className="actions">
-        <button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</button>
-        {props.onCancel && <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>}
+        <Button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</Button>
+        {props.onCancel && <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>}
       </div>
     </form>
   );

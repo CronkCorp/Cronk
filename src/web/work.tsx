@@ -1,3 +1,8 @@
+import { Button } from "./components/button.js";
+import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
+import { Actor, agentActor, userActor } from "./components/actor.js";
 import { useEffect, useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
@@ -16,7 +21,6 @@ import {
   type TicketFilter,
   type TicketRef,
   type User,
-  sessionName,
   watchProject,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
@@ -27,7 +31,6 @@ import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
-const PRIORITY_NAMES: Record<Priority, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low", none: "No Priority" };
 
 const CATEGORY_NAMES: Record<StatusCategory, string> = {
   backlog: "Backlog",
@@ -55,7 +58,7 @@ export function ProjectsPage(props: { archived: boolean }) {
           ) : (
             <>
               <Link to="/archived" className="link">Archived Projects</Link>
-              {!creating && <button onClick={() => setCreating(true)}>New Project</button>}
+              {!creating && <Button onClick={() => setCreating(true)}>New Project</Button>}
             </>
           )}
         </div>
@@ -83,8 +86,8 @@ export function ProjectsPage(props: { archived: boolean }) {
                   <Link to={`/projects/${project.key}`} className="row">
                     <span className="key">{project.key}</span>
                     <span className="grow">{project.name}</span>
-                    {project.visibility === "private" && <span className="badge">Private</span>}
-                    {project.access === "read" && <span className="badge">Read only</span>}
+                    {project.visibility === "private" && <Chip>Private</Chip>}
+                    {project.access === "read" && <Chip>Read only</Chip>}
                   </Link>
                 </li>
               ))}
@@ -109,8 +112,8 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
         <p className="muted hint">Tickets are numbered from it, like {key || "CRONK"}-1. It can't be changed later.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Create Project</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Create Project</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
@@ -153,9 +156,11 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
   // The list and board follow the Project's changes; a change to its Statuses reloads the Project, which holds them.
+  const [live, onLive] = useLiveState();
   useEffect(
     () =>
       watchProject(props.projectKey, {
+        onLive,
         ready: () => {
           reloadProject();
           reloadTickets();
@@ -195,24 +200,25 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             <div>
               <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
               <h1>
-                {p.name} {p.archived && <span className="badge">Archived</span>}{" "}
-                {p.visibility === "private" && <span className="badge">Private</span>}{" "}
-                {p.access === "read" && <span className="badge">Read only</span>}
+                {p.name} {p.archived && <Chip>Archived</Chip>}{" "}
+                {p.visibility === "private" && <Chip>Private</Chip>}{" "}
+                {p.access === "read" && <Chip>Read only</Chip>}
               </h1>
             </div>
             <div className="actions">
+              <LiveIndicator state={live} />
               {p.access === "write" && (
                 <AgentAccessSelect value={p.agentAccess} disabled={agentAccess.busy} onChange={(a) => void agentAccess.run(a)} />
               )}
               {props.me.role === "admin" && (
-                <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
+                <Button variant="secondary" onClick={() => setShowAccess(!showAccess)}>Access</Button>
               )}
               {p.access === "write" && (
                 <>
-                  <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
+                  <Button variant="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
                     {p.archived ? "Restore Project" : "Archive Project"}
-                  </button>
-                  {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
+                  </Button>
+                  {!creating && <Button onClick={() => setCreating(true)}>New Ticket</Button>}
                 </>
               )}
             </div>
@@ -289,11 +295,11 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                         {list.map((ticket) => (
                           <li key={ticket.key}>
                             <Link to={`/tickets/${ticket.key}`} className="row">
-                              <PriorityIcon priority={ticket.priority} />
+                              <PriorityTag priority={ticket.priority} />
                               <span className="key">{ticket.key}</span>
                               <span className="grow">{ticket.title}</span>
                               <LabelChips labels={ticket.labels} />
-                              {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
+                              {ticket.assignee && <span className="assignee"><Actor actor={userActor(ticket.assignee.name)} /></span>}
                               <StatusPill status={ticket.status} />
                             </Link>
                           </li>
@@ -383,7 +389,7 @@ function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
               <Link key={ticket.key} to={`/tickets/${ticket.key}`} className="card">
                 <span className="card-head">
                   <span className="key">{ticket.key}</span>
-                  <PriorityIcon priority={ticket.priority} />
+                  <PriorityTag priority={ticket.priority} />
                 </span>
                 <span>{ticket.title}</span>
                 <LabelChips labels={ticket.labels} />
@@ -451,7 +457,7 @@ function StatusCategorySection(props: {
       {props.canChange && (
         <form className="add-status" onSubmit={add.submit}>
           <input aria-label={`New ${props.label} Status`} placeholder="New Status" value={name} required onChange={(e) => setName(e.target.value)} />
-          <button type="submit" disabled={add.busy}>Add</button>
+          <Button type="submit" disabled={add.busy}>Add</Button>
         </form>
       )}
       {add.error && <p className="error" role="alert">{add.error}</p>}
@@ -503,8 +509,8 @@ function StatusRow(props: {
           }}
         >
           <input aria-label={`Name of ${s.name}`} className="grow" value={name} required onChange={(e) => setName(e.target.value)} />
-          <button type="submit" disabled={update.busy}>Save</button>
-          <button type="button" className="secondary" onClick={() => setMode("view")}>Cancel</button>
+          <Button type="submit" disabled={update.busy}>Save</Button>
+          <Button type="button" variant="secondary" onClick={() => setMode("view")}>Cancel</Button>
         </form>
       ) : (
         <div className="row">
@@ -512,24 +518,24 @@ function StatusRow(props: {
           <span className="muted">{props.ticketCount} {props.ticketCount === 1 ? "Ticket" : "Tickets"}</span>
           {props.canChange && (
             <>
-              <button
-                className="link"
+              <Button
+                variant="ghost"
                 aria-label={`Move ${s.name} up`}
                 disabled={props.position === 0 || update.busy}
                 onClick={() => void update.run({ position: props.position - 1 })}
               >
                 ↑
-              </button>
-              <button
-                className="link"
+              </Button>
+              <Button
+                variant="ghost"
                 aria-label={`Move ${s.name} down`}
                 disabled={props.position === props.inCategory.length - 1 || update.busy}
                 onClick={() => void update.run({ position: props.position + 1 })}
               >
                 ↓
-              </button>
-              <button
-                className="link"
+              </Button>
+              <Button
+                variant="ghost"
                 aria-label={`Rename ${s.name}`}
                 onClick={() => {
                   setName(s.name);
@@ -537,10 +543,10 @@ function StatusRow(props: {
                 }}
               >
                 Rename
-              </button>
+              </Button>
               {/* A Status Category keeps at least one Status, so its last can't be removed. */}
               {props.inCategory.length > 1 && (
-                <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+                <Button variant="ghost" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</Button>
               )}
             </>
           )}
@@ -560,30 +566,12 @@ function StatusRow(props: {
           ) : (
             <span className="grow muted">No Tickets are in {s.name}.</span>
           )}
-          <button disabled={remove.busy} onClick={() => void remove.run()}>Remove Status</button>
-          <button className="secondary" onClick={() => setMode("view")}>Cancel</button>
+          <Button disabled={remove.busy} onClick={() => void remove.run()}>Remove Status</Button>
+          <Button variant="secondary" onClick={() => setMode("view")}>Cancel</Button>
         </div>
       )}
       {error && <p className="error row" role="alert">{error}</p>}
     </li>
-  );
-}
-
-export function StatusPill(props: { status: Status }) {
-  return (
-    <span className="status-pill">
-      <span className={`dot ${props.status.category}`} />
-      {props.status.name}
-    </span>
-  );
-}
-
-function PriorityIcon(props: { priority: Priority }) {
-  if (props.priority === "none") return null;
-  return (
-    <span className={`priority ${props.priority}`} title={`Priority: ${PRIORITY_NAMES[props.priority]}`}>
-      {PRIORITY_NAMES[props.priority]}
-    </span>
   );
 }
 
@@ -592,7 +580,7 @@ function LabelChips(props: { labels: string[] }) {
   return (
     <span className="chips">
       {props.labels.map((label) => (
-        <span key={label} className="chip">{label}</span>
+        <Chip key={label}>{label}</Chip>
       ))}
     </span>
   );
@@ -610,8 +598,8 @@ function NewTicket(props: { projectKey: string; onDone: (ticket: Ticket) => void
         <TextArea label="Description (Markdown)" value={description} onChange={setDescription} />
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Create Ticket</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Create Ticket</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
@@ -657,7 +645,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         <>
           <div className="page-head">
             <h1>{t.title}</h1>
-            {canWrite && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
+            {canWrite && <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>}
           </div>
           <div className="ticket-fields">
             <Show state={project}>
@@ -707,13 +695,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
           <ol className="history" aria-label="History">
             {changes.map((change, i) => (
               <li key={i}>
-                <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>
-                {change.actor.kind === "agent" && (
-                  <span className="muted">
-                    {" "}
-                    ({change.actor.session ? `${sessionName(change.actor.session.id)}, for` : "Agent of"} {change.actor.owner.name})
-                  </span>
-                )}{" "}
+                <RelativeTime at={change.at} /> <Actor actor={change.actor} />{" "}
                 {describe(change)}
               </li>
             ))}
@@ -744,8 +726,8 @@ function ReportsView(props: { projectKey: string }) {
                   <span className="grow">
                     {r.title} <span className="muted">on {r.ticketTitle}</span>
                   </span>
-                  <span className="muted">{r.agent.name}</span>
-                  <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                  <Actor actor={agentActor(r.agent, r.session)} owner={false} />
+                  <RelativeTime at={r.createdAt} />
                 </Link>
               </li>
             ))}
@@ -811,10 +793,14 @@ function ClaimLine(props: { claim: TicketDetail["claim"] }) {
   const { claim } = props;
   return (
     <p className="muted claim" data-testid="ticket-claim">
-      {claim
-        ? `Claimed by ${claim.agent.name} (${sessionName(claim.session.id)}) since ${new Date(claim.claimedAt).toLocaleString()}; ` +
-          `lapses if silent until ${new Date(claim.endsIfSilentAt).toLocaleTimeString()}`
-        : "Not Claimed"}
+      {claim ? (
+        <>
+          Claimed by <Actor actor={agentActor(claim.agent, claim.session)} /> <RelativeTime at={claim.claimedAt} />; lapses <RelativeTime at={claim.endsIfSilentAt} /> if
+          silent
+        </>
+      ) : (
+        "Not Claimed"
+      )}
     </p>
   );
 }
@@ -833,20 +819,14 @@ function LabelEditor(props: { ticket: Ticket; busy: boolean; readOnly: boolean; 
       {labels.length > 0 && (
         <ul className="chips" aria-label="Labels">
           {labels.map((label) => (
-            <li key={label} className="chip">
+            <Chip
+              key={label}
+              as="li"
+              disabled={props.busy}
+              {...(props.readOnly ? {} : { onRemove: () => props.onChange(labels.filter((l) => l !== label)) })}
+            >
               {label}
-              {!props.readOnly && (
-                <button
-                  type="button"
-                  className="chip-remove"
-                  aria-label={`Remove ${label}`}
-                  disabled={props.busy}
-                  onClick={() => props.onChange(labels.filter((l) => l !== label))}
-                >
-                  ×
-                </button>
-              )}
-            </li>
+            </Chip>
           ))}
         </ul>
       )}
@@ -872,7 +852,7 @@ function ParentEditor(props: { ticket: Ticket; readOnly: boolean; onChanged: () 
         <p data-testid="ticket-parent">
           Sub-Ticket of{" "}
           <Link to={`/tickets/${parent.key}`} className="link">{parent.key} {parent.title}</Link>{" "}
-          {!props.readOnly && <button className="link" onClick={() => void set.run(null)} disabled={set.busy}>Clear</button>}
+          {!props.readOnly && <Button variant="ghost" onClick={() => void set.run(null)} disabled={set.busy}>Clear</Button>}
         </p>
       )}
       {!props.readOnly && (
@@ -884,7 +864,7 @@ function ParentEditor(props: { ticket: Ticket; readOnly: boolean; onChanged: () 
           }}
         >
           <input aria-label="Parent" placeholder="Parent Ticket, e.g. CRONK-1" value={key} onChange={(e) => setKey(e.target.value)} required />
-          <button type="submit" className="secondary" disabled={set.busy}>Set parent</button>
+          <Button type="submit" variant="secondary" disabled={set.busy}>Set parent</Button>
         </form>
       )}
       {set.error && <p className="error" role="alert">{set.error}</p>}
@@ -937,7 +917,7 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean; onCha
             ))}
           </select>
           <input aria-label="Related Ticket" placeholder="e.g. CRONK-1" value={other} onChange={(e) => setOther(e.target.value)} required />
-          <button type="submit" className="secondary" disabled={add.busy}>Add relation</button>
+          <Button type="submit" variant="secondary" disabled={add.busy}>Add relation</Button>
         </form>
       )}
       {(add.error ?? remove.error) && <p className="error" role="alert">{add.error ?? remove.error}</p>}
@@ -986,12 +966,12 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
               <Link to={`/documents/${d.id}`} className="row-link">
                 <span className="grow">{d.title}</span>
                 <span className="muted">{whereDocumentIs(d)}</span>
-                <span className="badge">{d.reason === "linked" ? "Linked" : "Mentions it"}</span>
+                <Chip>{d.reason === "linked" ? "Linked" : "Mentions it"}</Chip>
               </Link>
               {d.reason === "linked" && !props.readOnly && (
-                <button className="link" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
+                <Button variant="ghost" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
                   Unlink
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -1006,7 +986,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
           }}
         >
           <input aria-label="Find a Document to link" placeholder="Find a Document by its words" value={query} onChange={(e) => setQuery(e.target.value)} required />
-          <button type="submit" className="secondary" disabled={search.busy}>Find</button>
+          <Button type="submit" variant="secondary" disabled={search.busy}>Find</Button>
         </form>
       )}
       {found && (
@@ -1018,9 +998,9 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
               <li key={r.documentId} className="row">
                 <span className="grow">{r.title}</span>
                 <span className="muted">{whereDocumentIs(r)}</span>
-                <button className="link" aria-label={`Link ${r.title}`} disabled={link.busy} onClick={() => void link.run(r.documentId!)}>
+                <Button variant="ghost" aria-label={`Link ${r.title}`} disabled={link.busy} onClick={() => void link.run(r.documentId!)}>
                   Link
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -1042,9 +1022,9 @@ function TicketRefList(props: { name: string; refs: TicketRef[]; onRemove?: (ref
             <StatusPill status={ref.status} />
           </Link>
           {props.onRemove && (
-            <button className="link" aria-label={`Remove ${ref.key}`} disabled={props.busy} onClick={() => props.onRemove!(ref)}>
+            <Button variant="ghost" aria-label={`Remove ${ref.key}`} disabled={props.busy} onClick={() => props.onRemove!(ref)}>
               Remove
-            </button>
+            </Button>
           )}
         </li>
       ))}
@@ -1063,8 +1043,8 @@ function EditTicket(props: { ticket: Ticket; onDone: (ticket: Ticket) => void; o
         <TextArea label="Description (Markdown)" value={description} onChange={setDescription} rows={12} />
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Save</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Save</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>

@@ -1,11 +1,15 @@
+import { ConfirmDialog } from "./components/overlays.js";
+import { Button, buttonClass } from "./components/button.js";
+import { Chip } from "./components/tags.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
+import { Actor } from "./components/actor.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   api,
-  sessionName,
   staleVersionOf,
   type Document,
   type DocumentTreeEntry,
-  type RecordedActor,
   type Version,
   watchDocument,
 } from "./api.js";
@@ -29,7 +33,7 @@ const explainStale = (reload: () => void, doing: string) => (err: unknown): neve
   const current = staleVersionOf(err);
   if (!current) throw err;
   reload();
-  throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before ${doing}`);
+  throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
 
 /** Whether the signed-in User may change Documents in a Project's tree, or the Workspace's (every User may). */
@@ -106,8 +110,8 @@ export function DocumentsPage(props: { projectKey?: string }) {
         </div>
         {canWrite && !creating && (
           <div className="actions">
-            <button onClick={() => setCreating(true)}>New Document</button>
-            <label className="button secondary" title="A folder of Markdown files; its folders become the page tree">
+            <Button onClick={() => setCreating(true)}>New Document</Button>
+            <label className={buttonClass("secondary")} title="A folder of Markdown files; its folders become the page tree">
               Import Markdown folder…
               <input
                 type="file"
@@ -118,7 +122,7 @@ export function DocumentsPage(props: { projectKey?: string }) {
                 onChange={(e) => void importFrom(e.target, packMarkdownFolder)}
               />
             </label>
-            <label className="button secondary" title="A .zip, .tar.gz or .tar of a folder of Markdown files; its folders become the page tree">
+            <label className={buttonClass("secondary")} title="A .zip, .tar.gz or .tar of a folder of Markdown files; its folders become the page tree">
               Import archive…
               <input type="file" accept=".zip,.gz,.tgz,.tar" hidden onChange={(e) => void importFrom(e.target, async ([file]) => file)} />
             </label>
@@ -161,8 +165,8 @@ function NewDocument(props: { projectKey: string | undefined; parentId?: string;
         <Field label="Title" value={title} onChange={setTitle} />
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Create Document</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Create Document</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
@@ -188,9 +192,11 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   // The newest Version anyone saved, as the Document's stream tells it, and how often its Comments changed.
   const [latest, setLatest] = useState(d.version);
   const [commentsGeneration, setCommentsGeneration] = useState(0);
+  const [live, onLive] = useLiveState();
   useEffect(
     () =>
       watchDocument(d.id, {
+        onLive,
         // On (re)connecting, catch up on what was saved and posted meanwhile.
         ready: () => {
           setCommentsGeneration((g) => g + 1);
@@ -208,13 +214,16 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   useEffect(() => {
     if (newer !== undefined && panel !== "edit") props.onReload();
   }, [newer, panel]);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const remove = useAction(
     async () => {
-      if (!confirm(`Delete ${d.title} and all its Versions?`)) return false;
-      await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
-      return true;
+      try {
+        await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
+      } finally {
+        setConfirmingDelete(false);
+      }
     },
-    (deleted) => deleted && navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
+    () => navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
   );
   const toggle = (p: Panel) => setPanel(panel === p ? "none" : p);
   const bodyAt = useRef<HTMLDivElement>(null);
@@ -246,21 +255,31 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
         <>
           <div className="page-head">
             <h1>
-              {d.title} {d.ticketKey && <span className="badge">Report on {d.ticketKey}</span>}
+              {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>}
             </h1>
             <div className="actions">
+              <LiveIndicator state={live} />
               <span className="muted">Version {d.version}</span>
-              <button className="secondary" onClick={() => toggle("versions")}>Versions</button>
+              <Button variant="secondary" onClick={() => toggle("versions")}>Versions</Button>
               {canWrite && (
                 <>
                   {!d.ticketKey && (
                     <>
-                      <button className="secondary" onClick={() => toggle("move")}>Move</button>
-                      <button className="secondary" onClick={() => toggle("new")}>New Document under this one</button>
+                      <Button variant="secondary" onClick={() => toggle("move")}>Move</Button>
+                      <Button variant="secondary" onClick={() => toggle("new")}>New Document under this one</Button>
                     </>
                   )}
-                  <button className="secondary" onClick={() => void remove.run()} disabled={remove.busy}>Delete</button>
-                  <button onClick={() => setPanel("edit")}>Edit</button>
+                  <Button variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={remove.busy}>Delete</Button>
+                  <ConfirmDialog
+                    open={confirmingDelete}
+                    onOpenChange={setConfirmingDelete}
+                    title={`Delete ${d.title}?`}
+                    description="This deletes the Document and all its Versions."
+                    confirmLabel="Delete"
+                    busy={remove.busy}
+                    onConfirm={() => void remove.run()}
+                  />
+                  <Button onClick={() => setPanel("edit")}>Edit</Button>
                 </>
               )}
             </div>
@@ -283,7 +302,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               {d.body.trim() ? <CronkMarkdown sourceOffsets>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
             </div>
             {canWrite && selected && (
-              <button
+              <Button
                 type="button"
                 className="comment-on-selection"
                 style={{ top: selected.top, left: selected.left }}
@@ -292,7 +311,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                 onClick={() => commentOnSelection(selected.passage)}
               >
                 Comment on this passage
-              </button>
+              </Button>
             )}
           </div>
           <h2>Comments</h2>
@@ -328,7 +347,7 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
       return {
         base: started,
         theirs: merge.onto,
-        by: actorName(merge.onto.actor),
+        by: merge.onto.actor,
         merge,
         merged: merge.conflicts === 0 ? { title: merge.title!, text: merge.body! } : null,
       };
@@ -355,8 +374,8 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
           />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
-            <button type="submit" disabled={busy}>Save</button>
-            <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+            <Button type="submit" disabled={busy}>Save</Button>
+            <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
           </div>
         </form>
       )}
@@ -377,7 +396,7 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
         {([base, theirs]) => (
           <>
             <p>
-              <strong>{actorName(theirs.actor)}</strong> saved Version {theirs.number} while you were editing Version {base.number}. Saving
+              <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}. Saving
               merges their changes into yours.
             </p>
             <details>
@@ -423,8 +442,8 @@ function MoveDocument(props: { document: Document; onMoved: (d: Document) => voi
         </Show>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Move</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Move</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
@@ -467,13 +486,13 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
             {list.map((v) => (
               <li key={v.number} className="version">
                 <span className="grow">
-                  <strong>Version {v.number}</strong> <span className="muted">{new Date(v.at).toLocaleString()}</span> {actorName(v.actor)}
+                  <strong>Version {v.number}</strong> <RelativeTime at={v.at} /> <Actor actor={v.actor} />
                   {v.restoredFrom !== null && <span className="muted"> (restored Version {v.restoredFrom})</span>}
-                  {v.number === d.version && <span className="badge">Current</span>}
+                  {v.number === d.version && <Chip>Current</Chip>}
                 </span>
-                <button className="link" onClick={() => void view.run(v.number)} disabled={view.busy}>View</button>
+                <Button variant="ghost" onClick={() => void view.run(v.number)} disabled={view.busy}>View</Button>
                 {props.canWrite && v.number !== d.version && (
-                  <button className="link" onClick={() => void restore.run(v.number)} disabled={restore.busy}>Restore</button>
+                  <Button variant="ghost" onClick={() => void restore.run(v.number)} disabled={restore.busy}>Restore</Button>
                 )}
               </li>
             ))}
@@ -525,13 +544,7 @@ function CompareVersions(props: { current: number; busy: boolean; onCompare: (fr
     >
       {pick("Compare", from, setFrom)}
       {pick("with", to, setTo)}
-      <button type="submit" className="secondary" disabled={props.busy}>Compare</button>
+      <Button type="submit" variant="secondary" disabled={props.busy}>Compare</Button>
     </form>
   );
-}
-
-/** Who saved a Version, as the UI names them. */
-function actorName(actor: RecordedActor): string {
-  if (actor.kind === "user") return actor.name;
-  return `${actor.name} (${actor.session ? `${sessionName(actor.session.id)}, for` : "Agent of"} ${actor.owner.name})`;
 }

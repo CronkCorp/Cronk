@@ -1,3 +1,5 @@
+import { Button } from "./components/button.js";
+import { Actor, type ActorLike } from "./components/actor.js";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
 import { diffLines } from "./diff.js";
@@ -32,19 +34,19 @@ const STAGE_ADVICE: Record<MergeStage, string> = {
  * Tells the User their save was refused because `by` saved `theirs` since `base`, shows what they
  * changed, and offers to drop the draft and edit their Version instead (not while `disabled`, as during a save).
  */
-export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
+export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
   const { base, theirs } = props;
   return (
     <div className={props.stage === "conflict" ? "conflict" : "merged"} role="alert">
       <p>
-        <strong>{props.by}</strong> saved Version {theirs.number} while you were editing, so your save was not made. {STAGE_ADVICE[props.stage]}
+        <Actor actor={props.by} /> saved Version {theirs.number} while you were editing, so your save was not made. {STAGE_ADVICE[props.stage]}
       </p>
       <details open={props.stage === "conflict"}>
         <summary>Their changes (Version {base.number} to {theirs.number})</summary>
         <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
       </details>
       <div className="actions">
-        <button type="button" className="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</button>
+        <Button type="button" variant="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</Button>
       </div>
     </div>
   );
@@ -63,7 +65,7 @@ export interface StaleMerge {
   /** The Version someone else saved meanwhile, which the merge is onto. */
   theirs: SavedText;
   /** Who saved their Version. */
-  by: string;
+  by: ActorLike;
   /** The merge, for `ResolveMerge` to settle. */
   merge: Mergeable;
   /** The merged draft, or null when the merge left conflicts for the User to settle. */
@@ -186,9 +188,9 @@ function ConflictChoice(props: { label: string; conflict: Conflict; value: strin
         {side("Theirs", c.theirs)}
       </div>
       <div className="actions">
-        <button type="button" className="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(c.both)}>Use both</button>
+        <Button type="button" variant="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</Button>
+        <Button type="button" variant="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</Button>
+        <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>
       </div>
       <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
     </section>
@@ -224,8 +226,8 @@ export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title:
         s.conflict ? <ConflictChoice key={i} label={sectionName(s)} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} /> : null,
       )}
       <div className="actions">
-        <button type="submit">Use these and keep editing</button>
-        <button type="button" className="secondary" onClick={props.onBack}>Back to my draft</button>
+        <Button type="submit">Use these and keep editing</Button>
+        <Button type="button" variant="secondary" onClick={props.onBack}>Back to my draft</Button>
       </div>
     </form>
   );
