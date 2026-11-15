@@ -8,6 +8,7 @@ import { inboxFilterFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
+import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
 import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
@@ -135,35 +136,38 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
 function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceChange: (workspace: Workspace) => void }) {
   const { path, search } = useLocation();
   const admin = props.me.role === "admin";
-  if (path === "/users" && admin) return <UsersPage me={props.me} />;
-  if (path === "/settings" && admin) {
-    return props.workspace === undefined ? null : (
-      <WorkspaceSettings current={props.workspace} onDone={props.onWorkspaceChange} onCancel={() => navigate("/")} />
-    );
+  const route = routeOf(path);
+  switch (route.page) {
+    case "users":
+      if (admin) return <UsersPage me={props.me} />;
+      break;
+    case "settings":
+      if (!admin) break;
+      return props.workspace === undefined ? null : (
+        <WorkspaceSettings current={props.workspace} onDone={props.onWorkspaceChange} onCancel={() => navigate("/")} />
+      );
+    case "agents":
+      return <AgentsPage me={props.me} />;
+    case "search":
+      return <SearchPage filter={searchFilterFrom(search)} />;
+    case "inbox":
+      return <InboxPage filter={inboxFilterFrom(search)} />;
+    case "documents":
+      return <DocumentsPage />;
+    case "projectDocuments":
+      return <DocumentsPage projectKey={route.key} />;
+    case "document":
+      return <DocumentPage id={route.id} edit={search.get("edit") === "1"} />;
+    case "guidance":
+      return <WorkspaceGuidancePage me={props.me} />;
+    case "project":
+      return <ProjectPage projectKey={route.key} view={projectView(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
+    case "ticket":
+      return <TicketPage ticketKey={route.key} />;
+    case "projects":
+      return <ProjectsPage archived={route.archived} />;
   }
-  if (path === "/agents") return <AgentsPage me={props.me} />;
-  if (path === "/search") return <SearchPage filter={searchFilterFrom(search)} />;
-  if (path === "/inbox") return <InboxPage filter={inboxFilterFrom(search)} />;
-  if (path === "/documents") return <DocumentsPage />;
-  const projectDocuments = /^\/projects\/([^/]+)\/documents$/.exec(path);
-  if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;
-  const documentMatch = /^\/documents\/([^/]+)$/.exec(path);
-  if (documentMatch) return <DocumentPage id={decodeURIComponent(documentMatch[1]!)} edit={search.get("edit") === "1"} />;
-  if (path === "/guidance") return <WorkspaceGuidancePage me={props.me} />;
-  const project = /^\/projects\/([^/]+)$/.exec(path);
-  if (project) {
-    return (
-      <ProjectPage
-        projectKey={decodeURIComponent(project[1]!)}
-        view={projectView(search.get("view"))}
-        filter={filterFrom(search)}
-        me={props.me}
-      />
-    );
-  }
-  const ticket = /^\/tickets\/([^/]+)$/.exec(path);
-  if (ticket) return <TicketPage ticketKey={decodeURIComponent(ticket[1]!)} />;
-  return <ProjectsPage archived={path === "/archived"} />;
+  return <ProjectsPage archived={false} />;
 }
 
 /** The Admin's Workspace settings, at `/settings`. Saving keeps the page open and tells the frame the new name. */

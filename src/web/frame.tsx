@@ -4,37 +4,36 @@ import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { api, watchInbox, type Project, type User, type Workspace } from "./api.js";
 import { Link, navigate, useLocation } from "./router.js";
+import { routeOf, projectKeyOfTicket, type Route } from "./routes.js";
 import { SearchBox } from "./search.js";
 import { useLoad } from "./ui.js";
 
 // The app frame's sidebar: docs/ui.md § Layout and navigation.
 
-/** Which sidebar item the page at `path` belongs to: a Ticket marks its Project, a Document marks Documents. */
-export function currentItem(path: string): string | undefined {
-  let first: string | undefined, second: string | undefined;
-  try {
-    [, first, second] = path.split("/").map(decodeURIComponent);
-  } catch {
-    return undefined; // a malformed address belongs to no item
-  }
-  // Keys are upper case, but the server also takes them in lower case.
-  second = second?.toUpperCase();
-  switch (first) {
+/** Which sidebar item a page belongs to: a Ticket marks its Project, a Document marks Documents. */
+function currentItem(route: Route): string | undefined {
+  switch (route.page) {
     case "inbox":
     case "documents":
+    case "document":
     case "agents":
     case "guidance":
     case "users":
     case "settings":
-      return first;
+      return route.page === "document" ? "documents" : route.page;
+    case "project":
+    case "projectDocuments":
+      return projectItem(route.key);
+    case "ticket":
+      return projectItem(projectKeyOfTicket(route.key));
     case "projects":
-      return second ? `project:${second}` : undefined;
-    case "tickets":
-      return second?.includes("-") ? `project:${second.slice(0, second.lastIndexOf("-"))}` : undefined;
-    default:
+    case "search":
       return undefined;
   }
 }
+
+/** A Project's sidebar item. Keys are upper case, but addresses may hold them in lower case. */
+const projectItem = (key: string) => `project:${key.toUpperCase()}`;
 
 const ROLE_NAMES: Record<User["role"], string> = { admin: "Admin", member: "Member" };
 
@@ -44,7 +43,7 @@ const ROLE_NAMES: Record<User["role"], string> = { admin: "Admin", member: "Memb
  */
 export function Sidebar(props: { me: User; workspace: Workspace | undefined; onSignOut: () => void }) {
   const { path } = useLocation();
-  const current = currentItem(path);
+  const current = currentItem(routeOf(path));
   const admin = props.me.role === "admin";
   // Projects and Agent Sessions have no stream to the browser, so they load again on each navigation.
   const [projects] = useLoad(() => api.projects(), [path]);
@@ -99,7 +98,7 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         {projectList.length > 0 && (
           <NavGroup label="Projects">
             {projectList.map((p) => (
-              <NavItem key={p.id} to={`/projects/${encodeURIComponent(p.key)}`} current={current === `project:${p.key}`}>
+              <NavItem key={p.id} to={`/projects/${encodeURIComponent(p.key)}`} current={current === projectItem(p.key)}>
                 <span className="nav-key">{p.key}</span> <span className="nav-text">{p.name}</span>
               </NavItem>
             ))}
