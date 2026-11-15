@@ -177,13 +177,15 @@ export interface Cronk {
    * Locks the row of `table` with this id, as a transaction updating it would, so writes that
    * reference it (such as rows with a foreign key to it) wait until it is released.
    */
-  holdRow(table: string, id: string): Promise<HeldRow>;
+  holdRow(table: string, id: string): Promise<HeldLock>;
+  /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
+  holdTable(table: string): Promise<HeldLock>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
 }
 
-/** A row held by `Cronk.holdRow`. */
-export interface HeldRow {
+/** A row held by `Cronk.holdRow`, or a table held by `Cronk.holdTable`, until released. */
+export interface HeldLock {
   /** Resolves once at least `n` queries on this test's database are waiting on a lock. */
   waiters(n: number): Promise<void>;
   /** Lets the writes waiting on the row through. */
@@ -266,35 +268,38 @@ export async function startCronk(): Promise<Cronk> {
         await admin.end();
       }
     },
-    holdRow: async (table, id) => {
-      const holder = new pg.Client({ connectionString: databaseUrl });
-      await holder.connect();
-      await holder.query("BEGIN");
-      await holder.query(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
-      let released = false;
-      const release = async () => {
-        if (released) return;
-        released = true;
-        await holder.query("ROLLBACK").catch(() => {});
-        await holder.end();
-      };
-      onTestFinished(release);
-      return {
-        waiters: async (n) => {
-          // Asked outside the holding transaction, as pg_stat_activity stays the same within one.
-          const watcher = new pg.Client({ connectionString: databaseUrl });
-          await watcher.connect();
-          try {
-            await pollUntil(async () => (await lockWaiters(watcher, dbName)) >= n, `Fewer than ${n} queries waited on a lock`);
-          } finally {
-            await watcher.end();
-          }
-        },
-        release,
-      };
-    },
+    holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
+    holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
+  /** Takes a lock with `sql` in a transaction it keeps open until released. */
+  async function hold(sql: string, params: unknown[]): Promise<HeldLock> {
+    const holder = new pg.Client({ connectionString: databaseUrl });
+    await holder.connect();
+    await holder.query("BEGIN");
+    await holder.query(sql, params);
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      await holder.query("ROLLBACK").catch(() => {});
+      await holder.end();
+    };
+    onTestFinished(release);
+    return {
+      waiters: async (n) => {
+        // Asked outside the holding transaction, as pg_stat_activity stays the same within one.
+        const watcher = new pg.Client({ connectionString: databaseUrl });
+        await watcher.connect();
+        try {
+          await pollUntil(async () => (await lockWaiters(watcher, dbName)) >= n, `Fewer than ${n} queries waited on a lock`);
+        } finally {
+          await watcher.end();
+        }
+      },
+      release,
+    };
+  }
   let listening: Promise<string> | undefined;
 
   onTestFinished(async () => {
