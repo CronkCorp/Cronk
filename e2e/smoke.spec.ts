@@ -161,7 +161,12 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("link", { name: "Statuses" }).click();
+  await page.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Project settings" }).click();
+  await expect(page).toHaveURL(/view=settings/);
+  for (const section of ["Access", "Agent Access", "Statuses", "Guidance"]) {
+    await expect(page.getByRole("region", { name: section, exact: true })).toBeVisible();
+  }
 
   const started = page.getByRole("region", { name: "Started", exact: true });
   await started.getByLabel("New Started Status").fill("In QA");
@@ -176,6 +181,36 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByRole("link", { name: "Board" }).click();
   await expect(page.getByRole("region", { name: "In QA" })).toContainText("Add sign-in");
   await expect(page.getByRole("region", { name: "In Progress" })).toHaveCount(0);
+});
+
+// Runs after the tests above, so Ada exists; archives a Project of its own so later tests keep CRONK.
+test("archive a Project from the page head's … menu, through a confirmation", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Attic", key: "ATTIC" } });
+  await page.goto("/projects/ATTIC");
+  await expect(page.getByRole("heading", { name: "Attic" })).toBeVisible();
+
+  // New Ticket is the head's one action; Archive waits in the … menu.
+  const head = page.getByTestId("page-head");
+  await expect(head.getByRole("button")).toHaveCount(2);
+  await expect(head.getByRole("button").last()).toHaveText("New Ticket");
+  await head.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive Project" }).click();
+  const confirm = page.getByRole("dialog", { name: "Archive Attic?" });
+  await confirm.getByRole("button", { name: "Archive Project" }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Attic/ })).toContainText("Archived");
+
+  await head.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Restore Project" }).click();
+  await page.getByRole("dialog", { name: "Restore Attic?" }).getByRole("button", { name: "Restore Project" }).click();
+  await expect(page.getByRole("heading", { name: /Attic/ })).not.toContainText("Archived");
+  await head.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive Project" }).click();
+  await page.getByRole("dialog", { name: "Archive Attic?" }).getByRole("button", { name: "Archive Project" }).click();
+  await expect(page.getByRole("heading", { name: /Attic/ })).toContainText("Archived");
+  await page.goto("/archived");
+  await expect(page.getByRole("main").getByRole("link", { name: /ATTIC/ })).toBeVisible();
 });
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
@@ -199,8 +234,10 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await bob.getByRole("button", { name: "Join" }).click();
   await expect(bob.getByRole("main").getByRole("link", { name: /CRONK/ })).toBeVisible();
 
-  await page.goto("/projects/CRONK");
-  await page.getByRole("button", { name: "Access" }).click();
+  // The old address of a settings tab opens Project settings at that section.
+  await page.goto("/projects/CRONK?view=statuses");
+  await expect(page.getByRole("region", { name: "Statuses" })).toBeInViewport();
+  await page.goto("/projects/CRONK?view=settings");
   await page.getByRole("button", { name: "Make private" }).click();
   await expect(page.getByRole("heading", { name: /Private/ })).toBeVisible();
 
@@ -725,7 +762,8 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("navigation", { name: "View" }).getByRole("link", { name: "Guidance" }).click();
+  await page.goto("/projects/CRONK?view=guidance");
+  await expect(page.getByRole("region", { name: "Guidance" })).toBeInViewport();
   await page.getByRole("button", { name: "Edit Guidance" }).click();
   await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n");
   await page.getByRole("button", { name: "Save" }).click();

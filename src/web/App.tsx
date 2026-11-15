@@ -11,7 +11,7 @@ import { Sidebar } from "./frame.js";
 import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
-import { filterFrom, ProjectPage, ProjectsPage, type ProjectView } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, projectViewOf } from "./work.js";
 import { TicketPage } from "./ticket.js";
 
 type State =
@@ -162,7 +162,7 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "guidance":
       return <WorkspaceGuidancePage me={props.me} />;
     case "project":
-      return <ProjectPage projectKey={route.key} view={projectView(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
+      return <ProjectPage projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
     case "ticket":
       return <TicketPage ticketKey={route.key} />;
     case "projects":
@@ -241,10 +241,6 @@ function ImportExport() {
       {error && <p className="error" role="alert">{error}</p>}
     </>
   );
-}
-
-function projectView(view: string | null): ProjectView {
-  return view === "board" || view === "statuses" || view === "reports" || view === "guidance" ? view : "list";
 }
 
 function WorkspaceGuidancePage(props: { me: User }) {

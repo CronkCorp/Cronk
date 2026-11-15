@@ -142,6 +142,14 @@ a.link:hover { text-decoration: underline; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .page-head h1 { margin-top: 0; }
 .page-head .actions { align-items: center; }
+.crumbs { font-size: 13px; margin-bottom: 4px; }
+
+/* A view switcher in the page head: List / Board / Reports on a Project (docs/ui.md § Layout and navigation). */
+.segmented { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.segment { padding: 4px 12px; font-size: 13px; color: var(--text); }
+.segment + .segment { border-left: 1px solid var(--border); }
+.segment:hover { background: var(--surface-2); }
+.segment.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .panel.wide { max-width: none; margin-bottom: 16px; }
 .panel { margin-bottom: 16px; }
 
@@ -172,6 +180,9 @@ a.link:hover { text-decoration: underline; }
 .dot.canceled { border-color: var(--danger); background: linear-gradient(135deg, var(--danger) 40%, var(--surface) 40%, var(--surface) 60%, var(--danger) 60%); }
 
 .status-category .rows { margin-bottom: 10px; }
+/* A Project's settings: Access, Agent Access, Statuses and Guidance, one section each. */
+.settings { display: flex; flex-direction: column; gap: 24px; }
+.settings-section { scroll-margin-top: 16px; }
 .status-row .row:hover { background: none; }
 .status-row input, .add-status input { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .status-row .field { margin-bottom: 0; }

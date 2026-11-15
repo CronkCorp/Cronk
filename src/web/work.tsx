@@ -1,9 +1,10 @@
 import { Button } from "./components/button.js";
+import { ConfirmDialog, Menu } from "./components/overlays.js";
 import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor, agentActor, userActor } from "./components/actor.js";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
@@ -111,7 +112,20 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
   );
 }
 
-export type ProjectView = "list" | "board" | "statuses" | "reports" | "guidance";
+export type ProjectView = "list" | "board" | "reports" | "settings";
+
+/** The sections of a Project's settings, in the order the settings view shows them. */
+export type SettingsSection = "access" | "agent-access" | "statuses" | "guidance";
+
+/**
+ * The view a Project page's `view` parameter asks for, and the settings section it lands on. Statuses and
+ * Guidance were views of their own, so their old addresses open the settings at their section.
+ */
+export function projectViewOf(view: string | null): { view: ProjectView; section?: SettingsSection } {
+  if (view === "board" || view === "reports" || view === "settings") return { view };
+  if (view === "statuses" || view === "guidance") return { view: "settings", section: view };
+  return { view: "list" };
+}
 
 /** Whether a view shows the Project's Tickets, and so takes a filter: the list and the board do. */
 const showsTickets = (view: ProjectView) => view === "list" || view === "board";
@@ -139,9 +153,9 @@ function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter
 
 /**
  * One Project's Tickets, as a list or as a board grouped by Status, narrowed by the
- * filters in its address; or its Statuses to tailor, counting all its Tickets.
+ * filters in its address; its Reports; or its settings.
  */
-export function ProjectPage(props: { projectKey: string; view: ProjectView; filter: TicketFilter; me: User }) {
+export function ProjectPage(props: { projectKey: string; view: ProjectView; section?: SettingsSection; filter: TicketFilter; me: User }) {
   const filter = showsTickets(props.view) ? props.filter : {};
   const filterKey = JSON.stringify(filter);
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
@@ -166,7 +180,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
     [props.projectKey],
   );
   const [creating, setCreating] = useState(false);
-  const [showAccess, setShowAccess] = useState(false);
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
   const agentAccess = useAction(
     async (access: AgentAccess) => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -187,40 +201,51 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
     <Show state={project}>
       {({ project: p, statuses }) => (
         <section>
-          <div className="page-head">
-            <div>
-              <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
-              <h1>
-                {p.name} {p.archived && <Chip>Archived</Chip>}{" "}
-                {p.visibility === "private" && <Chip>Private</Chip>}{" "}
-                {p.access === "read" && <Chip>Read only</Chip>}
-              </h1>
-            </div>
+          <div className="muted crumbs">
+            <Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}
+          </div>
+          <div className="page-head" data-testid="page-head">
+            <h1>
+              {p.name} {p.archived && <Chip>Archived</Chip>}{" "}
+              {p.visibility === "private" && <Chip>Private</Chip>}{" "}
+              {p.access === "read" && <Chip>Read only</Chip>}
+            </h1>
             <div className="actions">
               <LiveIndicator state={live} />
-              {p.access === "write" && (
-                <AgentAccessSelect value={p.agentAccess} disabled={agentAccess.busy} onChange={(a) => void agentAccess.run(a)} />
-              )}
-              {props.me.role === "admin" && (
-                <Button variant="secondary" onClick={() => setShowAccess(!showAccess)}>Access</Button>
-              )}
-              {p.access === "write" && (
-                <>
-                  <Button variant="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
-                    {p.archived ? "Restore Project" : "Archive Project"}
-                  </Button>
-                  {!creating && <Button onClick={() => setCreating(true)}>New Ticket</Button>}
-                </>
-              )}
+              <ViewSwitcher projectKey={p.key} view={props.view} filter={props.filter} />
+              <Menu
+                label="Project actions"
+                trigger={<Button variant="secondary" aria-label="Project actions">…</Button>}
+                items={[
+                  { label: "Documents", onSelect: () => navigate(`/projects/${p.key}/documents`) },
+                  ...(p.access === "write"
+                    ? [
+                        { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
+                        { label: p.archived ? "Restore Project" : "Archive Project", danger: !p.archived, onSelect: () => setConfirmingArchive(true) },
+                      ]
+                    : []),
+                ]}
+              />
+              {p.access === "write" && !creating && <Button onClick={() => setCreating(true)}>New Ticket</Button>}
             </div>
-          </div>
-          {(archive.error ?? agentAccess.error) && <p className="error" role="alert">{archive.error ?? agentAccess.error}</p>}
-          {showAccess && (
-            <ProjectAccessPanel
-              project={p}
-              onProjectChanged={(updated) => setProject({ project: updated, statuses })}
+            <ConfirmDialog
+              open={confirmingArchive}
+              onOpenChange={setConfirmingArchive}
+              title={`${p.archived ? "Restore" : "Archive"} ${p.name}?`}
+              description={
+                p.archived
+                  ? "It comes back to the sidebar and the Projects page."
+                  : "It leaves the sidebar and the Projects page, and moves to Archived Projects. It can be restored."
+              }
+              confirmLabel={p.archived ? "Restore Project" : "Archive Project"}
+              busy={archive.busy}
+              onConfirm={() => {
+                setConfirmingArchive(false);
+                void archive.submit();
+              }}
             />
-          )}
+          </div>
+          {archive.error && <p className="error" role="alert">{archive.error}</p>}
           {creating && (
             <NewTicket
               projectKey={p.key}
@@ -229,21 +254,6 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                 setCreating(false);
                 reloadTickets();
               }}
-            />
-          )}
-          <nav className="tabs" aria-label="View">
-            <Link to={projectPath(p.key, "list", props.filter)} className={props.view === "list" ? "tab active" : "tab"}>List</Link>
-            <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
-            <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
-            <Link to={`/projects/${p.key}/documents`} className="tab">Documents</Link>
-            <Link to={projectPath(p.key, "reports", {})} className={props.view === "reports" ? "tab active" : "tab"}>Reports</Link>
-            <Link to={projectPath(p.key, "guidance", {})} className={props.view === "guidance" ? "tab active" : "tab"}>Guidance</Link>
-          </nav>
-          {props.view === "guidance" && (
-            <GuidanceSection
-              projectKey={p.key}
-              canEdit={p.access === "write"}
-              intro="Standing instructions for Agents working in this Project, on top of the Workspace Guidance. Every Agent Session gets them when it connects."
             />
           )}
           {showsTickets(props.view) && (
@@ -255,20 +265,49 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             />
           )}
           {props.view === "reports" && <ReportsView projectKey={p.key} />}
-          {props.view !== "guidance" && props.view !== "reports" && (
+          {props.view !== "reports" && (
             <Show state={tickets}>
               {(list) =>
-                props.view === "statuses" ? (
-                  <StatusesView
-                    projectKey={p.key}
-                    statuses={statuses}
-                    tickets={list}
-                    canChange={p.access === "write"}
-                    onChanged={() => {
-                      reloadProject();
-                      reloadTickets();
-                    }}
-                  />
+                props.view === "settings" ? (
+                  <div className="settings">
+                    {props.me.role === "admin" && (
+                      <SettingsPart id="access" title="Access" landOn={props.section}>
+                        <ProjectAccessPanel project={p} onProjectChanged={(updated) => setProject({ project: updated, statuses })} />
+                      </SettingsPart>
+                    )}
+                    <SettingsPart id="agent-access" title="Agent Access" landOn={props.section}>
+                      <div className="panel wide">
+                        <p className="muted">The most Agents may do in this Project. An Agent never gets more than its Owner has.</p>
+                        <AgentAccessSelect
+                          value={p.agentAccess}
+                          disabled={p.access !== "write" || agentAccess.busy}
+                          onChange={(a) => void agentAccess.run(a)}
+                        />
+                        {agentAccess.error && <p className="error" role="alert">{agentAccess.error}</p>}
+                      </div>
+                    </SettingsPart>
+                    <SettingsPart id="statuses" title="Statuses" landOn={props.section}>
+                      <StatusesView
+                        projectKey={p.key}
+                        statuses={statuses}
+                        tickets={list}
+                        canChange={p.access === "write"}
+                        onChanged={() => {
+                          reloadProject();
+                          reloadTickets();
+                        }}
+                      />
+                    </SettingsPart>
+                    <SettingsPart id="guidance" title="Guidance" landOn={props.section}>
+                      <div className="panel wide">
+                        <GuidanceSection
+                          projectKey={p.key}
+                          canEdit={p.access === "write"}
+                          intro="Standing instructions for Agents working in this Project, on top of the Workspace Guidance. Every Agent Session gets them when it connects."
+                        />
+                      </div>
+                    </SettingsPart>
+                  </div>
                 ) : (
                   <>
                     {list.length === 0 && filtered && (
@@ -305,6 +344,40 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
         </section>
       )}
     </Show>
+  );
+}
+
+/** One section of a Project's settings, which scrolls into view when the address asks to land on it. */
+function SettingsPart(props: { id: SettingsSection; title: string; landOn: SettingsSection | undefined; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const landing = props.landOn === props.id;
+  useEffect(() => {
+    if (landing) ref.current?.scrollIntoView({ block: "start" });
+  }, [landing]);
+  return (
+    <section ref={ref} className="settings-section" aria-label={props.title}>
+      <h2>{props.title}</h2>
+      {props.children}
+    </section>
+  );
+}
+
+/** List, Board and Reports as a segmented control; List and Board keep the filter between them. */
+function ViewSwitcher(props: { projectKey: string; view: ProjectView; filter: TicketFilter }) {
+  const views: [ProjectView, string][] = [["list", "List"], ["board", "Board"], ["reports", "Reports"]];
+  return (
+    <nav className="segmented" aria-label="View">
+      {views.map(([view, name]) => (
+        <Link
+          key={view}
+          to={projectPath(props.projectKey, view, props.filter)}
+          className={props.view === view ? "segment active" : "segment"}
+          {...(props.view === view ? { "aria-current": "page" as const } : {})}
+        >
+          {name}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -430,10 +503,10 @@ function StatusCategorySection(props: {
   );
   return (
     <section className="panel wide status-category" aria-label={props.label}>
-      <h2 className="column-head">
+      <h3 className="column-head">
         <span className={`dot ${props.category}`} />
         {props.label}
-      </h2>
+      </h3>
       <ul className="rows">
         {props.inCategory.map((status, position) => (
           <StatusRow
