@@ -6,6 +6,7 @@ Decisions and Artifacts. See `GLOSSARY.md` for vocabulary and `docs/adr/` for de
 - `docs/roadmap.md`: phase scope, what is decided and what is still open for later phases, and the loop each phase follows.
 - `docs/testing.md`: how to test; read before writing tests.
 - `docs/research/existing-platforms.md`: research on comparable platforms behind the design.
+- `docs/ui.md`: layout, navigation, tokens, typography and component conventions. Read it before any work that touches the UI (`src/web/`).
 
 ## Agent skills
 
