@@ -327,7 +327,9 @@ export function coordinationRoutes(ctx: AppContext) {
                 "A server-sent event stream of the Ticket's changes as they happen, for as long as the caller can see it. It opens " +
                 "with a `ready` event; each new Activity arrives as an `activity` event whose data is `{ activity }`, an Activity as JSON, " +
                 "and arrives again once a Comment answers it. Each new Comment arrives as a `comment` event whose data is `{ comment }`, " +
-                "and each new Report as a `report` event whose data is `{ report }`, a Report as JSON.",
+                "and each new Report as a `report` event whose data is `{ report }`, a Report as JSON. Whenever the Ticket itself changes " +
+                "(its fields, its Sub-Tickets, its relations, its linked Documents, its Claim being taken, released or lapsing) a " +
+                "`changed` event arrives whose data is `{ ticket }`, the Ticket's key.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(401, 404, 410),

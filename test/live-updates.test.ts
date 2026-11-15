@@ -179,6 +179,7 @@ describe("A Ticket's live updates", () => {
     await agent.post("/api/tickets/CRONK-1/sub-tickets", { title: "Part" });
     expect(await stream.next()).toEqual(changed);
   });
+
   it("push a Send back's Comment marked as one", async () => {
     const { admin } = await delegatedSetup(1);
     const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
@@ -190,6 +191,23 @@ describe("A Ticket's live updates", () => {
     let pushed = await stream.next();
     while (pushed && pushed.event !== "comment") pushed = await stream.next();
     expect(pushed?.data.comment).toMatchObject({ body: "Add a test.", sendBack: true });
+  });
+
+  it("tell its watchers and its Project's when a Document is linked to it or unlinked from it", async () => {
+    const { admin } = await delegatedSetup(1);
+    const planId = (await admin.post("/api/projects/CRONK/documents", { title: "Plan" })).body.document.id;
+    const ticket = await admin.events("/api/tickets/CRONK-1/events");
+    const project = await admin.events("/api/projects/CRONK/events");
+    expect((await ticket.next())?.event).toBe("ready");
+    expect((await project.next())?.event).toBe("ready");
+    const changed = { event: "changed", data: { ticket: "CRONK-1" } };
+
+    await admin.post(`/api/tickets/CRONK-1/documents/${planId}`);
+    expect(await ticket.next()).toEqual(changed);
+    expect(await project.next()).toEqual(changed);
+    await admin.delete(`/api/tickets/CRONK-1/documents/${planId}`);
+    expect(await ticket.next()).toEqual(changed);
+    expect(await project.next()).toEqual(changed);
   });
 });
 

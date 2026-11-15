@@ -53,9 +53,16 @@ export const agentActor = (agent: { name: string; owner?: { name: string } }, se
   session: session ?? null,
 });
 
-/** An Actor's avatar alone, as a timeline's gutter shows it: round for a User, square and violet for an Agent. */
-export function Avatar(props: { actor: ActorLike }) {
-  return <span className={`avatar ${props.actor.kind}`} data-initial={props.actor.name.trim().charAt(0).toUpperCase()} aria-hidden="true" />;
+/**
+ * An Actor's avatar alone, as a timeline's gutter shows it: round for a User, square and violet for an Agent.
+ * Pass `large` for a card's head, which shows two initials ("CL" for claude-laptop) where the name has two words.
+ * Beside a name it is decoration; on its own, as in a dense row, `label` names it (such as "Assignee: Ada").
+ */
+export function Avatar(props: { actor: Pick<ActorLike, "kind" | "name">; large?: boolean; label?: string }) {
+  const words = props.actor.name.trim().split(/[\s\-_.]+/).filter(Boolean);
+  const initial = (props.large ? words.slice(0, 2).map((w) => w.charAt(0)).join("") : props.actor.name.trim().charAt(0)).toUpperCase();
+  const named = props.label ? { role: "img", "aria-label": props.label, title: props.label } : { "aria-hidden": true };
+  return <span className={`avatar ${props.actor.kind}${props.large ? " large" : ""}`} data-initial={initial} {...named} />;
 }
 
 /**

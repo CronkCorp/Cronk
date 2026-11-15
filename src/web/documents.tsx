@@ -1,24 +1,26 @@
-import { ConfirmDialog } from "./components/overlays.js";
+import { ConfirmDialog, Popover } from "./components/overlays.js";
 import { Button, buttonClass } from "./components/button.js";
 import { Chip } from "./components/tags.js";
+import { Banner } from "./components/banner.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   api,
   staleVersionOf,
+  type Comment,
   type Document,
   type DocumentTreeEntry,
   type Version,
   watchDocument,
 } from "./api.js";
-import { ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
-import { DocumentComments } from "./timeline.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
+import { DocumentMargin, PassageCommentForm } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
-import { CronkMarkdown } from "./markdown.js";
+import { CronkMarkdown, highlightIds, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
-import { useSelectedPassage } from "./selected-passage.js";
+import { useSelectedPassage, type SelectedPassage } from "./selected-passage.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Field, Show, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -185,6 +187,33 @@ export function DocumentPage(props: { id: string; edit: boolean }) {
 
 type Panel = "none" | "edit" | "move" | "versions" | "new";
 
+const NO_COMMENTS: Comment[] = [];
+
+/**
+ * A Document's body, rendered again only when it or its highlighted passages change, so hovering a
+ * Comment doesn't rebuild it.
+ */
+const DocumentBody = memo(function DocumentBody(props: { body: string; highlights: Highlight[] }) {
+  return props.body.trim() ? (
+    <CronkMarkdown sourceOffsets highlights={props.highlights}>{props.body}</CronkMarkdown>
+  ) : (
+    <p className="muted">This Document is empty.</p>
+  );
+});
+
+/** The ids of the passages highlighted inside `root`, in the order they first appear, read again after every render. */
+function usePlacedHighlights(root: RefObject<HTMLElement | null>): string[] {
+  const [placed, setPlaced] = useState<string[]>([]);
+  useLayoutEffect(() => {
+    const ids: string[] = [];
+    root.current?.querySelectorAll<HTMLElement>("mark.highlight").forEach((mark) => {
+      for (const id of highlightIds(mark)) if (!ids.includes(id)) ids.push(id);
+    });
+    setPlaced((before) => (before.join(" ") === ids.join(" ") ? before : ids));
+  });
+  return placed;
+}
+
 function DocumentView(props: { document: Document; startEditing: boolean; onChanged: (d: Document) => void; onReload: () => void }) {
   const d = props.document;
   const canWrite = useCanWrite(d.projectKey);
@@ -229,14 +258,42 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   const bodyAt = useRef<HTMLDivElement>(null);
   const commentAt = useRef<HTMLTextAreaElement>(null);
   const selected = useSelectedPassage(bodyAt, d.body);
-  // The passage a new Comment anchors to, forgotten once the Document moves on to another Version.
-  const [anchor, setAnchor] = useState({ version: d.version, passage: "" });
-  const passage = anchor.version === d.version ? anchor.passage : "";
-  const commentOnSelection = (selectedPassage: string) => {
-    setAnchor({ version: d.version, passage: selectedPassage });
-    getSelection()?.removeAllRanges();
-    commentAt.current?.focus();
+  // Loaded again after a save, so whether each anchor is still in the Document is asked again.
+  const [comments, reloadComments] = useLoad(() => api.documentComments(d.id), [d.id, d.version, commentsGeneration]);
+  const loadedComments = comments.kind === "loaded" ? comments.value : NO_COMMENTS;
+  const highlights = useMemo(
+    () => loadedComments.flatMap((c) => (c.anchor?.inCurrentVersion && !c.replyToCommentId ? [{ id: c.id, passage: c.anchor.passage }] : [])),
+    [loadedComments],
+  );
+  const placed = usePlacedHighlights(bodyAt);
+  // The Comments whose passage and card are highlighted: those hovered, else those focused.
+  const [hovered, setHovered] = useState<string[]>([]);
+  const [focused, setFocused] = useState<string[]>([]);
+  const active = hovered.length > 0 ? hovered : focused;
+  useEffect(() => {
+    bodyAt.current?.querySelectorAll("mark.highlight").forEach((mark) => {
+      mark.classList.toggle("active", highlightIds(mark).some((id) => active.includes(id)));
+    });
+  });
+  /** The Comments a highlight in the body under an event belongs to, if any. */
+  const highlightAt = (target: EventTarget) => {
+    const mark = (target as Element).closest?.("mark.highlight");
+    return mark ? highlightIds(mark) : [];
   };
+  // The passage a new Comment anchors to, and where it was selected, while its popover is open.
+  const [composing, setComposing] = useState<SelectedPassage>();
+  const [passage, setPassage] = useState("");
+  // Selecting anything else in the body closes the popover, to offer to comment on the new selection, if it can be.
+  useEffect(() => {
+    const reselected = () => {
+      const selection = getSelection();
+      if (selection && !selection.isCollapsed && bodyAt.current?.contains(selection.anchorNode)) setComposing(undefined);
+    };
+    document.addEventListener("selectionchange", reselected);
+    return () => document.removeEventListener("selectionchange", reselected);
+  }, []);
+  useEffect(() => setComposing(undefined), [d.version]);
+  const offer = composing ?? selected;
 
   return (
     <article className="document">
@@ -297,34 +354,73 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
             />
           )}
           {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} onOutdated={props.onReload} />}
-          <div className="selectable">
-            <div className="markdown" data-testid="document-body" ref={bodyAt}>
-              {d.body.trim() ? <CronkMarkdown sourceOffsets>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
+          <div className="document-read">
+            <div
+              className="selectable document-body"
+              onMouseOver={(e) => setHovered(highlightAt(e.target))}
+              onMouseLeave={() => setHovered([])}
+              onFocus={(e) => setFocused(highlightAt(e.target))}
+              onBlur={() => setFocused([])}
+            >
+              <div className="markdown" data-testid="document-body" ref={bodyAt}>
+                <DocumentBody body={d.body} highlights={highlights} />
+              </div>
+              {canWrite && offer && (
+                <Popover
+                  open={composing !== undefined}
+                  onOpenChange={(open) => {
+                    if (!open) return setComposing(undefined);
+                    if (!selected) return;
+                    setPassage(selected.passage);
+                    setComposing(selected);
+                    getSelection()?.removeAllRanges();
+                  }}
+                  label="Comment on this passage"
+                  onOpenAutoFocus={(e) => {
+                    e.preventDefault();
+                    commentAt.current?.focus();
+                  }}
+                  trigger={
+                    <Button
+                      type="button"
+                      className="comment-on-selection"
+                      style={{ top: offer.top, left: offer.left }}
+                      // Pressing the button would otherwise clear the selection before it is read.
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      Comment on this passage
+                    </Button>
+                  }
+                >
+                  <PassageCommentForm
+                    documentId={d.id}
+                    passage={passage}
+                    onPassageChange={setPassage}
+                    commentRef={commentAt}
+                    onPosted={() => {
+                      setComposing(undefined);
+                      reloadComments();
+                    }}
+                  />
+                </Popover>
+              )}
             </div>
-            {canWrite && selected && (
-              <Button
-                type="button"
-                className="comment-on-selection"
-                style={{ top: selected.top, left: selected.left }}
-                // Pressing the button would otherwise clear the selection before it is read.
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => commentOnSelection(selected.passage)}
-              >
-                Comment on this passage
-              </Button>
-            )}
+            <Show state={comments}>
+              {(all) => (
+                <DocumentMargin
+                  documentId={d.id}
+                  comments={all}
+                  placed={placed}
+                  bodyRef={bodyAt}
+                  active={active}
+                  onHover={(id) => setHovered(id ? [id] : [])}
+                  onFocus={(id) => setFocused(id ? [id] : [])}
+                  canWrite={canWrite}
+                  onPosted={reloadComments}
+                />
+              )}
+            </Show>
           </div>
-          <h2>Comments</h2>
-          {/* Keyed by Version, so whether each anchor is still in the Document is asked again after a save. */}
-          <DocumentComments
-            key={d.version}
-            documentId={d.id}
-            canWrite={canWrite}
-            generation={commentsGeneration}
-            passage={passage}
-            onPassageChange={(p) => setAnchor({ version: d.version, passage: p })}
-            commentRef={commentAt}
-          />
         </>
       )}
     </article>
@@ -338,7 +434,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
  */
 function EditDocument(props: { document: Document; newerVersion: number | undefined; onSaved: (d: Document) => void; onCancel: () => void }) {
   const id = props.document.id;
-  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+  const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
     draft: { title: props.document.title, text: props.document.body },
     baseVersion: props.document.version,
     save: (d, baseVersion) => api.saveDocument(id, { baseVersion, title: d.title, body: d.text }),
@@ -356,30 +452,36 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
   });
 
   return (
-    <section className="panel wide">
+    <>
+      <div className="page-head">
+        <h1>{props.document.title}</h1>
+      </div>
       {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile document={props.document} version={props.newerVersion} />}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
       ) : (
-        <form onSubmit={save}>
-          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
-          <MarkdownEditor
-            label="Body (Markdown)"
-            value={draft.text}
-            onChange={(text) => setDraft((d) => ({ ...d, text }))}
-            disabled={busy}
-            projectKey={props.document.projectKey}
-          />
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="actions">
-            <Button type="submit" disabled={busy}>Save</Button>
-            <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
-          </div>
-        </form>
+        <section className="panel wide">
+          <form onSubmit={save}>
+            {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+            <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
+            <MarkdownEditor
+              label="Body (Markdown)"
+              value={draft.text}
+              onChange={(text) => setDraft((d) => ({ ...d, text }))}
+              disabled={busy}
+              projectKey={props.document.projectKey}
+            />
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={busy}>Save</Button>
+              <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+              {discardMine && <DiscardMine {...discardMine} />}
+            </div>
+          </form>
+        </section>
       )}
-    </section>
+    </>
   );
 }
 
@@ -391,13 +493,15 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
   const { id, version: started } = props.document;
   const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
   return (
-    <div className="merged" role="status">
+    <Banner tone="warn" role="status">
       <Show state={versions}>
         {([base, theirs]) => (
           <>
             <p>
-              <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}. Saving
-              merges their changes into yours.
+              <strong>
+                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
+              </strong>{" "}
+              Saving merges their changes into yours.
             </p>
             <details>
               <summary>See what they changed</summary>
@@ -406,7 +510,7 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
           </>
         )}
       </Show>
-    </div>
+    </Banner>
   );
 }
 
