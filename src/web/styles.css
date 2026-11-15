@@ -180,10 +180,10 @@ a.link:hover { text-decoration: underline; }
 .side-field { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .side-field + .side-field { border-top: 1px solid var(--border); }
 .side-field-label { width: 76px; flex: none; color: var(--muted); font-size: 12px; }
-.picker-trigger { flex: 1; min-width: 0; display: flex; align-items: center; min-height: 28px; padding: 2px 6px; margin-left: -6px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.picker-trigger { flex: 1; min-width: 0; display: flex; align-items: center; min-height: 28px; padding: 4px 8px; margin-left: -8px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .picker-trigger:hover:not(:disabled) { background: var(--surface-2); }
 .picker-trigger:disabled { cursor: default; }
-.picker-filter { width: 100%; font: inherit; font-size: 13px; padding: 6px 8px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.picker-filter { width: 100%; font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .picker-list { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
 .picker-option { display: flex; align-items: center; min-height: 30px; padding: 4px 8px; border-radius: 4px; font-size: 13px; cursor: pointer; outline: none; }
 .picker-option:hover, .picker-option:focus { background: var(--accent-soft); }
@@ -196,10 +196,10 @@ a.link:hover { text-decoration: underline; }
 .meter { height: 4px; border-radius: 999px; background: var(--surface); overflow: hidden; }
 .meter-fill { height: 100%; background: var(--agent); transition: width 1s linear; }
 .claim-note { margin: 0; font-size: 12px; }
-.side-related { padding: 4px 12px 12px; }
-.side-group h3 { font-size: 14px; margin: 12px 0 6px; }
-.side-group h4 { font-size: 12px; font-weight: 400; color: var(--muted); margin: 8px 0 4px; }
-.side-group .inline-form { margin-top: 6px; }
+.side-related { padding: 12px; display: flex; flex-direction: column; gap: 16px; }
+.side-group, .relation-group { display: flex; flex-direction: column; gap: 8px; }
+.side-group h3 { font-size: 14px; margin: 0; }
+.side-group h4 { font-size: 12px; font-weight: 400; color: var(--muted); margin: 0; }
 .side-group .inline-form input { flex: 1; min-width: 0; font-size: 13px; }
 .side-group .inline-form select { font-size: 13px; }
 .side-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
@@ -221,17 +221,17 @@ a.link:hover { text-decoration: underline; }
 .tl-entry:not(:last-child) .tl-gutter::after { content: ""; position: absolute; top: 28px; bottom: -14px; left: 11px; width: 1px; background: var(--border); }
 .tl-gutter { width: 24px; flex: none; display: flex; justify-content: center; padding-top: 1px; }
 .tl-gutter .avatar { width: 22px; height: 22px; }
-.tl-ring { width: 10px; height: 10px; margin-top: 5px; border: 1.5px solid var(--border); border-radius: 50%; background: var(--bg); }
+.tl-ring { width: 10px; height: 10px; margin-top: 4px; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); }
 .tl-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; }
 .tl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; }
 .tl-body > :first-child { margin-top: 0; }
 .tl-body > :last-child { margin-bottom: 0; }
 .tl-body pre { overflow-x: auto; }
-.tl-question { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; }
+.tl-question { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 8px 12px; }
 .tl-activity.blocking .tl-question { background: var(--danger-soft); border-color: var(--danger); }
 .tl-error { font-family: var(--font-mono); font-size: 13px; background: var(--surface-2); border-left: 3px solid var(--danger); border-radius: 4px; padding: 8px 12px; }
 .tl-error p, .tl-error pre { white-space: pre-wrap; margin: 0; }
-.tl-bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tl-bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
 .tl-replies { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 .tl-activity > .tl-content > .tl-replies { margin-left: 4px; }
 .tl-reply { display: flex; flex-direction: column; gap: 4px; }
@@ -239,7 +239,7 @@ a.link:hover { text-decoration: underline; }
 .tl-report { border: 1px solid var(--agent); border-radius: 8px; background: var(--surface); overflow: hidden; }
 .tl-report-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--agent-soft); font-size: 13px; }
 .tl-report-title { margin: 0; font-size: 14px; }
-.tl-report-body { padding: 10px 12px; }
+.tl-report-body { padding: 8px 12px; }
 .tl-report-body > :first-child { margin-top: 0; }
 .tl-report-body > :last-child { margin-bottom: 0; }
 .tl-report-body h1, .tl-report-body h2, .tl-report-body h3, .tl-report-body h4, .tl-report-body h5, .tl-report-body h6 { font-size: 14px; font-weight: 600; margin: 12px 0 4px; }
@@ -365,6 +365,7 @@ a.link:hover { text-decoration: underline; }
 .chip-remove { background: none; border: none; color: var(--muted); padding: 0 2px; line-height: 1; cursor: pointer; font: inherit; }
 
 /* Radix overlays (popover, menu, dialog) and tabs: styled here, behaviour from Radix. Shadows are for these only. */
+.popover { display: flex; flex-direction: column; gap: 4px; }
 .popover, .menu { z-index: 20; min-width: 180px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; }
 .menu-item { display: flex; align-items: center; padding: 6px 10px; border-radius: 4px; font-size: 13px; cursor: pointer; outline: none; color: var(--text); }
 .menu-item[data-highlighted] { background: var(--accent-soft); color: var(--accent); }

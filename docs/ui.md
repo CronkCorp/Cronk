@@ -79,7 +79,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Actor** (`<Actor>`): avatar plus name. A User is round. An Agent is square, violet, and followed by "for <Owner>" where the Owner isn't obvious. Never write "Ada (session d152, for Ada)" as prose.
 - **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper, `sessionName` in `src/web/components/actor.tsx`, computes it everywhere, and `<SessionName>` renders it.
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
-- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip.
+- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour.
 - **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
@@ -89,7 +89,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - A disabled button keeps its colours at 50% opacity with a `not-allowed` cursor.
   - Buttons size to their label and are never full width outside sign-in forms.
 - **Forms:** the label sits above the field, in 12px `--muted`. Inputs have a `--surface` background and a 1px border, and show the `--accent` focus ring. Markdown inputs use the mono face. Each error sits under its form in `--danger` with `role="alert"`.
-- **Pickers** (`<FieldPicker>` in `components/picker.tsx`): Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter; Enter picks the first match, and a picker that takes new values (Labels) offers the typed text. Bare `<select>` rows are not used for this.
+- **Pickers** (`<FieldPicker>` in `components/picker.tsx`): Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter; once something is typed, Enter picks the first match, and a picker that takes new values (Labels) offers the typed text. Bare `<select>` rows are not used for this.
 - **Times** (`<RelativeTime>`):
   - Relative under an hour ("12 min ago").
   - Then clock time for today ("10:18") and "yesterday".
