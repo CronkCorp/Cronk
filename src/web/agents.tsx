@@ -126,6 +126,14 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
           <div role="status" className="secret">
             <p>Give this token to your AI tool now; Cronk won't show it again. It is sent as <code>Authorization: Bearer …</code>.</p>
             <input className="copy" readOnly value={secret} aria-label="New token" onFocus={(e) => e.target.select()} />
+            <p>Then add Cronk to your AI tool as a streamable-HTTP MCP server at <code>{mcpUrl()}</code>. For Claude Code, run:</p>
+            <input
+              className="copy"
+              readOnly
+              value={`claude mcp add --transport http cronk ${mcpUrl()} --header "Authorization: Bearer ${secret}"`}
+              aria-label="Command to connect Claude Code"
+              onFocus={(e) => e.target.select()}
+            />
           </div>
         )}
         {error && <p className="error" role="alert">{error}</p>}
@@ -154,6 +162,9 @@ function LiveSessions(props: { agent: Agent }) {
     </ul>
   );
 }
+
+/** Cronk's MCP address, where an Agent connects: this installation's own origin. */
+const mcpUrl = () => `${window.location.origin}/mcp`;
 
 /** What an Agent did across the Workspace, newest first, shown on request. */
 function WorkLog(props: { agent: Agent }) {

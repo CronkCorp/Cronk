@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
+  projectExportUrl,
   type Agent,
   type AgentAccess,
   type Priority,
@@ -187,7 +188,10 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                 <AgentAccessSelect value={p.agentAccess} disabled={agentAccess.busy} onChange={(a) => void agentAccess.run(a)} />
               )}
               {props.me.role === "admin" && (
-                <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
+                <>
+                  <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
+                  <a className="button secondary" href={projectExportUrl(p.key)} download>Export</a>
+                </>
               )}
               {p.access === "write" && (
                 <>

@@ -163,6 +163,9 @@ async function upload<T>(path: string, file: Blob): Promise<T> {
 /** Where the whole Workspace's export downloads from; it holds every Version. */
 export const workspaceExportUrl = "/api/export";
 
+/** Where one Project's export downloads from; it holds every Version. */
+export const projectExportUrl = (projectKey: string) => `/api/projects/${encodeURIComponent(projectKey)}/export`;
+
 export const api = {
   /** Imports an export of the Workspace or a Project; Admins only. */
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
