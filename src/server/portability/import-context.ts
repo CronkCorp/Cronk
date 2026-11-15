@@ -56,18 +56,22 @@ export class ImportContext {
       .map(([n, p]) => [n, this.need(p)]);
   }
 
-  /** The id of the User `email` names, who must be in `people.md` (or already here). */
-  async userId(email: unknown, where: string): Promise<string> {
-    if (typeof email !== "string" || email.trim() === "") refuse(`${where} must name a User by email`);
+  /** The User with `email` in the export or this Workspace, if there is one. */
+  async findUser(email: string): Promise<string | undefined> {
     const known = this.userIds.get(email.toLowerCase());
     if (known) return known;
     const { rows } = await this.db.query<{ id: string }>("SELECT id FROM users WHERE workspace_id = $1 AND lower(email) = lower($2)", [
       this.workspaceId,
       email,
     ]);
-    if (!rows[0]) refuse(`${where} names ${email}, who isn't in people.md`);
-    this.userIds.set(email.toLowerCase(), rows[0].id);
-    return rows[0].id;
+    if (rows[0]) this.userIds.set(email.toLowerCase(), rows[0].id);
+    return rows[0]?.id;
+  }
+
+  /** The id of the User `email` names, who must be in `people.md` (or already here). */
+  async userId(email: unknown, where: string): Promise<string> {
+    if (typeof email !== "string" || email.trim() === "") refuse(`${where} must name a User by email`);
+    return (await this.findUser(email)) ?? refuse(`${where} names ${email}, who isn't in people.md`);
   }
 
   /** The Agent `ref`, its id in the export, names. */

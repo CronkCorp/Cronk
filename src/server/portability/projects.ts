@@ -20,10 +20,10 @@ export interface ProjectRow {
   next_ticket_number: number;
 }
 
-/** Writes `${dir}/project.md` for the Project `p`. */
-export async function exportProject(ctx: ExportContext, dir: string, p: ProjectRow): Promise<void> {
-  const { rows: statuses } = await ctx.db.query<{ name: string; category: string }>(
-    `SELECT name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
+/** Writes `${dir}/project.md` for the Project `p`; returns the names of its Statuses by id. */
+export async function exportProject(ctx: ExportContext, dir: string, p: ProjectRow): Promise<Map<string, string>> {
+  const { rows: statuses } = await ctx.db.query<{ id: string; name: string; category: string }>(
+    `SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
     [p.id, STATUS_CATEGORIES],
   );
   const { rows: members } = await ctx.db.query<{ user_id: string; access: string }>(
@@ -38,9 +38,10 @@ export async function exportProject(ctx: ExportContext, dir: string, p: ProjectR
     archivedAt: iso(p.archived_at),
     createdAt: iso(p.created_at),
     nextTicketNumber: p.next_ticket_number,
-    statuses,
+    statuses: statuses.map(({ name, category }) => ({ name, category })),
     members: members.map((m) => ({ user: ctx.user(m.user_id), access: m.access })),
   });
+  return new Map(statuses.map((s) => [s.id, s.name]));
 }
 
 /** A Project an import created. */

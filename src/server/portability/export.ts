@@ -31,10 +31,10 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
   ]);
   for (const p of projects) {
     const dir = `projects/${p.key}`;
-    await exportProject(ctx, dir, p);
+    const statusNow = await exportProject(ctx, dir, p);
     await exportGuidance(ctx, `${dir}/guidance`, p.id);
     await exportTree(ctx, `${dir}/documents`, p.id);
-    await exportTickets(ctx, dir, p);
+    await exportTickets(ctx, dir, p, statusNow);
   }
   // Last, so a Project export lists only who the other files name.
   await exportPeople(ctx);

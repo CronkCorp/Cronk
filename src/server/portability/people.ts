@@ -1,5 +1,5 @@
 import { insertAgent } from "../identity/agents.js";
-import { insertUser } from "../identity/users.js";
+import { insertUserWithoutPassword } from "../identity/users.js";
 import { roleSchema } from "../schemas.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
@@ -47,25 +47,23 @@ export async function importPeople(ctx: ImportContext): Promise<void> {
   await importSessions(ctx, people);
 }
 
-/** Users already here by email are used as they are; the rest come in deactivated, with no password to sign in with. */
+/** Users already here by email are used as they are; the rest come in deactivated, with no password until they accept an invitation. */
 async function importUsers(ctx: ImportContext, people: File): Promise<void> {
   for (const [i, u] of list(people, "users").entries()) {
     const where = `people.md users[${i}]`;
     const email = text(u.email, `${where}.email`);
     const { rows } = await ctx.db.query<{ id: string; workspace_id: string }>("SELECT id, workspace_id FROM users WHERE lower(email) = lower($1)", [email]);
     if (rows[0] && rows[0].workspace_id !== ctx.workspaceId) refuse(`${email} is a User of another Workspace`);
-    // No password hash matches "!", so the User can't sign in until one is set.
+    // With no password, the User can't sign in until they accept an invitation.
     const id =
       rows[0]?.id ??
       (
-        await insertUser(ctx.db, {
+        await insertUserWithoutPassword(ctx.db, {
           workspaceId: ctx.workspaceId,
           email,
           name: text(u.name, `${where}.name`),
-          passwordHash: "!",
           role: oneOf(u.role, roleSchema.enum, `${where}.role`),
           now: ctx.now,
-          deactivated: true,
         })
       ).id;
     ctx.userIds.set(email.toLowerCase(), id);

@@ -4,6 +4,7 @@ import { ticketKeySql } from "../work/tickets.js";
 import { storeRelation } from "../work/relations.js";
 import { exportComments, importComments } from "./comments.js";
 import { exportDocument, importDocument, type DocumentRow } from "./documents.js";
+import { exportHistory, importHistory } from "./history.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, natural, oneOf, refuse, text, type File } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -37,8 +38,8 @@ interface RelationRow {
   to_key: string;
 }
 
-/** Writes the Tickets of the Project `p` into `${dir}/tickets/`. */
-export async function exportTickets(ctx: ExportContext, dir: string, p: ProjectRow): Promise<void> {
+/** Writes the Tickets of the Project `p` into `${dir}/tickets/`; `statusNow` names its Statuses by id. */
+export async function exportTickets(ctx: ExportContext, dir: string, p: ProjectRow, statusNow: Map<string, string>): Promise<void> {
   const { rows: tickets } = await ctx.db.query<TicketRow>(
     `SELECT t.*, s.name AS status, pt.number AS parent_number
      FROM tickets t JOIN statuses s ON s.id = t.status_id LEFT JOIN tickets pt ON pt.id = t.parent_id
@@ -53,11 +54,11 @@ export async function exportTickets(ctx: ExportContext, dir: string, p: ProjectR
      WHERE f.project_id = $1 OR t.project_id = $1`,
     [p.id],
   );
-  for (const t of tickets) await exportTicket(ctx, dir, p.key, t, relations);
+  for (const t of tickets) await exportTicket(ctx, dir, p.key, t, relations, statusNow);
 }
 
 /** Writes the Ticket `t` of the Project keyed `projectKey` into `${dir}/tickets/`, with its Activities, Comments and Reports beside it. */
-async function exportTicket(ctx: ExportContext, dir: string, projectKey: string, t: TicketRow, relations: RelationRow[]): Promise<void> {
+async function exportTicket(ctx: ExportContext, dir: string, projectKey: string, t: TicketRow, relations: RelationRow[], statusNow: Map<string, string>): Promise<void> {
   const key = `${projectKey}-${t.number}`;
   const base = `${dir}/tickets/${key}`;
   const related = (kind: string, side: "from" | "to") => {
@@ -85,6 +86,7 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
     t.description,
   );
   await exportActivitiesAndComments(ctx, base, t.id);
+  await exportHistory(ctx, base, t.id, statusNow);
   const { rows: reports } = await ctx.db.query<DocumentRow>("SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id", [t.id]);
   for (const [i, r] of reports.entries()) await exportDocument(ctx, `${base}.reports/${i + 1}`, r);
 }
@@ -124,10 +126,11 @@ interface PendingRelation {
   to: string;
 }
 
-/** The Tickets an import brought in so far, by key, and the relations they name, to store once every Project is in. */
+/** The Tickets an import brought in so far, by key, and the relations and history they hold, to import once every Project is in. */
 export class ImportedTickets {
   readonly ids = new Map<string, string>();
   readonly relations: PendingRelation[] = [];
+  readonly histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
 
   /** Stores the relations between Tickets this import brought in: a key elsewhere may name another Ticket here. */
   async storeRelations(ctx: ImportContext): Promise<void> {
@@ -138,12 +141,17 @@ export class ImportedTickets {
       await storeRelation(ctx.db, { kind: r.kind, from, to });
     }
   }
+
+  /** Imports the Tickets' history, once every Ticket is in so changes can name them. */
+  async importHistories(ctx: ImportContext): Promise<void> {
+    for (const { ticketId, statusIds, file } of this.histories) await importHistory(ctx, file, ticketId, statusIds);
+  }
 }
 
 /** Imports the Tickets in `projects/<dirKey>/tickets/` into `project`, adding them and the relations they name to `tickets`. */
 export async function importTickets(ctx: ImportContext, dirKey: string, project: ImportedProject, tickets: ImportedTickets): Promise<void> {
   const parents: { ticketId: string; parent: string; path: string }[] = [];
-  for (const path of ctx.filesIn(`projects/${dirKey}/tickets`)) {
+  for (const path of ctx.filesIn(`projects/${dirKey}/tickets`).filter((p) => !p.endsWith(".history.md"))) {
     const t = ctx.need(path);
     const { key, id } = await importTicket(ctx, t, project);
     if (tickets.ids.has(key)) refuse(`Two Tickets have the key ${key}`);
@@ -151,6 +159,8 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
     if (typeof t.data.parent === "string") parents.push({ ticketId: id, parent: t.data.parent.toUpperCase(), path });
     tickets.relations.push(...relationsOf(t, key));
     const base = path.slice(0, -".md".length);
+    const history = ctx.read(`${base}.history.md`);
+    if (history) tickets.histories.push({ ticketId: id, statusIds: project.statusIds, file: history });
     await importActivitiesAndComments(ctx, base, id);
     for (const report of ctx.filesIn(`${base}.reports`)) {
       await importDocument(ctx, report.slice(0, -".md".length), { projectId: project.id, parentId: null, position: 0, ticketId: id });

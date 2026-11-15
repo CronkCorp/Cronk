@@ -54,6 +54,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importTickets(ctx, dirKey, project, tickets);
   }
   await tickets.storeRelations(ctx);
+  await tickets.importHistories(ctx);
   return { scope, projects: created };
 }
 

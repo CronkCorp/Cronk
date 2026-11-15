@@ -42,3 +42,6 @@ export const MENTION_SYNTAX =
 /** What a search can find: Tickets, Documents in a page tree, Reports, and Comments. */
 export const SEARCH_KINDS = ["ticket", "document", "report", "comment"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
+
+/** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
+export const MARKDOWN_FILE = /\.(md|markdown)$/i;

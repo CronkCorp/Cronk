@@ -10,15 +10,24 @@ import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 
 /** The media types an uploaded archive may come as. */
-const ARCHIVE_TYPES = ["application/gzip", "application/x-gzip", "application/x-tar", "application/x-compressed-tar", "application/octet-stream"];
+const ARCHIVE_TYPES = [
+  "application/gzip",
+  "application/x-gzip",
+  "application/x-tar",
+  "application/x-compressed-tar",
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/octet-stream",
+];
 /** The largest archive an import takes. */
 const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
 /** The request body of an import: an archive, which the content-type parser hands over as bytes (so it has no type to check). */
-const archiveBodySchema = { description: "The folder as a tar archive, gzipped or not." };
+const archiveBodySchema = { description: "The folder as a zip archive, or a tar archive gzipped or not." };
 
 const archiveUpload =
-  "The request body is the folder as a tar archive, gzipped (`tar czf`) or not, sent as `application/gzip`, `application/x-tar` or `application/octet-stream`.";
+  "The request body is the folder as a zip archive, or a tar archive gzipped (`tar czf`) or not, sent as `application/zip`, `application/gzip`, " +
+  "`application/x-tar` or `application/octet-stream`.";
 
 const importedAnswer = answer(
   "The Documents created, depth first, each followed by those under it; they go at the top of the page tree, after the Documents already there",
@@ -102,7 +111,7 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
         description:
           "Imports an export made by GET /api/export or GET /api/projects/{key}/export, all of it or nothing. A Workspace export goes into a Workspace " +
           "with no Projects, Documents or Guidance yet, as in a fresh installation; a Project export becomes a new Project, refused if its key is taken. " +
-          "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, " +
+          "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, until an Admin invites them and they accept, " +
           "and Agents not found are created without tokens. Relations to Tickets outside the export are left out. " +
           archiveUpload,
         response: {
