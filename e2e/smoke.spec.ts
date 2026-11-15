@@ -33,7 +33,8 @@ test("set up a fresh installation, sign out, sign in and see the application she
   await page.getByRole("button", { name: "Create Admin account" }).click();
   await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
 
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Ada Admin" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 
   await page.getByLabel("Email").fill("ada@example.com");
@@ -46,13 +47,15 @@ test("set up a fresh installation, sign out, sign in and see the application she
   await page.reload();
   await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
   // The Admin tunes how long a silent Agent Session keeps its Claims.
-  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("5");
   await page.getByLabel("Silence threshold (minutes)").fill("10");
   await page.getByRole("button", { name: "Save" }).click();
-  await page.getByRole("button", { name: "Workspace settings" }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved.");
+  await page.reload();
   await expect(page.getByLabel("Silence threshold (minutes)")).toHaveValue("10");
   await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page).toHaveURL(/\/$/);
 
   // The API refuses query parameters it doesn't know; the application shell takes any.
   await page.goto("/?utm_source=bookmark");
@@ -94,7 +97,7 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
 
   await page.getByRole("button", { name: "New Ticket" }).click();
   await page.getByLabel("Title").fill("Document sign-in");
@@ -151,7 +154,7 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: "Statuses" }).click();
 
   const started = page.getByRole("region", { name: "Started", exact: true });
@@ -188,7 +191,7 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await bob.getByLabel("Your name").fill("Bob");
   await bob.getByLabel("Password").fill("bobs password");
   await bob.getByRole("button", { name: "Join" }).click();
-  await expect(bob.getByRole("link", { name: /CRONK/ })).toBeVisible();
+  await expect(bob.getByRole("main").getByRole("link", { name: /CRONK/ })).toBeVisible();
 
   await page.goto("/projects/CRONK");
   await page.getByRole("button", { name: "Access" }).click();
@@ -336,7 +339,7 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: "Documents" }).last().click();
 
   await page.getByRole("button", { name: "New Document" }).click();
@@ -430,7 +433,7 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: "Documents" }).last().click();
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Quoting");
@@ -603,7 +606,7 @@ test("comment on passages of code inside blockquotes and list items", async ({ p
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: "Documents" }).last().click();
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Quoted code");
@@ -686,7 +689,7 @@ test("link a Document to a Ticket from the Ticket's page, then unlink it", async
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: /CRONK-2/ }).click();
   await expect(page.getByRole("heading", { name: "Document sign-in" })).toBeVisible();
 
@@ -709,7 +712,7 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: "Documents" }).last().click();
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Runbook");
@@ -781,7 +784,7 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("link", { name: /CRONK/ })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("link", { name: /CRONK/ })).toBeVisible();
 
   // Changes come through the API behind the page's back, as another User or an Agent would make them.
   await page.goto("/projects/CRONK?view=board");
@@ -822,7 +825,7 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("navigation", { name: "View" }).getByRole("link", { name: "Guidance" }).click();
   await page.getByRole("button", { name: "Edit Guidance" }).click();
   await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n");
@@ -898,4 +901,109 @@ test("import a folder of Markdown files picked in the browser", async ({ page })
   } finally {
     await rm(picked, { recursive: true, force: true });
   }
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("find the way around from the sidebar: counts, Projects, Settings and the phone menu", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const sidebar = page.getByRole("navigation", { name: "Sidebar" });
+  await expect(sidebar.getByTestId("workspace-name")).toHaveText("Acme");
+
+  // An archived Project is left out of the sidebar.
+  await page.request.post("/api/projects", { data: { name: "Old stuff", key: "OLD" } });
+  await page.request.patch("/api/projects/OLD", { data: { archived: true } });
+
+  // An Agent of Ada's connects; its live Agent Session counts once the frame loads again.
+  const { agent } = await (await page.request.post("/api/agents", { data: { name: "sidebar-bot" } })).json();
+  const { secret } = await (await page.request.post(`/api/agents/${agent.id}/tokens`, { data: { readOnly: false } })).json();
+  const asAgent = { authorization: `Bearer ${secret}` };
+  const live = async () =>
+    ((await (await page.request.get("/api/agents")).json()).agents as { sessions: unknown[] }[]).reduce((n, a) => n + a.sessions.length, 0);
+  const before = await live();
+  const session = (await (await page.request.post("/api/agent-sessions", { headers: asAgent })).json()).session.id as string;
+
+  // Navigating to a Project from the sidebar marks it, and only it, as the current page.
+  await sidebar.getByRole("link", { name: "CRONK Cronk" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Cronk");
+  await expect(sidebar.locator("[aria-current=page]")).toHaveCount(1);
+  await expect(sidebar.getByRole("link", { name: "CRONK Cronk" })).toHaveAttribute("aria-current", "page");
+  await expect(sidebar.getByRole("link", { name: /OLD/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("link", { name: /^Agents/ })).toHaveAccessibleName(`Agents ${before + 1} live`);
+
+  // The Inbox count follows a new question without a reload.
+  const waiting = (await (await page.request.get("/api/inbox")).json()).items.length as number;
+  const inbox = sidebar.getByRole("link", { name: /^Inbox/ });
+  await expect(inbox).toHaveAccessibleName(waiting ? `Inbox ${waiting} waiting` : "Inbox");
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Asked from the sidebar test" } })).json();
+  const me = (await (await page.request.get("/api/me")).json()).user.id as string;
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { assigneeId: me, delegateId: agent.id } });
+  const claimed = await page.request.post(`/api/tickets/${ticket.key}/claim`, { headers: { ...asAgent, "cronk-agent-session": session } });
+  expect(claimed.status(), await claimed.text()).toBe(200);
+  const asked = await page.request.post(`/api/tickets/${ticket.key}/activities`, {
+    headers: { ...asAgent, "cronk-agent-session": session },
+    data: { kind: "question", body: "Which way?" },
+  });
+  expect(asked.status(), await asked.text()).toBe(201);
+  await expect(inbox).toHaveAccessibleName(`Inbox ${waiting + 1} waiting`);
+  // Answering it elsewhere resolves it, and the count drops back.
+  const { activity } = await asked.json();
+  await page.request.post(`/api/tickets/${ticket.key}/comments`, { data: { body: "Left.", replyToActivityId: activity.id } });
+  await expect(inbox).toHaveAccessibleName(waiting ? `Inbox ${waiting} waiting` : "Inbox");
+
+  // A Ticket page marks its Project; a Document page marks Documents.
+  await page.getByRole("main").getByRole("link", { name: new RegExp(ticket.key) }).click();
+  await expect(page.getByRole("heading", { name: "Asked from the sidebar test" })).toBeVisible();
+  await expect(sidebar.locator("[aria-current=page]")).toHaveCount(1);
+  await expect(sidebar.getByRole("link", { name: "CRONK Cronk" })).toHaveAttribute("aria-current", "page");
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Sidebar notes", body: "Hi." } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await expect(page.getByTestId("document-body")).toContainText("Hi.");
+  await expect(sidebar.locator("[aria-current=page]")).toHaveCount(1);
+  await expect(sidebar.getByRole("link", { name: "Documents" })).toHaveAttribute("aria-current", "page");
+
+  // `/` focuses Search, unless the User is typing in a field.
+  await page.locator("body").press("/");
+  await expect(page.getByRole("searchbox", { name: "Search" })).toBeFocused();
+  await expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("");
+
+  // Settings has its own address, inside the frame.
+  await sidebar.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  await page.getByLabel("Workspace name").fill("Acme Inc");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(sidebar.getByTestId("workspace-name")).toHaveText("Acme Inc");
+  await page.getByLabel("Workspace name").fill("Acme");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(sidebar.getByTestId("workspace-name")).toHaveText("Acme");
+
+  // On a phone the sidebar becomes a strip; Projects, Workspace and the User move into a menu, and nothing scrolls sideways.
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto("/inbox");
+  await expect(sidebar.getByRole("link", { name: /^Inbox/ })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "CRONK Cronk" })).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await sidebar.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("menuitem", { name: "CRONK Cronk" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Cronk");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+// Runs after the invitation test above, so Bob is a Member.
+test("a Member sees no Settings, and /settings does not open for them", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("bob@example.com");
+  await page.getByLabel("Password").fill("bobs password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const sidebar = page.getByRole("navigation", { name: "Sidebar" });
+  await expect(sidebar.getByRole("link", { name: "Guidance" })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  await expect(sidebar.getByRole("link", { name: "Users" })).toHaveCount(0);
+  await page.goto("/settings");
+  await expect(sidebar.getByTestId("workspace-name")).toHaveText("Acme");
+  await expect(page.getByRole("heading", { name: "Workspace settings" })).toHaveCount(0);
 });

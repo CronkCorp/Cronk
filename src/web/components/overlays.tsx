@@ -2,7 +2,7 @@ import * as RadixDialog from "@radix-ui/react-dialog";
 import * as RadixMenu from "@radix-ui/react-dropdown-menu";
 import * as RadixPopover from "@radix-ui/react-popover";
 import * as RadixTabs from "@radix-ui/react-tabs";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Button } from "./button.js";
 
 // Radix UI's headless primitives, each wrapped once and styled by our classes (docs/ui.md § Component conventions).
@@ -38,9 +38,10 @@ export function Popover(props: {
   );
 }
 
-/** One entry of a `Menu`; `danger` marks a destructive one, such as Archive or Delete. */
+/** One entry of a `Menu`; `danger` marks a destructive one, such as Archive or Delete. Entries sharing a `group` sit under its label. */
 export interface MenuItem {
   label: string;
+  group?: string;
   onSelect: () => void;
   danger?: boolean;
   disabled?: boolean;
@@ -53,15 +54,19 @@ export function Menu(props: { trigger: ReactNode; items: MenuItem[]; label?: str
       <RadixMenu.Trigger asChild>{props.trigger}</RadixMenu.Trigger>
       <RadixMenu.Portal>
         <RadixMenu.Content className="menu" align="end" sideOffset={4} aria-label={props.label}>
-          {props.items.map((item) => (
-            <RadixMenu.Item
-              key={item.label}
-              className={`menu-item${item.danger ? " danger" : ""}`}
-              {...(item.disabled ? { disabled: true } : {})}
-              onSelect={item.onSelect}
-            >
-              {item.label}
-            </RadixMenu.Item>
+          {props.items.map((item, i) => (
+            <Fragment key={`${item.group ?? ""}/${item.label}`}>
+              {item.group !== undefined && item.group !== props.items[i - 1]?.group && (
+                <RadixMenu.Label className="menu-label">{item.group}</RadixMenu.Label>
+              )}
+              <RadixMenu.Item
+                className={`menu-item${item.danger ? " danger" : ""}`}
+                {...(item.disabled ? { disabled: true } : {})}
+                onSelect={item.onSelect}
+              >
+                {item.label}
+              </RadixMenu.Item>
+            </Fragment>
           ))}
         </RadixMenu.Content>
       </RadixMenu.Portal>

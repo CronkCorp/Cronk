@@ -89,7 +89,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - Danger is filled `--danger`, and only inside a confirming dialog.
   - A disabled button keeps its colours at 50% opacity with a `not-allowed` cursor.
   - Buttons size to their label and are never full width outside sign-in forms.
-- **Forms:** the label sits above the field, in 12px `--muted`. Inputs have a `--surface` background and a 1px border, and show the `--accent` focus ring. Markdown inputs use the mono face. Each error sits under its form in `--danger` with `role="alert"`.
+- **Forms:** the label sits above the field, in 12px `--muted`. Inputs have a `--surface` background and a 1px border, and show the `--accent` focus ring. Markdown inputs use the mono face. Each error sits under its form in `--danger` with `role="alert"`. A settings page, such as `/settings`, stays open after saving and says "Saved." beside its buttons (`role="status"`).
 - **Pickers:** Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter. Bare `<select>` rows are not used for this.
 - **Times** (`<RelativeTime>`):
   - Relative under an hour ("12 min ago").
