@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, startInstalledCronk, type Client } from "./harness.js";
+import { agentOf, joinAs, startInstalledCronk, type Client } from "./harness.js";
 
 interface Status {
   id: string;
@@ -228,6 +228,49 @@ describe("Statuses", () => {
       expect((await client.post("/api/projects/CRONK/statuses", { name: "Mine", category: "started" })).status).toBe(expected);
       expect((await client.patch(`/api/projects/CRONK/statuses/${qa.id}`, { name: "Mine" })).status).toBe(expected);
       expect((await client.delete(`/api/projects/CRONK/statuses/${qa.id}`)).status).toBe(expected);
+    }
+    expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In QA", "In Review", "Done", "Canceled"]);
+  });
+
+  it("can't be removed by an Agent, even to finish the Tickets in them by moving them to a Completed Status", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
+    const done = await statusNamed(admin, "Done");
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add sign-in" });
+    await admin.patch("/api/tickets/CRONK-1", { statusId: qa.id });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    const refused = await claude.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${done.id}`);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Only a User/);
+    expect(names(await statuses(admin))).toContain("In QA");
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.status.name).toBe("In QA");
+  });
+
+  it("can't be added by an Agent", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    const refused = await claude.post("/api/projects/CRONK/statuses", { name: "Shipped", category: "completed" });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Only a User/);
+    expect(names(await statuses(admin))).not.toContain("Shipped");
+  });
+
+  it("can't be renamed or reordered by an Agent", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    for (const res of [
+      await claude.patch(`/api/projects/CRONK/statuses/${qa.id}`, { name: "Done-ish" }),
+      await claude.patch(`/api/projects/CRONK/statuses/${qa.id}`, { position: 0 }),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Only a User/);
     }
     expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In QA", "In Review", "Done", "Canceled"]);
   });

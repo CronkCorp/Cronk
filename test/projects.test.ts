@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk } from "./harness.js";
+import { agentOf, startInstalledCronk } from "./harness.js";
 
 describe("Projects", () => {
   it("are created with a name and a key, and come with the default Statuses", async () => {
@@ -79,6 +79,21 @@ describe("Projects", () => {
     expect(rekeyed.body.error).toBe('body has unknown field "key"');
     expect((await admin.get("/api/projects/CRONK")).body.project).toMatchObject({ name: "Cronk app", key: "CRONK" });
     expect((await admin.get("/api/projects/APP")).status).toBe(404);
+  });
+
+  it("can't be renamed or archived by an Agent", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    for (const res of [
+      await claude.patch("/api/projects/CRONK", { name: "Renamed" }),
+      await claude.patch("/api/projects/CRONK", { archived: true }),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Only a User/);
+    }
+    expect((await admin.get("/api/projects/CRONK")).body.project).toMatchObject({ name: "Cronk", archived: false });
   });
 
   it("name a misspelt field when refusing it, even while a required field is missing", async () => {
