@@ -4,15 +4,18 @@ Cronk is built in three phases. Vocabulary follows `GLOSSARY.md`; decisions are 
 
 1. **Reconcile.** Check `GLOSSARY.md` and the ADRs against what was actually built in the previous phase, and fix whichever is wrong. `/retro` on the build sessions is a separate, optional step: it improves the agent environment (checks, navigation, coding standards), not the design.
 2. **Grill** the phase's open questions with `/grill-with-docs`, starting from the "Decided so far" and "Open questions" lists below.
-3. **Spec** with `/to-spec`, then **tickets** with `/to-tickets` (published as GitHub issues: the spec as a parent, tickets as sub-issues), in the same session as the grilling, since both synthesise from that conversation.
-4. **Build**, then update this roadmap.
+3. **Prototype** the phase's new or changed key screens with `/prototype` (throwaway HTML), when the phase adds UI. Choose a direction with the User and record it in `docs/ui.md`, so tickets follow one design instead of each inventing its own.
+4. **Spec** with `/to-spec`, then **tickets** with `/to-tickets` (published as GitHub issues: the spec as a parent, tickets as sub-issues), in the same session as the grilling, since both synthesise from that conversation.
+5. **Build**, then update this roadmap.
+
+Phase 1 was built without step 3; #98 reviewed its UI afterwards and wrote the first `docs/ui.md`, which later phases extend.
 
 ## Where the design lives
 
 A session starting a later phase should read, in order:
 
 1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
-2. `docs/adr/`: decisions that are hard to reverse (0001–0012).
+2. `docs/adr/`: decisions that are hard to reverse (0001–0013).
 3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
 4. The Phase 1 spec, GitHub issue #1 (`gh issue view 1`): the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
 5. `docs/testing.md`: the test seams every phase uses.
@@ -26,7 +29,7 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 - **Structure.** The Workspace holds Projects plus knowledge spanning them (Documents, Terms, Decisions, Guidance) but never Tickets. Project knowledge layers over the Workspace's.
 - **Agent Sessions.** One MCP connection is one Agent Session; the MCP session id is the Agent Session's id. It ends when the client disconnects (an MCP DELETE) or stays silent longer than the Workspace's silence threshold (default 5 minutes, configurable per Workspace), after which the client must reconnect. Every call in a Session refreshes it; Activities and tool calls keep Claims alive. An open stream of the Session's waiting work (`GET /api/agent-sessions/current/events`) counts as not silent too: its heartbeat refreshes the Session, so an Agent waiting on a blocking question keeps its Session and Claims for as long as it stays connected. Over MCP, that stream is followed only while the client keeps open its own stream it hears notifications on, so a client that crashes without disconnecting still goes silent. The MCP server calls the HTTP API as the Agent, sending the `Cronk-Agent-Session` header so the API knows the Session; history records it.
 - **Ticket keys.** `<PROJECT KEY>-<n>`, numbered in order per Project by the server.
-- **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise.
+- **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise. Ticket fields are last-write-wins; only Documents take version-based edits (ADR 0009).
 - **Reports.** Required whenever an Agent hands work over: moving a Ticket to In Review, or completing it under Autonomous Delegation. Not required when an Agent just releases its Claim.
 - **Documents.** Human-curated Documents live in a page tree per Project and Workspace; Reports live with their Ticket; Terms and Decisions get their own views. Agents follow Guidance about where new Documents go.
 - **Comments.** Threaded, on Tickets and Documents, from any Actor, optionally anchored to a passage. Answers to Agent questions are Comment replies. Comments, @mentions and answers mark work as waiting for an Agent.
@@ -34,11 +37,12 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 - **Access.** Workspace roles Admin and Member; open or private Projects; Read or Write per Member. Admins have Write in every Project. A Member listed in a Project has the access listed; an unlisted Member has Write in an open Project and nothing in a private one, which answers as if it didn't exist. Only Admins change roles, invitations, visibility and listings. Protected means "Agents can't edit", not "only Admins can edit".
 - **Agents and tokens.** Any User registers and manages only their own Agents; Admins can see every Agent but not change others'. An Agent calls the API with a bearer token, full or read-only; only the token's hash is stored and its secret is shown once. Revoking a token or removing the Agent refuses it at once; deactivating an Owner ends their Agents' Agent Sessions (and so their Claims) and refuses the Agents until the Owner is reactivated, when their next Agent Sessions start afresh. Agents can't manage Agents, change Agent Access, or do anything only Admins can, even for an Admin Owner.
 - **Agent Access.** None, Read or Write, Write by default, per Project and for the Workspace (which covers what lies outside any Project, such as creating Projects or listing Users). A Project's is set by Users with Write in it; the Workspace's by Admins. An Agent's access is the lowest of its Owner's, the Agent Access and its token; a Project it has None in answers as if it didn't exist.
+- **Users.** Unique by email across the installation, which a second Workspace (ADR 0008) would have to revisit. There is no password change or reset yet.
 - **Invitations.** Until outside-app email arrives (Phase 3), inviting a User gives the Admin a one-time link, valid 7 days, to send themselves.
 - **Sign-in.** Email and password, with optional OIDC in Phase 3.
-- **Search.** Postgres full-text search plus context on claim. Semantic search is optional and off by default; Cronk must never require an extra AI service.
+- **Search.** Postgres full-text search plus context on claim. Semantic search is optional and off by default; Cronk must never require an extra AI service. Full-text search uses Postgres's `english` configuration; changing it means rebuilding the indexes.
 - **Notifications.** In-app live updates. Outside the app only from Phase 3, via webhooks or optional email, defaulting to urgent events only. No native apps for now.
-- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders.
+- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders. Export and import are Admin-only. Import gives Agents and Agent Sessions new ids.
 - **Deployment.** Docker Compose first; standalone servers and Proxmox later, so nothing may assume Docker (ADR 0006).
 
 ## Phase 1: Core loop
@@ -57,6 +61,7 @@ Scope:
 - **Discovered Tickets** filed by Agents into Backlog, and the shared **Triage** view.
 - **Artifacts** with Versions, served from a separate hostname (ADR 0007), and **Attachments**.
 - Inbox extended with Unverified completions, Suggestions and Discovered Tickets.
+- **Transcripts** of chats that led Agents to change things, uploaded from the client side and linked to what they led to (ADR 0013). A separate slice that nothing else in the phase depends on, so it can be built last or cut.
 
 Decided so far (beyond the glossary and ADRs):
 
@@ -70,6 +75,16 @@ Decided so far (beyond the glossary and ADRs):
 - Artifacts belong to a Project or the Workspace, never to a Ticket or chat; they record the Ticket or Agent Session they came from and can be embedded in many places.
 - Each Artifact publish creates a new Version; the Artifact's address shows the latest Version, and a link can name a specific Version. A publish based on an outdated Version is refused, so the publisher merges first.
 - Artifact pages may load scripts only from a short CDN allow-list by default; anything more is declared when publishing, kept minimal.
+- Transcripts are verbatim, never an Agent's summary. Cronk never captures chats; a client-side hook uploads them with the Agent's full token (read-only tokens are refused), and Cronk links them by scanning for the uploading Agent's own Agent Session ids (ADR 0013). One Transcript may cover many Agent Sessions.
+- Only Transcripts whose linked Agent Sessions changed at least one thing are kept; others are refused, so a hook can upload every chat.
+- Re-uploads upsert by (Agent, client chat id), such as Claude Code's `session_id`: the new text replaces the old and links only grow. If the new text doesn't continue the stored one, the old text is kept as well.
+- A Transcript is readable by its Owner and by anyone with Read in every Project its Agent Sessions changed things in (Workspace read for Workspace-level changes); Agents are capped as usual (ADR 0004). The Owner may delete it. Transcripts outlive their Agent's removal.
+- Cronk scrubs known secret patterns on upload (its own tokens, private keys, common provider tokens, `Authorization` headers) and never stores the originals; the Owner can also redact passages by hand, and those redactions survive re-uploads. Scrubbing is documented as best-effort.
+- Transcripts are uploaded as Markdown following a documented turn convention (`## User`, `## Assistant`, tool calls and results as fenced blocks). Cronk ships a reference Claude Code hook that converts deterministically and trims long tool output; Cronk parses no client formats.
+- Users and Agents can search Transcripts, as a separate result type ranked below Documents, Terms and Decisions, with hits pointing at the matching turn. Context on claim lists linked Transcripts but never includes their text.
+- Every item a linked Agent Session changed gets a "From Transcript" link to the turn where its key or id first appears, falling back to the top; the Transcript view marks those turns with chips for the items.
+- A Transcript may be at most 10 MB by default (configurable per Workspace); it is kept until its Owner deletes it.
+- Transcripts are always part of the full export, as Markdown with frontmatter (Agent, client chat id, linked Agent Sessions and items), with hand redactions applied, and are restored on import.
 
 Open questions to grill before writing the spec:
 
@@ -80,6 +95,14 @@ Open questions to grill before writing the spec:
 - **Autonomous Delegation**: is it set per Ticket, per parent Ticket (covering its Sub-Tickets), as a Project default, or all three; what Reopen does to dependents that already continued on the Unverified completion.
 - **Discovered Tickets**: may an Agent mark a Discovered Ticket as blocking queued Tickets on its own; which Inbox or Triage it lands in when the source Ticket's Assignee is known.
 - **Artifacts**: what an Agent publishes (one HTML page or a folder of files); the default CDN allow-list and how a publish declares more; links to a specific Version; how Artifacts embed in Documents and Reports; whether Artifacts take Comments and whether those reach the producing Agent; size limits.
+- **What Agents may write.** Phase 1 lets Agents create Tickets (landing in Backlog with no marker), edit any Ticket's fields and Relations without a Claim, and create Projects; Status and Project management is being limited to Users (#139). Decide how this narrows once Discovered Tickets exist, and whether editing a Ticket needs a Claim.
+- **Agent calls outside an Agent Session.** A bare token can write without a Session, so those changes can never link to a Transcript. Keep this for scripts and CI, or require a Session for writes.
+- **Workspace knowledge.** Any User may write Workspace Documents, but only Admins Workspace Guidance; the glossary says Admins manage Workspace-level knowledge. Pick one rule.
+- **Unassigned In Review Tickets** reach no Inbox. Send them to Triage, or require an Assignee before In Review.
+- **Claiming by key** ignores Ready, so an Agent can Claim a blocked Ticket. Allow it as a deliberate override, or refuse.
+- **Password reset**: none exists, so a forgotten password locks a User out. For example, an Admin-issued reset link like an Invitation.
+- **Transcripts after import**: imported Agent Sessions get new ids, so Transcripts can't link to them. Keep ids on import into an empty Workspace, or remap from Transcript frontmatter.
+- **Artifact origin**: a subdomain such as `artifacts.cronk.example` is same-site with the app, and the sign-in cookie is `SameSite=Lax` with no Origin check. Require a separate registrable domain, or add an Origin check.
 - **Attachments**: size limits; local disk versus S3-compatible storage defaults; video handling.
 
 ## Phase 3: Code and reach
