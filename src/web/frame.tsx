@@ -11,7 +11,14 @@ import { useLoad } from "./ui.js";
 
 /** Which sidebar item the page at `path` belongs to: a Ticket marks its Project, a Document marks Documents. */
 export function currentItem(path: string): string | undefined {
-  const [, first, second] = path.split("/").map(decodeURIComponent);
+  let first: string | undefined, second: string | undefined;
+  try {
+    [, first, second] = path.split("/").map(decodeURIComponent);
+  } catch {
+    return undefined; // a malformed address belongs to no item
+  }
+  // Keys are upper case, but the server also takes them in lower case.
+  second = second?.toUpperCase();
   switch (first) {
     case "inbox":
     case "documents":
@@ -78,31 +85,14 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
       <ul className="nav-list nav-main">
         <NavItem to="/inbox" current={current === "inbox"}>
           <span className="nav-text">Inbox</span>
-          {waiting > 0 && (
-            <>
-              {" "}
-              <span className="nav-count">
-                {waiting}
-                <span className="visually-hidden"> waiting</span>
-              </span>
-            </>
-          )}
+          <NavCount count={waiting} className="nav-count" unit="waiting" />
         </NavItem>
         <NavItem to="/documents" current={current === "documents"}>
           <span className="nav-text">Documents</span>
         </NavItem>
         <NavItem to="/agents" current={current === "agents"}>
           <span className="nav-text">Agents</span>
-          {liveSessions > 0 && (
-            <>
-              {" "}
-              <span className="nav-live">
-                <span className="live-dot" aria-hidden="true" />
-                {liveSessions}
-                <span className="visually-hidden"> live</span>
-              </span>
-            </>
-          )}
+          <NavCount count={liveSessions} className="nav-live" unit="live" dot />
         </NavItem>
       </ul>
       <div className="sidebar-more">
@@ -127,15 +117,30 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         <Menu
           label="Account"
           trigger={
-            <button type="button" className="user-button">
+            <Button variant="ghost" className="user-button">
               <Actor actor={userActor(props.me.name)} />
               <span className="muted">{ROLE_NAMES[props.me.role]}</span>
-            </button>
+            </Button>
           }
           items={[{ label: "Sign out", onSelect: props.onSignOut }]}
         />
       </div>
     </nav>
+  );
+}
+
+/** A count after a sidebar link's name, read out with its unit ("Inbox 2 waiting"); nothing when it is zero. */
+function NavCount(props: { count: number; className: string; unit: string; dot?: boolean }) {
+  if (props.count === 0) return null;
+  return (
+    <>
+      {" "}
+      <span className={props.className}>
+        {props.dot && <span className="live-dot" aria-hidden="true" />}
+        {props.count}
+        <span className="visually-hidden"> {props.unit}</span>
+      </span>
+    </>
   );
 }
 

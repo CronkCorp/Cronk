@@ -743,6 +743,10 @@ test("find the way around from the sidebar: counts, Projects, Settings and the p
   });
   expect(asked.status(), await asked.text()).toBe(201);
   await expect(inbox).toHaveAccessibleName(`Inbox ${waiting + 1} waiting`);
+  // Answering it elsewhere resolves it, and the count drops back.
+  const { activity } = await asked.json();
+  await page.request.post(`/api/tickets/${ticket.key}/comments`, { data: { body: "Left.", replyToActivityId: activity.id } });
+  await expect(inbox).toHaveAccessibleName(waiting ? `Inbox ${waiting} waiting` : "Inbox");
 
   // A Ticket page marks its Project; a Document page marks Documents.
   await page.getByRole("main").getByRole("link", { name: new RegExp(ticket.key) }).click();

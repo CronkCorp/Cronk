@@ -97,23 +97,23 @@ h3 { font-size: 14px; font-weight: 600; }
 .workspace-mark { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; }
 .sidebar-phone-menu { display: none; }
 .search-box { position: relative; display: flex; }
-.search-box input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 6px 32px 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); }
+.search-box input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 32px 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); }
 .search-box input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.search-key { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; background: var(--surface); pointer-events: none; }
-.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--text); }
+.search-key { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; background: var(--surface); pointer-events: none; }
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; color: var(--text); }
 .nav-item:hover { background: var(--surface-2); }
 .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .nav-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-key { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); min-width: 44px; }
 .nav-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: var(--on-accent); font-size: 12px; font-weight: 600; text-align: center; }
-.nav-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ok); }
+.nav-live { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ok); }
 .sidebar-more { display: flex; flex-direction: column; gap: 16px; }
 .nav-label { padding: 0 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .sidebar-user { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
-.user-button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; font: inherit; font-size: 13px; color: var(--text); background: transparent; border: 0; border-radius: 6px; padding: 6px 8px; cursor: pointer; text-align: left; }
-.user-button:hover { background: var(--surface-2); }
-.menu-label { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.btn.ghost.user-button { justify-content: space-between; gap: 8px; width: 100%; font-weight: 400; color: var(--text); padding: 4px 8px; }
+.btn.ghost.user-button:hover { background: var(--surface-2); }
+.menu-label { padding: 8px 12px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 
 /* Below 760px the sidebar is a wrapping strip of the main links; the rest moves into its menu. */
 @media (max-width: 759px) {
