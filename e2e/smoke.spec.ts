@@ -517,6 +517,38 @@ test("see a Comment in the margin beside the passage it is about", async ({ page
   expect((await card.boundingBox())!.y).toBeGreaterThan(narrowBody.y + narrowBody.height);
 });
 
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("highlight a repeated passage once, and list passages that can't be placed at the end of the margin", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const first = "Old wording.\n\nRotate the keys yearly.\n\n```js\njs\n```\n";
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Key rotation", body: first } })).json();
+  const comment = (body: string, passage: string) => page.request.post(`/api/documents/${document.id}/comments`, { data: { body, anchor: { passage } } });
+  await comment("Is this still true?", "Old wording.");
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: `Rotate the keys yearly.\n\n${first.slice(14)}\n## Again\n\nRotate the keys yearly.\n` } });
+  // The info string of a code block shows nowhere on the page, so this passage can't be placed.
+  await comment("Which language?", "```js");
+  await comment("Why yearly?", "Rotate the keys");
+  await page.goto(`/documents/${document.id}`);
+
+  // The passage appears twice, but only its first place in the Markdown is highlighted.
+  const body = page.getByTestId("document-body");
+  await expect(body.locator("mark")).toHaveCount(1);
+  await expect(body.locator("p").first().locator("mark")).toHaveText("Rotate the keys");
+
+  // The placed card comes first; the passage that can't be placed and the detached one follow, unhighlighted.
+  const cards = page.getByRole("list", { name: "Comments" }).locator("> li");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.nth(0)).toContainText("Why yearly?");
+  await expect(cards.nth(1)).toContainText("Is this still true?");
+  await expect(cards.nth(1)).toContainText("No longer in the Document (was in Version 1)");
+  await expect(cards.nth(2)).toContainText("Which language?");
+  await expect(cards.nth(1).locator("blockquote")).toHaveCSS("text-decoration-line", "line-through");
+});
+
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
 test("link a Document to a Ticket from the Ticket's page, then unlink it", async ({ page }) => {
   await page.goto("/");
