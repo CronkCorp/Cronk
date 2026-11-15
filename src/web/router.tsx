@@ -4,8 +4,10 @@ import { useEffect, useState, type AnchorHTMLAttributes, type MouseEvent } from 
 
 const listeners = new Set<() => void>();
 
-export function navigate(to: string): void {
-  history.pushState(null, "", to);
+/** Goes to `to`; `replace` swaps the current history entry instead of adding one, as moving through a list does. */
+export function navigate(to: string, options: { replace?: boolean } = {}): void {
+  if (options.replace) history.replaceState(null, "", to);
+  else history.pushState(null, "", to);
   for (const listener of listeners) listener();
 }
 

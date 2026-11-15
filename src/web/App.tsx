@@ -4,7 +4,7 @@ import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
-import { inboxFilterFrom, InboxPage } from "./inbox.js";
+import { inboxAddressFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
@@ -152,7 +152,7 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "search":
       return <SearchPage filter={searchFilterFrom(search)} />;
     case "inbox":
-      return <InboxPage filter={inboxFilterFrom(search)} />;
+      return <InboxPage address={inboxAddressFrom(search)} />;
     case "documents":
       return <DocumentsPage />;
     case "projectDocuments":

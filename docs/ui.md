@@ -83,7 +83,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
 - **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
-  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
+  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
   - Ghost is text in `--accent`, for Reply, Rename and the like.
   - Danger is filled `--danger`, and only inside a confirming dialog.
@@ -122,8 +122,11 @@ The Project page is shown in `docs/ui/frame.png`.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back.
-- **Acting on an item:** the next item is selected. It never jumps to the top of the list.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back. None of them fire while focus is in a text field. A line under the split names them.
+- **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
+- **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
+- **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
+- **Empty:** a calm empty state, not an empty split.
 - **Phone:** the list and the detail stack, and selecting an item opens the detail full width.
 
 ![Inbox on a phone](ui/phone-inbox.png)

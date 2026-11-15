@@ -493,3 +493,55 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .dialog-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .dialog-description { color: var(--muted); margin: 0 0 16px; }
 .dialog-actions { justify-content: flex-end; }
+
+/* Inbox: a split view of the grouped list and the selected item (docs/ui.md § Inbox). */
+.inbox-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.filter-chip { font: inherit; font-size: 12px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); cursor: pointer; }
+.filter-chip:hover { background: var(--surface-2); }
+.filter-chip.pressed { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.inbox-triage { display: flex; flex-direction: column; gap: 8px; }
+.inbox-split { display: flex; align-items: stretch; min-height: 560px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.inbox-list { width: 360px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.inbox-group-head { margin: 0; padding: 4px 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--border); }
+.inbox-items { list-style: none; margin: 0; padding: 0; }
+.inbox-items li { border-bottom: 1px solid var(--border); }
+.inbox-item { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border-left: 3px solid transparent; color: var(--text); }
+.inbox-item:hover { background: var(--bg); }
+.inbox-item.blocking { border-left-color: var(--danger); }
+.inbox-item.selected { background: var(--accent-soft); }
+.inbox-item.selected:not(.blocking) { border-left-color: var(--accent); }
+.inbox-item-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.inbox-item-head .key { min-width: 0; font-size: 12px; }
+.inbox-item-head .time { margin-left: auto; color: var(--muted); }
+.inbox-item-title { font-weight: 600; overflow-wrap: anywhere; }
+.inbox-item-snippet { font-size: 13px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.inbox-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 16px 24px; overflow-wrap: anywhere; }
+.inbox-detail-body { display: flex; flex-direction: column; gap: 16px; }
+.inbox-detail-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.inbox-detail-head .key { min-width: 0; font-size: 12px; }
+.inbox-detail-who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.inbox-question > :first-child { margin-top: 0; }
+.inbox-question > :last-child { margin-bottom: 0; }
+.inbox-question pre { overflow-x: auto; }
+.inbox-reports { display: flex; flex-direction: column; gap: 12px; }
+.inbox-detail .comment-form { margin-top: 0; }
+.inbox-detail .actions { flex-wrap: wrap; align-items: center; }
+.inbox-keys { margin: 0; font-size: 12px; }
+.inbox-none { margin: 0; padding: 12px; font-size: 13px; }
+.inbox-resolved { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-size: 13px; }
+.inbox-resolved p { margin: 0; font-weight: 600; color: var(--muted); }
+.inbox-item.arrived { animation: arrived-inset 2s ease-out; }
+@keyframes arrived-inset {
+  from { box-shadow: inset 0 0 0 2px var(--accent); }
+  to { box-shadow: inset 0 0 0 2px transparent; }
+}
+.inbox-back { display: none; }
+@media (max-width: 759px) {
+  .inbox-split { flex-direction: column; min-height: 0; }
+  .inbox-list { width: auto; border-right: 0; }
+  .inbox-detail { padding: 16px; }
+  .inbox-back { display: block; align-self: flex-start; font-size: 13px; }
+  .inbox-split.picked .inbox-list { display: none; }
+  .inbox-split:not(.picked) .inbox-detail { display: none; }
+  .inbox-keys { display: none; }
+}
