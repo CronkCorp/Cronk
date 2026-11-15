@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-// A meter counting down until an Agent Session falls silent (docs/ui.md § Agents), or its Claim lapses.
+// A meter counting down until an Agent Session falls silent (docs/ui.md § Agents).
 
 /** Re-renders every second, so a countdown moves between the server's updates. */
 function useSecondTick(): number {

@@ -81,7 +81,7 @@ export async function listLiveClaims(db: Queryable, now: Date): Promise<Map<stri
 }
 
 /** A Ticket an Agent Session holds the Claim on, as the Agents list shows it. */
-export interface HeldTicket {
+export interface ClaimedTicket {
   ticketKey: string;
   title: string;
   projectId: string;
@@ -91,14 +91,14 @@ export interface HeldTicket {
  * The Tickets each of these Agent Sessions holds the Claim on, in key order. Pass only live Sessions:
  * a Claim is live exactly while its Session is.
  */
-export async function listClaimsOfSessions(db: Queryable, sessionIds: string[]): Promise<Map<string, HeldTicket[]>> {
+export async function listClaimsOfSessions(db: Queryable, sessionIds: string[]): Promise<Map<string, ClaimedTicket[]>> {
   const { rows } = await db.query<{ session_id: string; ticket_key: string; title: string; project_id: string }>(
     `SELECT t.claim_session_id AS session_id, ${ticketKeySql("p", "t")} AS ticket_key, t.title, t.project_id
      FROM tickets t JOIN projects p ON p.id = t.project_id
      WHERE t.claim_session_id = ANY($1::uuid[]) ORDER BY p.key, t.number`,
     [sessionIds],
   );
-  const bySession = new Map<string, HeldTicket[]>(sessionIds.map((id) => [id, []]));
+  const bySession = new Map<string, ClaimedTicket[]>(sessionIds.map((id) => [id, []]));
   for (const row of rows) bySession.get(row.session_id)!.push({ ticketKey: row.ticket_key, title: row.title, projectId: row.project_id });
   return bySession;
 }

@@ -74,8 +74,12 @@ export function Actor(props: { actor: ActorLike; owner?: boolean }) {
   );
 }
 
-/** Just an Actor's avatar: round for a User, square and violet for an Agent. Pass `large` for a card's head. */
+/**
+ * Just an Actor's avatar: round for a User, square and violet for an Agent. Pass `large` for a card's head,
+ * which shows two initials ("CL" for claude-laptop) where the name has two words.
+ */
 export function Avatar(props: { actor: Pick<ActorLike, "kind" | "name">; large?: boolean }) {
-  const initial = props.actor.name.trim().charAt(0).toUpperCase();
+  const words = props.actor.name.trim().split(/[\s\-_.]+/).filter(Boolean);
+  const initial = (props.large ? words.slice(0, 2).map((w) => w.charAt(0)).join("") : props.actor.name.trim().charAt(0)).toUpperCase();
   return <span className={`avatar ${props.actor.kind}${props.large ? " large" : ""}`} data-initial={initial} aria-hidden="true" />;
 }

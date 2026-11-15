@@ -5,7 +5,7 @@ import { lookAtLiveAgentSessions, ownersWithChangedSessions, type SessionLook } 
 import { agentsTopic } from "../live/topics.js";
 
 /**
- * Claims lapse by time alone, when their Agent Session stays silent too long (or the Workspace
+ * Watches what changes by time alone, as Agent Sessions fall silent. Claims lapse by time alone, when their Agent Session stays silent too long (or the Workspace
  * shortens its silence threshold), so no call marks the moment. Every `intervalMs` this notes
  * which Claims are live, by the application's clock, and finds those that lapsed since it last
  * looked (live then, or lapsing after then), to tell their Tickets' watchers and the Agents they
@@ -14,7 +14,7 @@ import { agentsTopic } from "../live/topics.js";
  * lapse while the server is down aren't told of; a stream reopening catches up with its `ready`.
  * Stops when the returned function is called.
  */
-export function watchClaimLapses(ctx: AppContext, intervalMs: number): () => void {
+export function watchSilence(ctx: AppContext, intervalMs: number): () => void {
   let last = { at: ctx.clock.now(), live: new Map<string, string>(), sessions: new Map<string, SessionLook>() };
   let looking = false;
   const look = async () => {

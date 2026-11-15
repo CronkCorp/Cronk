@@ -32,7 +32,7 @@ export function AgentsPage(props: { me: User }) {
     [admin],
   );
   return (
-    <section>
+    <section className="agents-page">
       <div className="page-head">
         <h1>Agents</h1>
         <div className="actions">
@@ -97,7 +97,7 @@ function agentSummary(agent: Agent): string {
   const parts = [];
   if (agent.sessions.length > 0) parts.push(plural(agent.sessions.length, "live Agent Session"));
   if (agent.delegateTicketCount > 0) parts.push(`Delegate on ${plural(agent.delegateTicketCount, "Ticket")}`);
-  return parts.length > 0 ? parts.join(" · ") : "Nothing delegated";
+  return parts.join(" · ");
 }
 
 function AgentCard(props: { agent: Agent; onChanged: () => void }) {
@@ -133,7 +133,15 @@ function AgentCard(props: { agent: Agent; onChanged: () => void }) {
               <div className="agent-name">{a.name}</div>
               <div className="agent-summary muted">{agentSummary(a)}</div>
             </div>
-            <Button variant="ghost" onClick={() => setRenaming(true)}>Rename</Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setName(a.name);
+                setRenaming(true);
+              }}
+            >
+              Rename
+            </Button>
             <Button variant="ghost" onClick={() => setRemoving(true)}>Remove</Button>
           </>
         )}
@@ -158,6 +166,7 @@ function AgentCard(props: { agent: Agent; onChanged: () => void }) {
   );
 }
 
+/** What kind of token it is: "full" or "read-only". */
 const tokenKind = (t: AgentToken) => (t.readOnly ? "read-only" : "full");
 
 /** "2 tokens: full (issued 3 Nov), read-only (issued 9 Nov)". */
@@ -208,6 +217,7 @@ function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open:
   };
   return (
     <Dialog open={props.open} onOpenChange={openChange} title={`Tokens of ${a.name}`} description="Your AI tool connects as this Agent with one of them.">
+      <div className="tokens-dialog">
       <Show state={props.tokens}>
         {(list) => (
           <ul className="token-list" aria-label={`Tokens of ${a.name}`}>
@@ -215,7 +225,7 @@ function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open:
             {list.map((t) => (
               <li key={t.id} className="token">
                 <span className="grow">
-                  {t.readOnly ? "Read-only token" : "Full token"} <span className="muted">issued <RelativeTime at={t.createdAt} /></span>
+                  {tokenKind(t) === "full" ? "Full" : "Read-only"} token <span className="muted">issued <RelativeTime at={t.createdAt} /></span>
                 </span>
                 <Button variant="ghost" disabled={revoke.busy} onClick={() => void revoke.run(t.id)}>Revoke</Button>
               </li>
@@ -237,8 +247,9 @@ function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open:
         </div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
-      <div className="actions dialog-actions dialog-foot">
+      <div className="actions dialog-actions">
         <Button variant="secondary" onClick={() => openChange(false)}>Done</Button>
+      </div>
       </div>
     </Dialog>
   );
@@ -251,12 +262,10 @@ function LiveSessions(props: { agent: Agent }) {
     <ul className="session-list" aria-label={`Live Agent Sessions of ${a.name}`}>
       {a.sessions.length === 0 && (
         <li className="session">
-          <span className="not-connected">
-            <span className="offline-dot" aria-hidden="true" /> Not connected
-          </span>
+          <NotConnected />
           {a.lastSessionEndedAt && (
             <span className="muted">
-              last Session ended <RelativeTime at={a.lastSessionEndedAt} />
+              last Agent Session ended <RelativeTime at={a.lastSessionEndedAt} />
             </span>
           )}
         </li>
@@ -291,10 +300,19 @@ function LiveSessions(props: { agent: Agent }) {
   );
 }
 
+/** An Agent with no live Agent Session: a hollow dot and "Not connected". */
+function NotConnected() {
+  return (
+    <span className="not-connected">
+      <span className="offline-dot" aria-hidden="true" /> Not connected
+    </span>
+  );
+}
+
 /** Every other User's Agents, read-only, for an Admin: Agent, Owner and whether it is connected. */
 function OthersAgents(props: { me: User; agents: Loaded<Agent[]> }) {
   return (
-    <>
+    <div className="others-agents">
       <h2 className="others-head">
         Everyone else's Agents <span className="muted others-badge">Admin</span>
       </h2>
@@ -311,9 +329,7 @@ function OthersAgents(props: { me: User; agents: Loaded<Agent[]> }) {
                   {a.sessions.length > 0 ? (
                     <LiveIndicator state="live" />
                   ) : (
-                    <span className="not-connected">
-                      <span className="offline-dot" aria-hidden="true" /> Not connected
-                    </span>
+                    <NotConnected />
                   )}
                 </li>
               ))}
@@ -321,7 +337,7 @@ function OthersAgents(props: { me: User; agents: Loaded<Agent[]> }) {
           );
         }}
       </Show>
-    </>
+    </div>
   );
 }
 
