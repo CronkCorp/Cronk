@@ -86,6 +86,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       priority: z.array(z.enum(PRIORITIES)).optional().describe("Only Tickets with one of these Priorities (list)"),
       label: z.array(z.string()).optional().describe("Only Tickets with one of these Labels, ignoring case (list)"),
       assignee: z.array(z.string()).optional().describe("Only Tickets assigned to one of these User ids, or `none` for unassigned (list)"),
+      delegate: z.array(z.string()).optional().describe("Only Tickets delegated to one of these Agent ids, or `none` for undelegated (list)"),
     },
     actions: {
       list: {
@@ -93,7 +94,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         writes: false,
         run: (api, a) => {
           const project = required(a.project, "a project", "list");
-          const filters = query({ status: a.status, category: a.category, priority: a.priority, label: a.label, assignee: a.assignee });
+          const filters = query({ status: a.status, category: a.category, priority: a.priority, label: a.label, assignee: a.assignee, delegate: a.delegate });
           return api("GET", `/api/projects/${encodeURIComponent(project)}/tickets${filters}`);
         },
       },
