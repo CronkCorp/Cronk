@@ -79,10 +79,11 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Actor** (`<Actor>`): avatar plus name. A User is round. An Agent is square, violet, and followed by "for <Owner>" where the Owner isn't obvious. Never write "Ada (session d152, for Ada)" as prose.
 - **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper, `sessionName` in `src/web/components/actor.tsx`, computes it everywhere, and `<SessionName>` renders it.
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
-- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour.
+- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour. The `danger` pill also marks a merge's "Both changed".
+- **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
 - **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
-  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
+  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
   - Ghost is text in `--accent`, for Reply, Rename and the like.
   - Danger is filled `--danger`, and only inside a confirming dialog.
@@ -97,6 +98,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - The exact time is always in `title`.
   - A timeline shows clock times (`<RelativeTime clock>`) with a separator for each day ("Today", "Yesterday", "14 Nov").
 - **Empty states:** a short heading saying what will appear and one line saying how it gets there ("Agents write a Report when they hand work over").
+- **Silence meter** (`<SilenceMeter>`): a thin `--agent` bar that empties from when an Agent Session was last heard to when it would fall silent, with "heard 40 s ago" under it. It counts down every second on the client between live updates.
 - **Live indicator** (`<LiveIndicator>`): a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
 
 ## Screens
@@ -105,11 +107,10 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 
 The Project page is shown in `docs/ui/frame.png`.
 
-- **Page head:** the title, a List / Board / Reports segmented control, and New Ticket as the only primary action. Access, Agent Access, Statuses, Guidance and Archive live in the Project's settings, behind a "…" menu.
-- **List rows:** Status dot, key, title, Priority tag, and the Delegate's and Assignee's avatars.
-- **Board:** uses the full main-column width. Completed and Canceled columns collapse to their count by default, so a 1280px screen shows every Status without sideways scrolling.
-
-Follow-up: #110.
+- **Page head:** the title, a List / Board / Reports segmented control, a "…" menu, and New Ticket as the only primary action, last. The "…" menu holds Documents (the Project's page tree), Project settings (read-only without Write access), and for those with Write access Archive Project (Restore Project once archived), which asks for confirmation.
+- **Project settings** (`?view=settings`): one section each for Access (Admins), Agent Access, Statuses and Guidance. The old addresses `?view=statuses` and `?view=guidance` open it at that section.
+- **List rows:** Status dot, key, title, Labels, Priority tag, and the Delegate's and Assignee's avatars, each named in its tooltip ("Delegate: claude-laptop").
+- **Board:** open columns share the main column's width. Columns in the Completed and Canceled Status Categories start collapsed to their dot and count, and clicking one opens it until the User leaves the page; nothing is stored. So a 1280px screen shows every Status without sideways scrolling. Cards show the key, Priority, title, Labels and the avatars.
 
 ### Inbox
 
@@ -121,8 +122,11 @@ Follow-up: #110.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back.
-- **Acting on an item:** the next item is selected. It never jumps to the top of the list.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back. None of them fire while focus is in a text field. A line under the split names them.
+- **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
+- **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
+- **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
+- **Empty:** a calm empty state, not an empty split.
 - **Phone:** the list and the detail stack, and selecting an item opens the detail full width.
 
 ![Inbox on a phone](ui/phone-inbox.png)

@@ -161,7 +161,12 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("link", { name: "Statuses" }).click();
+  await page.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Project settings" }).click();
+  await expect(page).toHaveURL(/view=settings/);
+  for (const section of ["Access", "Agent Access", "Statuses", "Guidance"]) {
+    await expect(page.getByRole("region", { name: section, exact: true })).toBeVisible();
+  }
 
   const started = page.getByRole("region", { name: "Started", exact: true });
   await started.getByLabel("New Started Status").fill("In QA");
@@ -176,6 +181,24 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByRole("link", { name: "Board" }).click();
   await expect(page.getByRole("region", { name: "In QA" })).toContainText("Add sign-in");
   await expect(page.getByRole("region", { name: "In Progress" })).toHaveCount(0);
+});
+
+// Runs after the tests above, so Ada exists; archives a Project of its own so later tests keep CRONK.
+test("archive a Project from the page head's … menu, through a confirmation", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Attic", key: "ATTIC" } });
+  await page.goto("/projects/ATTIC");
+  await expect(page.getByRole("heading", { name: "Attic" })).toBeVisible();
+
+  // Archive isn't in the head itself: it waits in the … menu and asks first.
+  const head = page.getByTestId("page-head");
+  await expect(head.getByRole("button", { name: "Archive Project" })).toHaveCount(0);
+  await head.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive Project" }).click();
+  await page.getByRole("dialog", { name: "Archive Attic?" }).getByRole("button", { name: "Archive Project" }).click();
+  await expect(page.getByRole("heading", { name: /Attic/ })).toContainText("Archived");
+  await page.goto("/archived");
+  await expect(page.getByRole("main").getByRole("link", { name: /ATTIC/ })).toBeVisible();
 });
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
@@ -199,8 +222,10 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await bob.getByRole("button", { name: "Join" }).click();
   await expect(bob.getByRole("main").getByRole("link", { name: /CRONK/ })).toBeVisible();
 
-  await page.goto("/projects/CRONK");
-  await page.getByRole("button", { name: "Access" }).click();
+  // The old address of a settings tab opens Project settings at that section.
+  await page.goto("/projects/CRONK?view=statuses");
+  await expect(page.getByRole("region", { name: "Statuses" })).toBeInViewport();
+  await page.goto("/projects/CRONK?view=settings");
   await page.getByRole("button", { name: "Make private" }).click();
   await expect(page.getByRole("heading", { name: /Private/ })).toBeVisible();
 
@@ -217,15 +242,30 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await page.getByRole("link", { name: "Agents" }).click();
-  await page.getByLabel("Agent name").fill("claude-laptop");
+  // Registering happens in a dialog opened from the page head.
+  await page.getByRole("button", { name: "Register an Agent" }).click();
+  const registerDialog = page.getByRole("dialog", { name: "Register an Agent" });
+  await registerDialog.getByLabel("Agent name").fill("claude-laptop");
   // Outside the sign-in forms a button sizes to its label rather than filling its form.
-  const register = (await page.getByRole("button", { name: "Register Agent" }).boundingBox())!;
-  const agentName = (await page.getByLabel("Agent name").boundingBox())!;
+  const register = (await registerDialog.getByRole("button", { name: "Register Agent" }).boundingBox())!;
+  const agentName = (await registerDialog.getByLabel("Agent name").boundingBox())!;
   expect(register.width).toBeLessThan(agentName.width / 2);
-  await page.getByRole("button", { name: "Register Agent" }).click();
-  await page.getByRole("button", { name: "Issue full token" }).click();
-  const token = await page.getByLabel("New token").inputValue();
-  await expect(page.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+  await registerDialog.getByRole("button", { name: "Register Agent" }).click();
+  await expect(registerDialog).toBeHidden();
+  const card = page.getByRole("listitem", { name: "claude-laptop" });
+  await expect(card).toContainText("Not connected");
+  // Tokens are issued in the Manage tokens dialog, which shows a new secret once.
+  await card.getByRole("button", { name: "Manage tokens" }).click();
+  const tokensDialog = page.getByRole("dialog", { name: "Tokens of claude-laptop" });
+  await tokensDialog.getByRole("button", { name: "Issue full token" }).click();
+  const token = await tokensDialog.getByLabel("New token").inputValue();
+  await expect(tokensDialog.getByRole("button", { name: "Copy" })).toBeVisible();
+  await expect(tokensDialog.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+  await tokensDialog.getByRole("button", { name: "Done" }).click();
+  await expect(card).toContainText("1 token: full");
+  await card.getByRole("button", { name: "Manage tokens" }).click();
+  await expect(tokensDialog.getByLabel("New token")).toHaveCount(0);
+  await tokensDialog.getByRole("button", { name: "Done" }).click();
 
   const created = await request.post("/api/projects/CRONK/tickets", {
     headers: { authorization: `Bearer ${token}` },
@@ -271,6 +311,17 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   // The Claim shows in the side panel as soon as it is made, without a reload.
   await expect(page.getByTestId("ticket-claim")).toContainText(`claude-laptop since`);
   await expect(page.getByTestId("ticket-claim").getByTitle(session)).toHaveText(sessionName);
+  // The open Agents page shows what the Session works on, and follows it as it releases and Claims again, without a reload.
+  // The server notices Agent Session changes every 5 seconds, so these wait a little longer than usual.
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(liveSessions).toContainText(`Working on ${ticket.key}`);
+  await expect(page.getByText("Live", { exact: true }).first()).toBeVisible();
+  expect((await request.delete(`/api/tickets/${ticket.key}/claim`, { headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session } })).status()).toBe(204);
+  await expect(liveSessions).toContainText("Connected, no Claim", { timeout: 10_000 });
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session } })).status()).toBe(200);
+  await expect(liveSessions).toContainText(`Working on ${ticket.key}`, { timeout: 10_000 });
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByTestId("ticket-claim").getByTitle(session)).toHaveText(sessionName);
   // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
   const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
@@ -315,26 +366,29 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
   await page.getByRole("link", { name: "Inbox" }).click();
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
-  const inbox = page.getByRole("list", { name: "Inbox" });
-  const review = inbox.getByRole("listitem", { name: `Review ${ticket.key}` });
-  await expect(review.getByRole("list", { name: `Reports on ${ticket.key}` })).toContainText("What I found");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  const review = list.getByRole("list", { name: "To review" }).getByRole("link", { name: new RegExp(ticket.key) });
+  await expect(review).toContainText("Report: What I found");
+  await review.click();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
   await request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body: "Ship it **today**?", blocking: true } });
-  const question = inbox.getByRole("listitem", { name: `Question on ${ticket.key}` });
-  await expect(question).toContainText("Blocking question");
-  await expect(inbox.getByRole("listitem").first()).toContainText("Ship it today?");
-  await question.getByRole("button", { name: "Answer" }).click();
-  await question.getByLabel("Answer").fill("Yes.");
-  await question.getByRole("button", { name: "Post answer" }).click();
+  const question = list.getByRole("list", { name: "Blocking" }).getByRole("link", { name: /Ship it today\?/ });
+  await expect(question).toContainText(ticket.key);
+  await question.click();
+  await detail.getByLabel("Answer", { exact: true }).fill("Yes.");
+  await detail.getByRole("button", { name: "Post answer" }).click();
   await expect(question).toHaveCount(0);
   // The Ticket opens from the Inbox.
-  await review.getByRole("link", { name: new RegExp(ticket.key) }).click();
+  await review.click();
+  await detail.getByRole("link", { name: "Open Ticket" }).click();
   await expect(page.getByRole("heading", { name: "Filed and renamed by an Agent" })).toBeVisible();
   await page.goBack();
   // Ada sends the work back with what is left; it leaves her Inbox, and the Ticket shows why.
-  await review.getByRole("button", { name: "Send back" }).click();
-  await review.getByLabel("What is left to do").fill("Add a test.");
-  await review.getByRole("button", { name: "Send back" }).click();
-  await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
+  await detail.getByRole("button", { name: "Send back…" }).click();
+  await detail.getByLabel("What is left to do").fill("Add a test.");
+  await detail.getByRole("button", { name: "Send back", exact: true }).click();
+  await expect(review).toHaveCount(0);
   await page.goto(`/tickets/${ticket.key}`);
   const startedStatus = statuses.find((s: { category: string }) => s.category === "started").name;
   await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Status/ })).toContainText(startedStatus);
@@ -486,6 +540,128 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await selectText(body, "strong", "bold", "strong", "a*b");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**bold a\\*b**");
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("see a Comment in the margin beside the passage it is about", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const intro = "Cronk stores every password as an **Argon2id** hash.\n\n";
+  const { document } = await (
+    await page.request.post("/api/projects/CRONK/documents", {
+      data: { title: "Security notes", body: `${intro.repeat(12)}## Rate limits\n\nFailed sign-ins are limited to five per minute. The limit slides.\n` },
+    })
+  ).json();
+  const passage = "Failed sign-ins are limited to five per minute";
+  await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Per IP too?", anchor: { passage } } });
+  await page.goto(`/documents/${document.id}`);
+
+  // The passage is highlighted in the body, and its Comment's card sits in the margin beside it.
+  const highlighted = page.getByTestId("document-body").locator("mark");
+  await expect(highlighted).toHaveText(passage);
+  const card = page.getByRole("list", { name: "Comments" }).getByRole("listitem").filter({ hasText: "Per IP too?" });
+  await expect(card).toBeVisible();
+  const passageBox = (await highlighted.boundingBox())!;
+  const cardBox = (await card.boundingBox())!;
+  expect(cardBox.x).toBeGreaterThan(passageBox.x + passageBox.width);
+  expect(Math.abs(cardBox.y - passageBox.y)).toBeLessThan(24);
+
+  // Hovering or focusing either one highlights both.
+  await highlighted.hover();
+  await expect(highlighted).toHaveClass(/active/);
+  await expect(card).toHaveClass(/active/);
+  await page.mouse.move(0, 0);
+  await expect(highlighted).not.toHaveClass(/active/);
+  await card.focus();
+  await expect(highlighted).toHaveClass(/active/);
+
+  // On a narrow screen the Comments move under the body.
+  await page.setViewportSize({ width: 800, height: 900 });
+  const narrowBody = (await page.getByTestId("document-body").boundingBox())!;
+  expect((await card.boundingBox())!.y).toBeGreaterThan(narrowBody.y + narrowBody.height);
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("highlight a repeated passage once, and list passages that can't be placed at the end of the margin", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const first = "Old wording.\n\nRotate the keys yearly.\n\n```js\njs\n```\n";
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Key rotation", body: first } })).json();
+  const comment = (body: string, passage: string) => page.request.post(`/api/documents/${document.id}/comments`, { data: { body, anchor: { passage } } });
+  await comment("Is this still true?", "Old wording.");
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: `Rotate the keys yearly.\n\n${first.slice(14)}\n## Again\n\nRotate the keys yearly.\n` } });
+  // The info string of a code block shows nowhere on the page, so this passage can't be placed.
+  await comment("Which language?", "```js");
+  await comment("Why yearly?", "Rotate the keys");
+  await page.goto(`/documents/${document.id}`);
+
+  // The passage appears twice, but only its first place in the Markdown is highlighted.
+  const body = page.getByTestId("document-body");
+  await expect(body.locator("mark")).toHaveCount(1);
+  await expect(body.locator("p").first().locator("mark")).toHaveText("Rotate the keys");
+
+  // The placed card comes first; the passage that can't be placed and the detached one follow, unhighlighted.
+  const cards = page.getByRole("list", { name: "Comments" }).locator("> li");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.nth(0)).toContainText("Why yearly?");
+  await expect(cards.nth(1)).toContainText("Is this still true?");
+  await expect(cards.nth(1)).toContainText("No longer in the Document (was in Version 1)");
+  await expect(cards.nth(2)).toContainText("Which language?");
+  await expect(cards.nth(1).locator("blockquote")).toHaveCSS("text-decoration-line", "line-through");
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("settle a stale save by using their side of the conflict", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const original = "## Setup\n\nInstall it.\n\n## Limits\n\nFive per minute.\n";
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Rate limits", body: original } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Title").fill("Rate limits per IP");
+  await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it.\n\n## Limits\n\nFive per minute, sliding.\n");
+  const theirs = "## Setup\n\nInstall it with npm.\n\n## Limits\n\nFive per email and fifty per IP.\n";
+  expect((await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: theirs } })).status()).toBe(200);
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // An information banner, under the Document's title, says who saved which Version and what needs a choice.
+  await expect(page.getByRole("heading", { name: "Rate limits" })).toBeVisible();
+  const banner = page.getByRole("alert");
+  await expect(banner).toContainText("Ada saved Version 2 while you were editing");
+  await expect(banner).toContainText("1 section needs your choice");
+  await expect(banner).toHaveClass(/banner info/);
+  // The conflict shows both sides next to each other; the section that merged cleanly is folded.
+  const limits = page.getByRole("region", { name: "## Limits" });
+  await expect(limits.getByText("Both changed")).toBeVisible();
+  const yours = limits.getByRole("region", { name: "Yours" });
+  const theirSide = limits.getByRole("region", { name: "Ada, Version 2" });
+  await expect(yours).toContainText("Five per minute, sliding.");
+  await expect(theirSide).toContainText("Five per email and fifty per IP.");
+  expect((await theirSide.boundingBox())!.x).toBeGreaterThan((await yours.boundingBox())!.x);
+  const clean = page.getByRole("group", { name: "Merged cleanly" });
+  await expect(clean.getByRole("list")).toBeHidden();
+  await clean.getByText("Merged cleanly").click();
+  await expect(clean).toContainText("+ Install it with npm.");
+  await expect(page.getByRole("button", { name: "Discard mine and edit theirs" })).toBeVisible();
+
+  await limits.getByRole("button", { name: "Use theirs" }).click();
+  await expect(limits.getByLabel("Keep for ## Limits")).toHaveValue("## Limits\n\nFive per email and fifty per IP.\n");
+  await page.getByRole("button", { name: "Use these and keep editing" }).click();
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue(theirs);
+  await page.getByRole("button", { name: "Save" }).click();
+  // Their body is kept, with the title only this edit changed.
+  await expect(page.getByRole("heading", { name: "Rate limits per IP" })).toBeVisible();
+  await expect(page.getByTestId("document-body")).toContainText("Five per email and fifty per IP.");
+  expect((await (await page.request.get(`/api/documents/${document.id}`)).json()).document.version).toBe(3);
 });
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
@@ -725,7 +901,8 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("navigation", { name: "View" }).getByRole("link", { name: "Guidance" }).click();
+  await page.goto("/projects/CRONK?view=guidance");
+  await expect(page.getByRole("region", { name: "Guidance" })).toBeInViewport();
   await page.getByRole("button", { name: "Edit Guidance" }).click();
   await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n");
   await page.getByRole("button", { name: "Save" }).click();
@@ -1002,15 +1179,193 @@ test("answer a blocking question in the timeline, where only Comments and questi
   await expect(comment.getByRole("list", { name: "Replies" })).toContainText("Agreed.");
 });
 
+// Runs after the tests above, so Ada exists. Each Inbox test works in a Project of its own, filtered to it.
+test("review a Ticket from the Inbox's detail pane: read its Report inline, send it back, then complete the next", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox reviews", key: "INR" } });
+  const first = await reviewWithReport(page, request, "review-bot-1", "Show Claim expiry", "INR", "It was the **cache**.");
+  const second = await reviewWithReport(page, request, "review-bot-2", "Fix stale-save merge", "INR", "Merge keeps **ATX** headings.");
+
+  await page.goto("/inbox?project=INR");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await expect(list.getByRole("heading", { name: "To review · 2" })).toBeVisible();
+  const reviews = list.getByRole("list", { name: "To review" });
+  await expect(reviews.getByRole("link")).toHaveCount(2);
+  // The first item is selected until the User picks another; picking one keeps it in the address alongside the filters.
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  await reviews.getByRole("link", { name: new RegExp(second.key) }).click();
+  await expect(page).toHaveURL(/project=INR/);
+  await expect(page).toHaveURL(new RegExp(`item=review-${second.key}`));
+  await expect(reviews.getByRole("link", { name: new RegExp(second.key) })).toHaveAttribute("aria-current", "true");
+  // The Report's full body is rendered inline, and the Ticket's Status is shown; a reload reopens the same item.
+  await page.reload();
+  await expect(detail.getByRole("strong").filter({ hasText: "ATX" })).toBeVisible();
+  await expect(detail).toContainText("In Review");
+  await expect(detail.getByRole("link", { name: "Open Ticket" })).toHaveAttribute("href", `/tickets/${second.key}`);
+
+  // S opens Send back, which needs a Comment saying what is left to do.
+  await page.locator("body").press("s");
+  await expect(detail.getByLabel("What is left to do")).toBeFocused();
+  await expect(detail.getByLabel("What is left to do")).toHaveValue("");
+  await expect(detail.getByRole("button", { name: "Send back", exact: true })).toBeDisabled();
+  await detail.getByLabel("What is left to do").fill("Add a test.");
+  await detail.getByRole("button", { name: "Send back", exact: true }).click();
+  // It leaves the Inbox, and the item before it is selected, as it was the last.
+  await expect(reviews.getByRole("link")).toHaveCount(1);
+  await expect(list.getByRole("heading", { name: "To review · 1" })).toBeVisible();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`item=review-${first.key}`));
+  await page.goto(`/tickets/${second.key}`);
+  await expect(page.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "Add a test." })).toContainText("Sent back");
+
+  // C completes the selected review; with nothing left, the Inbox is a calm empty state rather than an empty split.
+  await page.goBack();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  await page.locator("body").press("c");
+  await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
+  await expect(detail).toHaveCount(0);
+  await page.goto(`/tickets/${first.key}`);
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Status/ })).toContainText("Done");
+});
+
+// Runs after the tests above, so Ada exists.
+test("answer a blocking question from the Inbox's detail pane, moving through the groups with the keyboard", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox questions", key: "INQ" } });
+  await reviewWithReport(page, request, "triage-bot-1", "Show Claim expiry", "INQ", "Done.");
+  const { ticket, agentCall } = await delegatedTicket(page, request, "triage-bot-2", "Rate-limit sign-in attempts", "INQ");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const ask = (body: string, blocking: boolean) => request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body, blocking } });
+  await ask("Keep the **casing** of the first use?", false);
+
+  await page.goto("/inbox?project=INQ");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await expect(list.getByRole("heading", { name: "Questions · 1" })).toBeVisible();
+  // A new blocking question arrives live, without a reload, in its own group at the top.
+  await ask("Per **email** or per IP?", true);
+  await expect(list.getByRole("heading")).toHaveText(["Blocking · 1", "Questions · 1", "To review · 1"]);
+  const blocking = list.getByRole("list", { name: "Blocking" }).getByRole("link");
+  await expect(blocking).toContainText("Per email or per IP?");
+  await expect(page.getByRole("group", { name: "Filters" }).getByRole("button", { name: "Everything 3" })).toBeVisible();
+
+  // J and K move through the list across the groups.
+  await blocking.click();
+  await expect(detail).toContainText("Blocking question");
+  await page.locator("body").press("j");
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await page.locator("body").press("j");
+  await expect(detail).toContainText("Done.");
+  await page.locator("body").press("k");
+  await page.locator("body").press("k");
+  await expect(detail.getByRole("strong").filter({ hasText: "email" })).toBeVisible();
+  await expect(detail).toContainText("triage-bot-2 is waiting");
+  await expect(detail).toContainText("The answer reaches triage-bot-2 as Waiting Work.");
+
+  // A focuses the answer box; the shortcuts type into it rather than moving the list.
+  await page.locator("body").press("a");
+  // Located by its placeholder, as a label's text grows with what is typed in the field inside it.
+  const answer = detail.getByPlaceholder("Answer triage-bot-2… (Markdown)");
+  await expect(answer).toBeFocused();
+  await expect(answer).toHaveValue("");
+  await answer.pressSequentially("just email");
+  await expect(answer).toHaveValue("just email");
+  await expect(blocking).toHaveAttribute("aria-current", "true");
+  await detail.getByRole("button", { name: "Post answer" }).click();
+  // The answered question leaves the Inbox, and the next item is selected.
+  await expect(list.getByRole("list", { name: "Blocking" })).toHaveCount(0);
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("list", { name: "Timeline" }).getByRole("list", { name: "Replies" })).toContainText("just email");
+
+  // On a phone the list and the detail stack: picking an item opens it full width, with a way back to the list.
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto("/inbox?project=INQ");
+  await expect(list).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await list.getByRole("link", { name: /casing/ }).click();
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await expect(list).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await detail.getByRole("link", { name: "Back to the list" }).click();
+  await expect(list).toBeVisible();
+});
+
+// Runs after the tests above, so Ada exists.
+test("see the selected item marked Resolved elsewhere once it is answered in another page", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox elsewhere", key: "INX" } });
+  const { ticket, agentCall } = await delegatedTicket(page, request, "elsewhere-bot", "Export Labels in frontmatter", "INX");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const ask = (body: string) => request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body } });
+  await ask("Lowercase them all?");
+  await ask("Keep the casing?");
+  await ask("Sort them too?");
+
+  await page.goto("/inbox?project=INX");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await list.getByRole("link", { name: /Keep the casing\?/ }).click();
+  await expect(detail).toContainText("Keep the casing?");
+
+  // Ada answers the same question on the Ticket page, in a second page.
+  const other = await page.context().newPage();
+  await other.goto(`/tickets/${ticket.key}`);
+  const asked = other.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "Keep the casing?" });
+  await asked.getByLabel("Answer", { exact: true }).fill("Keep it.");
+  await asked.getByRole("button", { name: "Post answer" }).click();
+  await expect(asked).toContainText("Answered");
+  await other.close();
+
+  // The list drops it, but the detail pane keeps it, marked and with its actions disabled, linking to the Ticket.
+  await expect(list.getByRole("link", { name: /Keep the casing\?/ })).toHaveCount(0);
+  await expect(list.getByRole("heading", { name: "Questions · 2" })).toBeVisible();
+  await expect(detail.getByRole("status")).toHaveText(/Resolved elsewhere/);
+  await expect(detail).toContainText("Keep the casing?");
+  await expect(detail.getByRole("button", { name: "Post answer" })).toBeDisabled();
+  await expect(detail.getByPlaceholder("Answer elsewhere-bot… (Markdown)")).toBeDisabled();
+  await expect(detail.getByRole("link", { name: "Open Ticket" })).toHaveAttribute("href", `/tickets/${ticket.key}`);
+  // J moves on to the item that followed it.
+  await page.locator("body").press("j");
+  await expect(detail).toContainText("Sort them too?");
+  await expect(detail.getByRole("status")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "Post answer" })).toBeVisible();
+});
+
+/** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */
+async function reviewWithReport(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  agentName: string,
+  title: string,
+  project: string,
+  report: string,
+) {
+  const { ticket, agentCall } = await delegatedTicket(page, request, agentName, title, project);
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  expect((await request.post(`/api/tickets/${ticket.key}/reports`, { headers: agentCall, data: { title, body: report } })).status()).toBe(201);
+  const { statuses } = await (await request.get(`/api/projects/${project}`, { headers: agentCall })).json();
+  const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
+  expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
+  return ticket as { key: string; title: string };
+}
+
 /**
  * Registers an Agent of Ada's with a full token, starts an Agent Session for it, and files a Ticket assigned
  * to Ada and delegated to the Agent. Calls with `agentCall` act as that Agent Session.
  */
-async function delegatedTicket(page: import("@playwright/test").Page, request: import("@playwright/test").APIRequestContext, agentName: string, title: string) {
+async function delegatedTicket(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  agentName: string,
+  title: string,
+  project = "CRONK",
+) {
   const { user } = await (await page.request.get("/api/me")).json();
   const { agent } = await (await page.request.post("/api/agents", { data: { name: agentName } })).json();
   const { secret } = await (await page.request.post(`/api/agents/${agent.id}/tokens`, { data: { readOnly: false } })).json();
-  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title } })).json();
+  const { ticket } = await (await page.request.post(`/api/projects/${project}/tickets`, { data: { title } })).json();
   await page.request.patch(`/api/tickets/${ticket.key}`, { data: { assigneeId: user.id, delegateId: agent.id } });
   const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${secret}` } });
   const session = (await started.json()).session.id as string;
@@ -1030,3 +1385,50 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("navigation", { name: "Sidebar" }).getByRole("link", { name: /CRONK/ })).toBeVisible();
 }
+
+// Runs after the tests above, so Ada and CRONK exist.
+test("see a Ticket's Priority, Assignee and Delegate on the Project's list and board", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket } = await delegatedTicket(page, request, "people-bot", "Shows who has it");
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { priority: "high" } });
+
+  await page.goto("/projects/CRONK");
+  const row = page.getByRole("list", { name: "Tickets" }).getByRole("link", { name: /Shows who has it/ });
+  await expect(row.getByText("High", { exact: true })).toBeVisible();
+  await expect(row.getByRole("img", { name: "Delegate: people-bot" })).toBeVisible();
+  await expect(row.getByRole("img", { name: "Assignee: Ada" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Board" }).click();
+  const card = page.getByRole("region", { name: "Backlog" }).getByRole("link", { name: /Shows who has it/ });
+  await expect(card.getByText("High", { exact: true })).toBeVisible();
+  await expect(card.getByRole("img", { name: "Delegate: people-bot" })).toBeVisible();
+  await expect(card.getByRole("img", { name: "Assignee: Ada" })).toBeVisible();
+});
+
+// Runs after the tests above, so Ada exists; uses a Project of its own with the six Statuses a Project starts with.
+test("fit the board on a 1280px screen, with Completed and Canceled columns collapsed until opened", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Fit", key: "FIT" } });
+  const { statuses } = await (await page.request.get("/api/projects/FIT")).json();
+  const done = statuses.find((s: { name: string }) => s.name === "Done");
+  const { ticket } = await (await page.request.post("/api/projects/FIT/tickets", { data: { title: "Shipped already" } })).json();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { statusId: done.id } });
+  await page.request.post("/api/projects/FIT/tickets", { data: { title: "Still to do" } });
+
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/projects/FIT?view=board");
+  const board = page.getByRole("group", { name: "Board" });
+  for (const name of ["Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled"]) {
+    await expect(board.getByRole("region", { name, exact: true })).toBeInViewport({ ratio: 1 });
+  }
+  expect(await board.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(board.getByRole("region", { name: "Backlog" })).toContainText("Still to do");
+
+  const doneColumn = board.getByRole("region", { name: "Done", exact: true });
+  const open = doneColumn.getByRole("button", { name: "Done, 1 Ticket" });
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await expect(doneColumn).not.toContainText("Shipped already");
+  await expect(board.getByRole("region", { name: "Canceled" }).getByRole("button", { name: "Canceled, 0 Tickets" })).toBeVisible();
+  await open.click();
+  await expect(doneColumn).toContainText("Shipped already");
+});

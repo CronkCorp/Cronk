@@ -135,3 +135,55 @@ export async function liveAgentSessions(db: Queryable, agentIds: string[], now: 
   for (const row of rows) byAgent.get(row.agent_id)!.push(toAgentSession(row));
   return byAgent;
 }
+
+/**
+ * When each of these Agents' last Session that is no longer live ended: when it was ended, or when it
+ * fell silent if that came first. Agents with no such Session are left out.
+ */
+export async function lastAgentSessionEnds(db: Queryable, agentIds: string[], now: Date): Promise<Map<string, Date>> {
+  const { rows } = await db.query<{ agent_id: string; ended: Date }>(
+    `SELECT s.agent_id, max(LEAST(s.ended_at, s.last_seen_at + make_interval(secs => w.silence_threshold_seconds))) AS ended
+     FROM agent_sessions s ${WITH_WORKSPACE} WHERE s.agent_id = ANY($1::uuid[]) AND NOT (${isLiveAt("$2")}) GROUP BY s.agent_id`,
+    [agentIds, now],
+  );
+  return new Map(rows.map((r) => [r.agent_id, r.ended]));
+}
+
+/** What the Agents page shows of a live Session, to notice when it changes: its Agent's Owner, when it would fall silent, and its Claims. */
+export interface SessionLook {
+  ownerId: string;
+  endsIfSilentAt: number;
+  /** The ids of the Tickets it holds the Claims on, in order. */
+  claims: string;
+}
+
+/** Every live Session at `now`, by id, as the Agents page shows it (see `SessionLook`). */
+export async function lookAtLiveAgentSessions(db: Queryable, now: Date): Promise<Map<string, SessionLook>> {
+  const { rows } = await db.query<{ id: string; owner_id: string; last_seen_at: Date; silence_threshold_seconds: number; claims: string }>(
+    `SELECT s.id, a.owner_id, s.last_seen_at, w.silence_threshold_seconds,
+            COALESCE(string_agg(t.id::text, ',' ORDER BY t.id), '') AS claims
+     FROM agent_sessions s ${WITH_WORKSPACE} LEFT JOIN tickets t ON t.claim_session_id = s.id
+     WHERE ${isLiveAt("$1")} GROUP BY s.id, a.owner_id, w.silence_threshold_seconds`,
+    [now],
+  );
+  return new Map(
+    rows.map((r) => [
+      r.id,
+      { ownerId: r.owner_id, endsIfSilentAt: r.last_seen_at.getTime() + r.silence_threshold_seconds * 1000, claims: r.claims },
+    ]),
+  );
+}
+
+/**
+ * The Owners whose live Sessions differ between two looks: one started, ended or fell silent,
+ * gained or lost a Claim, or would fall silent at another time.
+ */
+export function ownersWithChangedSessions(before: Map<string, SessionLook>, after: Map<string, SessionLook>): Set<string> {
+  const owners = new Set<string>();
+  for (const [id, was] of before) {
+    const is = after.get(id);
+    if (!is || is.endsIfSilentAt !== was.endsIfSilentAt || is.claims !== was.claims) owners.add(was.ownerId);
+  }
+  for (const [id, is] of after) if (!before.has(id)) owners.add(is.ownerId);
+  return owners;
+}

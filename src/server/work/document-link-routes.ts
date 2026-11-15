@@ -7,6 +7,7 @@ import { documentFor } from "../knowledge/document-reads.js";
 import { listLinkedDocuments, type Document } from "../knowledge/documents.js";
 import { answer, documentIdParam, errors, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { linkDocument, unlinkDocument } from "./document-links.js";
+import { ticketsChanged } from "./ticket-changes.js";
 import { ticketFor } from "./ticket-reads.js";
 import type { Ticket } from "./tickets.js";
 
@@ -28,12 +29,13 @@ export function documentLinkRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const documents = await transaction(ctx.db, async (tx) => {
+        const { ticket, documents } = await transaction(ctx.db, async (tx) => {
           const { ticket, document } = await linkEnds(tx, actor, request.params.key, request.params.documentId);
           if (document.ticketKey === ticket.key) throw new HttpError(400, `That Document is a Report on ${ticket.key}, which lists it already`);
           await linkDocument(tx, { ticket, document, actor, now: ctx.clock.now() });
-          return listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor));
+          return { ticket, documents: await listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor)) };
         });
+        ticketsChanged(ctx.live, [ticket]);
         return reply.code(201).send({ documents });
       },
     );
@@ -51,11 +53,12 @@ export function documentLinkRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const documents = await transaction(ctx.db, async (tx) => {
+        const { ticket, documents } = await transaction(ctx.db, async (tx) => {
           const { ticket, document } = await linkEnds(tx, actor, request.params.key, request.params.documentId);
           if (!(await unlinkDocument(tx, { ticket, document, actor, now: ctx.clock.now() }))) throw new HttpError(404, "That Document isn't linked to this Ticket");
-          return listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor));
+          return { ticket, documents: await listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor)) };
         });
+        ticketsChanged(ctx.live, [ticket]);
         return { documents };
       },
     );

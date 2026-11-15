@@ -149,8 +149,7 @@ export function ProjectAccessPanel(props: { project: Project; onProjectChanged: 
   );
 
   return (
-    <section className="panel wide" aria-label="Project access">
-      <h2>Access</h2>
+    <div className="panel wide">
       <p className="muted">
         {p.visibility === "open"
           ? "Open: every Member has Write access, unless listed below with other access."
@@ -167,7 +166,7 @@ export function ProjectAccessPanel(props: { project: Project; onProjectChanged: 
           </Show>
         )}
       </Show>
-    </section>
+    </div>
   );
 }
 

@@ -182,8 +182,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         items: ref("AgentSession"),
         description: "Its live Agent Sessions, oldest first; only the Agents list has it.",
       },
+      lastSessionEndedAt: {
+        ...nullable(timestamp),
+        description:
+          "When its last Agent Session that is no longer live ended or fell silent, or null if it has had none; only the Agents list has it.",
+      },
+      delegateTicketCount: {
+        type: "integer",
+        description: "How many unfinished Tickets it is Delegate on in Projects the caller can read; only the Agents list has it.",
+      },
     },
-    ["sessions"],
+    ["sessions", "lastSessionEndedAt", "delegateTicketCount"],
   ),
   AgentSession: {
     description: "One continuous connection of an Agent, from connect to disconnect.",
@@ -192,7 +201,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       startedAt: timestamp,
       lastSeenAt: timestamp,
       endsIfSilentAt: { ...timestamp, description: "When the Session ends if it stays silent until then." },
-    }),
+      claims: {
+        type: "array",
+        description:
+          "The Tickets it holds the live Claims on, in key order, leaving out those in Projects the caller can't read; only the Agents list has it.",
+        items: object({ ticketKey: { type: "string" }, title: { type: "string" } }),
+      },
+    }, ["claims"]),
   },
   AgentToken: {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
@@ -268,7 +283,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     anyOf: [
       object({ change: { const: "created" }, title: { type: "string" }, description: { type: "string" }, status: ref("Status") }),
       ...(["title", "description"] as const).map((c) => object({ change: { const: c }, from: { type: "string" }, to: { type: "string" } })),
-      object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
+      object({
+        change: { const: "status" },
+        from: ref("Status"),
+        to: ref("Status"),
+        sentBack: { type: "boolean", description: "True for the move back to a Started Status a User made sending the Ticket back from review." },
+      }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
       ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
@@ -323,6 +343,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The passage of its Document it is anchored to; null when it isn't anchored.",
       },
       body: { type: "string", description: "Markdown." },
+      sendBack: { type: "boolean", description: "True for the Comment a User sent its Ticket back from review with." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },
     }),

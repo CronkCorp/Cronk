@@ -4,14 +4,14 @@ import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
-import { inboxFilterFrom, InboxPage } from "./inbox.js";
+import { inboxAddressFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
 import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
 import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
-import { filterFrom, ProjectPage, ProjectsPage, type ProjectView } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, projectViewOf } from "./work.js";
 import { TicketPage } from "./ticket.js";
 
 type State =
@@ -152,7 +152,7 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "search":
       return <SearchPage filter={searchFilterFrom(search)} />;
     case "inbox":
-      return <InboxPage filter={inboxFilterFrom(search)} />;
+      return <InboxPage address={inboxAddressFrom(search)} />;
     case "documents":
       return <DocumentsPage />;
     case "projectDocuments":
@@ -162,7 +162,8 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "guidance":
       return <WorkspaceGuidancePage me={props.me} />;
     case "project":
-      return <ProjectPage projectKey={route.key} view={projectView(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
+      // Keyed by Project, so state kept while on the page, such as opened board columns, starts afresh in another.
+      return <ProjectPage key={route.key} projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
     case "ticket":
       return <TicketPage ticketKey={route.key} />;
     case "projects":
@@ -241,10 +242,6 @@ function ImportExport() {
       {error && <p className="error" role="alert">{error}</p>}
     </>
   );
-}
-
-function projectView(view: string | null): ProjectView {
-  return view === "board" || view === "statuses" || view === "reports" || view === "guidance" ? view : "list";
 }
 
 function WorkspaceGuidancePage(props: { me: User }) {

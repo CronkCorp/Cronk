@@ -79,11 +79,6 @@ export function TicketPage(props: { ticketKey: string }) {
           live={<LiveIndicator state={live} />}
           // An Agent Session's calls keep its Claim but aren't pushed, so the page reads the Claim again when it would lapse.
           onClaimDue={reloadDetail}
-          // Linking a Document isn't pushed on the Ticket's stream, so the page loads it again itself.
-          onDocumentsChanged={() => {
-            reloadDetail();
-            reloadChanges();
-          }}
           timeline={(canWrite) => (
             <Show state={entries}>
               {([lists, recorded]) => (
@@ -137,7 +132,6 @@ function TicketView(props: {
   detail: TicketDetail;
   live: ReactNode;
   timeline: (canWrite: boolean) => ReactNode;
-  onDocumentsChanged: () => void;
   onClaimDue: () => void;
 }) {
   const t = props.detail.ticket;
@@ -185,7 +179,7 @@ function TicketView(props: {
               </div>
             )}
             <RelationsEditor detail={props.detail} readOnly={!canWrite} />
-            <TicketDocuments detail={props.detail} readOnly={!canWrite} onChanged={props.onDocumentsChanged} />
+            <TicketDocuments detail={props.detail} readOnly={!canWrite} />
           </section>
         </aside>
       </div>
@@ -445,8 +439,9 @@ const whereDocumentIs = (d: { ticketKey: string | null; projectKey: string | nul
 /**
  * The Documents linked to the Ticket and those that mention its key, other Tickets' Reports included; its own
  * Reports show in its timeline. With Write, Documents found by search can be linked, and linked ones unlinked.
+ * A link or unlink shows once the Ticket's stream tells of it.
  */
-function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onChanged: () => void }) {
+function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
   const t = props.detail.ticket;
   const documents = props.detail.documents.filter((d) => d.reason !== "report");
   const [query, setQuery] = useState("");
@@ -464,9 +459,8 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
   const link = useAction((documentId: string) => api.linkDocument(t.key, documentId), () => {
     setQuery("");
     setFound(undefined);
-    props.onChanged();
   });
-  const unlink = useAction((documentId: string) => api.unlinkDocument(t.key, documentId), props.onChanged);
+  const unlink = useAction((documentId: string) => api.unlinkDocument(t.key, documentId), () => {});
   const error = search.error ?? link.error ?? unlink.error;
   if (props.readOnly && documents.length === 0) return null;
   return (
