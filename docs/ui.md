@@ -98,6 +98,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - The exact time is always in `title`.
   - A timeline shows clock times (`<RelativeTime clock>`) with a separator for each day ("Today", "Yesterday", "14 Nov").
 - **Empty states:** a short heading saying what will appear and one line saying how it gets there ("Agents write a Report when they hand work over").
+- **Silence meter** (`<SilenceMeter>`): a thin `--agent` bar that empties from when an Agent Session was last heard to when it would fall silent, with "heard 40 s ago" under it. It counts down every second on the client between live updates.
 - **Live indicator** (`<LiveIndicator>`): a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
 
 ## Screens
