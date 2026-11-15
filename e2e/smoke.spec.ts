@@ -83,8 +83,8 @@ test("create a Project and a Ticket, move it on the board and see its history", 
 
   await expect(page.getByRole("heading", { name: "Add sign-in" })).toBeVisible();
   await expect(page.getByTestId("ticket-description").locator("strong")).toHaveText("access");
-  await page.getByLabel("Status").selectOption({ label: "In Progress" });
-  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada moved it from Backlog to In Progress");
+  await pickField(page, "Status", "In Progress");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada moved it from Backlog to In Progress");
 
   await page.getByRole("link", { name: "CRONK", exact: true }).click();
   await page.getByRole("link", { name: "Board" }).click();
@@ -105,11 +105,17 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await page.getByRole("button", { name: "Create Ticket" }).click();
   await page.getByRole("link", { name: /CRONK-2/ }).click();
 
-  await page.getByLabel("Priority").selectOption({ label: "High" });
-  await page.getByLabel("Assignee").selectOption({ label: "Ada" });
-  await page.getByLabel("Add Label").fill("docs");
-  await page.getByLabel("Add Label").press("Enter");
-  await expect(page.getByRole("list", { name: "Labels" })).toContainText("docs");
+  await pickField(page, "Priority", "High");
+  await pickField(page, "Assignee", "Ada");
+  // A Label the Project doesn't have yet is added by typing it.
+  await page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Labels/ }).click();
+  await page.getByLabel("Filter Labels").fill("docs");
+  await page.getByLabel("Filter Labels").press("Enter");
+  // Labels picked one right after the other are all kept.
+  await page.getByLabel("Filter Labels").fill("sign-in");
+  await page.getByLabel("Filter Labels").press("Enter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Labels/ })).toContainText("docssign-in");
   await page.getByLabel("Parent").fill("CRONK-1");
   await page.getByRole("button", { name: "Set parent" }).click();
   await expect(page.getByTestId("ticket-parent")).toContainText("CRONK-1");
@@ -117,7 +123,7 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await page.getByLabel("Related Ticket").fill("CRONK-1");
   await page.getByRole("button", { name: "Add relation" }).click();
   await expect(page.getByRole("list", { name: "Blocked by" })).toContainText("Add sign-in");
-  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada set the Priority to High");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada set the Priority to High");
 
   await page.getByTestId("ticket-description").getByRole("link", { name: "CRONK-1" }).click();
   await expect(page.getByRole("heading", { name: "Add sign-in" })).toBeVisible();
@@ -229,7 +235,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   const { ticket } = await created.json();
 
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop for Ada created the Ticket");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("claude-laptop for Ada created the Ticket");
 
   // An Agent Session (one per MCP connection) shows on the Agents page and in the history of what it changed.
   const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
@@ -242,7 +248,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(renamed.status()).toBe(200);
   await page.reload();
   // The Session goes by a readable two-word name, the same everywhere, with its full id in the tooltip.
-  const renamedBy = page.getByRole("list", { name: "History" }).getByRole("listitem").filter({ hasText: "renamed it" });
+  const renamedBy = page.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "renamed it" });
   await expect(renamedBy).toContainText(/claude-laptop [a-z]+-[a-z]+ for Ada renamed it/);
   await expect(renamedBy.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
   const sessionName = (await renamedBy.getByTitle(session).textContent())!;
@@ -252,33 +258,34 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await expect(liveSessions.getByTitle(session)).toHaveText(sessionName);
   // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByTestId("ticket-claim")).toHaveText("Not Claimed");
-  await page.getByLabel("Assignee").selectOption({ label: "Ada" });
-  await page.getByLabel("Delegate").selectOption({ label: "claude-laptop" });
-  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada delegated it to claude-laptop");
+  await expect(page.getByRole("heading", { name: "Filed and renamed by an Agent" })).toBeVisible();
+  await expect(page.getByTestId("ticket-claim")).toHaveCount(0);
+  await pickField(page, "Assignee", "Ada");
+  await pickField(page, "Delegate", "claude-laptop");
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  await expect(timeline).toContainText("Ada delegated it to claude-laptop");
   const claimed = await request.post(`/api/tickets/${ticket.key}/claim`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
   });
   expect(claimed.status()).toBe(200);
-  await page.reload();
-  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop ${sessionName}`);
+  // The Claim shows in the side panel as soon as it is made, without a reload.
+  await expect(page.getByTestId("ticket-claim")).toContainText(`claude-laptop since`);
+  await expect(page.getByTestId("ticket-claim").getByTitle(session)).toHaveText(sessionName);
   // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
-  const timeline = page.getByRole("list", { name: "Timeline" });
-  await expect(timeline).toContainText("Nothing yet.");
   const asked = await request.post(`/api/tickets/${ticket.key}/activities`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
     data: { kind: "question", body: "Should this use **Postgres**?", blocking: true },
   });
   expect(asked.status()).toBe(201);
   await expect(timeline).toContainText("Blocking question");
-  // A recent time reads relatively, with the exact time in its tooltip.
-  const askedAt = timeline.getByRole("listitem").first().locator("time");
-  await expect(askedAt).toHaveText(/^(just now|\d+ min ago)$/);
+  // The timeline shows clock times under a separator for the day, with the exact time in the tooltip.
+  await expect(timeline.getByRole("separator").first()).toHaveAccessibleName("Today");
+  const askedAt = timeline.getByRole("listitem").filter({ hasText: "Blocking question" }).locator("time").first();
+  await expect(askedAt).toHaveText(/^\d\d:\d\d$/);
   await expect(askedAt).toHaveAttribute("title", new RegExp(String(new Date().getFullYear())));
   await expect(timeline.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
   await expect(timeline).toContainText("Waiting for an answer");
-  // Ada answers the question by replying to it; the answer shows under it as a Comment.
-  await timeline.getByRole("button", { name: "Answer" }).click();
+  // Ada answers the question in its answer box; the answer shows under it as a Comment.
   await timeline.getByLabel("Answer", { exact: true }).fill("Yes, **Postgres**.");
   await timeline.getByRole("button", { name: "Post answer" }).click();
   await expect(timeline).toContainText("Answered");
@@ -329,8 +336,11 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await review.getByRole("button", { name: "Send back" }).click();
   await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByLabel("Status")).toHaveValue(statuses.find((s: { category: string }) => s.category === "started").id);
-  await expect(timeline).toContainText("Add a test.");
+  const startedStatus = statuses.find((s: { category: string }) => s.category === "started").name;
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Status/ })).toContainText(startedStatus);
+  // The Comment of a Send back is labelled as one, after the line saying who sent it back.
+  await expect(timeline.getByRole("listitem").filter({ hasText: "Add a test." })).toContainText("Sent back");
+  await expect(timeline).toContainText(`Ada sent it back: In Review → ${startedStatus}`);
 });
 
 // Runs after the tests above, so Ada and the CRONK Project with CRONK-1 exist.
@@ -699,11 +709,11 @@ test("link a Document to a Ticket from the Ticket's page, then unlink it", async
   const documents = page.getByRole("list", { name: "Documents" });
   await expect(documents).toContainText("Onboarding");
   await expect(documents).toContainText("Linked");
-  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada linked the Document “Onboarding”");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada linked the Document “Onboarding”");
 
   await documents.getByRole("button", { name: "Unlink Onboarding" }).click();
   await expect(page.getByRole("list", { name: "Documents" })).toHaveCount(0);
-  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada unlinked the Document “Onboarding”");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada unlinked the Document “Onboarding”");
 });
 
 // Runs after the test above, so CRONK holds Documents already.
@@ -799,6 +809,17 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
   await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
   await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
+  // A field changed elsewhere shows in the side panel and as a line in the timeline.
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { priority: "urgent" } });
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Priority/ })).toContainText("Urgent");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada set the Priority to Urgent");
+  // On a phone the side panel sits above the timeline, and nothing runs off the side.
+  await page.setViewportSize({ width: 375, height: 800 });
+  const side = (await page.getByRole("complementary", { name: "Ticket fields" }).boundingBox())!;
+  const timelineBox = (await page.getByRole("list", { name: "Timeline" }).boundingBox())!;
+  expect(side.y + side.height).toBeLessThanOrEqual(timelineBox.y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
   await page.goto(`/documents/${document.id}`);
@@ -1007,3 +1028,127 @@ test("a Member sees no Settings, and /settings does not open for them", async ({
   await expect(sidebar.getByTestId("workspace-name")).toHaveText("Acme");
   await expect(page.getByRole("heading", { name: "Workspace settings" })).toHaveCount(0);
 });
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("change a Ticket's Status and Delegate from its side panel and see each as a change line", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/agents", { data: { name: "panel-bot" } });
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Worked from the panel" } })).json();
+  await page.goto(`/tickets/${ticket.key}`);
+
+  const panel = page.getByRole("complementary", { name: "Ticket fields" });
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  // A field is edited in place: its value opens a list that filters as the User types.
+  await panel.getByRole("button", { name: /^Status/ }).click();
+  await page.getByLabel("Filter Status").fill("revi");
+  await expect(page.getByRole("listbox", { name: "Status" }).getByRole("option")).toHaveText(["In Review"]);
+  await page.getByRole("option", { name: "In Review" }).click();
+  await expect(panel.getByRole("button", { name: /^Status/ })).toContainText("In Review");
+  await expect(timeline.getByRole("listitem").filter({ hasText: "moved it" })).toContainText("Ada moved it from Backlog to In Review");
+
+  await pickField(page, "Assignee", "Ada");
+  await pickField(page, "Delegate", "panel-bot");
+  const delegated = timeline.getByRole("listitem").filter({ hasText: "delegated it" });
+  await expect(delegated).toContainText("Ada delegated it to panel-bot");
+  // The Delegate named inside the line is shown as an Agent.
+  await expect(delegated.locator(".actor.agent")).toHaveText("panel-bot");
+  // The Changes are in the one timeline; there is no separate History list.
+  await expect(page.getByRole("list", { name: "History" })).toHaveCount(0);
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("see the Claim card on a Claimed Ticket, and see it go once the Claim is released", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket, agentCall, session } = await delegatedTicket(page, request, "claim-bot", "Claimed by a bot");
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("heading", { name: "Claimed by a bot" })).toBeVisible();
+  await expect(page.getByTestId("ticket-claim")).toHaveCount(0);
+
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  // The card shows the Agent, its Agent Session, and how long the Claim lasts if the Session stays silent.
+  const card = page.getByTestId("ticket-claim");
+  await expect(card).toContainText("Claimed");
+  await expect(card).toContainText("claim-bot since");
+  await expect(card.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
+  await expect(card.getByRole("meter", { name: "Time until the Claim lapses if silent" })).toHaveAttribute("aria-valuetext", /^(\d+ min )?\d+ s$/);
+  await expect(card).toContainText(/Lapses if silent for (\d+ min )?\d+ s more/);
+
+  expect((await request.delete(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(204);
+  await expect(card).toHaveCount(0);
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("answer a blocking question in the timeline, where only Comments and questions offer Reply", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket, agentCall } = await delegatedTicket(page, request, "question-bot", "Asks before it ships");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await page.goto(`/tickets/${ticket.key}`);
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  await expect(timeline).toContainText("Ada delegated it to question-bot");
+  await page.evaluate(() => window.scrollTo(0, 120));
+
+  // Entries arrive live, in place, and the page stays where the User is reading.
+  const write = (path: string, data: object) => request.post(`/api/tickets/${ticket.key}/${path}`, { headers: agentCall, data });
+  await write("activities", { kind: "plan", body: "Count failed sign-ins." });
+  await write("reports", { title: "What I found", body: "# Findings\n\nIt was the **cache**." });
+  await write("activities", { kind: "question", body: "Per email or per IP?", blocking: true });
+  const question = timeline.getByRole("listitem").filter({ hasText: "Per email or per IP?" });
+  await expect(question).toContainText("Blocking question");
+  expect(await page.evaluate(() => window.scrollY)).toBe(120);
+
+  // A Plan offers no Reply; a Report is a card with its headings scaled down and a link to open it.
+  const plan = timeline.getByRole("listitem").filter({ hasText: "Count failed sign-ins." });
+  await expect(plan).toContainText("Plan");
+  await expect(plan.getByRole("button", { name: "Reply" })).toHaveCount(0);
+  const report = timeline.getByRole("listitem", { name: "Report: What I found" });
+  await expect(report.getByRole("heading", { name: "Findings" })).toHaveCSS("font-size", "14px");
+  await expect(report.getByRole("link", { name: "Open Report" })).toHaveAttribute("href", /^\/documents\//);
+
+  // The open question shows its answer box; once answered, it offers Reply instead.
+  await expect(question).toContainText("The answer reaches question-bot as Waiting Work.");
+  await question.getByLabel("Answer", { exact: true }).fill("Per email.");
+  await question.getByRole("button", { name: "Post answer" }).click();
+  await expect(question).toContainText("Answered");
+  await expect(question.getByRole("list", { name: "Replies" })).toContainText("Per email.");
+  await expect(question.getByLabel("Answer", { exact: true })).toHaveCount(0);
+  await expect(question.getByRole("button", { name: "Reply" })).toBeVisible();
+
+  // A Comment offers Reply, and its replies sit under it.
+  await page.getByLabel("Comment", { exact: true }).fill("Ship per email first.");
+  await page.getByRole("button", { name: "Post Comment" }).click();
+  const comment = timeline.getByRole("listitem").filter({ hasText: "Ship per email first." });
+  await comment.getByRole("button", { name: "Reply" }).click();
+  await comment.getByLabel("Reply", { exact: true }).fill("Agreed.");
+  await comment.getByRole("button", { name: "Post reply" }).click();
+  await expect(comment.getByRole("list", { name: "Replies" })).toContainText("Agreed.");
+});
+
+/**
+ * Registers an Agent of Ada's with a full token, starts an Agent Session for it, and files a Ticket assigned
+ * to Ada and delegated to the Agent. Calls with `agentCall` act as that Agent Session.
+ */
+async function delegatedTicket(page: import("@playwright/test").Page, request: import("@playwright/test").APIRequestContext, agentName: string, title: string) {
+  const { user } = await (await page.request.get("/api/me")).json();
+  const { agent } = await (await page.request.post("/api/agents", { data: { name: agentName } })).json();
+  const { secret } = await (await page.request.post(`/api/agents/${agent.id}/tokens`, { data: { readOnly: false } })).json();
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title } })).json();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { assigneeId: user.id, delegateId: agent.id } });
+  const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${secret}` } });
+  const session = (await started.json()).session.id as string;
+  return { ticket, session, agentCall: { authorization: `Bearer ${secret}`, "cronk-agent-session": session } };
+}
+
+/** Picks `option` for the Ticket field `field` in the open Ticket's side panel. */
+async function pickField(page: import("@playwright/test").Page, field: string, option: string) {
+  await page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: new RegExp(`^${field}`) }).click();
+  await page.getByRole("listbox", { name: field }).getByRole("option", { name: option, exact: true }).click();
+}
+
+async function signIn(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("navigation", { name: "Sidebar" }).getByRole("link", { name: /CRONK/ })).toBeVisible();
+}

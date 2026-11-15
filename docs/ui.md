@@ -79,7 +79,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Actor** (`<Actor>`): avatar plus name. A User is round. An Agent is square, violet, and followed by "for <Owner>" where the Owner isn't obvious. Never write "Ada (session d152, for Ada)" as prose.
 - **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper, `sessionName` in `src/web/components/actor.tsx`, computes it everywhere, and `<SessionName>` renders it.
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
-- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip The `ok` tone marks something settled ("Answered"), and the `danger` tone, an outlined `--danger` pill, is used only for a merge's "Both changed".
+- **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour. The `danger` pill also marks a merge's "Both changed".
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
 - **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
@@ -90,13 +90,13 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - A disabled button keeps its colours at 50% opacity with a `not-allowed` cursor.
   - Buttons size to their label and are never full width outside sign-in forms.
 - **Forms:** the label sits above the field, in 12px `--muted`. Inputs have a `--surface` background and a 1px border, and show the `--accent` focus ring. Markdown inputs use the mono face. Each error sits under its form in `--danger` with `role="alert"`. A settings page, such as `/settings`, stays open after saving and says "Saved." beside its buttons (`role="status"`).
-- **Pickers:** Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter. Bare `<select>` rows are not used for this.
+- **Pickers** (`<FieldPicker>` in `components/picker.tsx`): Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter; once something is typed, Enter picks the first match, and a picker that takes new values (Labels) offers the typed text. Bare `<select>` rows are not used for this.
 - **Times** (`<RelativeTime>`):
   - Relative under an hour ("12 min ago").
   - Then clock time for today ("10:18") and "yesterday".
   - Then day and time ("14 Nov 09:52"), with the year only when it differs from the current one.
   - The exact time is always in `title`.
-  - A timeline shows clock times with a separator for each day.
+  - A timeline shows clock times (`<RelativeTime clock>`) with a separator for each day ("Today", "Yesterday", "14 Nov").
 - **Empty states:** a short heading saying what will appear and one line saying how it gets there ("Agents write a Report when they hand work over").
 - **Live indicator** (`<LiveIndicator>`): a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
 
@@ -135,7 +135,7 @@ Follow-up: #110.
 - **Main column:** the title, the description, then one **timeline** and the Comment box at the end.
 - **Side panel (280px, sticky):**
   - Status, Priority, Assignee, Delegate and Labels, each edited in place.
-  - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. It is hidden when the Ticket is not Claimed.
+  - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter runs from when the page last loaded the Claim, since the API gives the lapse time but not the threshold. It is hidden when the Ticket is not Claimed.
   - Parent, Sub-Tickets, Relations and Mentioned in.
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:

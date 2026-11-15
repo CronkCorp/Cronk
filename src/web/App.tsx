@@ -11,7 +11,8 @@ import { Sidebar } from "./frame.js";
 import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
-import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, type ProjectView } from "./work.js";
+import { TicketPage } from "./ticket.js";
 
 type State =
   | { kind: "loading" }

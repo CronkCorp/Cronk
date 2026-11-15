@@ -53,16 +53,20 @@ export const agentActor = (agent: { name: string; owner?: { name: string } }, se
   session: session ?? null,
 });
 
+/** An Actor's avatar alone, as a timeline's gutter shows it: round for a User, square and violet for an Agent. */
+export function Avatar(props: { actor: ActorLike }) {
+  return <span className={`avatar ${props.actor.kind}`} data-initial={props.actor.name.trim().charAt(0).toUpperCase()} aria-hidden="true" />;
+}
+
 /**
  * An avatar and a name. A User is round and neutral; an Agent is square and violet, followed by its
  * Agent Session and "for <Owner>". Pass `owner={false}` where the Owner is obvious.
  */
 export function Actor(props: { actor: ActorLike; owner?: boolean }) {
   const { actor } = props;
-  const initial = actor.name.trim().charAt(0).toUpperCase();
   return (
     <span className={`actor ${actor.kind}`}>
-      <span className="avatar" data-initial={initial} aria-hidden="true" />
+      <Avatar actor={actor} />
       <span className="actor-name">{actor.name}</span>
       {actor.kind === "agent" && actor.session && (
         <>

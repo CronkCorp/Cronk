@@ -49,6 +49,14 @@ export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): [Loaded<T>,
   return [state, () => setGeneration((g) => g + 1), (value) => setState({ kind: "loaded", value })];
 }
 
+/** Two loads as one, loaded once both are. */
+export function both<A, B>(a: Loaded<A>, b: Loaded<B>): Loaded<[A, B]> {
+  if (a.kind === "failed") return a;
+  if (b.kind === "failed") return b;
+  if (a.kind === "loading" || b.kind === "loading") return { kind: "loading" };
+  return { kind: "loaded", value: [a.value, b.value] };
+}
+
 /** Shows a load's error, nothing while loading, or its content. */
 export function Show<T>(props: { state: Loaded<T>; children: (value: T) => ReactNode }) {
   if (props.state.kind === "loading") return null;

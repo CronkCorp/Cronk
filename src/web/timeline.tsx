@@ -1,114 +1,355 @@
+import { Fragment, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { Actor, agentActor, Avatar, type ActorLike } from "./components/actor.js";
 import { Button } from "./components/button.js";
-import { Chip, KindLabel } from "./components/tags.js";
-import { LiveIndicator, useLiveState } from "./components/live.js";
-import { RelativeTime } from "./components/time.js";
-import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
-import { Actor, agentActor } from "./components/actor.js";
-import { api, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
+import { Chip, KindLabel, PRIORITY_NAMES } from "./components/tags.js";
+import { formatDay, RelativeTime, sameDay, useNow } from "./components/time.js";
+import { api, type Activity, type ActivityKind, type Comment, type NewComment, type RecordedChange, type RelationKind, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
 
 /**
- * A Ticket's timeline and a Document's Comments. Activities (an Agent's own work log), Reports
- * and Comments (conversation) show together but look different; replies sit under what they reply to.
+ * A Ticket's timeline and a Document's Comments. A Ticket has one chronology (docs/ui.md § Ticket): its
+ * Activities (an Agent's own work log), Comments (conversation), Reports and Changes, oldest first, each
+ * looking different. Replies sit under what they reply to.
  */
 
 const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
 
-/** What a timeline entry is: an Activity, a Report, or a Comment that replies to neither a Comment nor an Activity. */
-type Entry = { kind: "activity"; activity: Activity } | { kind: "report"; report: Report } | { kind: "comment"; comment: Comment };
+/** What a Ticket's timeline holds: an Activity, a Report, a Comment that replies to nothing, or a Change. */
+type Entry =
+  | { kind: "activity"; key: string; at: string; activity: Activity }
+  | { kind: "report"; key: string; at: string; report: Report }
+  | { kind: "comment"; key: string; at: string; comment: Comment; sentBack: boolean }
+  | { kind: "change"; key: string; at: string; change: RecordedChange; sentBack: boolean };
 
-const entryAt = (e: Entry) => (e.kind === "activity" ? e.activity.at : e.kind === "report" ? e.report.createdAt : e.comment.at);
+/** How close a Send back's Comment is to its move back to a Started Status: both are written in one request. */
+const SEND_BACK_WINDOW_MS = 1_000;
 
-/** Keeps the last of each id, in the order each id first appeared. */
-function latestById<T extends { id: string }>(items: T[]): T[] {
-  const byId = new Map<string, T>();
-  for (const item of items) byId.set(item.id, item);
-  return [...byId.values()];
+/**
+ * The Send backs among a Ticket's Changes and Comments. A Send back moves the Ticket from In Review to a
+ * Started Status and posts a Comment by the same User in the same request; the API marks neither, so each
+ * such move is paired with that User's nearest Comment written within a second of it. Returns the paired
+ * Comments' ids and the paired Changes' indexes.
+ */
+function findSendBacks(changes: RecordedChange[], comments: Comment[]): { comments: Set<string>; changes: Set<number> } {
+  const found = { comments: new Set<string>(), changes: new Set<number>() };
+  changes.forEach((change, index) => {
+    if (change.change !== "status" || change.from.category !== "in_review" || change.to.category !== "started" || change.actor.kind !== "user") return;
+    const at = Date.parse(change.at);
+    const distance = (c: Comment) => Math.abs(Date.parse(c.at) - at);
+    const nearest = comments
+      .filter(
+        (c) =>
+          !found.comments.has(c.id) &&
+          !c.replyToCommentId &&
+          !c.replyToActivityId &&
+          c.actor.kind === "user" &&
+          c.actor.id === change.actor.id &&
+          distance(c) <= SEND_BACK_WINDOW_MS,
+      )
+      .sort((a, b) => distance(a) - distance(b))[0];
+    if (nearest) {
+      found.comments.add(nearest.id);
+      found.changes.add(index);
+    }
+  });
+  return found;
 }
 
 /**
- * The Activities and Reports Agent Sessions wrote on a Ticket and its Comments, oldest first, kept up to
- * date as new ones arrive. Replies show under what they reply to; a reply to a question answers it.
+ * The entries that arrived while the timeline was open, by key, so they get the fading ring. The entries
+ * first shown are not new; every later one is, and stays marked, so its ring plays out once.
  */
-export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; onTicketChanged?: () => void }) {
-  const [loaded, reload] = useLoad(
-    async () => {
-      const [activities, reports, comments] = await Promise.all([
-        api.activities(props.ticketKey),
-        api.ticketReports(props.ticketKey),
-        api.ticketComments(props.ticketKey),
-      ]);
-      return { activities, reports, comments };
-    },
-    [props.ticketKey],
-  );
-  // Activities and Comments pushed while this page is open; the lists, loaded at any point, may or may not hold them yet.
-  const [arrivedActivities, setArrivedActivities] = useState<Activity[]>([]);
-  const [arrivedReports, setArrivedReports] = useState<Report[]>([]);
-  const [arrivedComments, setArrivedComments] = useState<Comment[]>([]);
-  const [live, onLive] = useLiveState();
-  // The latest handler, so the stream, opened once per Ticket, never calls an outdated one.
-  const onTicketChanged = useRef(props.onTicketChanged);
-  onTicketChanged.current = props.onTicketChanged;
-  useEffect(() => {
-    setArrivedActivities([]);
-    setArrivedReports([]);
-    setArrivedComments([]);
-    return watchTicket(props.ticketKey, {
-      onLive,
-      // Load the lists again once watching, and on every reconnect, so nothing posted before the stream was
-      // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
-      ready: () => {
-        reload();
-        onTicketChanged.current?.();
-      },
-      on: {
-        changed: () => onTicketChanged.current?.(),
-        activity: ({ activity }) => setArrivedActivities((list) => [...list, activity]),
-        report: ({ report }) => setArrivedReports((list) => [...list, report]),
-        comment: ({ comment }) => setArrivedComments((list) => [...list, comment]),
-      },
-    });
-  }, [props.ticketKey]);
-  const post = (input: NewComment) => api.postTicketComment(props.ticketKey, input);
+function useArrivals(keys: string[]): Set<string> {
+  const known = useRef<Set<string> | null>(null);
+  const arrived = useRef(new Set<string>());
+  if (known.current === null) known.current = new Set(keys);
+  for (const key of keys) {
+    if (!known.current.has(key)) {
+      known.current.add(key);
+      arrived.current.add(key);
+    }
+  }
+  return arrived.current;
+}
+
+/**
+ * A Ticket's one timeline, oldest first, with a separator for each day and clock times, then the Comment box.
+ * Questions and Comments offer Reply; an open question shows its answer box. New entries appear in place,
+ * with a fading ring, and never scroll the page.
+ */
+export function TicketTimeline(props: {
+  ticketKey: string;
+  activities: Activity[];
+  reports: Report[];
+  comments: Comment[];
+  changes: RecordedChange[];
+  canWrite: boolean;
+  onPosted: (comment: Comment) => void;
+}) {
+  const sendBacks = findSendBacks(props.changes, props.comments);
+  const entries: Entry[] = [
+    ...props.activities.map((activity): Entry => ({ kind: "activity", key: `activity-${activity.id}`, at: activity.at, activity })),
+    ...props.reports.map((report): Entry => ({ kind: "report", key: `report-${report.id}`, at: report.createdAt, report })),
+    ...props.comments
+      .filter((c) => !c.replyToCommentId && !c.replyToActivityId)
+      .map((comment): Entry => ({ kind: "comment", key: `comment-${comment.id}`, at: comment.at, comment, sentBack: sendBacks.comments.has(comment.id) })),
+    // A Ticket's Changes only ever grow, oldest first, so each keeps its index.
+    ...props.changes.map((change, i): Entry => ({ kind: "change", key: `change-${i}`, at: change.at, change, sentBack: sendBacks.changes.has(i) })),
+    // Stable, so entries at the same instant keep the order they were written or arrived in.
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const arrived = useArrivals(entries.map((e) => e.key));
+  const thread: Thread = {
+    comments: props.comments,
+    canWrite: props.canWrite,
+    post: (input) => api.postTicketComment(props.ticketKey, input),
+    onPosted: props.onPosted,
+  };
+  const now = useNow();
 
   return (
-    <Show state={loaded}>
-      {(lists) => {
-        // A pushed Activity replaces the loaded one: it is newer, as when a question gets answered.
-        const activities = latestById([...lists.activities, ...arrivedActivities]);
-        const reports = latestById([...lists.reports, ...arrivedReports]);
-        const comments = latestById([...lists.comments, ...arrivedComments]);
-        const entries: Entry[] = [
-          ...activities.map((activity): Entry => ({ kind: "activity", activity })),
-          ...reports.map((report): Entry => ({ kind: "report", report })),
-          ...comments.filter((c) => !c.replyToCommentId && !c.replyToActivityId).map((comment): Entry => ({ kind: "comment", comment })),
-          // Stable, so entries at the same instant keep the order they were written or arrived in.
-        ].sort((a, b) => Date.parse(entryAt(a)) - Date.parse(entryAt(b)));
-        const posted = (comment: Comment) => setArrivedComments((list) => [...list, comment]);
-        return (
-          <>
-            <LiveIndicator state={live} />
-            <ol className="timeline" aria-label="Timeline">
-              {entries.length === 0 && <li className="muted">Nothing yet.</li>}
-              {entries.map((e) =>
-                e.kind === "activity" ? (
-                  <ActivityItem key={e.activity.id} activity={e.activity} comments={comments} canWrite={props.canWrite} post={post} onPosted={posted} />
-                ) : e.kind === "report" ? (
-                  <ReportItem key={e.report.id} report={e.report} />
-                ) : (
-                  <CommentItem key={e.comment.id} comment={e.comment} comments={comments} canWrite={props.canWrite} post={post} onPosted={posted} />
-                ),
+    <>
+      <ol className="ticket-timeline" aria-label="Timeline">
+        {entries.length === 0 && <li className="muted">Nothing yet.</li>}
+        {entries.map((e, i) => {
+          const at = new Date(e.at);
+          const previous = entries[i - 1];
+          const newDay = !previous || !sameDay(new Date(previous.at), at);
+          const className = arrived.has(e.key) ? " arrived" : "";
+          return (
+            <Fragment key={e.key}>
+              {newDay && (
+                <li className="tl-day" role="separator" aria-label={formatDay(at, now)}>
+                  <span>{formatDay(at, now)}</span>
+                </li>
               )}
-            </ol>
-            {props.canWrite && <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={posted} />}
-          </>
-        );
-      }}
-    </Show>
+              {e.kind === "activity" ? (
+                <ActivityEntry activity={e.activity} className={className} {...thread} />
+              ) : e.kind === "report" ? (
+                <ReportEntry report={e.report} className={className} />
+              ) : e.kind === "comment" ? (
+                <CommentEntry comment={e.comment} sentBack={e.sentBack} className={className} {...thread} />
+              ) : (
+                <ChangeEntry change={e.change} sentBack={e.sentBack} className={className} />
+              )}
+            </Fragment>
+          );
+        })}
+      </ol>
+      {props.canWrite && (
+        <CommentForm
+          label="Comment"
+          submitLabel="Post Comment"
+          placeholder='Comment… @name, @owner/name or @"name with spaces" mentions an Agent'
+          post={thread.post}
+          onPosted={props.onPosted}
+        />
+      )}
+    </>
   );
+}
+
+/** One timeline entry: an avatar (or, for a Change, a small ring) in the gutter, and its content. */
+function TimelineEntry(props: { className: string; gutter: ReactNode; label?: string; children: ReactNode }) {
+  return (
+    <li className={`tl-entry ${props.className}`} aria-label={props.label}>
+      <div className="tl-gutter">{props.gutter}</div>
+      <div className="tl-content">{props.children}</div>
+    </li>
+  );
+}
+
+/**
+ * An Activity: its kind, Agent and Agent Session, time, and body as rendered Markdown. A question's body sits
+ * in a tinted box; an open one shows its answer box, an answered one offers Reply. Plan, Progress, Finding and
+ * Error offer no Reply, though replies already written still show under them.
+ */
+function ActivityEntry(props: { activity: Activity; className: string } & Thread) {
+  const a = props.activity;
+  const isQuestion = a.kind === "question";
+  const replies = props.comments.filter((c) => c.replyToActivityId === a.id);
+  const actor = agentActor(a.agent, a.session);
+  const kind = isQuestion ? `question${a.blocking ? " blocking" : ""}` : a.kind;
+  return (
+    <TimelineEntry className={`tl-activity ${kind}${props.className}`} gutter={<Avatar actor={actor} />}>
+      <div className="tl-head">
+        <KindLabel kind={a.blocking ? "blocking" : a.kind}>{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</KindLabel>
+        <Actor actor={actor} owner={false} />
+        <RelativeTime at={a.at} clock />
+        {isQuestion && (a.answer ? <Chip tone="ok">Answered</Chip> : <Chip tone={a.blocking ? "danger" : "warn"}>Waiting for an answer</Chip>)}
+      </div>
+      <div className={`tl-body${isQuestion ? " tl-question" : a.kind === "error" ? " tl-error" : ""}`}>
+        <CronkMarkdown>{a.body}</CronkMarkdown>
+      </div>
+      {replies.length > 0 && <ReplyList replies={replies} thread={props} />}
+      {isQuestion &&
+        props.canWrite &&
+        (a.answer ? (
+          <ReplyButton thread={props} replyTo={{ replyToActivityId: a.id }} />
+        ) : (
+          <CommentForm
+            label="Answer"
+            submitLabel="Post answer"
+            placeholder={`Answer ${a.agent.name}… (Markdown)`}
+            hint={`The answer reaches ${a.agent.name} as Waiting Work.`}
+            post={(input) => props.post({ ...input, replyToActivityId: a.id })}
+            onPosted={props.onPosted}
+          />
+        ))}
+    </TimelineEntry>
+  );
+}
+
+/** A Report: a card with its title, an "Open Report" link, and its current Version's body with headings scaled down. */
+function ReportEntry(props: { report: Report; className: string }) {
+  const r = props.report;
+  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
+  const actor = agentActor(r.agent, r.session);
+  return (
+    <TimelineEntry className={`tl-report-entry${props.className}`} gutter={<Avatar actor={actor} />} label={`Report: ${r.title}`}>
+      <div className="tl-head">
+        <KindLabel kind="report">Report</KindLabel>
+        <Actor actor={actor} owner={false} />
+        <RelativeTime at={r.createdAt} clock />
+      </div>
+      <div className="tl-report">
+        <div className="tl-report-head">
+          <h3 className="tl-report-title">{r.title}</h3>
+          <Link to={`/documents/${r.id}`} className="link">Open Report</Link>
+        </div>
+        <div className="tl-report-body">
+          <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+        </div>
+      </div>
+    </TimelineEntry>
+  );
+}
+
+/** A Comment: its body in a bubble, its replies indented under it inside the bubble, and Reply. */
+function CommentEntry(props: { comment: Comment; sentBack: boolean; className: string } & Thread) {
+  const c = props.comment;
+  const replies = props.comments.filter((r) => r.replyToCommentId === c.id);
+  return (
+    <TimelineEntry className={`tl-comment-entry${props.className}`} gutter={<Avatar actor={recordedActor(c.actor)} />}>
+      <div className="tl-head">
+        <KindLabel kind="comment">{props.sentBack ? "Sent back" : "Comment"}</KindLabel>
+        <Actor actor={recordedActor(c.actor)} />
+        <RelativeTime at={c.at} clock />
+      </div>
+      <div className="tl-bubble">
+        <div className="tl-body">
+          <CronkMarkdown>{c.body}</CronkMarkdown>
+        </div>
+        {replies.length > 0 && <ReplyList replies={replies} thread={props} />}
+      </div>
+      {props.canWrite && <ReplyButton thread={props} replyTo={{ replyToCommentId: c.id }} />}
+    </TimelineEntry>
+  );
+}
+
+/** Replies under an Activity or Comment, oldest first, each with any replies of its own. */
+function ReplyList(props: { replies: Comment[]; thread: Thread }) {
+  return (
+    <ol className="tl-replies" aria-label="Replies">
+      {props.replies.map((r) => (
+        <li key={r.id} className="tl-reply">
+          <div className="tl-head">
+            <Actor actor={recordedActor(r.actor)} />
+            <RelativeTime at={r.at} clock />
+          </div>
+          <div className="tl-body">
+            <CronkMarkdown>{r.body}</CronkMarkdown>
+          </div>
+          {props.thread.comments.some((c) => c.replyToCommentId === r.id) && (
+            <ReplyList replies={props.thread.comments.filter((c) => c.replyToCommentId === r.id)} thread={props.thread} />
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** A Reply button that opens a reply box under its Comment or question. */
+function ReplyButton(props: { thread: Thread; replyTo: Omit<NewComment, "body"> }) {
+  const [replying, setReplying] = useState(false);
+  return replying ? (
+    <CommentForm
+      label="Reply"
+      submitLabel="Post reply"
+      post={(input) => props.thread.post({ ...input, ...props.replyTo })}
+      onPosted={(comment) => {
+        setReplying(false);
+        props.thread.onPosted(comment);
+      }}
+      onCancel={() => setReplying(false)}
+    />
+  ) : (
+    <Button variant="ghost" className="tl-reply-button" onClick={() => setReplying(true)}>
+      Reply
+    </Button>
+  );
+}
+
+/** A Change to the Ticket's fields: a single muted line with a small ring in the gutter. */
+function ChangeEntry(props: { change: RecordedChange; sentBack: boolean; className: string }) {
+  const { change } = props;
+  return (
+    <TimelineEntry className={`tl-change${props.className}`} gutter={<span className="tl-ring" aria-hidden="true" />}>
+      <p className="tl-change-line">
+        <Actor actor={recordedActor(change.actor)} /> {props.sentBack && change.change === "status" ? <>sent it back: {change.from.name} → {change.to.name}</> : describeChange(change)}{" "}
+        <RelativeTime at={change.at} clock />
+      </p>
+    </TimelineEntry>
+  );
+}
+
+/** A User or Agent as the API records who acted, made into an Actor. */
+const recordedActor = (actor: Comment["actor"]): ActorLike => (actor.kind === "user" ? { kind: "user", name: actor.name } : agentActor(actor, actor.session));
+
+const RELATION_PHRASES: Record<RelationKind, string> = { blocks: "blocking", blocked_by: "blocked by", relates_to: "related to" };
+
+/** What a Change did, as the rest of a sentence after who made it. Users and Agents named in it show as Actors. */
+function describeChange(change: RecordedChange): ReactNode {
+  switch (change.change) {
+    case "created":
+      return `created the Ticket in ${change.status.name}`;
+    case "title":
+      return `renamed it from “${change.from}” to “${change.to}”`;
+    case "description":
+      return "edited the description";
+    case "status":
+      return `moved it from ${change.from.name} to ${change.to.name}`;
+    case "priority":
+      return change.to === "none" ? "cleared the Priority" : `set the Priority to ${PRIORITY_NAMES[change.to]}`;
+    case "labels": {
+      const added = change.to.filter((l) => !change.from.includes(l));
+      const removed = change.from.filter((l) => !change.to.includes(l));
+      const parts = [
+        ...(added.length ? [`added ${added.length > 1 ? "Labels" : "the Label"} ${added.join(", ")}`] : []),
+        ...(removed.length ? [`removed ${removed.length > 1 ? "Labels" : "the Label"} ${removed.join(", ")}`] : []),
+      ];
+      return parts.length ? parts.join(" and ") : "reordered the Labels";
+    }
+    case "assignee":
+      return change.to ? <>assigned it to <Actor actor={{ kind: "user", name: change.to.name }} /></> : "unassigned it";
+    case "delegate":
+      return change.to ? (
+        <>delegated it to <Actor actor={agentActor(change.to)} /></>
+      ) : (
+        <>took it back from <Actor actor={agentActor(change.from!)} /></>
+      );
+    case "parent":
+      return change.to ? `made it a Sub-Ticket of ${change.to.key}` : `took it out of ${change.from!.key}`;
+    case "relation added":
+      return `marked it as ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
+    case "relation removed":
+      return `removed that it is ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
+    case "document linked":
+      return `linked the Document “${change.document.title}”`;
+    case "document unlinked":
+      return `unlinked the Document “${change.document.title}”`;
+  }
 }
 
 /** What an Activity or Comment item needs to show its replies and post new ones. */
@@ -118,47 +359,6 @@ interface Thread {
   canWrite: boolean;
   post: (input: NewComment) => Promise<Comment>;
   onPosted: (comment: Comment) => void;
-}
-
-function ActivityItem(props: { activity: Activity } & Thread) {
-  const a = props.activity;
-  const isQuestion = a.kind === "question";
-  const replies = props.comments.filter((c) => c.replyToActivityId === a.id);
-  return (
-    <li className={`activity ${a.kind}${a.blocking ? " blocking" : ""}${a.answer ? " answered" : ""}`}>
-      <div className="activity-head">
-        <KindLabel kind={a.blocking ? "blocking" : a.kind}>{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</KindLabel>
-        <Actor actor={agentActor(a.agent, a.session)} />
-        <RelativeTime at={a.at} />
-        {isQuestion && (a.answer ? <Chip tone="ok">Answered</Chip> : <Chip>Waiting for an answer</Chip>)}
-      </div>
-      <div className="activity-body">
-        <CronkMarkdown>{a.body}</CronkMarkdown>
-      </div>
-      <Replies {...props} replies={replies} replyTo={{ replyToActivityId: a.id }} replyLabel={isQuestion && !a.answer ? "Answer" : "Reply"} />
-    </li>
-  );
-}
-
-/** A Report in a Ticket's timeline, showing its current Version. */
-function ReportItem(props: { report: Report }) {
-  const r = props.report;
-  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
-  return (
-    <li className="activity report" aria-label={`Report: ${r.title}`}>
-      <div className="activity-head">
-        <KindLabel kind="report">Report</KindLabel>
-        <Actor actor={agentActor(r.agent, r.session)} />
-        <RelativeTime at={r.createdAt} />
-      </div>
-      <h3 className="report-title">
-        <Link to={`/documents/${r.id}`} className="link">{r.title}</Link>
-      </h3>
-      <div className="activity-body">
-        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
-      </div>
-    </li>
-  );
 }
 
 /** How a Comment is shown as a card in a Document's margin: highlighted with its passage, and telling when it is hovered or focused. */
@@ -242,6 +442,9 @@ function CommentForm(props: {
   onPosted: (comment: Comment) => void;
   onCancel?: () => void;
   inputRef?: Ref<HTMLTextAreaElement>;
+  placeholder?: string;
+  /** A line beside the submit button saying where the Comment goes. */
+  hint?: string;
 }) {
   const [body, setBody] = useState("");
   const send = useSubmit(
@@ -253,11 +456,12 @@ function CommentForm(props: {
   );
   return (
     <form className="comment-form" onSubmit={send.submit}>
-      <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} placeholder='Markdown; @name, @owner/name or @"name with spaces" mentions an Agent' />
+      <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} placeholder={props.placeholder ?? 'Markdown; @name, @owner/name or @"name with spaces" mentions an Agent'} />
       {send.error && <p className="error" role="alert">{send.error}</p>}
       <div className="actions">
         <Button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</Button>
         {props.onCancel && <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>}
+        {props.hint && <span className="muted form-hint">{props.hint}</span>}
       </div>
     </form>
   );
