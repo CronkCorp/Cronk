@@ -115,7 +115,8 @@ function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, 
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the
  * Agent whose question it answers (`answered`), every Agent it @mentions by name, and the
  * Delegate of the Ticket it is on. Never for the Agent that posted it, and only for Agents
- * that can see where it was posted. Returns the Agents it now waits for, and why.
+ * that can see where it was posted. Returns the Agents it now waits for, and why. Calls
+ * `positioned` with each position as soon as it is taken, before the transaction commits.
  */
 export async function markWaiting(
   db: Queryable,
@@ -124,6 +125,7 @@ export async function markWaiting(
   place: CommentPlace,
   answered: { agentId: string } | null,
   at: Date,
+  positioned: (agentId: string, seq: string) => void,
 ): Promise<WaitingFor[]> {
   const agents = await listAgents(db, actingUser(actor).workspaceId);
   const candidates: Record<WaitingReason, string[]> = {
@@ -153,7 +155,9 @@ export async function markWaiting(
       "INSERT INTO waiting_work (agent_id, comment_id, reason, at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING seq",
       [agentId, comment.id, reason, at],
     );
-    if (rows[0]) waiting.push({ agentId, reason, seq: rows[0].seq });
+    if (!rows[0]) continue;
+    positioned(agentId, rows[0].seq);
+    waiting.push({ agentId, reason, seq: rows[0].seq });
   }
   return waiting;
 }
@@ -203,9 +207,8 @@ export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterS
  * `markWaiting` serializes it per Agent, so a replay from it never skips that work. Work that
  * committed but whose `waiting` event a stream has yet to send may have this position or lower:
  * a stream's `ready` must not carry this alone, but the furthest of it and every id the stream
- * sent before `ready`, having sent everything published meanwhile (see `LiveUpdates.stream`).
- * Work that committed before this read but is pushed only after `ready` is written is still
- * at or below it: the gap between a post's COMMIT and its push stays open.
+ * sent before `ready`, having sent everything published meanwhile, and kept below the
+ * positions committed but not yet pushed (see `LiveUpdates.stream` and `LiveUpdates.expect`).
  */
 export async function latestWaitingSeq(db: Queryable, agentId: string): Promise<string> {
   const { rows } = await db.query<{ seq: string | null }>("SELECT max(seq)::text AS seq FROM waiting_work WHERE agent_id = $1", [agentId]);

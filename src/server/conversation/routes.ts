@@ -55,6 +55,9 @@ const newCommentBody = {
   },
 } as const;
 
+/** Told each position `markWaiting` takes for an Agent, before it commits. */
+type Positioned = (agentId: string, seq: string) => void;
+
 /** A Comment just posted: the question it answered, if any, and the Agents it now waits for. */
 interface Posted {
   comment: Comment;
@@ -71,6 +74,7 @@ export function conversationRoutes(ctx: AppContext) {
      */
     const post = async (
       tx: Queryable,
+      positioned: Positioned,
       actor: Actor,
       target: CommentTarget,
       place: CommentPlace,
@@ -94,7 +98,22 @@ export function conversationRoutes(ctx: AppContext) {
       // A User answers a question by replying to it; the first such reply is its answer.
       const answered = activity && actor.kind === "user" && (await markAnswered(tx, activity, comment.id)) ? await findActivity(tx, activity.ticketId, activity.id) : undefined;
       const asker = answered ? { agentId: answered.agent.id } : null;
-      return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at) };
+      return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at, positioned) };
+    };
+
+    /**
+     * Runs `fn` in a transaction, passing it what to tell `post` about the positions it takes.
+     * Each is expected on its Agent's stream (`LiveUpdates.expect`) before it commits, until
+     * `pushWaiting` publishes it, and forgotten if the transaction rolls back.
+     */
+    const posting = async <T>(fn: (tx: Queryable, positioned: Positioned) => Promise<T>): Promise<T> => {
+      const forget: (() => void)[] = [];
+      try {
+        return await transaction(ctx.db, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
+      } catch (err) {
+        for (const f of forget) f();
+        throw err;
+      }
     };
 
     /**
@@ -124,10 +143,10 @@ export function conversationRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { ticket, posted } = await transaction(ctx.db, async (tx) => {
+        const { ticket, posted } = await posting(async (tx, positioned) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write");
           const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-          return { ticket, posted: await post(tx, actor, { ticketId: ticket.id }, place, request.body) };
+          return { ticket, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
         if (posted.answered) {
@@ -166,7 +185,7 @@ export function conversationRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         const actor = userActor(user);
-        const { ticket, posted } = await transaction(ctx.db, async (tx) => {
+        const { ticket, posted } = await posting(async (tx, positioned) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (ticket.status.category !== "in_review") throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, not In Review`);
           const started = (await listStatuses(tx, ticket.projectId)).filter((s) => s.category === "started");
@@ -176,7 +195,7 @@ export function conversationRoutes(ctx: AppContext) {
           if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
           const moved = await updateTicket(tx, ticket, { status }, actor, ctx.clock.now());
           const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-          return { ticket: moved, posted: await post(tx, actor, { ticketId: ticket.id }, place, { body: request.body.comment }) };
+          return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment }) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
         pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
@@ -210,10 +229,10 @@ export function conversationRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { document, posted } = await transaction(ctx.db, async (tx) => {
+        const { document, posted } = await posting(async (tx, positioned) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
           const place = { projectId: document.projectId, delegateId: null };
-          return { document, posted: await post(tx, actor, { documentId: document.id }, place, request.body, document) };
+          return { document, posted: await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document) };
         });
         pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } });
         return reply.code(201).send({ comment: publicComment(posted.comment) });
