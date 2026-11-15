@@ -83,6 +83,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
+  - **Dialogs:** the action row (`.dialog-actions`) is right-aligned, with Cancel first and the primary or danger button last. A dialog with a single button, such as Done, puts it in the same place.
   - Secondary is `--surface` with a border.
   - Ghost is text in `--accent`, for Reply, Rename and the like.
   - Danger is filled `--danger`, and only inside a confirming dialog.
