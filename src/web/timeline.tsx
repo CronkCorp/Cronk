@@ -21,20 +21,7 @@ type Entry =
   | { kind: "activity"; key: string; at: string; activity: Activity }
   | { kind: "report"; key: string; at: string; report: Report }
   | { kind: "comment"; key: string; at: string; comment: Comment }
-  | { kind: "change"; key: string; at: string; change: RecordedChange; sentBack: boolean };
-
-/**
- * The indexes of the Changes that moved the Ticket back in a Send back: a Send back records its move and its
- * Comment, which the API marks `sendBack`, at one instant, by one User.
- */
-function findSendBackMoves(changes: RecordedChange[], comments: Comment[]): Set<number> {
-  const sentBack = new Set(comments.filter((c) => c.sendBack && c.actor.kind === "user").map((c) => `${c.actor.id} ${c.at}`));
-  const moves = new Set<number>();
-  changes.forEach((change, index) => {
-    if (change.change === "status" && change.actor.kind === "user" && sentBack.has(`${change.actor.id} ${change.at}`)) moves.add(index);
-  });
-  return moves;
-}
+  | { kind: "change"; key: string; at: string; change: RecordedChange };
 
 /**
  * The entries that arrived while the timeline was open, by key, so they get the fading ring. The entries
@@ -67,16 +54,14 @@ export function TicketTimeline(props: {
   canWrite: boolean;
   onPosted: (comment: Comment) => void;
 }) {
-  const sendBackMoves = findSendBackMoves(props.changes, props.comments);
   const entries: Entry[] = [
     ...props.activities.map((activity): Entry => ({ kind: "activity", key: `activity-${activity.id}`, at: activity.at, activity })),
     ...props.reports.map((report): Entry => ({ kind: "report", key: `report-${report.id}`, at: report.createdAt, report })),
-    // A Ticket's Changes only ever grow, oldest first, so each keeps its index. Before the Comments, so a Send back's
-    // move, written first, stays above its Comment at the same instant.
-    ...props.changes.map((change, i): Entry => ({ kind: "change", key: `change-${i}`, at: change.at, change, sentBack: sendBackMoves.has(i) })),
     ...props.comments
       .filter((c) => !c.replyToCommentId && !c.replyToActivityId)
       .map((comment): Entry => ({ kind: "comment", key: `comment-${comment.id}`, at: comment.at, comment })),
+    // A Ticket's Changes only ever grow, oldest first, so each keeps its index.
+    ...props.changes.map((change, i): Entry => ({ kind: "change", key: `change-${i}`, at: change.at, change })),
     // Stable, so entries at the same instant keep the order they were written or arrived in.
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const arrived = useArrivals(entries.map((e) => e.key));
@@ -111,7 +96,7 @@ export function TicketTimeline(props: {
               ) : e.kind === "comment" ? (
                 <CommentEntry comment={e.comment} className={className} {...thread} />
               ) : (
-                <ChangeEntry change={e.change} sentBack={e.sentBack} className={className} />
+                <ChangeEntry change={e.change} className={className} />
               )}
             </Fragment>
           );
@@ -272,12 +257,12 @@ function ReplyButton(props: { thread: Thread; replyTo: Omit<NewComment, "body"> 
 }
 
 /** A Change to the Ticket's fields: a single muted line with a small ring in the gutter. */
-function ChangeEntry(props: { change: RecordedChange; sentBack: boolean; className: string }) {
+function ChangeEntry(props: { change: RecordedChange; className: string }) {
   const { change } = props;
   return (
     <TimelineEntry className={`tl-change${props.className}`} gutter={<span className="tl-ring" aria-hidden="true" />}>
       <p className="tl-change-line">
-        <Actor actor={recordedActor(change.actor)} /> {props.sentBack && change.change === "status" ? <>sent it back: {change.from.name} → {change.to.name}</> : describeChange(change)}{" "}
+        <Actor actor={recordedActor(change.actor)} /> {change.change === "status" && change.sentBack ? <>sent it back: {change.from.name} → {change.to.name}</> : describeChange(change)}{" "}
         <RelativeTime at={change.at} clock />
       </p>
     </TimelineEntry>
