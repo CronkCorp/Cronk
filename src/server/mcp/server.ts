@@ -22,9 +22,29 @@ interface Connection {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
   tokenHash: string;
+  /** When its Agent Session ends if it stays silent, as last heard; meaningless while the client listens. */
   endsIfSilentAt: Date;
-  /** Stops pushing waiting work and newly Ready Tickets to it. */
-  stopNotifying: () => void;
+  /** Starts pushing waiting work and newly Ready Tickets to it, resolving once it is, to a function that stops it. */
+  notify: () => Promise<() => void>;
+  /** How many of the client's streams it hears notifications on are open; while any is, its Agent Session is kept alive. */
+  listening: number;
+  /** Pushing waiting work and newly Ready Tickets to it, while it is: resolves to a function that stops it. */
+  notifying?: Promise<() => void>;
+}
+
+/** A deadline no sweep reaches, for a connection whose real one is being asked for. */
+const UNTIL_HEARD = new Date(8.64e15);
+
+/** Notes when the connection's Agent Session ends if it stays silent, from the API's answer for the Session. */
+function noteEndsIfSilentAt(connection: Connection, answer: { session: AgentSession }): void {
+  connection.endsIfSilentAt = new Date(answer.session.endsIfSilentAt);
+}
+
+/** Stops pushing waiting work and newly Ready Tickets to the connection, if it is. */
+function stopNotifying(connection: Connection): void {
+  const notifying = connection.notifying;
+  connection.notifying = undefined;
+  void notifying?.then((stop) => stop());
 }
 
 /** How often connections whose Agent Session went silent are forgotten. */
@@ -47,13 +67,13 @@ export function mcpRoutes(ctx: AppContext) {
     const drop = async (id: string) => {
       const connection = connections.get(id);
       connections.delete(id);
-      connection?.stopNotifying();
+      if (connection) stopNotifying(connection);
       await connection?.server.close();
     };
     // A Session that stayed silent has ended on the API's side; forget its connection too.
     const sweep = async () => {
       const now = ctx.clock.now();
-      for (const [id, c] of connections) if (c.endsIfSilentAt <= now) await drop(id);
+      for (const [id, c] of connections) if (c.listening === 0 && c.endsIfSilentAt <= now) await drop(id);
     };
     const sweeping = setInterval(() => void sweep(), SWEEP_INTERVAL_MS).unref();
     // Set once the server starts closing, so a connection still starting isn't held after the rest are dropped.
@@ -62,7 +82,7 @@ export function mcpRoutes(ctx: AppContext) {
       closing = true;
       clearInterval(sweeping);
       // Every stream stops first, so none is opened again while the others' servers close.
-      for (const c of connections.values()) c.stopNotifying();
+      for (const c of connections.values()) stopNotifying(c);
       for (const id of [...connections.keys()]) await drop(id);
     });
 
@@ -88,8 +108,7 @@ export function mcpRoutes(ctx: AppContext) {
         // Work starting to wait for the Agent, and Tickets becoming Ready for it, reach it as log messages, from the API's own stream
         // of it, which ends as soon as the Agent Session does or its token is revoked. That stream needs
         // real HTTP, so when Cronk doesn't listen (its requests are only injected) nothing is pushed.
-        const baseUrl = ownBaseUrl(app);
-        const notify = ({ event, data }: LiveEvent) => {
+        const pushNotices = ({ event, data }: LiveEvent) => {
           const notice = (message: string, about: object) =>
             void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message, ...about } }).catch(() => {});
           if (event === "waiting") {
@@ -100,19 +119,20 @@ export function mcpRoutes(ctx: AppContext) {
             notice(`A Ticket is now Ready for you:\n${readyLine(ticket)}\nClaim it with the \`tickets\` tool's \`claim\` action.`, { ticketReady: ticket });
           }
         };
-        const stopNotifying = baseUrl
-          ? await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify)
-          : () => {};
-        if (closing) {
-          stopNotifying();
-          return refuse(reply, 503, "Cronk is shutting down; reconnect once it is back");
-        }
+        const notify = async () => {
+          const baseUrl = ownBaseUrl(app);
+          // Refused, the Agent Session has ended or its token was revoked, so the connection can't go on either.
+          const ended = () => void drop(session.id);
+          return baseUrl ? followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", pushNotices, ended) : () => {};
+        };
+        if (closing) return refuse(reply, 503, "Cronk is shutting down; reconnect once it is back");
         connections.set(session.id, {
           transport,
           server,
           tokenHash: hashToken(token),
           endsIfSilentAt: new Date(session.endsIfSilentAt),
-          stopNotifying,
+          notify,
+          listening: 0,
         });
         await server.connect(transport);
         return serve(transport, request, reply, token);
@@ -136,7 +156,35 @@ export function mcpRoutes(ctx: AppContext) {
         await serve(connection.transport, request, reply, token);
         return drop(sessionId);
       }
-      connection.endsIfSilentAt = new Date((current.body.session as AgentSession).endsIfSilentAt);
+      noteEndsIfSilentAt(connection, current.body);
+      if (request.method === "GET") return listen(sessionId, connection, request, reply, token);
+      return serve(connection.transport, request, reply, token);
+    };
+
+    /**
+     * Serves the client's stream it hears notifications on (its GET). While that is open, the API's
+     * stream of work waiting for the Agent is followed for it, and that stream keeps the Agent Session
+     * alive: a client listening is connected, not silent. The API's stream is held by this server, not
+     * the client, so it is only followed while the client's own stream is open, and a client that goes
+     * away without disconnecting (it crashed, say) has its Session end once it stays silent.
+     */
+    const listen = async (id: string, connection: Connection, request: FastifyRequest, reply: FastifyReply, token: string) => {
+      connection.listening++;
+      // Once the last of the client's streams closes, stop following and start the silence from then.
+      reply.raw.on("close", () => {
+        if (--connection.listening > 0) return;
+        stopNotifying(connection);
+        if (connections.get(id) !== connection) return;
+        // What it last heard is stale, as the API's stream kept the Session alive; until it hears anew, it isn't swept.
+        connection.endsIfSilentAt = UNTIL_HEARD;
+        void callApi(app, { token, sessionId: id }, "GET", "/api/agent-sessions/current").then(
+          (current) => (current.status >= 400 ? drop(id) : noteEndsIfSilentAt(connection, current.body)),
+          () => drop(id),
+        );
+      });
+      await (connection.notifying ??= connection.notify());
+      // The connection may have been dropped meanwhile, with nothing left to stop this.
+      if (connections.get(id) !== connection || closing) stopNotifying(connection);
       return serve(connection.transport, request, reply, token);
     };
 

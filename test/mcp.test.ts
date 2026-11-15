@@ -68,6 +68,37 @@ describe("the MCP endpoint", () => {
     await expect(mcp.client.ping()).rejects.toMatchObject({ code: 404, message: expect.stringContaining("Agent Session has ended") });
   });
 
+  it("keeps the Agent Session of a client listening for notifications alive while it stays idle past the silence threshold", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    // 12 minutes pass, each four of them ending in the stream's heartbeat.
+    for (let i = 0; i < 3; i++) {
+      cronk.clock.advance(4 * 60_000);
+      await cronk.heartbeat();
+    }
+
+    const logged = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "progress", body: "Still here." });
+    expect(logged).toMatchObject({ isError: false, body: { activity: { session: { id: mcp.transport.sessionId } } } });
+  });
+
+  it("ends the Agent Session of a client that stops listening without disconnecting, as on a crash, after the silence threshold", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const liveSessions = async () => (await admin.get("/api/agents")).body.agents[0].sessions.map((s: { id: string }) => s.id);
+
+    const sessionId = mcp.transport.sessionId;
+    await mcp.client.close();
+    await cronk.heartbeat();
+    cronk.clock.advance(4 * 60_000);
+    await cronk.heartbeat();
+    expect(await liveSessions()).toEqual([sessionId]);
+    cronk.clock.advance(60_000);
+    expect(await liveSessions()).toEqual([]);
+  });
+
   it("refuses unknown tokens, and a token as soon as it is revoked", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await expect(connectMcp(cronk, "not-a-token")).rejects.toMatchObject({ code: 401 });

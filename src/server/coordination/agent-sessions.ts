@@ -3,7 +3,7 @@ import type { Queryable } from "../db/database.js";
 /**
  * One continuous connection of an Agent, from connect to disconnect. It is live until it is
  * ended or stays silent longer than the Workspace's silence threshold; every call made in it
- * refreshes it.
+ * refreshes it, as does its open stream of waiting work, on each heartbeat.
  */
 export interface AgentSession {
   id: string;

@@ -33,6 +33,8 @@ const HEARTBEAT_MS = 25_000;
 export class LiveUpdates {
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly streams = new Set<() => void>();
+  /** Each open stream's heartbeat, resolving once it has run. */
+  private readonly heartbeats = new Set<() => Promise<void>>();
   /** Per topic, the positions of events whose change committed (or is about to) but that aren't published yet. */
   private readonly pending = new Map<string, Set<bigint>>();
 
@@ -118,8 +120,9 @@ export class LiveUpdates {
       if (!open) return;
       open = false;
       unsubscribe();
-      clearInterval(heartbeat);
+      clearInterval(beating);
       this.streams.delete(end);
+      this.heartbeats.delete(beat);
       res.end();
     };
     // Whether the stream is still open and the caller may still see the topic; it may have closed during the check.
@@ -142,8 +145,13 @@ export class LiveUpdates {
       if (held) held.push(event);
       else checked(() => fresh(event) && write(event));
     });
-    const heartbeat = setInterval(() => checked(() => res.write(": keep-alive\n\n")), HEARTBEAT_MS).unref();
+    const beat = () => {
+      checked(() => res.write(": keep-alive\n\n"));
+      return queue;
+    };
+    const beating = setInterval(beat, HEARTBEAT_MS).unref();
     this.streams.add(end);
+    this.heartbeats.add(beat);
     res.on("close", end);
     if (!catchUp) {
       write({ event: "ready", data: {} });
@@ -175,6 +183,11 @@ export class LiveUpdates {
         end();
       }
     })();
+  }
+
+  /** Runs every open stream's heartbeat now, as its timer does, and resolves once each has run. */
+  async heartbeat(): Promise<void> {
+    await Promise.all([...this.heartbeats].map((beat) => beat()));
   }
 
   /** Ends every open stream, as when the server stops. */

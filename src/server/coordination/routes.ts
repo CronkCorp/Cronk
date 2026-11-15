@@ -366,7 +366,8 @@ export function coordinationRoutes(ctx: AppContext) {
                 "Each time one of the Agent's Tickets becomes Ready for it (delegated to it, unblocked, moved back into unfinished work, or its " +
                 "Claim released, ended or lapsed), a `ticketReady` event arrives whose data is `{ ticket }`, the Ticket as the welcome lists it; " +
                 "it has no `id` and isn't sent again on reopening, as the next welcome lists Ready Tickets anyway. A read-only token's stream " +
-                "gets none, as it can't Claim them.",
+                "gets none, as it can't Claim them. " +
+                "While it is open the Agent Session isn't silent: the stream refreshes it on its heartbeat (every 25 seconds), so it and its Claims stay alive.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(400, 401, 403, 410),
@@ -376,7 +377,8 @@ export function coordinationRoutes(ctx: AppContext) {
       async (request, reply) => {
         const agent = requireAgent(await requireActor(ctx, request));
         requireSession(agent);
-        const canSee = async () => !!requireSession(await requireActor(ctx, request, { refreshSession: false }));
+        // Unlike a Ticket's stream, this one refreshes the Session on every check: an Agent with it open is connected, not silent.
+        const canSee = async () => !!requireSession(await requireActor(ctx, request));
         const lastEventId = request.headers["last-event-id"];
         const catchUp = async () => ({
           missed:
