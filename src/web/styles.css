@@ -115,8 +115,8 @@ a.link:hover { text-decoration: underline; }
 .grow { flex: 1; min-width: 0; }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-.tab { padding: 6px 12px; border-bottom: 2px solid transparent; color: var(--muted); }
-.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab { padding: 6px 12px; background: none; border: none; border-bottom: 2px solid transparent; font: inherit; color: var(--muted); cursor: pointer; }
+.tab.active, .tab[data-state="active"] { color: var(--text); border-bottom-color: var(--accent); }
 
 .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
 .column { flex: 0 0 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -264,9 +264,9 @@ a.link:hover { text-decoration: underline; }
 
 /* Live indicator: docs/ui.md § Component conventions. */
 .live-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ok); font-weight: 600; }
-.live-indicator.away { color: var(--muted); font-weight: 400; }
+.live-indicator.away, .live-indicator.closed { color: var(--muted); font-weight: 400; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
-.live-indicator.away .live-dot { background: var(--muted); }
+.live-indicator.away .live-dot, .live-indicator.closed .live-dot { background: var(--muted); }
 
 /* Kind labels, Priority tags and chips: docs/ui.md § Component conventions. */
 .kind-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
@@ -282,8 +282,6 @@ a.link:hover { text-decoration: underline; }
 .priority.medium { color: var(--warn); background: var(--warn-soft); }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; padding: 1px 8px; border-radius: 4px; background: var(--surface-2); color: var(--text); vertical-align: middle; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
-.chip + .chip { margin-left: 4px; }
-.chips .chip + .chip { margin-left: 0; }
 .chip-remove { background: none; border: none; color: var(--muted); padding: 0 2px; line-height: 1; cursor: pointer; font: inherit; }
 
 /* Radix overlays (popover, menu, dialog) and tabs: styled here, behaviour from Radix. Shadows are for these only. */
@@ -298,5 +296,3 @@ a.link:hover { text-decoration: underline; }
 .dialog-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .dialog-description { color: var(--muted); margin: 0 0 16px; }
 .dialog-actions { justify-content: flex-end; }
-.tab[data-state="active"] { color: var(--text); border-bottom-color: var(--accent); }
-.tabs .tab { background: none; border: none; border-bottom: 2px solid transparent; font: inherit; cursor: pointer; }

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Priority } from "../api.js";
+import type { Priority, Status } from "../api.js";
 
 // Small labels set into rows and headings: docs/ui.md § Component conventions.
 
@@ -11,6 +11,7 @@ export function KindLabel(props: { kind: Kind; children: ReactNode }) {
   return <span className={`kind-label ${props.kind}`}>{props.children}</span>;
 }
 
+/** Each Priority as the UI names it. */
 export const PRIORITY_NAMES: Record<Priority, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low", none: "No Priority" };
 
 /** A Ticket's Priority as a small uppercase tag; no Priority shows nothing. */
@@ -38,5 +39,15 @@ export function Chip(props: { children: string; as?: "span" | "li"; tone?: "ok";
         </button>
       )}
     </Tag>
+  );
+}
+
+/** A Status: its Category's dot and its name. */
+export function StatusPill(props: { status: Status }) {
+  return (
+    <span className="status-pill">
+      <span className={`dot ${props.status.category}`} aria-hidden="true" />
+      {props.status.name}
+    </span>
   );
 }

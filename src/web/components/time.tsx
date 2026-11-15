@@ -47,7 +47,7 @@ export function RelativeTime(props: { at: Date | string; className?: string }) {
   const now = useNow();
   const at = new Date(props.at);
   return (
-    <time className={props.className ?? "time"} dateTime={at.toISOString()} title={at.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" })}>
+    <time className={props.className ?? "time"} dateTime={at.toISOString()} title={at.toLocaleString("en-GB", { dateStyle: "full", timeStyle: "medium" })}>
       {formatTime(at, now)}
     </time>
   );

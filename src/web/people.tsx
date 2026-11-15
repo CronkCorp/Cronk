@@ -188,7 +188,7 @@ function MemberList(props: { projectKey: string; members: Member[]; users: User[
         <ul className="rows" aria-label="Project members">
           {props.members.map((m) => (
             <li key={m.user.id} className="row">
-              <span className="grow">{m.user.name}</span>
+              <span className="grow"><Actor actor={{ kind: "user", name: m.user.name }} /></span>
               <AccessSelect label={`Access of ${m.user.name}`} value={m.access} disabled={busy} onChange={(a) => void set.run(m.user.id, a)} />
               <Button variant="ghost" disabled={busy} onClick={() => void remove.run(m.user.id)}>Remove</Button>
             </li>

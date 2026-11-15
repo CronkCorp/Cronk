@@ -1,5 +1,5 @@
 import { Button } from "./components/button.js";
-import { Chip, PRIORITY_NAMES, PriorityTag } from "./components/tags.js";
+import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor, agentActor } from "./components/actor.js";
@@ -572,15 +572,6 @@ function StatusRow(props: {
       )}
       {error && <p className="error row" role="alert">{error}</p>}
     </li>
-  );
-}
-
-export function StatusPill(props: { status: Status }) {
-  return (
-    <span className="status-pill">
-      <span className={`dot ${props.status.category}`} />
-      {props.status.name}
-    </span>
   );
 }
 

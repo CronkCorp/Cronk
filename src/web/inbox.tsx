@@ -1,5 +1,5 @@
 import { Button } from "./components/button.js";
-import { KindLabel } from "./components/tags.js";
+import { KindLabel, StatusPill } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useState } from "react";
@@ -8,7 +8,6 @@ import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } fro
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
-import { StatusPill } from "./work.js";
 
 const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "Tickets to review" };
 
