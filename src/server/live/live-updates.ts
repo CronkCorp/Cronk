@@ -20,7 +20,7 @@ export interface CatchUp {
 
 type Listener = (event: LiveEvent) => void;
 
-/** How often an open stream re-checks access and sends a comment, so proxies and browsers keep it open, by default. */
+/** How often an open stream re-checks access and sends a comment, so proxies and browsers keep it open, unless told otherwise. */
 const HEARTBEAT_MS = 25_000;
 
 /**

@@ -216,7 +216,8 @@ export interface Cronk {
   holdPushes(): HeldPushes;
   /**
    * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does
-   * outside tests (no timer runs it in them), and waits until each has run. Streams a test closed just before are given a moment to end first.
+   * outside tests (no timer runs it in them), and waits until each has run. Streams a test closed
+   * just before are given a moment to end first.
    */
   heartbeat(): Promise<void>;
   /**
