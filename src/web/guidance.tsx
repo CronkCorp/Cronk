@@ -4,7 +4,7 @@ import { Actor, userActor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Guidance } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
-import { ResolveMerge, StaleSaveNotice, useStaleSave, type SavedText } from "./merge.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, type SavedText } from "./merge.js";
 import { Show, TextArea, useLoad } from "./ui.js";
 
 /**
@@ -83,7 +83,7 @@ function GuidanceEditor(props: {
   onDone: (guidance: Guidance) => void;
   onCancel: () => void;
 }) {
-  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+  const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
     draft: { text: props.current.markdown },
     baseVersion: props.current.version,
     save: (d, baseVersion) => api.saveGuidance(props.projectKey, { markdown: d.text, baseVersion }),
@@ -106,21 +106,24 @@ function GuidanceEditor(props: {
   });
 
   return (
-    <section className="panel wide">
+    <>
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
       ) : (
-        <form onSubmit={save}>
-          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <TextArea label="Guidance (Markdown)" value={draft.text} onChange={(text) => setDraft({ text })} rows={14} disabled={busy} />
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="actions">
-            <Button type="submit" disabled={busy}>Save</Button>
-            <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
-          </div>
-        </form>
+        <section className="panel wide">
+          <form onSubmit={save}>
+            {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+            <TextArea label="Guidance (Markdown)" value={draft.text} onChange={(text) => setDraft({ text })} rows={14} disabled={busy} />
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={busy}>Save</Button>
+              <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+              {discardMine && <DiscardMine {...discardMine} />}
+            </div>
+          </form>
+        </section>
       )}
-    </section>
+    </>
   );
 }

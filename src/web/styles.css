@@ -194,14 +194,11 @@ a.link:hover { text-decoration: underline; }
 .activity-body > :first-child { margin-top: 4px; }
 .activity-body > :last-child { margin-bottom: 0; }
 /* Comments are conversation, set apart from an Agent's Activities: no kind colour, a tinted background. */
-.comment { background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; }
+li.comment { background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; }
 .comment-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; }
 .comment-body > :first-child { margin-top: 4px; }
 .comment-body > :last-child { margin-bottom: 0; }
 .timeline.replies { margin: 8px 0 4px 16px; }
-.anchor { margin: 6px 0; padding: 2px 8px; border-left: 3px solid var(--accent); color: var(--muted); font-size: 13px; }
-.anchor.detached { border-left-color: var(--border); text-decoration: line-through; }
-.anchor.detached .muted { text-decoration: none; display: inline-block; }
 .comment-form { margin-top: 12px; }
 .history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .guidance .actions { margin: 12px 0; }
@@ -294,7 +291,6 @@ a.link:hover { text-decoration: underline; }
 .form-hint { font-size: 12px; }
 .chip.warn { background: transparent; border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; }
 .chip.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 999px; }
-.conflict { border: 1px solid var(--danger); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
 .filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
@@ -332,12 +328,7 @@ a.link:hover { text-decoration: underline; }
 .page-tree .depth-6 { padding-left: 134px; }
 .versions .version { display: flex; align-items: center; gap: 8px; }
 .version-view { margin-top: 12px; }
-.conflict { border: 1px solid var(--danger); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-.conflict p { margin: 0 0 8px; }
-.theirs { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 14px; }
 
-.merged { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-.merged p { margin: 0 0 8px; }
 .compare { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 12px; }
 .compare .field { margin-bottom: 0; }
 .diff-lines { list-style: none; margin: 8px 0 0; padding: 8px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-family: var(--font-mono); font-size: 13px; max-height: 420px; overflow: auto; }
@@ -345,10 +336,30 @@ a.link:hover { text-decoration: underline; }
 .diff-added { background: var(--ok-soft); }
 .diff-removed { background: var(--danger-soft); }
 .diff-fold { font-style: italic; }
-.merge-conflict { border: 1px solid var(--danger); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-.merge-conflict h3 { margin: 0 0 8px; }
-.merge-conflict .sides { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.merge-conflict .side { flex: 1 1 200px; min-width: 0; }
+
+/* Banners above an editor: docs/ui.md § Document. Information (a merge to settle) and warnings (a newer Version saved meanwhile). */
+.banner { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.banner p { margin: 0; }
+.banner summary { color: var(--accent); cursor: pointer; }
+.banner.info { background: var(--info-soft); border-color: var(--info); }
+.banner.warn { background: var(--warn-soft); border-color: var(--warn); }
+.folded-diff { margin-bottom: 16px; }
+.resolve-merge .folded-diff { margin-bottom: 0; }
+.folded-diff summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+/* Settling a merge: each conflicting part a panel, the User's side and theirs next to each other. */
+.resolve-merge { display: flex; flex-direction: column; gap: 16px; }
+.merge-conflict { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.merge-conflict .field { margin-bottom: 0; }
+.merge-conflict-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.merge-conflict-head h3 { margin: 0; font-family: var(--font-mono); font-size: 13px; }
+.merge-sides { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.merge-side { flex: 1 1 240px; min-width: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.merge-side + .merge-side { border-left: 1px solid var(--border); }
+.merge-side-name { font-size: 12px; color: var(--muted); }
+.merge-side pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 240px; overflow: auto; }
+.merge-choices { align-items: center; }
+.merge-choices .muted { font-size: 12px; }
 
 .search-result { flex-direction: column; align-items: stretch; gap: 4px; }
 .search-result-head { display: flex; align-items: center; gap: 12px; }
@@ -367,6 +378,33 @@ a.link:hover { text-decoration: underline; }
 /* A Document's body, with the button that comments on the passage selected in it. */
 .selectable { position: relative; }
 .comment-on-selection { position: absolute; z-index: 1; padding: 4px 10px; font-size: 13px; box-shadow: var(--shadow); }
+.passage-comment { width: 360px; max-width: calc(100vw - 32px); padding: 8px; }
+.passage-comment .comment-form { margin-top: 0; }
+
+/* Reading a Document: docs/ui.md § Document. The body in a panel, Comments down a 280px margin beside it. */
+.document-read { display: flex; flex-direction: column; gap: 24px; }
+.document-body { min-width: 0; }
+.document-body .markdown { padding: 16px 32px; font-size: 15px; line-height: 1.65; }
+.document-body .markdown > * { max-width: 720px; }
+.comment-margin { display: flex; flex-direction: column; gap: 8px; }
+.margin-cards { gap: 8px; }
+li.margin-card { background: var(--surface); border-style: solid; }
+.margin-card.active { background: var(--accent-soft); border-color: var(--accent); }
+.margin-card:focus-visible { outline: none; }
+.comment-margin .whole-document { align-self: stretch; }
+@media (min-width: 900px) {
+  .document-read { flex-direction: row; align-items: flex-start; gap: 16px; }
+  .document-body { flex: 1; }
+  .comment-margin { flex: 0 0 280px; width: 280px; }
+}
+mark.highlight { background: var(--warn-soft); color: inherit; border-bottom: 2px solid var(--warn); border-radius: 0; }
+mark.highlight.active { background: var(--accent-soft); border-bottom-color: var(--accent); }
+mark.highlight:focus-visible { outline: 2px solid var(--accent); }
+.passage { margin: 0 0 4px; padding: 0; color: var(--muted); font-size: 13px; font-style: italic; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.passage::before { content: "\201C"; }
+.passage::after { content: "\201D"; }
+.passage.detached { text-decoration: line-through; }
+.detached-note { margin: 0 0 4px; font-size: 12px; }
 
 /* Actor and Agent Session: docs/ui.md § Component conventions. A User is round and neutral, an Agent square and violet. */
 .actor { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-weight: 600; }
