@@ -283,10 +283,15 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   // The passage a new Comment anchors to, and where it was selected, while its popover is open.
   const [composing, setComposing] = useState<SelectedPassage>();
   const [passage, setPassage] = useState("");
-  // Selecting another passage closes the popover, to offer to comment on the new one instead.
+  // Selecting anything else in the body closes the popover, to offer to comment on the new selection, if it can be.
   useEffect(() => {
-    if (selected) setComposing(undefined);
-  }, [selected?.passage, selected?.top, selected?.left]);
+    const reselected = () => {
+      const selection = getSelection();
+      if (selection && !selection.isCollapsed && bodyAt.current?.contains(selection.anchorNode)) setComposing(undefined);
+    };
+    document.addEventListener("selectionchange", reselected);
+    return () => document.removeEventListener("selectionchange", reselected);
+  }, []);
   useEffect(() => setComposing(undefined), [d.version]);
   const offer = composing ?? selected;
 
