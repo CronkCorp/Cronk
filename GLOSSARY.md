@@ -41,7 +41,7 @@ The Agent a Ticket's Assignee has handed the work to. Must be one of the Assigne
 _Avoid_: Agent assignee, worker
 
 **Autonomous Delegation**:
-A Delegation in which the Delegate may complete Tickets itself rather than stopping at In Review. Every completion it makes is Unverified until a User checks it.
+A Delegation in which the Delegate may complete Tickets itself rather than stopping at In Review. Every completion it makes is Unverified until a User checks it. A User sets it on a Ticket, and the Ticket's Sub-Tickets inherit it.
 _Avoid_: Auto mode, unattended mode, YOLO mode
 
 **Report**:
@@ -57,7 +57,7 @@ A User's return of a Ticket In Review to its Delegate and a Started Status, with
 _Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
-A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on. It waits in Backlog until a User delegates it, and may block other Tickets meanwhile.
+A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. It waits in Backlog until a User delegates it, and may block other Tickets meanwhile.
 _Avoid_: Follow-up, spin-off, finding
 
 **Sub-Ticket**:
@@ -93,11 +93,11 @@ A message any Actor posts on a Ticket or Document, possibly in reply to another 
 _Avoid_: Reply, note, message, discussion
 
 **Waiting Work**:
-A Comment that concerns an Agent: it answers the Agent's question, @mentions it, or is on a Ticket delegated to it. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
+A Comment that concerns an Agent: it answers the Agent's Question, @mentions it, or is on a Ticket delegated to it or an Artifact Version it published. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
-An Agent Session's exclusive, temporary hold on a Ticket while it works on it. A Ticket has at most one live Claim. It ends when the Ticket is Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
+An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:
@@ -105,7 +105,7 @@ A User's personal list of everything waiting on them: Tickets In Review, Unverif
 _Avoid_: Review queue, notifications, to-do
 
 **Triage**:
-The shared list of waiting items that have no clear User to go to.
+The shared list of waiting items that have no clear User to go to. Each User sees the items they could act on.
 _Avoid_: Unassigned queue, backlog
 
 ### Code
@@ -141,15 +141,15 @@ A live, viewable thing built by an Actor, such as an HTML prototype, served in i
 _Avoid_: Prototype (as the general term), app, preview, page
 
 **Attachment**:
-A plain file, such as an image, video, PDF or log, embedded in a Document, Report or Ticket.
+A plain file, such as an image, video, PDF or log, attached to a Document, Report or Ticket. It belongs to that item and is readable by whoever can read it.
 _Avoid_: Upload, asset, media, file (as the term)
 
 **Term**:
-A glossary entry naming one concept: its canonical name, definition and the words to avoid for it. Belongs to the Workspace or a Project; a Project's Terms layer over the Workspace's.
+A glossary entry naming one concept: its canonical name, definition and the words to avoid for it. Belongs to the Workspace or a Project; within a Project, a Project Term replaces any Workspace Term of the same name.
 _Avoid_: Glossary entry, definition, word
 
 **Decision**:
-A recorded choice with its reasoning and a lifecycle status (proposed, accepted, deprecated, superseded), which may supersede earlier Decisions.
+A recorded choice with its reasoning and a lifecycle status (proposed, accepted, rejected, deprecated, superseded), which may supersede earlier Decisions. Only Users change its status; accepting a Decision that supersedes another marks the other superseded.
 _Avoid_: ADR (in the product), RFC, ruling
 
 ### Actors
@@ -163,7 +163,7 @@ A one-time link, valid 7 days, that an Admin creates to let someone join as a Us
 _Avoid_: Invite code, signup link
 
 **Admin**:
-A User who manages the Workspace: its Users, settings and Workspace-level knowledge. Has Write in every Project, private ones included, and can see every Agent but change only their own.
+A User who manages the Workspace: its Users, settings and Workspace Guidance. Has Write in every Project, private ones included, and can see every Agent but change only their own.
 _Avoid_: Owner (reserved for Agents), superuser
 
 **Member**:
@@ -175,7 +175,7 @@ A non-human account that acts in Cronk on behalf of exactly one User. A User may
 _Avoid_: Bot, AI user, integration
 
 **Agent Session**:
-One continuous connection of an Agent, from connect until it disconnects or stays silent longer than the silence threshold, or its token, Agent or Owner is revoked, removed or deactivated. Every call in it, and the heartbeat of its open stream of Waiting Work, keeps it going; once ended it never resumes. Many Agent Sessions of the same Agent may run at once.
+One continuous connection of an Agent, from connect until it disconnects or stays silent longer than the silence threshold, or its token, Agent or Owner is revoked, removed or deactivated. Every call in it, and the heartbeat of its open stream of Waiting Work, keeps it going; once ended it never resumes. An Agent changes things only within an Agent Session. Many Agent Sessions of the same Agent may run at once.
 _Avoid_: Run, instance, conversation
 
 **Transcript**:
@@ -195,7 +195,7 @@ Either a User or an Agent; whoever performed an action.
 _Avoid_: Principal, author (when meaning the doer of any action)
 
 **Guidance**:
-Standing instructions Users write for Agents, layered Workspace then Project, handed to every Agent Session when it connects.
+Standing instructions Users write for Agents (Admins, for the Workspace's), layered Workspace then Project, handed to every Agent Session when it connects.
 _Avoid_: System prompt, rules, AGENTS.md (in the product)
 
 **Agent Webhook**:
@@ -213,9 +213,9 @@ The secret an Agent calls the API with, full or read-only, shown once when issue
 _Avoid_: API key, password, credential (as the term)
 
 **Protected**:
-Said of a Document, Term, Decision or Artifact that Agents may read but never edit, regardless of Agent Access.
+Said of a Document, Term, Decision or Artifact that Agents may read but never edit, regardless of Agent Access. Protecting a Document also protects every Document under it in the page tree, including ones added later.
 _Avoid_: Locked, read-only, human-only
 
 **Suggestion**:
-A change an Agent proposes to a Protected item, with its reasoning, that takes effect only if a User accepts it.
+A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version.
 _Avoid_: Proposal, change request, draft
