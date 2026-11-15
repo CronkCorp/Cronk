@@ -1,0 +1,986 @@
+<title>Cronk Phase 2 Screens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* PROTOTYPE for Cronk Phase 2. Throwaway: fake data, nothing calls the API. Base CSS copied from the #98 prototype (docs/ui.md direction);
+   Phase 2 additions are at the end. The dark bar on top picks a screen, the pill at the bottom (or ← →) cycles its variants. */
+/* PROTOTYPE for Thundernerd/Cronk#98. Throwaway: every screen is fake data, nothing calls the API.
+   Layout concept: the app frame (sidebar or top bar) hosts one screen at a time; a dark prototype bar on top
+   picks the screen, a floating pill at the bottom cycles that screen's variants (also ← →). */
+:root {
+  /* Proposed Cronk tokens, light */
+  --bg: #f3f4f1;          /* page ground, faintly green-grey */
+  --surface: #ffffff;     /* panels, rows, timeline entries */
+  --surface-2: #e9ece6;   /* sunken: inputs, code, Comment bubbles */
+  --text: #1b1f1c;
+  --muted: #5c655f;
+  --border: #d5dad2;
+  --accent: #116466;      /* ink teal: links, primary buttons, focus */
+  --accent-soft: #d7ebe9;
+  --on-accent: #ffffff;
+  --agent: #6247c2;       /* marks Agents as Actors, never decoration */
+  --agent-soft: #e9e4fb;
+  --danger: #b93a2b;  --danger-soft: #f8e1dd;
+  --warn: #a35f00;    --warn-soft: #fbecd2;
+  --ok: #2c7a42;      --ok-soft: #dcefe1;
+  --info: #2a65ad;    --info-soft: #dde9f7;
+  --cat-backlog: #8a938c; --cat-unstarted: #8a938c; --cat-started: #c98a12; --cat-review: #2a65ad; --cat-completed: #2c7a42; --cat-canceled: #b93a2b;
+  --proto-bg: #202422; --proto-fg: #f1f3ef; --proto-muted: #a9b2ab;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* spacing 4 8 12 16 24 32; radius 4 controls, 8 panels; type 12 13 14 16 20 24 */
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121513; --surface: #1a1e1b; --surface-2: #232825; --text: #e2e6e1; --muted: #98a29b; --border: #2e3430;
+  --accent: #4fb2aa; --accent-soft: #1d3634; --on-accent: #0c1514;
+  --agent: #a793f2; --agent-soft: #2b2545;
+  --danger: #ee7d6b; --danger-soft: #3d211d; --warn: #e3a447; --warn-soft: #3a2c15; --ok: #6cc284; --ok-soft: #1c3324; --info: #74a8ea; --info-soft: #1b2b40;
+  --cat-backlog: #7d877f; --cat-unstarted: #7d877f; --cat-started: #e3a447; --cat-review: #74a8ea; --cat-completed: #6cc284; --cat-canceled: #ee7d6b;
+  --proto-bg: #000000; --proto-fg: #f1f3ef; --proto-muted: #9aa39c;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #121513; --surface: #1a1e1b; --surface-2: #232825; --text: #e2e6e1; --muted: #98a29b; --border: #2e3430;
+  --accent: #4fb2aa; --accent-soft: #1d3634; --on-accent: #0c1514;
+  --agent: #a793f2; --agent-soft: #2b2545;
+  --danger: #ee7d6b; --danger-soft: #3d211d; --warn: #e3a447; --warn-soft: #3a2c15; --ok: #6cc284; --ok-soft: #1c3324; --info: #74a8ea; --info-soft: #1b2b40;
+  --cat-backlog: #7d877f; --cat-unstarted: #7d877f; --cat-started: #e3a447; --cat-review: #74a8ea; --cat-completed: #6cc284; --cat-canceled: #ee7d6b;
+  --proto-bg: #000000; --proto-fg: #f1f3ef; --proto-muted: #9aa39c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; padding-bottom: 72px; }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h1 { font-size: 20px; font-weight: 600; }
+h2 { font-size: 16px; font-weight: 600; }
+h3 { font-size: 14px; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--font-mono); font-size: 13px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.key { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.grow { flex: 1; min-width: 0; }
+.wrap { flex-wrap: wrap; }
+
+/* ---------- prototype chrome (not part of the design) ---------- */
+.proto-bar { background: var(--proto-bg); color: var(--proto-fg); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 13px; }
+.proto-bar strong { font-weight: 600; }
+.proto-bar .note { color: var(--proto-muted); }
+.proto-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.proto-tabs button { background: transparent; border: 1px solid #3a403c; color: var(--proto-fg); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.proto-tabs button[aria-current="true"] { background: var(--proto-fg); color: var(--proto-bg); border-color: var(--proto-fg); }
+.switcher { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; align-items: center; gap: 4px; background: var(--proto-bg); color: var(--proto-fg); border-radius: 999px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.35); max-width: calc(100% - 32px); }
+.switcher button { background: transparent; border: none; color: var(--proto-fg); width: 32px; height: 32px; border-radius: 999px; cursor: pointer; font-size: 16px; flex: none; }
+.switcher button:hover { background: #3a403c; }
+.switcher .vlabel { padding: 0 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proto-bar .seg { border-color: #3a403c; }
+.proto-bar .seg button { background: transparent; color: var(--proto-fg); }
+.proto-bar .seg button + button { border-left-color: #3a403c; }
+.proto-bar .seg button[aria-pressed="true"] { background: var(--proto-fg); color: var(--proto-bg); }
+.variant-note { margin-bottom: 16px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 13px; }
+.variant-note strong { color: var(--text); }
+
+/* ---------- app frame ---------- */
+.frame { display: flex; min-height: calc(100vh - 44px); }
+.frame.top { flex-direction: column; }
+.sidebar { width: 232px; flex: none; background: var(--surface); border-right: 1px solid var(--border); padding: 12px 8px; display: flex; flex-direction: column; gap: 16px; }
+.ws { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-weight: 600; }
+.ws-mark { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.search { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--muted); font-size: 13px; }
+.search kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 8px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--text); cursor: pointer; }
+.nav-item:hover { background: var(--surface-2); text-decoration: none; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.nav-item .count { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.nav-item .count.hot { color: var(--on-accent); background: var(--danger); border-radius: 999px; padding: 0 6px; }
+.nav-item .pkey { font-family: var(--font-mono); font-size: 11px; color: var(--muted); width: 44px; }
+.me { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 8px; border-top: 1px solid var(--border); font-size: 13px; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.topnav { display: flex; gap: 4px; flex-wrap: wrap; }
+.topnav .nav-item { padding: 4px 10px; }
+.topbar .search { width: 220px; }
+.main { flex: 1; min-width: 0; padding-block: 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.main-inner { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.crumbs { font-size: 13px; color: var(--muted); }
+.page-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.page-head h1 { flex: 1; min-width: 0; }
+@media (max-width: 760px) {
+  .frame { flex-direction: column; }
+  .sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .sidebar .nav-group { flex-direction: row; flex-wrap: wrap; }
+  .sidebar .nav-label, .sidebar .projects-group, .sidebar .me, .sidebar .search { display: none; }
+}
+
+/* ---------- components ---------- */
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; cursor: pointer; background: var(--accent); color: var(--on-accent); font-weight: 500; font-size: 13px; }
+.btn.secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.btn.ghost { background: transparent; color: var(--accent); padding: 4px 8px; }
+.btn.danger { background: var(--danger); color: var(--on-accent); }
+.btn.small { padding: 3px 8px; font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.panel-pad { padding: 16px; }
+.input { width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+textarea.input { font-family: var(--font-mono); font-size: 13px; resize: vertical; min-height: 72px; }
+.label { font-size: 12px; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.chip.solid { background: var(--surface-2); border-color: transparent; color: var(--text); }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.status i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; display: inline-block; }
+.status.started { color: var(--cat-started); } .status.started i { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.status.review { color: var(--cat-review); } .status.review i { background: currentColor; box-shadow: inset 0 0 0 2px var(--surface); }
+.status.completed { color: var(--cat-completed); } .status.completed i { background: currentColor; }
+.status.unstarted { color: var(--cat-unstarted); }
+.status span { color: var(--text); }
+.prio { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; }
+.prio.urgent { background: var(--danger); color: var(--on-accent); }
+.prio.high { color: var(--danger); background: var(--danger-soft); }
+.prio.medium { color: var(--warn); background: var(--warn-soft); }
+.prio.low { color: var(--muted); background: var(--surface-2); }
+/* Actors: Users are round, Agents are square and violet, everywhere. */
+.av { width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center; font-size: 10px; font-weight: 600; border-radius: 50%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.av.agent { border-radius: 5px; background: var(--agent-soft); color: var(--agent); border-color: transparent; }
+.av.lg { width: 32px; height: 32px; font-size: 12px; }
+.actor { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; white-space: nowrap; }
+.actor.agent-name { color: var(--agent); }
+.session { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ok); white-space: nowrap; }
+.live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.offline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.offline::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.kind { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.k-plan { color: var(--muted); } .k-progress { color: var(--info); } .k-finding { color: var(--ok); } .k-question { color: var(--warn); } .k-blocking { color: var(--danger); } .k-error { color: var(--danger); } .k-report { color: var(--agent); } .k-comment { color: var(--accent); } .k-review { color: var(--info); }
+.md p + p, .md p + ul, .md ul + p, .md p + ol { margin-top: 8px; }
+.md ul, .md ol { margin: 0; padding-left: 20px; }
+.md h4 { margin: 8px 0 4px; font-size: 14px; }
+.flash { animation: flash 2.4s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none; outline: 2px solid var(--accent); } }
+.empty-line { color: var(--muted); font-size: 13px; }
+.sep { width: 1px; align-self: stretch; background: var(--border); }
+.banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+.banner.warn { background: var(--warn-soft); color: var(--text); border: 1px solid var(--warn); }
+.banner.info { background: var(--info-soft); border: 1px solid var(--info); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; background: var(--surface); padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tabs button { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 10px; cursor: pointer; color: var(--muted); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
+.tabs .n { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+/* ---------- inbox ---------- */
+.ib-split { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; min-height: 560px; }
+.ib-list { width: 360px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.ib-group { padding: 8px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--border); }
+.ib-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
+.ib-item:hover { background: var(--bg); }
+.ib-item[aria-selected="true"] { background: var(--accent-soft); border-left-color: var(--accent); }
+.ib-item.blocking { border-left-color: var(--danger); }
+.ib-item .snip { font-size: 13px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ib-detail { flex: 1; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.report-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; background: var(--bg); }
+.actionbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (max-width: 860px) { .ib-split { flex-direction: column; } .ib-list { width: auto; border-right: none; border-bottom: 1px solid var(--border); } }
+.ib-cards { display: flex; flex-direction: column; gap: 12px; }
+.pinned { border: 1px solid var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.pinned-head { display: flex; align-items: center; gap: 8px; color: var(--danger); font-weight: 600; font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.card-head .t { font-weight: 500; font-size: 14px; color: var(--text); }
+details.report summary { cursor: pointer; color: var(--agent); font-weight: 500; font-size: 13px; }
+details.report[open] summary { margin-bottom: 8px; }
+.ib-tickets { display: flex; flex-direction: column; gap: 12px; }
+.tk-group { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.tk-head .t { font-weight: 600; }
+.tk-entry { display: flex; gap: 12px; padding: 12px 16px; }
+.tk-entry + .tk-entry { border-top: 1px solid var(--border); }
+.tk-gutter { width: 92px; flex: none; }
+@media (max-width: 600px) { .tk-entry { flex-direction: column; gap: 4px; } .tk-gutter { width: auto; } }
+
+/* ---------- ticket ---------- */
+.tk-layout { display: flex; gap: 24px; align-items: flex-start; }
+.tk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.tk-side { width: 280px; flex: none; display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
+@media (max-width: 900px) { .tk-layout { flex-direction: column-reverse; } .tk-side { width: 100%; position: static; } }
+.prop { display: flex; align-items: center; gap: 8px; padding: 6px 12px; min-height: 36px; font-size: 13px; }
+.prop + .prop { border-top: 1px solid var(--border); }
+.prop .label { width: 76px; flex: none; }
+.claim-card { border: 1px solid var(--agent); background: var(--agent-soft); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.meter { height: 4px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--agent); }
+.desc { padding: 12px 16px; }
+.tl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tl > li { position: relative; padding-left: 36px; padding-bottom: 12px; }
+.tl > li::before { content: ""; position: absolute; left: 11px; top: 24px; bottom: 0; width: 1px; background: var(--border); }
+.tl > li:last-child::before { display: none; }
+.tl .gut { position: absolute; left: 0; top: 0; }
+.tl .sys { font-size: 13px; color: var(--muted); padding-top: 2px; }
+.tl .sys .gut { left: 6px; top: 7px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); border: 2px solid var(--border); }
+.act { padding-top: 1px; }
+.act-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.act-body { margin-top: 4px; }
+.act.question .act-body, .act.blocking .act-body { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; }
+.act.blocking .act-body { background: var(--danger-soft); border-color: var(--danger); }
+.act.error .act-body { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); border-left: 3px solid var(--danger); padding: 8px 12px; border-radius: 4px; white-space: pre-wrap; }
+.bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 4px; }
+.reply { margin: 8px 0 0 16px; padding-left: 12px; border-left: 2px solid var(--border); }
+.report-card { margin-top: 4px; border: 1px solid var(--agent); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.report-card .rc-head { padding: 8px 12px; background: var(--agent-soft); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.report-card .rc-body { padding: 10px 12px; }
+.answer-box { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.composer { display: flex; flex-direction: column; gap: 8px; }
+.people-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; font-size: 13px; }
+.arrow { color: var(--muted); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filters .chip { cursor: pointer; padding: 2px 10px; }
+.filters .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.log { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.log li { display: flex; gap: 12px; padding: 6px 12px; align-items: baseline; }
+.log li + li { border-top: 1px solid var(--border); }
+.log .time { font-family: var(--font-mono); font-size: 12px; color: var(--muted); width: 44px; flex: none; }
+.log .kind { width: 72px; flex: none; }
+.lanes { display: flex; flex-direction: column; gap: 10px; }
+.lane-row { display: flex; }
+.lane-row.agent { justify-content: flex-start; }
+.lane-row.human { justify-content: flex-end; }
+.lane-row.center { justify-content: center; }
+.lane-card { max-width: 78%; min-width: 0; border-radius: 10px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface); }
+.lane-row.agent .lane-card { border-color: var(--agent-soft); border-left: 3px solid var(--agent); }
+.lane-row.human .lane-card { background: var(--accent-soft); border-color: transparent; }
+.lane-sys { font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 2px 10px; text-align: center; }
+.lane-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 0 4px; }
+@media (max-width: 600px) { .lane-card { max-width: 100%; } }
+
+/* ---------- document ---------- */
+.doc-layout { display: flex; gap: 24px; align-items: flex-start; }
+.doc-main { flex: 1; min-width: 0; }
+.doc-margin { width: 280px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 900px) { .doc-layout { flex-direction: column; } .doc-margin { width: 100%; } }
+.doc-body { padding: 24px 32px; max-width: 720px; font-size: 15px; line-height: 1.65; }
+.doc-body h2 { font-size: 18px; margin: 20px 0 8px; }
+.doc-body p + p { margin-top: 10px; }
+mark.anchor { background: var(--warn-soft); color: inherit; border-bottom: 2px solid var(--warn); padding: 0 1px; }
+mark.anchor.active { background: var(--accent-soft); border-bottom-color: var(--accent); }
+.sel { background: var(--info-soft); outline: 1px solid var(--info); }
+.pop { display: inline-flex; position: relative; top: -2px; margin-left: 4px; }
+.pop .btn { box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+.mc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.mc.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mc q { color: var(--muted); font-style: italic; }
+.toolbar { display: flex; gap: 2px; flex-wrap: wrap; padding: 4px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.toolbar button { border: none; background: transparent; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 13px; min-width: 30px; }
+.toolbar button:hover { background: var(--surface-2); }
+.toolbar .tsep { width: 1px; background: var(--border); margin: 4px; }
+.editor-split { display: flex; min-height: 420px; }
+.editor-split > * { flex: 1; min-width: 0; }
+.editor-split textarea { border: none; border-right: 1px solid var(--border); border-radius: 0; padding: 16px; background: var(--surface); line-height: 1.6; min-height: 420px; resize: none; }
+.editor-split .preview { padding: 16px 20px; background: var(--bg); font-size: 14px; }
+@media (max-width: 700px) { .editor-split { flex-direction: column; } .editor-split textarea { border-right: none; border-bottom: 1px solid var(--border); min-height: 240px; } }
+.conf { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.conf > div { flex: 1; min-width: 0; padding: 10px 12px; font-size: 13px; }
+.conf > div + div { border-left: 1px solid var(--border); }
+.conf pre { margin: 6px 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 700px) { .conf { flex-direction: column; } .conf > div + div { border-left: none; border-top: 1px solid var(--border); } }
+.choice { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); }
+.choice[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.choice pre { margin: 4px 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; }
+.diff { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.diff div { padding: 1px 10px; white-space: pre-wrap; }
+.diff .add { background: var(--ok-soft); } .diff .del { background: var(--danger-soft); } .diff .fold { color: var(--muted); font-style: italic; }
+
+/* ---------- agents ---------- */
+.agent-cards { display: flex; flex-direction: column; gap: 12px; }
+.agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.agent-card .ac-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; flex-wrap: wrap; }
+.sess { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; font-size: 13px; }
+.sess .working { flex: 1; min-width: 200px; }
+.beat { width: 120px; display: flex; flex-direction: column; gap: 2px; }
+.ac-foot { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); background: var(--bg); font-size: 13px; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12px; }
+
+/* ---------- tokens screen ---------- */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.sw { width: 132px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); font-size: 12px; }
+.sw i { display: block; height: 40px; }
+.sw div { padding: 6px 8px; }
+.typescale > div { display: flex; gap: 16px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.typescale .label { width: 120px; flex: none; }
+
+/* ================= Phase 2 additions ================= */
+.reason { border-left: 3px solid var(--agent); background: var(--agent-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.reason .kind { color: var(--agent); }
+.lock { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--muted); white-space: nowrap; }
+.lock b { font-weight: 600; color: var(--text); }
+.dl { font-family: var(--font-mono); font-size: 13px; border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; background: var(--surface); }
+.dl > div { padding: 3px 12px; white-space: pre-wrap; display: flex; gap: 8px; }
+.dl > div > span:first-child { width: 12px; flex: none; color: var(--muted); }
+.dl .add { background: var(--ok-soft); }
+.dl .del { background: var(--danger-soft); }
+.dl .del > span + span { text-decoration: line-through; text-decoration-color: var(--danger); }
+.dl .hd { background: var(--surface-2); color: var(--muted); font-family: var(--font-ui); font-size: 12px; }
+.sxs { display: flex; gap: 12px; }
+.sxs > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sxs .pane { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.sxs .pane p { padding: 2px 6px; border-radius: 4px; }
+.sxs .pane p.was { background: var(--danger-soft); }
+.sxs .pane p.now { background: var(--ok-soft); }
+@media (max-width: 700px) { .sxs { flex-direction: column; } }
+.proto-sim { font-size: 12px; color: var(--muted); border: 1px dashed var(--border); border-radius: 6px; padding: 4px 8px; background: transparent; cursor: pointer; }
+.overlay { position: fixed; inset: 0; background: rgba(10, 14, 12, .45); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+.dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 100%; max-width: 640px; max-height: 90%; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, .3); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.deps { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.deps-head { padding: 8px 12px; background: var(--surface-2); font-size: 13px; font-weight: 500; }
+.dep { display: flex; gap: 8px 12px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.dep .t { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 2px; }
+.opt { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; flex: none; }
+.opt button { border: none; background: var(--surface); padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.opt button + button { border-left: 1px solid var(--border); }
+.opt button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tree { display: flex; flex-direction: column; gap: 0; font-size: 13px; }
+.tree .node { display: flex; align-items: center; gap: 8px; padding: 6px 0; flex-wrap: wrap; }
+.tree .node.l1 { padding-left: 20px; border-left: 2px solid var(--border); margin-left: 6px; }
+.tree .node.l2 { padding-left: 44px; border-left: 2px solid var(--border); margin-left: 6px; }
+.dst { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; white-space: nowrap; }
+.dst.proposed { color: var(--warn); }
+.dst.accepted { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-soft); }
+.dst.rejected { color: var(--muted); }
+.dst.deprecated { color: var(--muted); border-style: dashed; }
+.dst.superseded { color: var(--info); }
+.term-groups { display: flex; flex-direction: column; gap: 24px; }
+.term-group { display: flex; flex-direction: column; gap: 8px; }
+.term { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.term + .term { border-top: 1px solid var(--border); }
+.term-name { font-weight: 600; font-size: 15px; }
+.avoid { font-size: 12px; color: var(--muted); }
+.avoid span { text-decoration: line-through; text-decoration-color: var(--muted); }
+.override { font-size: 12px; color: var(--info); border: 1px solid var(--info); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.ld { display: flex; gap: 16px; align-items: flex-start; }
+.ld-list { width: 260px; flex: none; display: flex; flex-direction: column; }
+.ld-list .li { padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.ld-list .li:hover { background: var(--surface-2); }
+.ld-list .li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.ld-list .lh { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 12px 10px 4px; }
+.ld-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 860px) { .ld { flex-direction: column; } .ld-list { width: 100%; } }
+.side-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.dec-page { display: flex; gap: 16px; align-items: flex-start; }
+.dec-body { flex: 1; min-width: 0; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.65; font-size: 15px; max-width: 760px; }
+.dec-body h4 { margin: 8px 0 0; font-size: 14px; }
+.dec-side { width: 260px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 900px) { .dec-page { flex-direction: column; } .dec-side { width: 100%; } }
+.dtl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dtl li { display: flex; gap: 12px; position: relative; padding-bottom: 12px; cursor: pointer; }
+.dtl .rail { width: 14px; flex: none; display: flex; flex-direction: column; align-items: center; }
+.dtl .rail i { width: 12px; height: 12px; border-radius: 999px; border: 2px solid var(--border); background: var(--surface); margin-top: 12px; }
+.dtl .rail b { flex: 1; width: 2px; background: var(--border); }
+.dtl li.accepted .rail i { border-color: var(--ok); background: var(--ok); }
+.dtl li.proposed .rail i { border-color: var(--warn); }
+.dtl li.superseded .rail i, .dtl li.rejected .rail i { border-color: var(--muted); }
+.dtl .dcard { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.dtl li[aria-selected="true"] .dcard { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dtl li.superseded .dcard, .dtl li.rejected .dcard { opacity: .72; }
+.month { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 0 8px 26px; }
+.af-wrap { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.af-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.af-frame { flex: 1; min-width: 0; background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 420px; }
+.drawer { width: 300px; flex: none; border-left: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+@media (max-width: 900px) { .af-wrap { flex-direction: column; } .drawer { width: auto; border-left: none; border-top: 1px solid var(--border); } }
+.fake { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.fake h5 { margin: 0; font-size: 15px; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; border-bottom: 1px solid var(--border); padding-top: 8px; }
+.bars i { flex: 1; background: var(--info); border-radius: 3px 3px 0 0; min-width: 6px; }
+.bars i.over { background: var(--danger); }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.extra { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--warn); border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 10px; }
+.embed { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.embed .eb { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: var(--surface-2); font-size: 12px; flex-wrap: wrap; }
+.embed .ef { padding: 12px; background: var(--bg); }
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.thumb { width: 168px; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); display: flex; flex-direction: column; }
+.thumb .img { height: 88px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.thumb .img.video { background: var(--text); color: var(--bg); font-size: 20px; }
+.thumb .cap { padding: 6px 8px; display: flex; flex-direction: column; font-size: 12px; }
+.drop { border: 1px dashed var(--border); border-radius: 8px; padding: 10px 12px; color: var(--muted); font-size: 13px; }
+.file-row { display: flex; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; }
+.file-row .ic { width: 28px; height: 28px; border-radius: 4px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; color: var(--muted); flex: none; }
+.file-row .ic.af { background: var(--agent-soft); color: var(--agent); }
+.player { border-radius: 8px; background: var(--text); color: var(--bg); height: 150px; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; max-width: 420px; }
+.player .pb { height: 4px; border-radius: 2px; background: var(--muted); }
+.player .pb i { display: block; width: 30%; height: 100%; background: var(--bg); border-radius: 2px; }
+.tri-table td .row { flex-wrap: wrap; }
+.status.backlog i { background: transparent; border: 1.5px dashed var(--cat-backlog); }
+</style>
+
+<div class="proto-bar" role="navigation" aria-label="Prototype">
+  <strong>Cronk Phase 2 prototype</strong><span class="note">throwaway · fake data · direction from docs/ui.md</span>
+  <div class="proto-tabs" id="screens"></div>
+  <div class="seg" id="theme" aria-label="Theme"><button data-t="">System</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+</div>
+<div id="app"></div>
+<div id="modal"></div>
+<div class="switcher" role="group" aria-label="Variant">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="vlabel" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+// ---------------------------------------------------------------- helpers (as in #98)
+const av = (n, agent) => `<span class="av${agent ? " agent" : ""}">${n.split(/[\s-]/).map(s => s[0]).join("").slice(0, 2).toUpperCase()}</span>`;
+const user = n => `<span class="actor">${av(n)}${n}</span>`;
+const agent = (n, owner) => `<span class="actor agent-name">${av(n, true)}${n}</span>${owner ? `<span class="muted small">for ${owner}</span>` : ""}`;
+const sess = s => `<span class="session" title="Agent Session">${s}</span>`;
+const status = (cat, name) => `<span class="status ${cat}"><i></i><span>${name}</span></span>`;
+const prio = p => `<span class="prio ${p.toLowerCase()}">${p}</span>`;
+const kind = (cls, txt) => `<span class="kind ${cls}">${txt}</span>`;
+const lock = (extra) => `<span class="lock" title="Agents may read but not edit">🔒 <b>Protected</b>${extra ? ` · ${extra}` : ""}</span>`;
+const dst = s => `<span class="dst ${s}">${s}</span>`;
+
+function nav(active) {
+  const items = [
+    ["inbox", "Inbox", `<span class="count hot">7</span>`],
+    ["triage", "Triage", `<span class="count">4</span>`],
+    ["documents", "Documents", ""],
+    ["terms", "Terms", ""],
+    ["decisions", "Decisions", ""],
+    ["agents", "Agents", `<span class="count"><span class="live">2</span></span>`],
+  ];
+  return items.map(([k, n, c]) => `<a class="nav-item${active === k ? " active" : ""}">${n}${c}</a>`).join("");
+}
+function frame(active, inner) {
+  return `<div class="frame">
+    <aside class="sidebar" aria-label="Main">
+      <div class="ws"><span class="ws-mark">A</span>Acme</div>
+      <div class="search">Search <kbd>/</kbd></div>
+      <nav class="nav-group">${nav(active)}</nav>
+      <nav class="nav-group projects-group"><div class="nav-label">Projects</div>
+        <a class="nav-item${active === "projects" ? " active" : ""}"><span class="pkey">CRONK</span>Cronk</a>
+        <a class="nav-item"><span class="pkey">SITE</span>Website</a>
+        <a class="nav-item"><span class="pkey">OPS</span>Operations</a>
+      </nav>
+      <nav class="nav-group"><div class="nav-label">Workspace</div>
+        <a class="nav-item">Guidance</a><a class="nav-item">Users</a><a class="nav-item">Settings</a>
+      </nav>
+      <div class="me">${av("Ada Lovelace")}<span class="grow">Ada Lovelace</span><span class="muted small">Admin</span></div>
+    </aside>
+    <main class="main"><div class="main-inner">${inner}</div></main></div>`;
+}
+
+// ---------------------------------------------------------------- fake data
+const D4 = {
+  v3: [
+    "Cronk limits failed sign-ins in the API, not in a reverse proxy, so the rule holds on any deployment (ADR 0006).",
+    "Limits: 5 failures per email per minute, sliding.",
+    "Per-IP limits are left out: behind the Compose proxy every request has the proxy's IP.",
+  ],
+  sug: [
+    "Cronk limits failed sign-ins in the API, not in a reverse proxy, so the rule holds on any deployment (ADR 0006).",
+    "Limits: 5 failures per email and 50 per client IP per minute, both sliding.",
+    "The client IP comes from X-Forwarded-For when trustProxy is set, which the Compose file now does (CRONK-31).",
+  ],
+  v4line: "Limits: 5 failures per email per minute, sliding; a successful sign-in resets the count.",
+};
+const REASON = `CRONK-31 fixed the proxy hiding client IPs, so the reason for leaving per-IP limits out no longer holds. I changed the limits line and replaced the last paragraph; nothing else.`;
+const REPORT14 = `<h4>What changed</h4><p>State-changing routes refuse requests whose <code>Origin</code> isn't Cronk's own, and the sign-in cookie is <code>SameSite=Strict</code>.</p><h4>Evidence</h4><ul><li><code>origin.test.ts</code>: 6 new cases, all green</li><li>Invitation and reset links still work signed out</li></ul>`;
+
+const INBOX = [
+  { id: "b1", grp: "Blocking", cls: "k-blocking", label: "Blocking", key: "CRONK-12", title: "Rate-limit sign-in attempts", at: "10:18", snip: "Per email or per IP? Behind the Compose proxy every request has the proxy's IP…", blocking: true },
+  { id: "r1", grp: "To review", cls: "k-review", label: "To review", key: "CRONK-9", title: "Show Claim expiry on the Ticket page", at: "08:55", snip: "Report: Claim expiry on the Ticket page" },
+  { id: "u1", grp: "Unverified", cls: "k-finding", label: "Unverified", key: "CRONK-14", title: "Check Origin on state-changing routes", at: "11:02", snip: "Completed by claude-laptop under Autonomous Delegation" },
+  { id: "s1", grp: "Suggestions", cls: "k-report", label: "Suggestion", key: "CRONK-D4", title: "Sign-in limits live in the API", at: "11:20", snip: "codex-ci: add a per-IP limit now that CRONK-31 passes client IPs through" },
+  { id: "s2", grp: "Suggestions", cls: "k-report", label: "Suggestion", key: "Term", title: "Claim", at: "09:12", snip: "claude-laptop: say that handing over ends the Claim" },
+  { id: "d1", grp: "Discovered", cls: "k-question", label: "Discovered", key: "CRONK-31", title: "Compose proxy hides client IPs", at: "10:31", snip: "Found while working on CRONK-12 · blocks 2 Tickets" },
+  { id: "p1", grp: "Proposed Decisions", cls: "k-plan", label: "Proposed Decision", key: "CRONK-D9", title: "Store Attachments by content hash", at: "yesterday", snip: "codex-ci, while working on CRONK-27" },
+];
+
+// ---------------------------------------------------------------- screens
+const SCREENS = {
+  inbox: { name: "Inbox · Suggestions", nav: "inbox", variants: {
+    a: ["Unified diff", "The Inbox gains Unverified, Suggestions, Discovered and Proposed Decisions groups. A Suggestion opens as a unified diff against its base Version, with the Agent's reasoning above it. Try \"Simulate a newer Version\" for the outdated case, and Reject or Edit and accept.", () => inbox()],
+    b: ["Side by side", "Same Inbox; the Suggestion shows the current Version and the suggested text side by side, changed paragraphs tinted. Easier for prose, wider.", () => inbox()],
+    c: ["Edit in place", "Same Inbox; the suggested text opens straight in an editor with the changes marked. Accepting unchanged credits the Agent; typing turns the button into \"Accept as edited\" and credits you.", () => inbox()],
+  }},
+  reopen: { name: "Reopen", nav: "inbox", variants: {
+    a: ["Dialog with dependents", "Reopen asks what is wrong, then lists every Ticket that already continued on this work, with a choice per Ticket. Defaults leave them alone.", () => inbox("u1")],
+    b: ["Inline with a dependency tree", "Reopen unfolds in the detail pane. The dependents show as a tree under the Ticket, so chains (A unblocked B, B unblocked C) are visible; tick the ones to Reopen too.", () => inbox("u1")],
+  }},
+  triage: { name: "Triage", nav: "triage", variants: {
+    a: ["Split, like the Inbox", "Triage reuses the Inbox split: groups on the left, the item and its actions on the right. Take it assigns it to you and moves it to your Inbox.", () => triageSplit()],
+    b: ["Table", "A dense table grouped by kind, one row per item with its Project, source and age, and actions in the row. Good for clearing many at once.", () => triageTable()],
+  }},
+  terms: { name: "Terms", nav: "terms", variants: {
+    a: ["Glossary page", "Reads like GLOSSARY.md: Terms under their groups, each with its definition, words to avoid and markers (Protected, overrides). A scope switch picks Workspace or a Project; a Project view folds in Workspace Terms it doesn't override.", () => termsA()],
+    b: ["List and detail", "An index of names on the left; the selected Term on the right with its mentions, linked Decisions, Versions and the override on both sides.", () => termsB()],
+  }},
+  decisions: { name: "Decisions", nav: "decisions", variants: {
+    a: ["Register and page", "A filterable register (key, title, status, group, date) above the selected Decision's page, which shows what it supersedes and what mentions it.", () => decisionsA()],
+    b: ["Timeline", "Decisions in order on a rail, superseded and rejected ones faded with a pointer to what replaced them; the selected one opens beside it.", () => decisionsB()],
+  }},
+  artifact: { name: "Artifact", nav: "projects", variants: {
+    a: ["Full bleed, comment drawer", "The Artifact fills the page under a thin bar: Version picker, copy link to this Version, declared extra origins. Comments slide in on the right, each saying which Version it was on.", () => artifactA()],
+    b: ["Page with tabs", "Like a Document: title and source on top, the Artifact in a framed panel, then tabs for Comments, Versions and where it is embedded.", () => artifactB()],
+  }},
+  ticket: { name: "Ticket · Attachments", nav: "projects", variants: {
+    a: ["Attachments under the description", "Attachments sit as thumbnails under the description with a drop zone; a Report embeds its Artifact (pinned to a Version) and lists its Attachments.", () => ticketA()],
+    b: ["Files in the side panel", "Attachments and Artifacts are listed in the side panel's Files section; media plays inline only where it is posted in the timeline.", () => ticketB()],
+  }},
+};
+
+// ---------------------------------------------------------------- inbox
+function inboxHead(title, count) {
+  return `<div class="page-head"><h1>${title}</h1><span class="live">Live</span>
+    <div class="filters"><span class="chip" aria-pressed="true">Everything ${count}</span><span class="chip">Project ▾</span><span class="chip">Agent ▾</span></div></div>`;
+}
+function listOf(items, sel) {
+  let out = "", last = "";
+  const counts = {};
+  items.forEach(x => counts[x.grp] = (counts[x.grp] || 0) + 1);
+  for (const x of items) {
+    if (x.grp !== last) { out += `<div class="ib-group">${x.grp} · ${counts[x.grp]}</div>`; last = x.grp; }
+    out += `<div class="ib-item${x.blocking ? " blocking" : ""}" role="option" aria-selected="${sel === x.id}" data-sel="${x.id}">
+      <div class="row">${kind(x.cls, x.label)}<span class="key">${x.key}</span><span class="grow"></span><span class="muted small">${x.at}</span></div>
+      <div class="row"><span class="grow" style="font-weight:500">${x.title}</span></div>
+      <div class="snip">${x.snip}</div></div>`;
+  }
+  return out;
+}
+function inbox(forceSel) {
+  const sel = state.sel || forceSel || "s1";
+  return `${inboxHead("Inbox", 7)}<div class="ib-split"><div class="ib-list" role="listbox" aria-label="Inbox">${listOf(INBOX, sel)}</div>
+    <div class="ib-detail">${detailFor(sel)}</div></div>
+    <p class="muted small">J / K moves through the list. On a Suggestion: Y accepts, E edits, R rejects.</p>`;
+}
+function detailFor(id) {
+  if (id === "s1") return suggestionDetail();
+  if (id === "s2") return termSuggestion();
+  if (id === "u1") return unverifiedDetail();
+  if (id === "d1") return discoveredDetail();
+  if (id === "p1") return proposedDetail();
+  if (id === "b1") return `<div class="row wrap">${kind("k-blocking", "Blocking question")}<span class="key">CRONK-12</span><a>Rate-limit sign-in attempts</a></div>
+    <div class="row wrap">${agent("claude-laptop", "Ada")}${sess("brisk-otter")}<span class="muted small">10:18</span></div>
+    <div class="md"><p>Should the limit be per email or per IP? Behind the Compose proxy every request has the proxy's IP, so a per-IP limit would lock everyone out at once.</p></div>
+    <p class="muted small">Unchanged from Phase 1.</p>`;
+  return `<div class="row wrap">${kind("k-review", "To review")}<span class="key">CRONK-9</span><a>Show Claim expiry on the Ticket page</a>${status("review", "In Review")}</div><p class="muted small">Unchanged from Phase 1.</p>`;
+}
+
+// ---- Suggestion on a Decision
+function sugHead() {
+  return `<div class="row wrap">${kind("k-report", "Suggestion")}<span class="key">CRONK-D4</span><a>Sign-in limits live in the API</a>${dst("accepted")}${lock()}</div>
+    <div class="row wrap">${agent("codex-ci", "Ada")}${sess("calm-heron")}<span class="muted small">11:20 · from Version 3 · while working on <a class="key">CRONK-18</a></span></div>
+    <div class="reason">${kind("", "Why")}<div>${REASON}</div></div>`;
+}
+function sugOutdatedBanner() {
+  return state.outdated ? `<div class="banner info"><strong>Version 4 was saved since.</strong> Grace Hopper changed the limits line at 11:41. Accepting this Suggestion merges both; one paragraph needs a choice.</div>` : "";
+}
+function unified() {
+  const L = (t, c, s) => `<div class="${c}"><span>${s}</span><span>${t}</span></div>`;
+  const cur = state.outdated ? [D4.v3[0], D4.v4line, D4.v3[2]] : D4.v3;
+  return `<div class="dl"><div class="hd"><span></span><span>Version ${state.outdated ? "4 (current)" : "3"} → Suggested</span></div>
+    ${L(D4.sug[0], "ctx", "")}${L(cur[1], "del", "−")}${L(D4.sug[1], "add", "+")}${L(cur[2], "del", "−")}${L(D4.sug[2], "add", "+")}</div>`;
+}
+function sideBySide() {
+  const cur = state.outdated ? [D4.v3[0], D4.v4line, D4.v3[2]] : D4.v3;
+  return `<div class="sxs"><div><span class="small muted">Version ${state.outdated ? "4, current" : "3, current"}</span><div class="pane">
+      <p>${cur[0]}</p><p class="was">${cur[1]}</p><p class="was">${cur[2]}</p></div></div>
+    <div><span class="small muted">Suggested by codex-ci</span><div class="pane">
+      <p>${D4.sug[0]}</p><p class="now">${D4.sug[1]}</p><p class="now">${D4.sug[2]}</p></div></div></div>`;
+}
+function editInPlace() {
+  return `<div class="col"><div class="row"><span class="small muted grow">Suggested text. Changed paragraphs are marked in the margin; edit freely before accepting.</span></div>
+    <textarea class="input mono" id="sug-edit" rows="7" data-edit>${D4.sug.join("\n\n")}</textarea>
+    <div class="dl"><div class="hd"><span></span><span>2 paragraphs changed from Version ${state.outdated ? "4" : "3"}</span></div><div class="add"><span>+</span><span>Limits: 5 failures per email and 50 per client IP…</span></div><div class="add"><span>+</span><span>The client IP comes from X-Forwarded-For…</span></div></div></div>`;
+}
+function mergePanel() {
+  const c = state.choice || "";
+  const ch = (k, label, txt) => `<div class="choice" role="radio" tabindex="0" aria-checked="${c === k}" data-choice="${k}"><strong class="small">${label}</strong><pre>${txt}</pre></div>`;
+  return `<div class="panel panel-pad col"><div class="row"><h3 class="grow">Merge: the limits paragraph</h3><span class="chip" style="color:var(--danger);border-color:var(--danger)">Both changed</span></div>
+    <div class="conf">${ch("sug", "Suggestion", D4.sug[1])}${ch("v4", "Version 4, Grace Hopper", D4.v4line)}</div>
+    <div class="row wrap"><button class="btn secondary small" data-choice="both">Use both</button><span class="muted small">The new last paragraph merged cleanly.</span></div>
+    <label class="label" for="merge-res">Result</label>
+    <textarea class="input mono" id="merge-res" rows="2">${c === "v4" ? D4.v4line : c === "both" ? "Limits: 5 failures per email and 50 per client IP per minute, both sliding; a successful sign-in resets the count." : D4.sug[1]}</textarea></div>`;
+}
+function sugActions() {
+  if (state.reject === "s1") return `<div class="answer-box"><label class="label" for="rej">Why not (required; reaches codex-ci as Waiting Work)</label><textarea class="input" id="rej" rows="3" placeholder="What should change, or why this shouldn't happen"></textarea>
+    <div class="row"><button class="btn danger">Reject Suggestion</button><button class="btn secondary" data-reject="">Cancel</button></div></div>`;
+  if (state.outdated && state.merging) return `${mergePanel()}<div class="actionbar"><button class="btn">Accept merged as Version 5</button><button class="btn secondary" data-merging="0">Back</button><span class="muted small">A merge counts as your edit: Version 5 is yours, linked to this Suggestion.</span></div>`;
+  const v = state.variant;
+  const acceptLabel = state.outdated ? "Merge and accept…" : (v === "c" && state.edited ? "Accept as edited" : "Accept");
+  const note = state.outdated ? "" : (v === "c" && state.edited ? "You changed it: Version 4 will be yours, linked to this Suggestion." : "Version 4 will be credited to codex-ci, accepted by you.");
+  return `<div class="actionbar"><button class="btn" ${state.outdated ? `data-merging="1"` : ""} id="accept-btn">${acceptLabel}</button>
+    ${v !== "c" && !state.outdated ? `<button class="btn secondary">Edit and accept…</button>` : ""}
+    <button class="btn secondary" data-reject="s1">Reject…</button>
+    <span class="muted small" id="accept-note">${note}</span></div>`;
+}
+function suggestionDetail() {
+  const body = state.variant === "b" && state.screen === "inbox" ? sideBySide() : state.variant === "c" && state.screen === "inbox" ? editInPlace() : unified();
+  return `${sugHead()}${sugOutdatedBanner()}${state.merging && state.outdated ? "" : body}${sugActions()}
+    <button class="proto-sim" data-outdated="1">${state.outdated ? "Prototype: undo the newer Version" : "Prototype: simulate a newer Version saved meanwhile"}</button>`;
+}
+function termSuggestion() {
+  return `<div class="row wrap">${kind("k-report", "Suggestion")}<span class="muted small">Term</span><a>Claim</a>${lock()}<span class="muted small">Workspace</span></div>
+    <div class="row wrap">${agent("claude-laptop", "Ada")}${sess("brisk-otter")}<span class="muted small">09:12 · from Version 6</span></div>
+    <div class="reason">${kind("", "Why")}<div>Phase 2 decided that handing a Ticket over ends its Claim; the definition still says only completion does.</div></div>
+    <div class="dl"><div class="hd"><span></span><span>Definition, Version 6 → Suggested</span></div>
+      <div class="del"><span>−</span><span>It ends when the Ticket is Completed or Canceled or the Agent releases it.</span></div>
+      <div class="add"><span>+</span><span>It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it.</span></div></div>
+    <div class="actionbar"><button class="btn">Accept</button><button class="btn secondary">Edit and accept…</button><button class="btn secondary">Reject…</button></div>`;
+}
+
+// ---- Unverified + Reopen
+function unverifiedDetail() {
+  const reopening = state.screen === "reopen" ? state.reopen !== false : state.reopen;
+  const inlineB = state.screen === "reopen" && state.variant === "b" && reopening;
+  return `<div class="row wrap">${kind("k-finding", "Unverified")}<span class="key">CRONK-14</span><a>Check Origin on state-changing routes</a>${status("completed", "Done")}<span class="chip" style="color:var(--warn);border-color:var(--warn)">Unverified</span></div>
+    <div class="row wrap">${agent("claude-laptop", "Ada")}<span class="muted small">completed 11:02 under Autonomous Delegation (from parent CRONK-3)</span></div>
+    <div class="report-box"><div class="row" style="margin-bottom:8px">${kind("k-report", "Report")}<strong>Origin check and strict cookie</strong></div><div class="md">${REPORT14}</div></div>
+    <div class="banner info">2 Tickets already continued on this work: <a class="key">CRONK-16</a> is In Progress, <a class="key">CRONK-17</a> was completed (Unverified).</div>
+    ${inlineB ? reopenInline() : `<div class="actionbar"><button class="btn">Accept</button><button class="btn secondary" data-reopen="1">Reopen…</button><a class="small" style="margin-left:auto">Open CRONK-14</a></div>`}`;
+}
+function depChoice(id, a, b) {
+  const v = (state.dep || {})[id] || a;
+  return `<div class="opt" role="group">${[a, b].map(o => `<button aria-pressed="${v === o}" data-dep="${id}" data-val="${o}">${o}</button>`).join("")}</div>`;
+}
+function reopenDialog() {
+  return `<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ro-t">
+    <h2 id="ro-t">Reopen CRONK-14</h2>
+    <p class="muted small">It goes back to ${"claude-laptop"} in a Started Status and blocks its dependents again.</p>
+    <label class="label" for="ro-why">What is wrong (required; claude-laptop gets it as Waiting Work)</label>
+    <textarea class="input" id="ro-why" rows="3">Invitation links opened from email clients that send an Origin of "null" are refused.</textarea>
+    <div class="deps"><div class="deps-head">2 Tickets already continued on this work</div>
+      <div class="dep"><div class="t"><span><span class="key">CRONK-16</span> Same-site warning in setup docs</span><span class="muted small">${status("started", "In Progress")} · Claimed by codex-ci</span></div>${depChoice("16", "Keep going", "Pause")}</div>
+      <div class="dep"><div class="t"><span><span class="key">CRONK-17</span> CSRF note in the API reference</span><span class="muted small">${status("completed", "Done")} · Unverified · claude-laptop</span></div>${depChoice("17", "Keep", "Reopen too")}</div>
+      <div class="dep"><div class="t"><span><span class="key">CRONK-19</span> Artifact host setting</span><span class="muted small">${status("unstarted", "Todo")} · not started, waits again</span></div></div>
+    </div>
+    <p class="muted small">Pause releases the Claim and moves it back to Todo. Every dependent's Agent is told CRONK-14 was Reopened.</p>
+    <div class="dialog-actions"><button class="btn secondary" data-reopen="0">Cancel</button><button class="btn">Reopen CRONK-14</button></div>
+  </div></div>`;
+}
+function reopenInline() {
+  const ck = (id, on) => `<input type="checkbox" id="ck-${id}"${on ? " checked" : ""}>`;
+  return `<div class="panel panel-pad col">
+    <h3>Reopen CRONK-14</h3>
+    <label class="label" for="ro-why2">What is wrong (required)</label>
+    <textarea class="input" id="ro-why2" rows="3">Invitation links opened from email clients that send an Origin of "null" are refused.</textarea>
+    <span class="label">What built on it</span>
+    <div class="tree">
+      <div class="node">${status("completed", "")}<span class="key">CRONK-14</span><span>Check Origin on state-changing routes</span><span class="muted small">Reopening</span></div>
+      <div class="node l1">${ck("16", false)}<label for="ck-16" class="row"><span class="key">CRONK-16</span>Same-site warning in setup docs<span class="muted small">In Progress · codex-ci · pause</span></label></div>
+      <div class="node l2">${ck("19", false)}<label for="ck-19" class="row"><span class="key">CRONK-19</span>Artifact host setting<span class="muted small">Todo · waits again</span></label></div>
+      <div class="node l1">${ck("17", true)}<label for="ck-17" class="row"><span class="key">CRONK-17</span>CSRF note in the API reference<span class="muted small">Done, Unverified · Reopen too</span></label></div>
+    </div>
+    <div class="row wrap"><button class="btn">Reopen CRONK-14 and 1 more</button><button class="btn secondary" data-reopen="0">Cancel</button></div></div>`;
+}
+
+// ---- Discovered Ticket & proposed Decision
+function discoveredDetail() {
+  return `<div class="row wrap">${kind("k-question", "Discovered Ticket")}<span class="key">CRONK-31</span><a>Compose proxy hides client IPs</a>${status("backlog", "Backlog")}${prio("Medium")}</div>
+    <div class="row wrap">${agent("claude-laptop", "Ada")}${sess("brisk-otter")}<span class="muted small">10:31 · found while working on <a class="key">CRONK-12</a> · assigned to you as its Assignee</span></div>
+    <div class="md"><p>Behind the Compose proxy every request arrives from the proxy's IP, because Fastify's <code>trustProxy</code> is off. Per-IP limits, and the client IP in history, are wrong until it is set for the proxy's network.</p></div>
+    <div class="banner warn"><strong>Pausing 2 Tickets.</strong> claude-laptop marked it as blocking <a class="key">CRONK-22</a> Per-IP sign-in limit and <a class="key">CRONK-23</a> Client IP in history. <a>Remove a block…</a></div>
+    <div class="actionbar"><button class="btn">Delegate to claude-laptop</button><button class="btn secondary">Delegate to…</button><button class="btn secondary">Keep in Backlog</button><button class="btn ghost" style="margin-left:auto">Cancel Ticket…</button></div>`;
+}
+function proposedDetail() {
+  return `<div class="row wrap">${kind("k-plan", "Proposed Decision")}<span class="key">CRONK-D9</span><a>Store Attachments by content hash</a>${dst("proposed")}</div>
+    <div class="row wrap">${agent("codex-ci", "Ada")}${sess("calm-heron")}<span class="muted small">yesterday 16:40 · while working on <a class="key">CRONK-27</a></span></div>
+    <div class="report-box"><div class="md"><p>Attachments are stored under the data directory at <code>sha256/ab/cdef…</code>, so the same file attached twice is stored once and S3 keys never need renaming.</p><h4>Considered Options</h4><ul><li>By Attachment id: simpler, duplicates files</li><li>By item path: breaks on moves</li></ul></div></div>
+    <div class="actionbar"><button class="btn">Accept</button><button class="btn secondary">Reject…</button><a class="small" style="margin-left:auto">Open CRONK-D9</a></div>
+    <p class="muted small">Agents with Write may still refine it while it is proposed. Accepting protects it.</p>`;
+}
+
+// ---------------------------------------------------------------- triage
+const TRIAGE = [
+  { id: "t1", grp: "Discovered Tickets", cls: "k-question", label: "Discovered", key: "OPS-8", title: "Backups skip the attachments directory", at: "2 h", snip: "By ops-runner (Grace Hopper's) · Grace has no access to OPS", where: "Operations", from: "ops-runner, no source Ticket" },
+  { id: "t2", grp: "Discovered Tickets", cls: "k-question", label: "Discovered", key: "SITE-40", title: "Docs site has no dark theme", at: "yesterday", snip: "By claude-laptop · source Ticket's Assignee left the Project", where: "Website", from: "claude-laptop, SITE-31" },
+  { id: "t3", grp: "Suggestions on Workspace items", cls: "k-report", label: "Suggestion", key: "Term", title: "Workspace", at: "3 h", snip: "codex-ci: mention that Admins can't create a second one", where: "Workspace", from: "codex-ci" },
+  { id: "t4", grp: "Suggestions on Workspace items", cls: "k-report", label: "Suggestion", key: "Guidance", title: "Workspace Guidance", at: "2 d", snip: "claude-laptop: tell Agents to file Discovered Tickets instead of TODO comments", where: "Workspace", from: "claude-laptop" },
+];
+function triageSplit() {
+  const sel = state.tsel || "t1";
+  const x = TRIAGE.find(t => t.id === sel);
+  const det = x.label === "Discovered" ? `<div class="row wrap">${kind(x.cls, "Discovered Ticket")}<span class="key">${x.key}</span><a>${x.title}</a>${status("backlog", "Backlog")}</div>
+      <div class="row wrap"><span class="muted small">${x.snip}</span></div>
+      <div class="md"><p>The nightly backup copies Postgres only. Attachments and Artifact files on local disk are not in it.</p></div>
+      <div class="actionbar"><button class="btn">Take it</button><button class="btn secondary">Assign to…</button><button class="btn ghost" style="margin-left:auto">Cancel Ticket…</button></div>
+      <p class="muted small">Take it assigns it to you; it then waits in your Inbox to be delegated.</p>`
+    : `<div class="row wrap">${kind(x.cls, "Suggestion")}<span class="muted small">${x.key}</span><a>${x.title}</a>${lock()}</div>
+      <div class="row wrap">${agent(x.from, "")}<span class="muted small">${x.at} ago</span></div>
+      <div class="reason">${kind("", "Why")}<div>${x.snip.split(": ")[1]}.</div></div>
+      <div class="dl"><div class="add"><span>+</span><span>${x.key === "Term" ? "There is exactly one per installation; Admins can't create a second one." : "When you notice work outside your Ticket, file a Discovered Ticket. Don't leave TODO comments in code."}</span></div></div>
+      <div class="actionbar"><button class="btn">Accept</button><button class="btn secondary">Edit and accept…</button><button class="btn secondary">Reject…</button></div>
+      <p class="muted small">Shown to everyone with Write on Workspace knowledge; ${x.key === "Guidance" ? "Guidance Suggestions only to Admins." : "the first to act resolves it for all."}</p>`;
+  return `<div class="page-head"><h1>Triage</h1><span class="live">Live</span><div class="filters"><span class="chip" aria-pressed="true">Everything 4</span><span class="chip">Project ▾</span></div></div>
+    <p class="muted small">Waiting items with nobody clear to go to. You see the ones you could act on.</p>
+    <div class="ib-split"><div class="ib-list" role="listbox" aria-label="Triage">${listOf(TRIAGE, sel).replaceAll("data-sel", "data-tsel")}</div><div class="ib-detail">${det}</div></div>`;
+}
+function triageTable() {
+  const rows = (g) => TRIAGE.filter(t => t.grp === g).map(t => `<tr><td><div class="row"><span class="key">${t.key}</span><a>${t.title}</a></div><div class="muted small">${t.snip}</div></td><td>${t.where}</td><td class="small">${t.from}</td><td class="num">${t.at}</td>
+    <td><div class="row">${t.label === "Discovered" ? `<button class="btn small">Take it</button><button class="btn secondary small">Assign…</button>` : `<button class="btn small">Review</button>`}</div></td></tr>`).join("");
+  return `<div class="page-head"><h1>Triage</h1><span class="live">Live</span><div class="filters"><span class="chip" aria-pressed="true">Everything 4</span><span class="chip">Project ▾</span></div></div>
+    <div class="table-wrap"><table class="tri-table"><thead><tr><th>Item</th><th>Where</th><th>From</th><th>Waiting</th><th></th></tr></thead><tbody>
+    <tr><td colspan="5" class="small" style="font-weight:600">Discovered Tickets · 2</td></tr>${rows("Discovered Tickets")}
+    <tr><td colspan="5" class="small" style="font-weight:600">Suggestions on Workspace items · 2</td></tr>${rows("Suggestions on Workspace items")}
+    </tbody></table></div>
+    <p class="muted small">Review opens the Suggestion the same way the Inbox does.</p>`;
+}
+
+// ---------------------------------------------------------------- terms
+const TERMS = [
+  { g: "Work", n: "Ticket", d: "A unit of work tracked within a Project.", a: ["Issue", "task", "work item", "card"], p: true, used: 48, v: 2 },
+  { g: "Work", n: "Claim", d: "An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it.", a: ["Lock", "checkout", "lease"], p: true, used: 21, v: 6, sug: true },
+  { g: "Work", n: "Delegate", d: "The Agent a Ticket's Assignee has handed the work to.", a: ["Agent assignee", "worker"], p: false, used: 17, v: 1 },
+  { g: "Billing", n: "Customer", d: "A billing account: who pays, at what plan, and where invoices go.", a: ["Client", "account"], p: false, used: 9, v: 3, ov: "a paying organization" },
+  { g: "Structure", n: "Workspace", d: "The single organization a Cronk installation serves.", a: ["Organization", "tenant"], p: true, used: 33, v: 4, sug: true },
+];
+function termsScope() {
+  return `<div class="seg" role="group" aria-label="Scope"><button aria-pressed="false">Workspace</button><button aria-pressed="true">CRONK</button><button aria-pressed="false">SITE</button></div>`;
+}
+function termsA() {
+  const groups = [...new Set(TERMS.map(t => t.g))];
+  return `<div class="crumbs">Terms / CRONK</div>
+    <div class="page-head"><h1>Terms</h1>${termsScope()}<button class="btn secondary">Export GLOSSARY.md</button><button class="btn">New Term</button></div>
+    <div class="row wrap"><input class="input grow" id="term-filter" placeholder="Filter Terms and words to avoid" style="max-width:360px"><span class="muted small">5 Terms · 2 from this Project, 3 from the Workspace</span></div>
+    <div class="term-groups">${groups.map(g => `<section class="term-group"><h2>${g}</h2><div class="panel">${TERMS.filter(t => t.g === g).map(t => `
+      <div class="term"><div class="row wrap"><span class="term-name">${t.n}</span>${t.p ? lock() : ""}${t.ov ? `<span class="override">Overrides the Workspace Term</span>` : ""}${t.g !== "Billing" ? `<span class="muted small">Workspace</span>` : `<span class="muted small">CRONK</span>`}${t.sug ? `<span class="chip" style="color:var(--agent);border-color:var(--agent)">1 Suggestion</span>` : ""}<span class="grow"></span><span class="muted small">used in ${t.used} · Version ${t.v}</span></div>
+      <div>${t.d}</div><div class="avoid">Avoid: ${t.a.map(a => `<span>${a}</span>`).join(", ")}</div>
+      ${t.ov ? `<div class="muted small">In the Workspace, Customer means "${t.ov}". <a>See it</a></div>` : ""}</div>`).join("")}</div></section>`).join("")}</div>`;
+}
+function termsB() {
+  const sel = state.term || "Customer";
+  const t = TERMS.find(x => x.n === sel);
+  const groups = [...new Set(TERMS.map(t => t.g))];
+  return `<div class="crumbs">Terms / CRONK</div>
+    <div class="page-head"><h1>Terms</h1>${termsScope()}<button class="btn">New Term</button></div>
+    <div class="ld"><div class="ld-list panel" role="listbox" aria-label="Terms">${groups.map(g => `<div class="lh">${g}</div>${TERMS.filter(x => x.g === g).map(x => `<div class="li" role="option" aria-selected="${x.n === sel}" data-term="${x.n}"><span class="grow">${x.n}</span>${x.p ? `<span title="Protected">🔒</span>` : ""}${x.ov ? `<span class="small" style="color:var(--info)">over</span>` : ""}</div>`).join("")}`).join("")}</div>
+    <div class="ld-detail"><div class="panel panel-pad col">
+      <div class="row wrap"><h2 class="grow" style="font-size:20px">${t.n}</h2>${t.p ? lock() : ""}<button class="btn secondary small">Edit</button><button class="btn secondary small">…</button></div>
+      ${t.ov ? `<div class="banner info">Overrides the Workspace Term <strong>Customer</strong> ("${t.ov}") within CRONK. <a>Open the Workspace Term</a></div>` : ""}
+      <div style="font-size:15px;line-height:1.65">${t.d}</div>
+      <div class="avoid">Avoid: ${t.a.map(a => `<span>${a}</span>`).join(", ")}</div>
+      <div class="row wrap small muted">Group: ${t.g} · Version ${t.v} by Ada Lovelace · <a>History</a></div></div>
+      <div class="sxs"><div><h3>Mentioned in · ${t.used}</h3><div class="panel panel-pad side-list"><a>Billing overview</a><a>Invoice runs</a><span><span class="key">CRONK-41</span> <a>Merge duplicate Customers</a></span><span class="muted small">and ${t.used - 3} more</span></div></div>
+      <div><h3>Decisions</h3><div class="panel panel-pad side-list"><span><span class="key">CRONK-D6</span> <a>One Customer per invoice address</a> ${dst("accepted")}</span></div>
+      <h3 style="margin-top:8px">Words to avoid seen this week</h3><div class="panel panel-pad side-list"><span class="small">"client" in 2 Agent saves, both hinted</span></div></div></div>
+    </div></div>`;
+}
+
+// ---------------------------------------------------------------- decisions
+const DECS = [
+  { k: "CRONK-D9", t: "Store Attachments by content hash", s: "proposed", g: "Storage", d: "16 Nov 2026", by: "codex-ci" },
+  { k: "CRONK-D8", t: "Origin check instead of a separate domain", s: "accepted", g: "Security", d: "15 Nov 2026", by: "Ada Lovelace" },
+  { k: "CRONK-D7", t: "Per-email and per-IP sign-in limits", s: "accepted", g: "Security", d: "14 Nov 2026", by: "Ada Lovelace", sup: "CRONK-D4" },
+  { k: "CRONK-D6", t: "One Customer per invoice address", s: "accepted", g: "Billing", d: "2 Nov 2026", by: "Grace Hopper" },
+  { k: "CRONK-D5", t: "Rate limits in the reverse proxy", s: "rejected", g: "Security", d: "28 Oct 2026", by: "codex-ci" },
+  { k: "CRONK-D4", t: "Sign-in limits live in the API", s: "superseded", g: "Security", d: "27 Oct 2026", by: "Ada Lovelace", supBy: "CRONK-D7" },
+];
+function decPage(k) {
+  const d = DECS.find(x => x.k === k);
+  return `<div class="dec-page"><div class="panel dec-body">
+      <div class="row wrap"><span class="key">${d.k}</span>${dst(d.s)}${d.s === "accepted" ? lock() : ""}<span class="grow"></span><button class="btn secondary small">Edit</button><button class="btn secondary small">…</button></div>
+      <h2 style="font-size:24px">${d.t}</h2>
+      ${d.sup ? `<div class="banner info">Supersedes <a class="key">${d.sup}</a> Sign-in limits live in the API.</div>` : ""}
+      ${d.supBy ? `<div class="banner warn">Superseded by <a class="key">${d.supBy}</a> on 14 Nov 2026.</div>` : ""}
+      <p>Cronk limits failed sign-ins in the API: 5 per email and 50 per client IP per minute, both sliding. The client IP comes from <code>X-Forwarded-For</code> because the Compose file sets <code>trustProxy</code> for the proxy's network (CRONK-31).</p>
+      <h4>Consequences</h4><p>Installs behind another proxy must set its network, or per-IP limits count the proxy.</p>
+      <h4>Considered Options</h4><p>Limits in the reverse proxy (<a class="key">CRONK-D5</a>, rejected): ties the rule to Compose, against ADR 0006.</p></div>
+    <aside class="dec-side"><div class="panel panel-pad col"><span class="label">Status</span><div class="row wrap">${dst(d.s)}${d.s === "accepted" ? `<span class="muted small">by ${d.by}, ${d.d}</span>` : ""}</div>
+      <span class="label">Group</span><span>${d.g}</span><span class="label">Proposed by</span><span>${d.by === "codex-ci" ? agent("codex-ci") : user(d.by)}</span></div>
+      <div class="panel panel-pad col"><h3>Mentioned in</h3><div class="side-list"><span><span class="key">CRONK-12</span> <a>Rate-limit sign-in attempts</a></span><span><span class="key">CRONK-22</span> <a>Per-IP sign-in limit</a></span><a>Security notes</a></div>
+      <h3>Terms</h3><div class="side-list"><a>Sign-in</a></div></div></aside></div>`;
+}
+function decFilters() {
+  const n = s => DECS.filter(d => d.s === s).length;
+  return `<div class="filters"><span class="chip" aria-pressed="true">All ${DECS.length}</span><span class="chip">Accepted ${n("accepted")}</span><span class="chip">Proposed ${n("proposed")}</span><span class="chip">Superseded ${n("superseded")}</span><span class="chip">Rejected ${n("rejected")}</span><span class="chip">Group ▾</span></div>`;
+}
+function decisionsA() {
+  const sel = state.dec || "CRONK-D7";
+  return `<div class="crumbs">Decisions / CRONK</div>
+    <div class="page-head"><h1>Decisions</h1>${termsScope()}<button class="btn secondary">Export docs/adr</button><button class="btn">New Decision</button></div>${decFilters()}
+    <div class="table-wrap"><table><thead><tr><th>Key</th><th>Decision</th><th>Status</th><th>Group</th><th>Date</th></tr></thead><tbody>
+    ${DECS.map(d => `<tr data-dec="${d.k}" style="cursor:pointer${d.k === sel ? ";background:var(--accent-soft)" : ""}"><td class="key">${d.k}</td><td>${d.t}${d.supBy ? ` <span class="muted small">→ ${d.supBy}</span>` : ""}</td><td>${dst(d.s)}</td><td class="small">${d.g}</td><td class="num small">${d.d}</td></tr>`).join("")}
+    </tbody></table></div>${decPage(sel)}`;
+}
+function decisionsB() {
+  const sel = state.dec || "CRONK-D7";
+  return `<div class="crumbs">Decisions / CRONK</div>
+    <div class="page-head"><h1>Decisions</h1>${termsScope()}<button class="btn">New Decision</button></div>${decFilters()}
+    <div class="ld"><div class="ld-list" style="width:340px"><div class="month">November 2026</div><ul class="dtl">
+    ${DECS.map((d, i) => `${i === 4 ? `</ul><div class="month">October 2026</div><ul class="dtl">` : ""}<li class="${d.s}" data-dec="${d.k}" aria-selected="${d.k === sel}"><span class="rail"><i></i><b></b></span><div class="dcard"><div class="row"><span class="key">${d.k}</span>${dst(d.s)}<span class="grow"></span><span class="muted small">${d.d.split(" ").slice(0, 2).join(" ")}</span></div><span style="font-weight:500">${d.t}</span>${d.supBy ? `<span class="small" style="color:var(--info)">→ superseded by ${d.supBy}</span>` : ""}${d.sup ? `<span class="small muted">supersedes ${d.sup}</span>` : ""}</div></li>`).join("")}
+    </ul></div><div class="ld-detail">${decPage(sel)}</div></div>`;
+}
+
+// ---------------------------------------------------------------- artifact
+function fakeChart() {
+  const vals = [12, 18, 9, 30, 52, 61, 22, 14, 8, 44, 70, 16];
+  return `<div class="fake"><div class="row"><h5 class="grow">Failed sign-ins per minute</h5><span class="muted small">last 12 min · sample data</span></div>
+    <div class="bars">${vals.map(v => `<i class="${v > 50 ? "over" : ""}" style="height:${v}%"></i>`).join("")}</div>
+    <div class="legend"><span><i style="background:var(--info)"></i>under the per-IP limit</span><span><i style="background:var(--danger)"></i>over 50, refused</span></div></div>`;
+}
+function fakeApp() {
+  return `${fakeChart()}
+    <div class="fake"><h5>Proposed limits</h5><div class="small">5 per email · 50 per client IP · both sliding over 60 s</div></div>`;
+}
+function artifactComments() {
+  return `<div class="col"><div class="row">${user("Ada Lovelace")}<span class="muted small">10:40 · on Version 2</span></div><div class="bubble md"><p>Can the bars show the limit as a line instead of colouring them?</p></div>
+    <div class="reply"><div class="row">${agent("claude-laptop")}<span class="muted small">10:52</span></div><div class="md"><p>Kept the colours for now; Version 3 adds the threshold to the legend.</p></div></div></div>
+    <div class="col"><div class="row">${user("Grace Hopper")}<span class="muted small">11:15 · on Version 3</span></div><div class="bubble md"><p>Mobile: the legend wraps under the chart, looks fine.</p></div></div>
+    <textarea class="input" id="af-c" rows="2" placeholder="Comment on Version 3… (reaches claude-laptop)"></textarea><button class="btn small" style="align-self:flex-start">Comment</button>`;
+}
+function artifactA() {
+  const open = state.drawer !== false;
+  return `<div class="crumbs">CRONK / Artifacts / sign-in-limits</div>
+    <div class="af-wrap" style="flex-direction:column">
+      <div class="af-bar"><strong>Sign-in limits dashboard</strong><span class="chip">Version 3 · latest ▾</span><span class="muted small">from <a class="key">CRONK-12</a> by ${agent("claude-laptop")}</span><span class="grow"></span>
+        <span class="extra" title="Declared when publishing: 'charting fonts'">Also loads from fonts.bunny.net</span>
+        <button class="btn secondary small">Copy link to Version 3</button><button class="btn secondary small">Open full size</button><button class="btn secondary small" data-drawer="1" aria-pressed="${open}">Comments 3</button></div>
+      <div class="af-wrap" style="border:none;border-radius:0"><div class="af-frame">${fakeApp()}</div>${open ? `<aside class="drawer"><h3>Comments</h3>${artifactComments()}</aside>` : ""}</div>
+    </div>
+    <p class="muted small">Served from the Artifact hostname in a sandboxed frame. Network requests are blocked unless declared.</p>`;
+}
+function artifactB() {
+  const tab = state.aftab || "comments";
+  const tabs = [["comments", "Comments", 3], ["versions", "Versions", 3], ["embedded", "Embedded in", 2]];
+  const body = tab === "comments" ? `<div class="col" style="max-width:640px">${artifactComments()}</div>`
+    : tab === "versions" ? `<div class="panel">${[["3", "11:05", "claude-laptop", "Threshold in the legend", "latest"], ["2", "10:31", "claude-laptop", "Colours for refused attempts", ""], ["1", "10:02", "claude-laptop", "First publish", ""]].map(v => `<div class="prop" style="gap:12px"><span class="key">Version ${v[0]}</span><span class="grow">${v[3]}</span>${v[4] ? `<span class="chip">Latest</span>` : `<a class="small">View</a>`}<span class="muted small">${v[1]}</span></div>`).join("")}</div>`
+    : `<div class="panel">${[["Report on CRONK-12", "pinned to Version 2"], ["Document: Security notes", "latest Version"]].map(e => `<div class="prop"><a class="grow">${e[0]}</a><span class="muted small">${e[1]}</span></div>`).join("")}</div>`;
+  return `<div class="crumbs">CRONK / Artifacts</div>
+    <div class="page-head"><h1>Sign-in limits dashboard</h1><span class="chip">Version 3 ▾</span><button class="btn secondary">Copy link</button><button class="btn secondary">…</button></div>
+    <div class="row wrap small muted">From <a class="key">CRONK-12</a> · published by ${agent("claude-laptop")} ${sess("brisk-otter")} · 11:05 · 3 files, 41 KB · <span class="extra">Also loads from fonts.bunny.net</span></div>
+    <div class="panel" style="overflow:hidden"><div class="af-frame" style="min-height:0">${fakeApp()}</div></div>
+    <div class="tabs" role="tablist">${tabs.map(([k, n, c]) => `<button role="tab" aria-selected="${tab === k}" data-aftab="${k}">${n} <span class="n">${c}</span></button>`).join("")}</div>${body}`;
+}
+
+// ---------------------------------------------------------------- ticket with attachments
+function tkHeader() {
+  return `<div class="crumbs">Projects / <a>CRONK</a> / CRONK-12</div><div class="page-head"><h1>Rate-limit sign-in attempts</h1><button class="btn secondary">Edit</button></div>`;
+}
+function tkSide(files) {
+  return `<aside class="tk-side"><div class="panel">
+      <div class="prop"><span class="label">Status</span>${status("review", "In Review")}</div>
+      <div class="prop"><span class="label">Priority</span>${prio("High")}</div>
+      <div class="prop"><span class="label">Assignee</span>${user("Ada Lovelace")}</div>
+      <div class="prop"><span class="label">Delegate</span>${agent("claude-laptop")}</div>
+      <div class="prop"><span class="label">Autonomous</span><span class="small muted">Off · Project default</span></div></div>
+    ${files ? `<div class="panel panel-pad col"><div class="row"><h3 class="grow">Files</h3><button class="btn ghost small">Attach…</button></div>
+      <div class="file-row"><span class="ic af">ART</span><span class="grow"><a>Sign-in limits dashboard</a><br><span class="muted small">Artifact · Version 3</span></span></div>
+      <div class="file-row"><span class="ic">MP4</span><span class="grow"><a>lockout-repro.mp4</a><br><span class="muted small">8.4 MB · Ada Lovelace</span></span></div>
+      <div class="file-row"><span class="ic">LOG</span><span class="grow"><a>sign-in-flood.log</a><br><span class="muted small">220 KB · claude-laptop · in the Report</span></span></div>
+      <div class="file-row"><span class="ic">PNG</span><span class="grow"><a>proxy-ip.png</a><br><span class="muted small">96 KB · claude-laptop</span></span></div>
+      <div class="drop">Drop files or paste to attach</div></div>` : ""}
+    <div class="panel panel-pad col"><h3>Relations</h3><div class="small">Blocked by <span class="key">CRONK-31</span> Compose proxy hides client IPs <span class="muted">(Discovered)</span></div></div></aside>`;
+}
+function reportWithEmbed(withList) {
+  return `<li><span class="gut">${av("claude-laptop", true)}</span><div class="act"><div class="act-head">${kind("k-report", "Report")}${agent("claude-laptop")}<span class="muted small">10:58</span></div>
+    <div class="report-card"><div class="rc-head"><strong>Per-email limit, per-IP waits on CRONK-31</strong><span class="grow"></span><a class="small">Open Report</a></div>
+    <div class="rc-body md"><p>5 failures per email per minute, sliding. The dashboard below shows a replayed flood against Version 2's limits.</p>
+    <div class="embed"><div class="eb"><span class="kind k-report">Artifact</span><strong>Sign-in limits dashboard</strong><span class="chip">Version 2</span><span class="grow"></span><a>Open full size</a></div><div class="ef">${fakeChart()}</div></div></div></div>
+    ${withList ? `<div class="row wrap small"><span class="muted">Attached:</span><span class="chip">📄 sign-in-flood.log · 220 KB</span><span class="chip">🖼 proxy-ip.png · 96 KB</span></div>` : ""}
+    <div class="row wrap small muted">Filed during this work: <a class="key">CRONK-31</a> (Discovered) · Proposed: <a class="key">CRONK-D7</a></div></div></li>`;
+}
+function ticketA() {
+  return `${tkHeader()}<div class="tk-layout"><div class="tk-main">
+    <div class="desc md"><p>Sign-in accepts unlimited password attempts. Limit failures per email, and per IP once the proxy passes client IPs.</p></div>
+    <div class="col"><div class="row"><h3 class="grow">Attachments · 3</h3><button class="btn ghost small">Attach…</button></div>
+      <div class="thumbs">
+        <div class="thumb"><div class="img video">▶</div><div class="cap"><a>lockout-repro.mp4</a><span class="muted">8.4 MB · 0:42 · Ada</span></div></div>
+        <div class="thumb"><div class="img">PNG</div><div class="cap"><a>proxy-ip.png</a><span class="muted">96 KB · claude-laptop</span></div></div>
+        <div class="thumb"><div class="img">.log</div><div class="cap"><a>sign-in-flood.log</a><span class="muted">220 KB · claude-laptop</span></div></div>
+      </div><div class="drop">Drop files or paste to attach · up to 100 MB each</div></div>
+    <ul class="tl">
+      <li class="sys"><span class="gut"></span>claude-laptop filed Discovered Ticket CRONK-31 and marked it as blocking CRONK-22 <span class="small">10:31</span></li>
+      ${reportWithEmbed(true)}
+      <li class="sys"><span class="gut"></span>claude-laptop moved it from In Progress to In Review; its Claim ended <span class="small">10:58</span></li>
+    </ul></div>${tkSide(false)}</div>`;
+}
+function ticketB() {
+  return `${tkHeader()}<div class="tk-layout"><div class="tk-main">
+    <div class="desc md"><p>Sign-in accepts unlimited password attempts. Limit failures per email, and per IP once the proxy passes client IPs.</p></div>
+    <ul class="tl">
+      <li><span class="gut">${av("Ada Lovelace")}</span><div class="act"><div class="act-head">${kind("k-comment", "Comment")}${user("Ada Lovelace")}<span class="muted small">09:40</span></div>
+        <div class="bubble md"><p>Here is the lockout I saw on staging:</p><div class="player"><div class="row" style="margin-bottom:6px"><span>▶</span><span class="small">lockout-repro.mp4 · 0:12 / 0:42</span></div><div class="pb"><i></i></div></div></div></div></li>
+      ${reportWithEmbed(false)}
+      <li class="sys"><span class="gut"></span>claude-laptop moved it from In Progress to In Review; its Claim ended <span class="small">10:58</span></li>
+    </ul></div>${tkSide(true)}</div>`;
+}
+
+// ---------------------------------------------------------------- shell
+const state = { screen: "inbox", variant: "a" };
+function parseHash() {
+  const m = /^#([a-z]+)-([a-z])$/.exec(location.hash);
+  if (m && SCREENS[m[1]] && SCREENS[m[1]].variants[m[2]]) { state.screen = m[1]; state.variant = m[2]; }
+}
+function resetLocal() { Object.assign(state, { sel: null, tsel: null, outdated: false, merging: false, reject: null, edited: false, reopen: undefined, dep: {}, choice: "" }); }
+function go(screen, variant) { location.hash = `${screen}-${variant}`; }
+function render() {
+  const s = SCREENS[state.screen];
+  const [vname, note, body] = s.variants[state.variant];
+  document.getElementById("screens").innerHTML = Object.entries(SCREENS).map(([k, x]) => `<button data-screen="${k}" aria-current="${k === state.screen}">${x.name}</button>`).join("");
+  const keys = Object.keys(s.variants);
+  document.getElementById("vlabel").textContent = `${s.name} ${state.variant.toUpperCase()} of ${keys.length}: ${vname}`;
+  document.getElementById("app").innerHTML = frame(s.nav, `<div class="variant-note"><strong>${s.name} ${state.variant.toUpperCase()}, ${vname}.</strong> ${note}</div>${body()}`);
+  const showDialog = (state.screen === "reopen" && state.variant === "a" && state.reopen !== false && (state.sel || "u1") === "u1") || (state.screen === "inbox" && state.reopen === true && state.sel === "u1");
+  document.getElementById("modal").innerHTML = showDialog ? reopenDialog() : "";
+}
+function cycle(d) {
+  const keys = Object.keys(SCREENS[state.screen].variants);
+  go(state.screen, keys[(keys.indexOf(state.variant) + d + keys.length) % keys.length]);
+}
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+  if (e.key === "Escape" && document.getElementById("modal").innerHTML) { state.reopen = false; render(); }
+});
+document.addEventListener("input", e => {
+  if (e.target.matches("[data-edit]") && !state.edited) {
+    state.edited = true;
+    document.getElementById("accept-btn").textContent = "Accept as edited";
+    document.getElementById("accept-note").textContent = "You changed it: Version 4 will be yours, linked to this Suggestion.";
+  }
+});
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-screen],[data-sel],[data-tsel],[data-t],[data-outdated],[data-merging],[data-reject],[data-reopen],[data-dep],[data-choice],[data-term],[data-dec],[data-drawer],[data-aftab]");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.screen) { resetLocal(); go(d.screen, "a"); return; }
+  if (d.t !== undefined) { if (d.t) document.documentElement.dataset.theme = d.t; else delete document.documentElement.dataset.theme; markTheme(); return; }
+  if (d.sel) { state.sel = d.sel; state.reopen = state.screen === "reopen" ? undefined : false; state.reject = null; state.merging = false; }
+  if (d.tsel) state.tsel = d.tsel;
+  if (d.outdated) { state.outdated = !state.outdated; state.merging = false; }
+  if (d.merging) state.merging = d.merging === "1";
+  if (d.reject !== undefined) state.reject = d.reject || null;
+  if (d.reopen) state.reopen = d.reopen === "1";
+  if (d.dep) { state.dep = { ...(state.dep || {}), [d.dep]: d.val }; }
+  if (d.choice) state.choice = d.choice;
+  if (d.term) state.term = d.term;
+  if (d.dec) state.dec = d.dec;
+  if (d.drawer) state.drawer = state.drawer === false;
+  if (d.aftab) state.aftab = d.aftab;
+  render();
+});
+function markTheme() {
+  const cur = document.documentElement.dataset.theme || "";
+  document.querySelectorAll("#theme button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === cur)));
+}
+addEventListener("hashchange", () => { parseHash(); resetLocal(); render(); });
+parseHash(); resetLocal(); markTheme(); render();
+</script>
