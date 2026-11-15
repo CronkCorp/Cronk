@@ -204,6 +204,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       agent: named,
       session: object({ id }),
       claimedAt: timestamp,
+      lastSeenAt: { ...timestamp, description: "When the Claim's Agent Session last called." },
       endsIfSilentAt: { ...timestamp, description: "When the Claim lapses if its Agent Session stays silent until then." },
     }),
   },

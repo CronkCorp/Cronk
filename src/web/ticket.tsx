@@ -303,24 +303,22 @@ function formatRemaining(ms: number): string {
 
 /**
  * The Ticket's Claim: the Agent and its Agent Session, since when, and a meter counting down until the Claim
- * lapses if the Agent Session stays silent. The meter runs from when this page last heard of the Claim, since
- * the API says when it lapses but not the silence threshold. When the time is up, `onDue` reads the Claim again:
- * the Agent Session may have called in meanwhile, which moves the lapse time without anything being pushed.
+ * lapses if the Agent Session stays silent. The meter spans the silence threshold, from the Agent Session's last
+ * call to the lapse time. When the time is up, `onDue` reads the Claim again: the Agent Session may have called in
+ * meanwhile, which moves the lapse time without anything being pushed.
  */
 function ClaimCard(props: { claim: NonNullable<TicketDetail["claim"]>; onDue: () => void }) {
   const { claim } = props;
   const now = useNow(SECOND).getTime();
   const endsAt = Date.parse(claim.endsIfSilentAt);
-  // Heard anew whenever the Ticket is loaded again: each load brings a fresh lapse time.
-  const [heardAt, setHeardAt] = useState(() => Date.now());
-  useEffect(() => setHeardAt(Date.now()), [claim.endsIfSilentAt]);
+  const lastSeenAt = Date.parse(claim.lastSeenAt);
   const onDue = useRef(props.onDue);
   onDue.current = props.onDue;
   useEffect(() => {
     const timer = setTimeout(() => onDue.current(), Math.max(endsAt - Date.now(), 0) + SECOND);
     return () => clearTimeout(timer);
   }, [endsAt]);
-  const span = Math.max(endsAt - heardAt, 1);
+  const span = Math.max(endsAt - lastSeenAt, 1);
   const left = Math.max(endsAt - now, 0);
   const share = Math.min(left / span, 1);
   return (

@@ -15,6 +15,8 @@ export interface Claim {
   agent: AgentRef;
   session: { id: string };
   claimedAt: Date;
+  /** When its Agent Session last called. */
+  lastSeenAt: Date;
   /** When the Claim lapses if its Agent Session stays silent until then. */
   endsIfSilentAt: Date;
 }
@@ -53,6 +55,7 @@ async function findLiveClaimWithId(db: Queryable, ticketId: string, now: Date): 
         agent: { id: row.agent_id, name: row.agent_name },
         session: { id: row.session_id },
         claimedAt: row.claimed_at,
+        lastSeenAt: row.last_seen_at,
         endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
       },
     }

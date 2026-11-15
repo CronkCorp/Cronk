@@ -134,7 +134,7 @@ Follow-up: #110.
 - **Main column:** the title, the description, then one **timeline** and the Comment box at the end.
 - **Side panel (280px, sticky):**
   - Status, Priority, Assignee, Delegate and Labels, each edited in place.
-  - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter runs from when the page last loaded the Claim, since the API gives the lapse time but not the threshold. It is hidden when the Ticket is not Claimed.
+  - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter spans the silence threshold, from the Agent Session's last call to the lapse time. It is hidden when the Ticket is not Claimed.
   - Parent, Sub-Tickets, Relations and Mentioned in.
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
