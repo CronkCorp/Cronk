@@ -24,6 +24,13 @@ export interface TicketName {
   title: string;
 }
 
+/** A Document as a Ticket's history names it, with the Project it belongs to (null for a Workspace Document). */
+export interface DocumentName {
+  id: string;
+  title: string;
+  projectKey: string | null;
+}
+
 /** Another Ticket, as a Ticket lists it among its Sub-Tickets or relations. */
 export interface TicketRef {
   key: string;
@@ -266,7 +273,8 @@ export type TicketChange =
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
   | { change: "delegate"; from: AgentRef | null; to: AgentRef | null }
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
-  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName };
+  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
+  | { change: "document linked" | "document unlinked"; document: DocumentName };
 
 export type { RecordedActor };
 

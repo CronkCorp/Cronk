@@ -42,7 +42,7 @@ export const bearerToken = (request: FastifyRequest): string | undefined =>
  * sends the Cronk-Agent-Session header calls within that Agent Session, which the
  * call refreshes; a Session that isn't the Agent's or has ended answers 410. With
  * `refreshSession: false` the Session is only checked, not refreshed, as when a live-update
- * stream re-checks who is watching: being told of others' changes isn't the Agent's own call.
+ * stream of a Ticket re-checks who is watching: being told of others' changes isn't the Agent's own call.
  */
 export async function requireActor(ctx: AppContext, request: FastifyRequest, opts: { refreshSession?: boolean } = {}): Promise<Actor> {
   const bearer = bearerToken(request);

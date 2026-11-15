@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -260,6 +260,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         enum: [
           ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
           ...["relation added", "relation removed"],
+          ...["document linked", "document unlinked"],
         ],
       },
     }),
@@ -275,6 +276,14 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },
         ticket: ticketName,
+      }),
+      object({
+        change: { type: "string", enum: ["document linked", "document unlinked"] },
+        document: object({
+          id,
+          title: { type: "string" },
+          projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+        }),
       }),
     ],
   },
@@ -361,7 +370,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   LinkedDocument: {
-    description: "A Document linked to a Ticket: one of its Reports, or a Document that mentions its key. Read it as a Document by its id.",
+    description:
+      "A Document linked to a Ticket: one of its Reports, a Document linked to it from the Ticket's side, or a Document that mentions its key. Read it as a Document by its id.",
     ...object({
       id,
       title: { type: "string" },
@@ -369,6 +379,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket a Report is on; null for any other Document." },
       version: { type: "integer", description: "The number of its current Version." },
       updatedAt: timestamp,
+      reason: {
+        type: "string",
+        enum: LINK_REASONS,
+        description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
+      },
     }),
   },
   DocumentTreeEntry: {

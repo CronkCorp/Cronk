@@ -16,9 +16,11 @@ import { knowledgeRoutes } from "./knowledge/routes.js";
 import { portabilityRoutes } from "./portability/routes.js";
 import { searchRoutes } from "./search/routes.js";
 import { workRoutes } from "./work/routes.js";
+import { documentLinkRoutes } from "./work/document-link-routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
+import { watchClaimLapses } from "./coordination/lapses.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -37,7 +39,14 @@ export interface AppConfig {
  * and registers the API. The caller decides whether to listen or inject. `live` defaults to a
  * new `LiveUpdates`; tests pass their own to stage when events are published.
  */
-export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?: boolean; live?: LiveUpdates }): Promise<FastifyInstance> {
+export async function buildApp(opts: {
+  config: AppConfig;
+  clock: Clock;
+  logger?: boolean;
+  live?: LiveUpdates;
+  /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
+  lapseCheckMs?: number;
+}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
     // Refuse fields a route doesn't declare (its schema's `additionalProperties: false`) instead of
@@ -56,7 +65,11 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
 
   // Open live-update streams would otherwise keep the server from closing.
   app.addHook("preClose", async () => ctx.live.close());
-  app.addHook("onClose", async () => db.end());
+  const stopWatchingLapses = watchClaimLapses(ctx, opts.lapseCheckMs ?? 5_000);
+  app.addHook("onClose", async () => {
+    stopWatchingLapses();
+    await db.end();
+  });
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
   // so a new route can't forget to. The web shell and the OpenAPI document take any query string.
   app.addHook("onRoute", (route) => {
@@ -125,6 +138,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
+  await app.register(documentLinkRoutes(ctx));
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));

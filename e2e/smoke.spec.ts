@@ -370,6 +370,29 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
 });
 
+// Runs after the test above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
+test("link a Document to a Ticket from the Ticket's page, then unlink it", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: /CRONK-2/ }).click();
+  await expect(page.getByRole("heading", { name: "Document sign-in" })).toBeVisible();
+
+  await page.getByLabel("Find a Document to link").fill("Onboarding");
+  await page.getByRole("button", { name: "Find" }).click();
+  await page.getByRole("list", { name: "Documents to link" }).getByRole("button", { name: "Link Onboarding" }).click();
+  const documents = page.getByRole("list", { name: "Documents" });
+  await expect(documents).toContainText("Onboarding");
+  await expect(documents).toContainText("Linked");
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada linked the Document “Onboarding”");
+
+  await documents.getByRole("button", { name: "Unlink Onboarding" }).click();
+  await expect(page.getByRole("list", { name: "Documents" })).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada unlinked the Document “Onboarding”");
+});
+
 // Runs after the test above, so CRONK holds Documents already.
 test("compare two Versions, and merge an edit someone else saved underneath", async ({ page }) => {
   await page.goto("/");
@@ -440,6 +463,43 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   const changes = page.getByRole("list", { name: /Changes from Version 2 to Version 6/ });
   await expect(changes).toContainText("- Install it.");
   await expect(changes).toContainText("+ Run it weekly.");
+});
+
+// Runs after the tests above, so CRONK exists.
+test("see the board, a Ticket and a Document follow changes made elsewhere", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("link", { name: /CRONK/ })).toBeVisible();
+
+  // Changes come through the API behind the page's back, as another User or an Agent would make them.
+  await page.goto("/projects/CRONK?view=board");
+  await expect(page.getByRole("region", { name: "Backlog" })).toBeVisible();
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Arrived live" } })).json();
+  await expect(page.getByRole("region", { name: "Backlog" })).toContainText("Arrived live");
+
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("heading", { name: "Arrived live" })).toBeVisible();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
+  await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
+
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await expect(page.getByTestId("document-body")).toContainText("First.");
+  await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Seen from afar." } });
+  await expect(page.getByRole("list", { name: "Comments" })).toContainText("Seen from afar.");
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: "Second." } });
+  await expect(page.getByTestId("document-body")).toContainText("Second.");
+
+  // While editing, a newer Version is announced instead of replacing the draft.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 2, body: "Third." } });
+  const savedMeanwhile = page.getByRole("status");
+  await expect(savedMeanwhile).toContainText("Ada saved Version 3 while you were editing Version 2");
+  await savedMeanwhile.getByText("See what they changed").click();
+  await expect(savedMeanwhile).toContainText("+ Third.");
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("Second.");
 });
 
 // Runs after the tests above, so CRONK exists.

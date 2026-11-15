@@ -18,6 +18,7 @@ import type {
   InboxKind,
   IssuedAgentToken,
   Invitation,
+  LinkedDocument,
   Member,
   Merge,
   MergedSection,
@@ -66,6 +67,7 @@ export type {
   InboxKind,
   IssuedAgentToken,
   Invitation,
+  LinkedDocument,
   Member,
   Merge,
   MergedSection,
@@ -266,6 +268,16 @@ export const api = {
       "DELETE",
       `/api/tickets/${encodeURIComponent(key)}/relations/${kind}/${encodeURIComponent(otherKey)}`,
     ).then((r) => r.relations),
+  /** Links a Document to a Ticket; answers the Ticket's Documents. */
+  linkDocument: (key: string, documentId: string) =>
+    request<{ documents: LinkedDocument[] }>("POST", `/api/tickets/${encodeURIComponent(key)}/documents/${encodeURIComponent(documentId)}`).then(
+      (r) => r.documents,
+    ),
+  /** Unlinks a Document from a Ticket; answers the Ticket's remaining Documents. */
+  unlinkDocument: (key: string, documentId: string) =>
+    request<{ documents: LinkedDocument[] }>("DELETE", `/api/tickets/${encodeURIComponent(key)}/documents/${encodeURIComponent(documentId)}`).then(
+      (r) => r.documents,
+    ),
   documentTree: (projectKey?: string) =>
     request<{ documents: DocumentTreeEntry[] }>("GET", `${treePath(projectKey)}/documents`).then((r) => r.documents),
   createDocument: (projectKey: string | undefined, input: { title: string; body?: string; parentId?: string }) =>
@@ -338,6 +350,21 @@ export interface TicketEvents {
   activity: { activity: Activity };
   comment: { comment: Comment };
   report: { report: Report };
+  /** The Ticket's fields, Claim, Sub-Tickets or relations changed; `ticket` is its key. */
+  changed: { ticket: string };
+}
+
+/** The events a Project's live-update stream pushes, by name, with their data. */
+export interface ProjectEvents {
+  /** One of its Tickets was created or changed (`ticket` is its key), or its Statuses changed (`ticket` is null). */
+  changed: { ticket: string | null };
+}
+
+/** The events a Document's live-update stream pushes, by name, with their data. */
+export interface DocumentEvents {
+  comment: { comment: Comment };
+  /** A new Version was saved or restored; `version` is its number. */
+  version: { version: number };
 }
 
 /**
@@ -361,3 +388,11 @@ export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }
 /** Watches one Ticket's changes as they happen (see `watch`). */
 export const watchTicket = (key: string, handlers: Parameters<typeof watch<TicketEvents>>[1]) =>
   watch<TicketEvents>(`/api/tickets/${encodeURIComponent(key)}/events`, handlers);
+
+/** Watches one Project's Tickets and Statuses as they change, for its list and board (see `watch`). */
+export const watchProject = (key: string, handlers: Parameters<typeof watch<ProjectEvents>>[1]) =>
+  watch<ProjectEvents>(`/api/projects/${encodeURIComponent(key)}/events`, handlers);
+
+/** Watches one Document's new Comments and Versions as they happen (see `watch`). */
+export const watchDocument = (id: string, handlers: Parameters<typeof watch<DocumentEvents>>[1]) =>
+  watch<DocumentEvents>(`${documentPath(id)}/events`, handlers);
