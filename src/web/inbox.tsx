@@ -150,6 +150,8 @@ interface DetailProps<I extends InboxItem> {
   item: I;
   resolved: boolean;
   keys: { current: DetailKeys };
+  /** Runs one of the pane's actions, so the item isn't taken for resolved elsewhere if the reload it causes lands first. */
+  acting: <T>(run: () => Promise<T>) => Promise<T>;
   onDone: () => void;
 }
 
@@ -170,10 +172,11 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
   const { items } = props;
   const pathTo = (item?: InboxItem) => inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) });
   // Items acted on here leave the list as the action succeeds rather than waiting for the reload, which would
-  // otherwise find them gone and show them as resolved elsewhere. A reload landing before the action's reply
-  // can still show that for a moment. Once a load no longer holds one, it is forgotten, so a Ticket handed
-  // over for review again shows again.
+  // otherwise find them gone and show them as resolved elsewhere; while the action runs, `busy` holds its item
+  // for a reload that lands before the action's reply. Once a load no longer holds an acted-on item, it is
+  // forgotten, so a Ticket handed over for review again shows again.
   const acted = useRef(new Set<string>());
+  const busy = useRef<string>(undefined);
   for (const id of acted.current) if (!items.some((item) => itemId(item) === id)) acted.current.delete(id);
   const ordered = GROUPS.flatMap((group) => items.filter((item) => group.holds(item) && !acted.current.has(itemId(item))));
   // The selected item as last seen in the list, and where it was. When a reload drops it because it was
@@ -184,10 +187,11 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
   let wanted = props.address.item;
   if (!wanted || (at(wanted) < 0 && wanted !== seen.current?.id)) wanted = seen.current?.id ?? (ordered[0] && itemId(ordered[0]));
   let index = at(wanted);
-  let resolved = false;
+  // Whether the selected item has left the list, and whether that was someone else's doing.
+  let gone = false;
   if (index < 0 && seen.current && seen.current.id === wanted) {
     index = seen.current.index;
-    resolved = true;
+    gone = true;
   } else {
     if (index < 0) index = 0;
     const item = ordered[index];
@@ -195,8 +199,9 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
     seen.current = item && { id: itemId(item), item, index, ...(before ? { before: itemId(before) } : {}), ...(after ? { after: itemId(after) } : {}) };
   }
   const selected = seen.current?.item;
-  const arrived = useArrivals(items.map(itemId));
   const selectedId = selected && itemId(selected);
+  const resolved = gone && busy.current !== selectedId;
+  const arrived = useArrivals(items.map(itemId));
   const keys = useRef<DetailKeys>({});
   const select = (item: InboxItem | undefined) => {
     seen.current = undefined;
@@ -206,7 +211,7 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
   // The item `step` away from the selected one. A resolved item has left the list: its neighbours then, if
   // still here, or else whatever took its place, so items arriving above it at the same time don't throw J and K off.
   const neighbour = (step: 1 | -1) => {
-    if (!resolved) return ordered[index + step];
+    if (!gone) return ordered[index + step];
     const was = ordered[at(step > 0 ? seen.current?.after : seen.current?.before)];
     return was ?? ordered[step > 0 ? index : index - 1];
   };
@@ -216,6 +221,14 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
   const move = (step: 1 | -1) => {
     const next = latest.current.neighbour(step);
     if (next) select(next);
+  };
+
+  const acting = <T,>(run: () => Promise<T>) => {
+    const id = seen.current?.id;
+    busy.current = id;
+    return run().finally(() => {
+      if (busy.current === id) busy.current = undefined;
+    });
   };
 
   /** After acting on the selected item, select the one after it, or the one before when it was the last. */
@@ -275,9 +288,9 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
             Back to the list
           </Link>
           {selected.kind === "question" ? (
-            <QuestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} onDone={actedOn} />
+            <QuestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           ) : (
-            <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} onDone={actedOn} />
+            <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           )}
         </section>
       </div>
@@ -362,7 +375,7 @@ function QuestionDetail(props: DetailProps<QuestionItem>) {
         hint={`The answer reaches ${question.agent.name} as Waiting Work.`}
         inputRef={answerBox}
         disabled={props.resolved}
-        post={(input) => api.postTicketComment(ticket.key, { ...input, replyToActivityId: question.id })}
+        post={(input) => props.acting(() => api.postTicketComment(ticket.key, { ...input, replyToActivityId: question.id }))}
         onPosted={props.onDone}
       />
     </div>
@@ -374,13 +387,17 @@ function ReviewDetail(props: DetailProps<ReviewItem>) {
   const { ticket, reports } = props.item;
   const [sendingBack, setSendingBack] = useState(false);
   const [comment, setComment] = useState("");
-  const complete = useAction(async () => {
-    const { statuses } = await api.project(ticket.projectKey);
-    const completed = statuses.find((s) => s.category === "completed");
-    if (!completed) throw new Error(`${ticket.projectKey} has no Completed Status`);
-    return api.updateTicket(ticket.key, { statusId: completed.id });
-  }, props.onDone);
-  const sendBack = useAction(() => api.sendBack(ticket.key, { comment }), props.onDone);
+  const complete = useAction(
+    () =>
+      props.acting(async () => {
+        const { statuses } = await api.project(ticket.projectKey);
+        const completed = statuses.find((s) => s.category === "completed");
+        if (!completed) throw new Error(`${ticket.projectKey} has no Completed Status`);
+        return api.updateTicket(ticket.key, { statusId: completed.id });
+      }),
+    props.onDone,
+  );
+  const sendBack = useAction(() => props.acting(() => api.sendBack(ticket.key, { comment })), props.onDone);
   const error = complete.error ?? sendBack.error;
   const runComplete = () => {
     if (!complete.busy) void complete.run();
