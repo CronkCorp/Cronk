@@ -605,6 +605,18 @@ test("import a folder of Markdown files picked in the browser", async ({ page })
     await expect(tree).toContainText("Installing");
     await tree.getByRole("link", { name: "Installing" }).click();
     await expect(page.getByTestId("document-body")).toContainText("Run it.");
+
+    // Deleting asks first; cancelling keeps the Document, confirming removes it from the tree.
+    await page.getByRole("button", { name: "Delete" }).click();
+    const confirmDelete = page.getByRole("dialog", { name: "Delete Installing?" });
+    await expect(confirmDelete).toContainText("and all its Versions");
+    await confirmDelete.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirmDelete).toHaveCount(0);
+    await expect(page.getByTestId("document-body")).toContainText("Run it.");
+    await page.getByRole("button", { name: "Delete" }).click();
+    await confirmDelete.getByRole("button", { name: "Delete" }).click();
+    await expect(tree).toContainText("Handbook");
+    await expect(tree).not.toContainText("Installing");
   } finally {
     await rm(picked, { recursive: true, force: true });
   }

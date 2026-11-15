@@ -20,6 +20,7 @@
   --info: #2a65ad;
   --info-soft: #dde9f7;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  --overlay: rgba(0, 0, 0, 0.4);
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   color-scheme: light dark;
@@ -49,6 +50,7 @@
     --info: #74a8ea;
     --info-soft: #1b2b40;
     --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --overlay: rgba(0, 0, 0, 0.6);
   }
 }
 * { box-sizing: border-box; }
@@ -283,3 +285,18 @@ a.link:hover { text-decoration: underline; }
 .chip + .chip { margin-left: 4px; }
 .chips .chip + .chip { margin-left: 0; }
 .chip-remove { background: none; border: none; color: var(--muted); padding: 0 2px; line-height: 1; cursor: pointer; font: inherit; }
+
+/* Radix overlays (popover, menu, dialog) and tabs: styled here, behaviour from Radix. Shadows are for these only. */
+.popover, .menu { z-index: 20; min-width: 180px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; }
+.menu-item { display: flex; align-items: center; padding: 6px 10px; border-radius: 4px; font-size: 13px; cursor: pointer; outline: none; color: var(--text); }
+.menu-item[data-highlighted] { background: var(--accent-soft); color: var(--accent); }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger[data-highlighted] { background: var(--danger-soft); }
+.menu-item[data-disabled] { opacity: 0.5; cursor: not-allowed; }
+.dialog-overlay { position: fixed; inset: 0; z-index: 30; background: var(--overlay); }
+.dialog { position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%); width: calc(100% - 32px); max-width: 440px; max-height: calc(100% - 32px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 24px; }
+.dialog-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+.dialog-description { color: var(--muted); margin: 0 0 16px; }
+.dialog-actions { justify-content: flex-end; }
+.tab[data-state="active"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .tab { background: none; border: none; border-bottom: 2px solid transparent; font: inherit; cursor: pointer; }

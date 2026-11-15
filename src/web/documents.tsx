@@ -1,3 +1,4 @@
+import { ConfirmDialog } from "./components/overlays.js";
 import { Button, buttonClass } from "./components/button.js";
 import { Chip } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
@@ -213,13 +214,16 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   useEffect(() => {
     if (newer !== undefined && panel !== "edit") props.onReload();
   }, [newer, panel]);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const remove = useAction(
     async () => {
-      if (!confirm(`Delete ${d.title} and all its Versions?`)) return false;
-      await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
-      return true;
+      try {
+        await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
+      } finally {
+        setConfirmingDelete(false);
+      }
     },
-    (deleted) => deleted && navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
+    () => navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
   );
   const toggle = (p: Panel) => setPanel(panel === p ? "none" : p);
   const bodyAt = useRef<HTMLDivElement>(null);
@@ -265,7 +269,16 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                       <Button variant="secondary" onClick={() => toggle("new")}>New Document under this one</Button>
                     </>
                   )}
-                  <Button variant="secondary" onClick={() => void remove.run()} disabled={remove.busy}>Delete</Button>
+                  <Button variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={remove.busy}>Delete</Button>
+                  <ConfirmDialog
+                    open={confirmingDelete}
+                    onOpenChange={setConfirmingDelete}
+                    title={`Delete ${d.title}?`}
+                    description="This deletes the Document and all its Versions."
+                    confirmLabel="Delete"
+                    busy={remove.busy}
+                    onConfirm={() => void remove.run()}
+                  />
                   <Button onClick={() => setPanel("edit")}>Edit</Button>
                 </>
               )}
