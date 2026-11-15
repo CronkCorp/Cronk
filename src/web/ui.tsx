@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 
 export const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -36,11 +36,20 @@ export type Loaded<T> = { kind: "loading" } | { kind: "failed"; message: string 
 export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): [Loaded<T>, () => void, (value: T) => void] {
   const [state, setState] = useState<Loaded<T>>({ kind: "loading" });
   const [generation, setGeneration] = useState(0);
+  // The deps the shown value was loaded for.
+  const loadedFor = useRef<unknown[]>(undefined);
   useEffect(() => {
     let current = true;
+    const sameDeps = loadedFor.current !== undefined && loadedFor.current.length === deps.length && loadedFor.current.every((d, i) => Object.is(d, deps[i]));
     load().then(
-      (value) => current && setState({ kind: "loaded", value }),
-      (err) => current && setState({ kind: "failed", message: messageOf(err) }),
+      (value) => {
+        if (!current) return;
+        loadedFor.current = deps;
+        setState({ kind: "loaded", value });
+      },
+      // A failed reload of the same thing keeps what was loaded, so a live view doesn't swap its list for an error on a blip;
+      // the next reload tries again.
+      (err) => current && setState((was) => (sameDeps && was.kind === "loaded" ? was : { kind: "failed", message: messageOf(err) })),
     );
     return () => {
       current = false;
