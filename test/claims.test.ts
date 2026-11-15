@@ -73,6 +73,28 @@ describe("A Claim", () => {
     expect((await second.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
   });
 
+  it("is kept alive while its Agent Session's events stream is open, and lapses after the silence threshold once it closes", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    const stream = await first.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    for (let minute = 4; minute <= 12; minute += 4) {
+      cronk.clock.advance(4 * 60_000);
+      await cronk.heartbeat();
+    }
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:17:00.000Z" });
+
+    stream.close();
+    cronk.clock.advance(4 * 60_000);
+    await cronk.heartbeat();
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:17:00.000Z" });
+    cronk.clock.advance(60_000);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    expect((await first.get("/api/agent-sessions/current")).status).toBe(410);
+  });
+
   it("lapses after the silence threshold the Admin sets for the Workspace", async () => {
     const { cronk, admin, session } = await delegatedSetup();
     expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);

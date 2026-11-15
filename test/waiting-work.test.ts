@@ -154,6 +154,24 @@ describe("An answer to an Agent's question", () => {
     ]);
   });
 
+  it("reaches the Agent Session that asked, pushed on its open events stream, when it comes after the silence threshold", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+    const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which one?", blocking: true })).body.activity;
+
+    for (let minute = 4; minute <= 8; minute += 4) {
+      cronk.clock.advance(4 * 60_000);
+      await cronk.heartbeat();
+    }
+    const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The first.", replyToActivityId: question.id })).body.comment;
+
+    expect(await stream.next()).toMatchObject({ event: "waiting", data: { waiting: { reason: "answer", comment: answer, ticket: { key: "CRONK-1" } } } });
+    expect((await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body: "Going with the first." })).status).toBe(201);
+  });
+
   it("is only the reply that answered it; later replies wait as Comments on the delegated Ticket", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
