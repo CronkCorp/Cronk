@@ -162,7 +162,8 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "guidance":
       return <WorkspaceGuidancePage me={props.me} />;
     case "project":
-      return <ProjectPage projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
+      // Keyed by Project, so state kept while on the page, such as opened board columns, starts afresh in another.
+      return <ProjectPage key={route.key} projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
     case "ticket":
       return <TicketPage ticketKey={route.key} />;
     case "projects":

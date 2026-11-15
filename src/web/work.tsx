@@ -230,7 +230,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                   ...(p.access === "write"
                     ? [
                         { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
-                        { label: p.archived ? "Restore Project" : "Archive Project", danger: !p.archived, onSelect: () => setConfirmingArchive(true) },
+                        { label: archiveOrRestore(p).label, danger: !p.archived, onSelect: () => setConfirmingArchive(true) },
                       ]
                     : []),
                 ]}
@@ -240,17 +240,12 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
             <ConfirmDialog
               open={confirmingArchive}
               onOpenChange={setConfirmingArchive}
-              title={`${p.archived ? "Restore" : "Archive"} ${p.name}?`}
-              description={
-                p.archived
-                  ? "It comes back to the sidebar and the Projects page."
-                  : "It leaves the sidebar and the Projects page, and moves to Archived Projects. It can be restored."
-              }
-              confirmLabel={p.archived ? "Restore Project" : "Archive Project"}
+              title={`${archiveOrRestore(p).verb} ${p.name}?`}
+              description={archiveOrRestore(p).description}
+              confirmLabel={archiveOrRestore(p).label}
               busy={archive.busy}
               onConfirm={() => {
-                setConfirmingArchive(false);
-                void archive.submit();
+                void archive.submit().finally(() => setConfirmingArchive(false));
               }}
             />
           </div>
@@ -366,6 +361,15 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
     </Show>
   );
 }
+
+/** What the … menu's Archive and Restore items, and the dialog confirming them, say. */
+const ARCHIVE = {
+  verb: "Archive",
+  label: "Archive Project",
+  description: "It leaves the sidebar and the Projects page, and moves to Archived Projects. It can be restored.",
+};
+const RESTORE = { verb: "Restore", label: "Restore Project", description: "It comes back to the sidebar and the Projects page." };
+const archiveOrRestore = (project: Project) => (project.archived ? RESTORE : ARCHIVE);
 
 /** One section of a Project's settings, which scrolls into view when the address asks to land on it. */
 function SettingsPart(props: { id: SettingsSection; title: string; landOn: SettingsSection | undefined; children: ReactNode }) {
