@@ -1,3 +1,4 @@
+import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
@@ -54,7 +55,7 @@ export function App() {
       return (
         <AuthCard title="Cronk is unavailable" intro="It could not be reached. Try again in a moment.">
           <p className="error" role="alert">{state.message}</p>
-          <button onClick={() => location.reload()}>Try again</button>
+          <Button onClick={() => location.reload()}>Try again</Button>
         </AuthCard>
       );
     case "setup":
@@ -83,7 +84,7 @@ function SetupPage(props: { onDone: (user: User) => void }) {
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Create Admin account</button>
+        <Button type="submit" disabled={busy}>Create Admin account</Button>
       </form>
     </AuthCard>
   );
@@ -99,7 +100,7 @@ function SignInPage(props: { onDone: (user: User) => void }) {
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Sign in</button>
+        <Button type="submit" disabled={busy}>Sign in</Button>
       </form>
     </AuthCard>
   );
@@ -131,11 +132,11 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
           {props.user.role === "admin" && (
             <>
               <Link to="/users" className="link">Users</Link>
-              <button className="link" onClick={() => setRenaming(true)}>Workspace settings</button>
+              <Button variant="ghost" onClick={() => setRenaming(true)}>Workspace settings</Button>
             </>
           )}
           <span className="muted">{props.user.name}</span>
-          <button className="link" onClick={signOut}>Sign out</button>
+          <Button variant="ghost" onClick={signOut}>Sign out</Button>
         </div>
       </header>
       <main className="content">
@@ -205,8 +206,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <p className="muted hint">How long an Agent Session may stay silent before it ends and its Claims lapse, from 1 minute to 1 day.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Save</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Save</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
       <h2>Export and import</h2>
@@ -214,7 +215,7 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         Everything in the Workspace as Markdown files with frontmatter, in a .tar.gz archive. Import one into a fresh installation to move Cronk.
       </p>
       <div className="actions">
-        <a className="button secondary" href={workspaceExportUrl} download>Download export</a>
+        <a className={buttonClass("secondary")} href={workspaceExportUrl} download>Download export</a>
         <ImportExport />
       </div>
     </section>
@@ -239,7 +240,7 @@ function ImportExport() {
   };
   return (
     <>
-      <label className="button secondary">
+      <label className={buttonClass("secondary")}>
         Import export…
         <input type="file" accept=".gz,.tgz,.tar" hidden onChange={(e) => void pick(e.target.files?.[0])} />
       </label>

@@ -209,6 +209,10 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
 
   await page.getByRole("link", { name: "Agents" }).click();
   await page.getByLabel("Agent name").fill("claude-laptop");
+  // Outside the sign-in forms a button sizes to its label rather than filling its form.
+  const register = (await page.getByRole("button", { name: "Register Agent" }).boundingBox())!;
+  const agentName = (await page.getByLabel("Agent name").boundingBox())!;
+  expect(register.width).toBeLessThan(agentName.width / 2);
   await page.getByRole("button", { name: "Register Agent" }).click();
   await page.getByRole("button", { name: "Issue full token" }).click();
   const token = await page.getByLabel("New token").inputValue();

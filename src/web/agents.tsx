@@ -1,3 +1,4 @@
+import { Button } from "./components/button.js";
 import { LiveIndicator } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useState } from "react";
@@ -52,7 +53,7 @@ function NewAgent(props: { onDone: () => void }) {
       <form onSubmit={submit}>
         <Field label="Agent name" value={name} onChange={setName} placeholder="claude-laptop" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Register Agent</button>
+        <Button type="submit" disabled={busy}>Register Agent</Button>
       </form>
     </section>
   );
@@ -88,14 +89,14 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
         {renaming ? (
           <form className="actions grow" onSubmit={rename.submit}>
             <input className="inline-input grow" aria-label="New name" value={name} onChange={(e) => setName(e.target.value)} />
-            <button type="submit" disabled={rename.busy}>Save</button>
-            <button type="button" className="secondary" onClick={() => setRenaming(false)}>Cancel</button>
+            <Button type="submit" disabled={rename.busy}>Save</Button>
+            <Button type="button" variant="secondary" onClick={() => setRenaming(false)}>Cancel</Button>
           </form>
         ) : (
           <>
             <span className="grow"><Actor actor={{ kind: "agent", name: a.name }} /></span>
-            <button className="link" onClick={() => setRenaming(true)}>Rename</button>
-            <button className="link" disabled={remove.busy} onClick={() => void remove.run()}>Remove</button>
+            <Button variant="ghost" onClick={() => setRenaming(true)}>Rename</Button>
+            <Button variant="ghost" disabled={remove.busy} onClick={() => void remove.run()}>Remove</Button>
           </>
         )}
       </div>
@@ -111,15 +112,15 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
                     {t.readOnly ? "Read-only token" : "Full token"}{" "}
                     <span className="muted">issued <RelativeTime at={t.createdAt} /></span>
                   </span>
-                  <button className="link" disabled={revoke.busy} onClick={() => void revoke.run(t.id)}>Revoke</button>
+                  <Button variant="ghost" disabled={revoke.busy} onClick={() => void revoke.run(t.id)}>Revoke</Button>
                 </li>
               ))}
             </ul>
           )}
         </Show>
         <div className="actions">
-          <button className="secondary" disabled={issue.busy} onClick={() => void issue.run(false)}>Issue full token</button>
-          <button className="secondary" disabled={issue.busy} onClick={() => void issue.run(true)}>Issue read-only token</button>
+          <Button variant="secondary" disabled={issue.busy} onClick={() => void issue.run(false)}>Issue full token</Button>
+          <Button variant="secondary" disabled={issue.busy} onClick={() => void issue.run(true)}>Issue read-only token</Button>
         </div>
         {secret && (
           <div role="status" className="secret">

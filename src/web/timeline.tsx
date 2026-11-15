@@ -1,3 +1,4 @@
+import { Button } from "./components/button.js";
 import { Chip, KindLabel } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
@@ -209,9 +210,9 @@ function Replies(props: Thread & { replies: Comment[]; replyTo: Omit<NewComment,
             onCancel={() => setReplying(false)}
           />
         ) : (
-          <button className="link" onClick={() => setReplying(true)}>
+          <Button variant="ghost" onClick={() => setReplying(true)}>
             {props.replyLabel}
-          </button>
+          </Button>
         ))}
     </>
   );
@@ -238,8 +239,8 @@ function CommentForm(props: {
       <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} placeholder='Markdown; @name, @owner/name or @"name with spaces" mentions an Agent' />
       {send.error && <p className="error" role="alert">{send.error}</p>}
       <div className="actions">
-        <button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</button>
-        {props.onCancel && <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>}
+        <Button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</Button>
+        {props.onCancel && <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>}
       </div>
     </form>
   );

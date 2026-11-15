@@ -1,3 +1,4 @@
+import { Button } from "./components/button.js";
 import { useId, useRef } from "react";
 import { CronkMarkdown } from "./markdown.js";
 
@@ -93,9 +94,9 @@ export function MarkdownEditor(props: {
           <label htmlFor={id}>{props.label}</label>
           <div className="toolbar" role="toolbar" aria-label="Formatting">
             {tools.map(([name, text, action]) => (
-              <button key={name} type="button" className="secondary" title={name} aria-label={name} disabled={props.disabled} onClick={() => apply(action)}>
+              <Button key={name} type="button" variant="secondary" title={name} aria-label={name} disabled={props.disabled} onClick={() => apply(action)}>
                 {text}
-              </button>
+              </Button>
             ))}
           </div>
           <textarea id={id} ref={area} disabled={props.disabled} value={props.value} rows={18} onChange={(e) => props.onChange(e.target.value)} />

@@ -1,3 +1,4 @@
+import { Button } from "./components/button.js";
 import { Actor, type ActorLike } from "./components/actor.js";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
@@ -45,7 +46,7 @@ export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs:
         <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
       </details>
       <div className="actions">
-        <button type="button" className="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</button>
+        <Button type="button" variant="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</Button>
       </div>
     </div>
   );
@@ -187,9 +188,9 @@ function ConflictChoice(props: { label: string; conflict: Conflict; value: strin
         {side("Theirs", c.theirs)}
       </div>
       <div className="actions">
-        <button type="button" className="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</button>
-        <button type="button" className="secondary" onClick={() => props.onChange(c.both)}>Use both</button>
+        <Button type="button" variant="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</Button>
+        <Button type="button" variant="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</Button>
+        <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>
       </div>
       <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
     </section>
@@ -225,8 +226,8 @@ export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title:
         s.conflict ? <ConflictChoice key={i} label={sectionName(s)} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} /> : null,
       )}
       <div className="actions">
-        <button type="submit">Use these and keep editing</button>
-        <button type="button" className="secondary" onClick={props.onBack}>Back to my draft</button>
+        <Button type="submit">Use these and keep editing</Button>
+        <Button type="button" variant="secondary" onClick={props.onBack}>Back to my draft</Button>
       </div>
     </form>
   );

@@ -1,3 +1,4 @@
+import { Button } from "./components/button.js";
 import { KindLabel } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
@@ -122,13 +123,13 @@ function QuestionEntry(props: { item: Extract<InboxItem, { kind: "question" }>; 
           <TextArea label="Answer" value={body} onChange={setBody} rows={3} />
           {answer.error && <p className="error" role="alert">{answer.error}</p>}
           <div className="actions">
-            <button type="submit" disabled={answer.busy || !body.trim()}>Post answer</button>
-            <button type="button" className="secondary" onClick={() => setAnswering(false)}>Cancel</button>
+            <Button type="submit" disabled={answer.busy || !body.trim()}>Post answer</Button>
+            <Button type="button" variant="secondary" onClick={() => setAnswering(false)}>Cancel</Button>
           </div>
         </form>
       ) : (
         <div className="actions">
-          <button className="link" onClick={() => setAnswering(true)}>Answer</button>
+          <Button variant="ghost" onClick={() => setAnswering(true)}>Answer</Button>
         </div>
       )}
     </li>
@@ -177,14 +178,14 @@ function ReviewEntry(props: { item: Extract<InboxItem, { kind: "review" }>; onDo
         >
           <TextArea label="What is left to do" value={comment} onChange={setComment} rows={3} />
           <div className="actions">
-            <button type="submit" disabled={sendBack.busy || !comment.trim()}>Send back</button>
-            <button type="button" className="secondary" onClick={() => setSendingBack(false)}>Cancel</button>
+            <Button type="submit" disabled={sendBack.busy || !comment.trim()}>Send back</Button>
+            <Button type="button" variant="secondary" onClick={() => setSendingBack(false)}>Cancel</Button>
           </div>
         </form>
       ) : (
         <div className="actions">
-          <button onClick={() => void complete.run()} disabled={complete.busy}>Complete</button>
-          <button className="secondary" onClick={() => setSendingBack(true)}>Send back</button>
+          <Button onClick={() => void complete.run()} disabled={complete.busy}>Complete</Button>
+          <Button variant="secondary" onClick={() => setSendingBack(true)}>Send back</Button>
         </div>
       )}
     </li>

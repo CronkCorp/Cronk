@@ -1,3 +1,4 @@
+import { Button } from "./components/button.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
 import { useState } from "react";
@@ -43,7 +44,7 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
               </div>
               {props.canEdit && (
                 <div className="actions">
-                  <button onClick={() => setEditing(true)}>Edit Guidance</button>
+                  <Button onClick={() => setEditing(true)}>Edit Guidance</Button>
                 </div>
               )}
             </>
@@ -115,8 +116,8 @@ function GuidanceEditor(props: {
           <TextArea label="Guidance (Markdown)" value={draft.text} onChange={(text) => setDraft({ text })} rows={14} disabled={busy} />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
-            <button type="submit" disabled={busy}>Save</button>
-            <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+            <Button type="submit" disabled={busy}>Save</Button>
+            <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
           </div>
         </form>
       )}
