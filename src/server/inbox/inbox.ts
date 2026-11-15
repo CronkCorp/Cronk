@@ -47,7 +47,7 @@ export interface InboxFilter {
 
 /**
  * The items in `user`'s Inbox, in the Projects they can still see: blocking questions first,
- * then the rest, each oldest first.
+ * then the rest, each oldest first. A new item kind also belongs in `usersWithItemsOn`.
  */
 export async function listInbox(db: Queryable, user: User, filter: InboxFilter = {}): Promise<InboxItem[]> {
   const projectIds = await visibleProjectIds(db, user, filter.projectKeys);
@@ -89,6 +89,24 @@ async function reviews(db: Queryable, user: User, projectIds: string[]): Promise
  */
 export function inboxesChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
   for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
+}
+
+/**
+ * Ids of the Users with items on the Tickets of a Project, or of a Status: the Assignees of those
+ * in an In Review Status, and the Owners of Agents with open questions on them. Keep it in step
+ * with the item kinds `listInbox` gathers.
+ */
+export async function usersWithItemsOn(db: Queryable, scope: { projectId: string } | { statusId: string }): Promise<string[]> {
+  const [column, id] = "projectId" in scope ? ["t.project_id", scope.projectId] : ["t.status_id", scope.statusId];
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.assignee_id AS id FROM tickets t JOIN statuses s ON s.id = t.status_id
+     WHERE ${column} = $1 AND s.category = 'in_review' AND t.assignee_id IS NOT NULL
+     UNION
+     SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
+     WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL`,
+    [id],
+  );
+  return rows.map((r) => r.id);
 }
 
 /** Ids of the Projects, archived or not, `user` can see; only those with one of `keys`, if given. */

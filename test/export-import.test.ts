@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
-import { delegatedSetup, joinAs, startInstalledCronk, tarGz, untarGz, type Client } from "./harness.js";
+import { parse, stringify } from "yaml";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
@@ -44,6 +44,24 @@ describe("exporting a Project", () => {
     });
     expect(markdown(files["projects/CRONK/documents/1-plan.md"])).toMatchObject({ data: { title: "Plan", version: 1 }, body: "# Plan\n\nShip." });
     expect(markdown(files["people.md"]).data.users).toEqual([{ email: "ada@example.com", name: "Ada", role: "admin", active: true }]);
+    // History names Users by email, Statuses by name and Tickets by key, keeping the names recorded at the time.
+    const history = markdown(files["projects/CRONK/tickets/CRONK-1.history.md"]).data.changes;
+    expect(history[0]).toMatchObject({ by: "ada@example.com", change: "created", title: "Build it", status: { name: "Backlog", current: "Backlog" } });
+    expect(history).toContainEqual(expect.objectContaining({ change: "assignee", from: null, to: { id: ada.id, name: "Ada", email: "ada@example.com" } }));
+    expect(history).toContainEqual(expect.objectContaining({ change: "relation added", kind: "blocks", ticket: { key: "CRONK-2", title: "Test it" } }));
+    expect(markdown(files["projects/CRONK/tickets/CRONK-2.history.md"]).data.changes).toContainEqual(
+      expect.objectContaining({ change: "parent", from: null, to: { key: "CRONK-1", title: "Build it" } }),
+    );
+  });
+
+  it("writes an Agent in history by its id in people.md", async () => {
+    const { admin, claude } = await delegatedSetup(1);
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+
+    expect(markdown(files["people.md"]).data.agents).toMatchObject([{ id: claude.agentId, name: "claude-laptop" }]);
+    expect(markdown(files["projects/CRONK/tickets/CRONK-1.history.md"]).data.changes).toContainEqual(
+      expect.objectContaining({ by: "ada@example.com", change: "delegate", from: null, to: { id: claude.agentId, name: "claude-laptop" } }),
+    );
   });
 
   it("is only for Admins", async () => {
@@ -93,6 +111,7 @@ async function snapshot(admin: Client): Promise<unknown> {
             ticket: await get(`/api/tickets/${t.key}`),
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
+            history: await get(`/api/tickets/${t.key}/history`),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -125,7 +144,15 @@ async function busyWorkspace() {
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
   await admin.patch("/api/projects/CRONK", { visibility: "private", agentAccess: "write" });
   await admin.put(`/api/projects/CRONK/members/${graceId}`, { access: "write" });
-  await admin.post("/api/projects/CRONK/statuses", { name: "Blocked", category: "started" });
+  const blocked = (await admin.post("/api/projects/CRONK/statuses", { name: "Blocked", category: "started" })).body.status;
+  // History keeps the names it recorded: CRONK-3 moved into "Blocked", since renamed "Stuck", and to Grace.
+  await admin.patch("/api/tickets/CRONK-3", { statusId: blocked.id, assigneeId: graceId });
+  await admin.patch(`/api/projects/CRONK/statuses/${blocked.id}`, { name: "Stuck" });
+  // ...and CRONK-2 through "Parked", since deleted: its id names no Status in either installation.
+  const parked = (await admin.post("/api/projects/CRONK/statuses", { name: "Parked", category: "backlog" })).body.status;
+  await admin.patch("/api/tickets/CRONK-2", { statusId: parked.id });
+  await admin.patch("/api/tickets/CRONK-2", { statusId: blocked.id });
+  expect((await admin.delete(`/api/projects/CRONK/statuses/${parked.id}`)).status).toBe(204);
   await admin.patch("/api/tickets/CRONK-2", { parentKey: "CRONK-1", priority: "urgent", labels: ["Core", "api"], description: "The *API*." });
   await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-3" });
   await admin.post("/api/tickets/CRONK-3/relations", { kind: "relates_to", ticketKey: "CRONK-2" });
@@ -180,9 +207,9 @@ describe("importing an export", () => {
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
 
-    // Users who weren't in the installation come in deactivated: they have no password here yet.
+    // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
-      value?.email === "grace@example.com" ? { ...value, active: false } : value,
+      value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
   });
@@ -215,6 +242,37 @@ describe("importing a Project export", () => {
     expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-4");
   });
 
+  it("keeps the names history recorded for Users, Agents and Tickets the export leaves out", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Other", key: "OTHER" });
+    await admin.post("/api/projects/OTHER/tickets", { title: "Elsewhere" });
+    const bob = await joinAs(cronk, admin, "bob@example.com", "member", "Bob");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const helper = await registerAgent(admin, "helper");
+    const adaId = (await admin.get("/api/me")).body.user.id;
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    // Bob and helper had the Ticket once; neither is named anywhere else in a CRONK export.
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId })).status).toBe(200);
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: helper.agentId })).status).toBe(200);
+    expect((await admin.patch("/api/tickets/CRONK-1", { delegateId: null })).status).toBe(200);
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "relates_to", ticketKey: "OTHER-1" });
+    const exported = await admin.download("/api/projects/CRONK/export");
+    expect(markdown((await untarGz(exported.body))["people.md"]).data.users.map((u: { email: string }) => u.email)).toEqual(["ada@example.com"]);
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    await elsewhere.admin.post("/api/projects", { name: "Other", key: "OTHER" });
+    await elsewhere.admin.post("/api/projects/OTHER/tickets", { title: "Not that one" });
+    expect((await elsewhere.admin.upload("/api/import", exported.body)).status).toBe(201);
+
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/history")).body;
+    expect(changes).toContainEqual(expect.objectContaining({ change: "assignee", from: null, to: { id: bobId, name: "Bob" } }));
+    expect(changes).toContainEqual(expect.objectContaining({ change: "assignee", from: { id: bobId, name: "Bob" }, to: { id: expect.any(String), name: "Ada" } }));
+    expect(changes).toContainEqual(expect.objectContaining({ change: "delegate", from: { id: helper.agentId, name: "helper" }, to: null }));
+    expect(changes).toContainEqual(expect.objectContaining({ change: "relation added", kind: "relates_to", ticket: { key: "OTHER-1", title: "Elsewhere" } }));
+    expect((await elsewhere.admin.get("/api/users")).body.users).toHaveLength(1);
+  });
+
   it("is refused when the key is taken, and a Workspace export is refused once the Workspace holds anything", async () => {
     const before = await busyWorkspace();
     const project = (await before.admin.download("/api/projects/CRONK/export")).body;
@@ -241,6 +299,29 @@ describe("importing a Project export", () => {
     const plain = await admin.upload("/api/import", await tarGz({ "notes/a.md": "# A" }));
     expect(plain.status).toBe(400);
     expect(plain.body.error).toMatch(/isn't a Cronk export/);
+  });
+});
+
+describe("a Ticket's history in an export", () => {
+  it("is refused when a change in it isn't one Cronk records", async () => {
+    const before = await busyWorkspace();
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    const path = "projects/CRONK/tickets/CRONK-1.history.md";
+    const { changes } = markdown(files[path]).data;
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    for (const broken of [
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "relation added", kind: "blocks" },
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "priority", from: "none", to: "soon" },
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "assignee", from: null, to: "ada@example.com" },
+      { at: "2026-01-01T09:00:00Z", by: "ada@example.com", change: "renamed", from: "a", to: "b" },
+    ]) {
+      const edited = { ...files, [path]: `---\n${stringify({ changes: [...changes, broken] })}---\n` };
+      const imported = await admin.upload("/api/import", await tarGz(edited));
+      expect(imported.status).toBe(400);
+      expect(imported.body.error).toMatch(/CRONK-1\.history\.md changes\[\d+\]/);
+    }
+    expect((await admin.get("/api/tickets/CRONK-1")).status).toBe(404);
   });
 });
 
@@ -277,5 +358,81 @@ describe("an export taken apart and archived again", () => {
     const imported = await admin.upload("/api/import", wrapped);
     expect(imported.status).toBe(201);
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.title).toBe("Edited by hand");
+  });
+});
+
+describe("an export edited by hand", () => {
+  it("is refused when it says what Cronk can't hold, naming the file", async () => {
+    const before = await busyWorkspace();
+    const files = await untarGz((await before.admin.download("/api/export")).body);
+    const edited = async (path: string, edit: (data: any) => void, rename?: string) => {
+      const { data, body } = markdown(files[path]);
+      edit(data);
+      const copy = { ...files };
+      delete copy[path];
+      copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
+      return tarGz(copy);
+    };
+    const { admin } = await startInstalledCronk("Elsewhere");
+
+    const answeredPlan = await admin.upload("/api/import", await edited("projects/CRONK/tickets/CRONK-1.activities/1.md", (d) => (d.answer = 1)));
+    expect(answeredPlan.status).toBe(400);
+    expect(answeredPlan.body.error).toMatch(/CRONK-1\.activities\/1\.md answer is only for a question/);
+
+    const gap = await admin.upload("/api/import", await edited("guidance.versions/2.md", () => {}, "guidance.versions/3.md"));
+    expect(gap.status).toBe(400);
+    expect(gap.body.error).toMatch(/guidance\.versions\/3\.md must follow Version 2/);
+
+    const twice = await admin.upload("/api/import", await edited("projects/CRONK/project.md", (d) => d.members.push(d.members[0])));
+    expect(twice.status).toBe(400);
+    expect(twice.body.error).toMatch(/project\.md lists .* as a member twice/);
+
+    expect((await admin.get("/api/projects")).body.projects).toEqual([]);
+  });
+});
+
+describe("a User an import brought in", () => {
+  /** A fresh installation holding an import of a Workspace where Grace was assigned CRONK-1. */
+  async function importedGrace() {
+    const { cronk: before, admin: beforeAdmin } = await startInstalledCronk();
+    const grace = await joinAs(before, beforeAdmin, "grace@example.com", "member", "Grace");
+    const graceId = (await grace.get("/api/me")).body.user.id;
+    await beforeAdmin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await beforeAdmin.post("/api/projects/CRONK/tickets", { title: "Grace's job" });
+    await beforeAdmin.patch("/api/tickets/CRONK-1", { assigneeId: graceId });
+    const exported = await beforeAdmin.download("/api/export");
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", exported.body)).status).toBe(201);
+    const imported = (await admin.get("/api/users")).body.users.find((u: { email: string }) => u.email === "grace@example.com");
+    return { cronk, admin, imported };
+  }
+
+  it("can be invited, and accepting sets their password, reactivates them and keeps their id and history", async () => {
+    const { cronk, admin, imported } = await importedGrace();
+    expect(imported).toMatchObject({ name: "Grace", active: false, joined: false });
+
+    const invited = await admin.post("/api/invitations", { email: "grace@example.com" });
+    expect(invited.status).toBe(201);
+    const accepted = await cronk.client().post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: "Grace H", password: "graces password" });
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true, joined: true });
+
+    const grace = cronk.client();
+    expect((await grace.post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
+    expect((await grace.get(`/api/projects/CRONK/tickets?assignee=${imported.id}`)).body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1"]);
+  });
+
+  it("can't be invited again once they have a password, so no invitation can take their account", async () => {
+    const { cronk, admin } = await importedGrace();
+    const first = (await admin.post("/api/invitations", { email: "grace@example.com" })).body.token;
+    const replaced = (await admin.post("/api/invitations", { email: "GRACE@example.com" })).body.token;
+    expect((await cronk.client().post(`/api/invitations/by-token/${first}/accept`, { name: "Eve", password: "eves password" })).status).toBe(404);
+    expect((await cronk.client().post(`/api/invitations/by-token/${replaced}/accept`, { name: "Grace", password: "graces password" })).status).toBe(201);
+
+    const again = await admin.post("/api/invitations", { email: "grace@example.com" });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already a User/);
+    expect((await cronk.client().post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
   });
 });

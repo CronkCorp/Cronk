@@ -4,6 +4,7 @@ import type { Queryable } from "../db/database.js";
 import { insertDocument, type Tree, type TreeEntry } from "../knowledge/documents.js";
 import { unwrapFolder, type Folder } from "./archive.js";
 import { readFrontmatter } from "./frontmatter.js";
+import { MARKDOWN_FILE } from "../../shared/values.js";
 
 /**
  * Importing a plain folder of Markdown files as Documents: each file becomes a Document and each
@@ -17,7 +18,6 @@ interface DocumentToCreate {
   children: DocumentToCreate[];
 }
 
-const MARKDOWN = /\.(md|markdown)$/i;
 /** A folder's own file: its README or index, whose Document the folder becomes. */
 const FOLDER_OWN_FILE = /^(readme|index)\.(md|markdown)$/i;
 
@@ -27,7 +27,7 @@ const FOLDER_OWN_FILE = /^(readme|index)\.(md|markdown)$/i;
  * holding only one folder is that folder's archive, so its contents go at the top. Run inside a transaction.
  */
 export async function importMarkdownFolder(db: Queryable, tree: Tree, folder: Folder, actor: Actor, now: Date): Promise<TreeEntry[]> {
-  const markdown = unwrapFolder(new Map([...folder].filter(([path]) => MARKDOWN.test(path))));
+  const markdown = unwrapFolder(new Map([...folder].filter(([path]) => MARKDOWN_FILE.test(path))));
   const toCreate = documentsIn([...markdown.keys()].map((path) => ({ path, relative: path })), markdown);
   const created: TreeEntry[] = [];
   const create = async (planned: DocumentToCreate, parentId: string | null, depth: number) => {
@@ -51,14 +51,14 @@ function documentsIn(entries: { path: string; relative: string }[], folder: Fold
   const named: [name: string, planned: DocumentToCreate][] = [];
   for (const [name, inside] of folders) {
     // A file named like the folder, such as `setup.md` beside `setup/`, is the folder's own file if it has no README or index.
-    const beside = files.find((e) => e.relative.replace(MARKDOWN, "") === name);
+    const beside = files.find((e) => e.relative.replace(MARKDOWN_FILE, "") === name);
     const own = inside.find((e) => FOLDER_OWN_FILE.test(e.relative)) ?? beside;
     if (own && own === beside) files = files.filter((e) => e !== beside);
     const rest = inside.filter((e) => e !== own);
     named.push([name, { ...(own ? documentFrom(own.path, folder, name) : { title: name, body: "" }), children: documentsIn(rest, folder) }]);
   }
   for (const e of files) {
-    const name = e.relative.replace(MARKDOWN, "");
+    const name = e.relative.replace(MARKDOWN_FILE, "");
     named.push([name, documentFrom(e.path, folder, name)]);
   }
   return named.sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })).map(([, p]) => p);
