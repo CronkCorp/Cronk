@@ -18,19 +18,27 @@ export function createDatabase(databaseUrl: string, onIdleError: (err: Error) =>
   return pool;
 }
 
-/** Runs `fn` in a transaction, committing on success and rolling back on error. */
+/**
+ * Runs `fn` in a transaction, committing on success and rolling back on error. A connection
+ * Postgres drops meanwhile fails the transaction and is discarded instead of going back to the pool.
+ */
 export async function transaction<T>(db: Database, fn: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await db.connect();
+  // The pool listens for a lost connection only while it is idle; the query running when it is lost fails instead.
+  let lost: Error | undefined;
+  const onError = (err: Error) => (lost = err);
+  client.on("error", onError);
   try {
     await client.query("BEGIN");
     const result = await fn(client);
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch((rollbackErr: Error) => (lost ??= rollbackErr));
     throw err;
   } finally {
-    client.release();
+    client.removeListener("error", onError);
+    client.release(lost);
   }
 }
 
