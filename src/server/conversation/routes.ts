@@ -202,7 +202,7 @@ export function conversationRoutes(ctx: AppContext) {
             // Locked so it can't be removed before the move commits.
             const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
             if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
-            const moved = await updateTicket(tx, ticket, { status }, actor, ctx.clock.now());
+            const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
             return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
           },
