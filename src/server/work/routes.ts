@@ -453,7 +453,7 @@ export function workRoutes(ctx: AppContext) {
               description:
                 "A server-sent event stream of changes to the Project's Tickets as they happen, for as long as the caller can see the " +
                 "Project. It opens with a `ready` event; whenever one of its Tickets is created or changes (its fields, its Sub-Tickets, " +
-                "its relations, its Claim being taken, released or lapsing) a `changed` event arrives whose data is `{ ticket }`, the " +
+                "its relations, its linked Documents, its Claim being taken, released or lapsing) a `changed` event arrives whose data is `{ ticket }`, the " +
                 "Ticket's key, and a `changed` event with `{ ticket: null }` when its Statuses change.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
