@@ -20,7 +20,7 @@ export interface CatchUp {
 
 type Listener = (event: LiveEvent) => void;
 
-/** How often an open stream re-checks access and sends a comment, so proxies and browsers keep it open. */
+/** How often an open stream re-checks access and sends a comment, so proxies and browsers keep it open, unless told otherwise. */
 const HEARTBEAT_MS = 25_000;
 
 /**
@@ -37,6 +37,16 @@ export class LiveUpdates {
   private readonly heartbeats = new Set<() => Promise<void>>();
   /** Per topic, the positions of events whose change committed (or is about to) but that aren't published yet. */
   private readonly pending = new Map<string, Set<bigint>>();
+  /** How often each open stream's heartbeat runs on its own, or `null` if it runs only through `heartbeat`. */
+  private readonly heartbeatMs: number | null;
+
+  /**
+   * `heartbeatMs` is how often each open stream's heartbeat runs on its own, every 25 seconds by
+   * default. With `null` no timer runs it, only `heartbeat`, as for tests that move a fake clock.
+   */
+  constructor(opts: { heartbeatMs?: number | null } = {}) {
+    this.heartbeatMs = opts.heartbeatMs === undefined ? HEARTBEAT_MS : opts.heartbeatMs;
+  }
 
   /**
    * Tells everyone watching `topic` about `event`. Publishing an event with a position that was
@@ -149,7 +159,7 @@ export class LiveUpdates {
       checked(() => res.write(": keep-alive\n\n"));
       return queue;
     };
-    const beating = setInterval(beat, HEARTBEAT_MS).unref();
+    const beating = this.heartbeatMs === null ? undefined : setInterval(beat, this.heartbeatMs).unref();
     this.streams.add(end);
     this.heartbeats.add(beat);
     res.on("close", end);
@@ -185,7 +195,7 @@ export class LiveUpdates {
     })();
   }
 
-  /** Runs every open stream's heartbeat now, as its timer does, and resolves once each has run. */
+  /** Runs every open stream's heartbeat now, as its timer does (if it has one), and resolves once each has run. */
   async heartbeat(): Promise<void> {
     await Promise.all([...this.heartbeats].map((beat) => beat()));
   }
