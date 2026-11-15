@@ -161,7 +161,12 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("link", { name: "Statuses" }).click();
+  await page.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Project settings" }).click();
+  await expect(page).toHaveURL(/view=settings/);
+  for (const section of ["Access", "Agent Access", "Statuses", "Guidance"]) {
+    await expect(page.getByRole("region", { name: section, exact: true })).toBeVisible();
+  }
 
   const started = page.getByRole("region", { name: "Started", exact: true });
   await started.getByLabel("New Started Status").fill("In QA");
@@ -176,6 +181,24 @@ test("tailor the Project's Statuses and see the board follow them", async ({ pag
   await page.getByRole("link", { name: "Board" }).click();
   await expect(page.getByRole("region", { name: "In QA" })).toContainText("Add sign-in");
   await expect(page.getByRole("region", { name: "In Progress" })).toHaveCount(0);
+});
+
+// Runs after the tests above, so Ada exists; archives a Project of its own so later tests keep CRONK.
+test("archive a Project from the page head's … menu, through a confirmation", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Attic", key: "ATTIC" } });
+  await page.goto("/projects/ATTIC");
+  await expect(page.getByRole("heading", { name: "Attic" })).toBeVisible();
+
+  // Archive isn't in the head itself: it waits in the … menu and asks first.
+  const head = page.getByTestId("page-head");
+  await expect(head.getByRole("button", { name: "Archive Project" })).toHaveCount(0);
+  await head.getByRole("button", { name: "Project actions" }).click();
+  await page.getByRole("menuitem", { name: "Archive Project" }).click();
+  await page.getByRole("dialog", { name: "Archive Attic?" }).getByRole("button", { name: "Archive Project" }).click();
+  await expect(page.getByRole("heading", { name: /Attic/ })).toContainText("Archived");
+  await page.goto("/archived");
+  await expect(page.getByRole("main").getByRole("link", { name: /ATTIC/ })).toBeVisible();
 });
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
@@ -199,8 +222,10 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await bob.getByRole("button", { name: "Join" }).click();
   await expect(bob.getByRole("main").getByRole("link", { name: /CRONK/ })).toBeVisible();
 
-  await page.goto("/projects/CRONK");
-  await page.getByRole("button", { name: "Access" }).click();
+  // The old address of a settings tab opens Project settings at that section.
+  await page.goto("/projects/CRONK?view=statuses");
+  await expect(page.getByRole("region", { name: "Statuses" })).toBeInViewport();
+  await page.goto("/projects/CRONK?view=settings");
   await page.getByRole("button", { name: "Make private" }).click();
   await expect(page.getByRole("heading", { name: /Private/ })).toBeVisible();
 
@@ -876,7 +901,8 @@ test("merge a Guidance edit someone else saved underneath", async ({ page }) => 
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
-  await page.getByRole("navigation", { name: "View" }).getByRole("link", { name: "Guidance" }).click();
+  await page.goto("/projects/CRONK?view=guidance");
+  await expect(page.getByRole("region", { name: "Guidance" })).toBeInViewport();
   await page.getByRole("button", { name: "Edit Guidance" }).click();
   await page.getByLabel("Guidance (Markdown)").fill("## Style\n\nWrite tests first.\n\n## Tools\n\nUse npm.\n");
   await page.getByRole("button", { name: "Save" }).click();
@@ -1359,3 +1385,50 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("navigation", { name: "Sidebar" }).getByRole("link", { name: /CRONK/ })).toBeVisible();
 }
+
+// Runs after the tests above, so Ada and CRONK exist.
+test("see a Ticket's Priority, Assignee and Delegate on the Project's list and board", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket } = await delegatedTicket(page, request, "people-bot", "Shows who has it");
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { priority: "high" } });
+
+  await page.goto("/projects/CRONK");
+  const row = page.getByRole("list", { name: "Tickets" }).getByRole("link", { name: /Shows who has it/ });
+  await expect(row.getByText("High", { exact: true })).toBeVisible();
+  await expect(row.getByRole("img", { name: "Delegate: people-bot" })).toBeVisible();
+  await expect(row.getByRole("img", { name: "Assignee: Ada" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Board" }).click();
+  const card = page.getByRole("region", { name: "Backlog" }).getByRole("link", { name: /Shows who has it/ });
+  await expect(card.getByText("High", { exact: true })).toBeVisible();
+  await expect(card.getByRole("img", { name: "Delegate: people-bot" })).toBeVisible();
+  await expect(card.getByRole("img", { name: "Assignee: Ada" })).toBeVisible();
+});
+
+// Runs after the tests above, so Ada exists; uses a Project of its own with the six Statuses a Project starts with.
+test("fit the board on a 1280px screen, with Completed and Canceled columns collapsed until opened", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Fit", key: "FIT" } });
+  const { statuses } = await (await page.request.get("/api/projects/FIT")).json();
+  const done = statuses.find((s: { name: string }) => s.name === "Done");
+  const { ticket } = await (await page.request.post("/api/projects/FIT/tickets", { data: { title: "Shipped already" } })).json();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { statusId: done.id } });
+  await page.request.post("/api/projects/FIT/tickets", { data: { title: "Still to do" } });
+
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/projects/FIT?view=board");
+  const board = page.getByRole("group", { name: "Board" });
+  for (const name of ["Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled"]) {
+    await expect(board.getByRole("region", { name, exact: true })).toBeInViewport({ ratio: 1 });
+  }
+  expect(await board.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(board.getByRole("region", { name: "Backlog" })).toContainText("Still to do");
+
+  const doneColumn = board.getByRole("region", { name: "Done", exact: true });
+  const open = doneColumn.getByRole("button", { name: "Done, 1 Ticket" });
+  await expect(open).toHaveAttribute("aria-expanded", "false");
+  await expect(doneColumn).not.toContainText("Shipped already");
+  await expect(board.getByRole("region", { name: "Canceled" }).getByRole("button", { name: "Canceled, 0 Tickets" })).toBeVisible();
+  await open.click();
+  await expect(doneColumn).toContainText("Shipped already");
+});
