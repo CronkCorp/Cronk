@@ -1,3 +1,5 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+import type { Nodes } from "mdast";
 import Markdown, { type Components } from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
@@ -200,4 +202,19 @@ export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean
       {props.children}
     </Markdown>
   );
+}
+
+const BLOCKS = new Set(["paragraph", "heading", "listItem", "code", "blockquote", "tableCell", "break", "thematicBreak"]);
+
+/** Markdown's words without its marks, each block run into the next, as a list's snippet of a body shows it. */
+export function plainText(markdown: string): string {
+  const parts: string[] = [];
+  const walk = (node: Nodes) => {
+    if (node.type === "html") return;
+    if ("value" in node) parts.push(node.value);
+    else if ("children" in node) for (const child of node.children) walk(child);
+    if (BLOCKS.has(node.type)) parts.push(" ");
+  };
+  walk(fromMarkdown(markdown));
+  return parts.join("").replace(/\s+/g, " ").trim();
 }

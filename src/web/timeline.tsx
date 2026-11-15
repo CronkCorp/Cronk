@@ -204,7 +204,6 @@ function ActivityEntry(props: { activity: Activity; className: string } & Thread
 /** A Report: a card with its title, an "Open Report" link, and its current Version's body with headings scaled down. */
 function ReportEntry(props: { report: Report; className: string }) {
   const r = props.report;
-  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
   const actor = agentActor(r.agent, r.session);
   return (
     <TimelineEntry className={`tl-report-entry${props.className}`} gutter={<Avatar actor={actor} />} label={`Report: ${r.title}`}>
@@ -213,16 +212,28 @@ function ReportEntry(props: { report: Report; className: string }) {
         <Actor actor={actor} owner={false} />
         <RelativeTime at={r.createdAt} clock />
       </div>
-      <div className="tl-report">
-        <div className="tl-report-head">
-          <h3 className="tl-report-title">{r.title}</h3>
-          <Link to={`/documents/${r.id}`} className="link">Open Report</Link>
-        </div>
-        <div className="tl-report-body">
-          <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
-        </div>
-      </div>
+      <ReportCard report={r} />
     </TimelineEntry>
+  );
+}
+
+/**
+ * A Report as a card: its title, an "Open Report" link, and its current Version's body with headings scaled
+ * down, loaded through the same pipeline wherever a Report is read in place (the timeline, the Inbox).
+ */
+export function ReportCard(props: { report: Report }) {
+  const r = props.report;
+  const [document] = useLoad(() => api.document(r.id), [r.id, r.version]);
+  return (
+    <div className="tl-report">
+      <div className="tl-report-head">
+        <h3 className="tl-report-title">{r.title}</h3>
+        <Link to={`/documents/${r.id}`} className="link">Open Report</Link>
+      </div>
+      <div className="tl-report-body">
+        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+      </div>
+    </div>
   );
 }
 
@@ -418,7 +429,8 @@ function Replies(props: Thread & { replies: Comment[]; replyTo: Omit<NewComment,
   );
 }
 
-function CommentForm(props: {
+/** A Comment box: a Markdown field, its submit button and an optional hint beside it. `disabled` holds it closed, as for an item resolved elsewhere. */
+export function CommentForm(props: {
   label: string;
   submitLabel: string;
   post: (input: NewComment) => Promise<Comment>;
@@ -428,6 +440,7 @@ function CommentForm(props: {
   placeholder?: string;
   /** A line beside the submit button saying where the Comment goes. */
   hint?: string;
+  disabled?: boolean;
 }) {
   const [body, setBody] = useState("");
   const send = useSubmit(
@@ -439,10 +452,10 @@ function CommentForm(props: {
   );
   return (
     <form className="comment-form" onSubmit={send.submit}>
-      <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} placeholder={props.placeholder ?? 'Markdown; @name, @owner/name or @"name with spaces" mentions an Agent'} />
+      <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} disabled={props.disabled} placeholder={props.placeholder ?? 'Markdown; @name, @owner/name or @"name with spaces" mentions an Agent'} />
       {send.error && <p className="error" role="alert">{send.error}</p>}
       <div className="actions">
-        <Button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</Button>
+        <Button type="submit" disabled={props.disabled || send.busy || !body.trim()}>{props.submitLabel}</Button>
         {props.onCancel && <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>}
         {props.hint && <span className="muted form-hint">{props.hint}</span>}
       </div>
