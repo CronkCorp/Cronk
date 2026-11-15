@@ -84,9 +84,14 @@ export function useSelectedPassage(root: RefObject<HTMLElement | null>, source: 
       const box = el.getBoundingClientRect();
       setSelected({ passage, top: at.bottom - box.top + 4, left: Math.max(0, at.left - box.left) });
     };
+    // A resize moves the selection, so the button that follows it is placed again.
     document.addEventListener("selectionchange", update);
+    window.addEventListener("resize", update);
     update();
-    return () => document.removeEventListener("selectionchange", update);
+    return () => {
+      document.removeEventListener("selectionchange", update);
+      window.removeEventListener("resize", update);
+    };
   }, [root, source]);
   return selected;
 }
