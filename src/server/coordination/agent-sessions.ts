@@ -86,17 +86,20 @@ export async function findLiveAgentSession(db: Queryable, agentId: string, id: s
   return rows[0] && toAgentSession(rows[0]);
 }
 
-/** Ends the Sessions `column` picks, and returns the Tickets whose Claims they held. */
+/** Ends the Sessions `column` picks, and returns the Tickets whose live Claims they held. */
 async function endSessions(db: Queryable, column: "id" | "token_id" | "agent_id", value: string, now: Date): Promise<ClaimHolders> {
   const { rows } = await db.query<{ id: string }>(
-    `WITH ended AS (UPDATE agent_sessions SET ended_at = $2 WHERE ${column} = $1 AND ended_at IS NULL RETURNING id)
-     SELECT t.id FROM tickets t JOIN ended ON ended.id = t.claim_session_id`,
+    `WITH ended AS (
+       UPDATE agent_sessions s SET ended_at = $2 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
+       WHERE a.id = s.agent_id AND s.${column} = $1 AND s.ended_at IS NULL
+       RETURNING s.id, s.last_seen_at > $2::timestamptz - make_interval(secs => w.silence_threshold_seconds) AS was_live)
+     SELECT t.id FROM tickets t JOIN ended ON ended.id = t.claim_session_id WHERE ended.was_live`,
     [value, now],
   );
   return { ticketIds: rows.map((r) => r.id) };
 }
 
-/** What ending Agent Sessions changed: the Tickets whose Claims they held, which no longer have one. */
+/** What ending Agent Sessions changed: the Tickets whose live Claims they held, which no longer have one. */
 export interface ClaimHolders {
   ticketIds: string[];
 }

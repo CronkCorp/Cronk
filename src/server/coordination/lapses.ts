@@ -1,15 +1,17 @@
 import type { AppContext } from "../context.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { findTicketsByIds } from "../work/tickets.js";
+import { tellNewlyReady } from "./ready.js";
 
 /**
  * Claims lapse by time alone, when their Agent Session stays silent too long, so no call
  * marks the moment. Every `intervalMs` this looks for the Claims that lapsed since it last
- * looked, by the application's clock, and tells their Tickets' watchers (see `onLapsed`).
+ * looked, by the application's clock, and tells their Tickets' watchers and the Agents they are
+ * now Ready for.
  * Claims that lapse while the server is down aren't told of; a stream reopening catches up
  * with its `ready`. Stops when the returned function is called.
  */
-export function watchClaimLapses(ctx: AppContext, intervalMs: number, onLapsed: (ticketIds: string[]) => Promise<void> = async () => {}): () => void {
+export function watchClaimLapses(ctx: AppContext, intervalMs: number): () => void {
   let since = ctx.clock.now();
   let looking = false;
   const look = async () => {
@@ -27,7 +29,8 @@ export function watchClaimLapses(ctx: AppContext, intervalMs: number, onLapsed: 
     if (rows.length === 0) return;
     const ids = rows.map((r) => r.id);
     ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ids));
-    await onLapsed(ids);
+    // They were Claimed, so they weren't Ready.
+    await tellNewlyReady(ctx, ids, new Map());
   };
   const timer = setInterval(() => {
     if (looking) return;

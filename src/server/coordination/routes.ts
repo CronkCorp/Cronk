@@ -9,7 +9,7 @@ import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
-import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim, type ReadyScope } from "./claims.js";
+import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim } from "./claims.js";
 import { findReport, insertReport, listTicketReports } from "../knowledge/reports.js";
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
@@ -18,6 +18,7 @@ import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } fr
 import { agentTopic, ticketTopic } from "../live/topics.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
+import { readyScope, readyTicket, tellNewlyReady } from "./ready.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -145,7 +146,7 @@ export function coordinationRoutes(ctx: AppContext) {
         const actor = requireAgent(await requireActor(ctx, request));
         const session = requireSession(actor);
         const now = ctx.clock.now();
-        const scope = await readyScope(ctx, actor);
+        const scope = await readyScope(ctx.db, actor);
         const id = await transaction(ctx.db, (tx) => claimNextReady(tx, scope, session.id, now));
         const ticket = id ? (await findTicketById(ctx.db, id))! : null;
         ticketsChanged(ctx.live, [ticket]);
@@ -205,6 +206,8 @@ export function coordinationRoutes(ctx: AppContext) {
           return ticket;
         });
         ticketsChanged(ctx.live, [released]);
+        // It was Claimed, so it wasn't Ready.
+        await tellNewlyReady(ctx, [released.id], new Map());
         return reply.code(204).send();
       },
     );
@@ -361,7 +364,11 @@ export function coordinationRoutes(ctx: AppContext) {
                 "with a `ready` event; each Comment that starts waiting for the Agent arrives as a `waiting` event whose data is " +
                 "`{ waiting }`, a WaitingWork as JSON, with an `id`; `ready` carries one too. Reopened with the last id it got as " +
                 "`Last-Event-ID`, the stream first sends, before `ready`, each `waiting` event it missed meanwhile whose work no welcome " +
-                "has taken since, then any pushed while it did so. Pushed work is still listed in the welcome of the Agent's next Agent Session.",
+                "has taken since, then any pushed while it did so. Pushed work is still listed in the welcome of the Agent's next Agent Session. " +
+                "Each time one of the Agent's Tickets becomes Ready for it (delegated to it, unblocked, moved back into unfinished work, or its " +
+                "Claim released, ended or lapsed), a `ticketReady` event arrives whose data is `{ ticket }`, the Ticket as the welcome lists it; " +
+                "it has no `id` and isn't sent again on reopening, as the next welcome lists Ready Tickets anyway. A read-only token's stream " +
+                "gets none, as it can't Claim them.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(400, 401, 403, 410),
@@ -380,7 +387,8 @@ export function coordinationRoutes(ctx: AppContext) {
               : [],
           readyId: await latestWaitingSeq(ctx.db, agent.agent.id),
         });
-        ctx.live.stream(reply, agentTopic(agent.agent.id), canSee, catchUp);
+        // A read-only token can't Claim, so it isn't told what it could Claim.
+        ctx.live.stream(reply, agentTopic(agent.agent.id), canSee, catchUp, (event) => !(agent.readOnly && event.event === "ticketReady"));
       },
     );
 
@@ -391,16 +399,11 @@ export function coordinationRoutes(ctx: AppContext) {
         const session = requireSession(await requireActor(ctx, request));
         const { ticketIds } = await endAgentSession(ctx.db, session.id, ctx.clock.now());
         ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
+        await tellNewlyReady(ctx, ticketIds, new Map());
         return reply.code(204).send();
       },
     );
   };
-}
-
-/** Where the Agent looks for Ready Tickets: the unarchived Projects it may write in. */
-async function readyScope(ctx: AppContext, agent: AgentActor): Promise<ReadyScope> {
-  const projects = await visibleProjects(ctx.db, agent, await listProjects(ctx.db, agent.owner.workspaceId, false));
-  return { agentId: agent.agent.id, projectIds: projects.filter((p) => p.access === "write").map((p) => p.id) };
 }
 
 function requireAgent(actor: Actor): AgentActor {
@@ -448,7 +451,7 @@ export async function welcome(ctx: AppContext, agent: AgentActor & { session: Ag
 
 /** The first of the Agent's Ready Tickets, as the welcome lists them. */
 async function readyTickets(ctx: AppContext, agent: AgentActor) {
-  const ids = await listReadyTicketIds(ctx.db, await readyScope(ctx, agent), ctx.clock.now(), WELCOME_READY_LIMIT);
+  const ids = await listReadyTicketIds(ctx.db, await readyScope(ctx.db, agent), ctx.clock.now(), WELCOME_READY_LIMIT);
   const tickets = await findTicketsByIds(ctx.db, ids);
-  return tickets.map((t) => ({ key: t.key, title: t.title, priority: t.priority, status: t.status }));
+  return tickets.map(readyTicket);
 }

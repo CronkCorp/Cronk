@@ -482,3 +482,20 @@ describe("work waiting for an Agent over MCP", () => {
     expect(notifications.map((n) => n.data.waiting.comment.body)).toEqual(["Before."]);
   });
 });
+
+describe("a Ticket becoming Ready over MCP", () => {
+  it("is pushed to a connected Agent Session as a notice", async () => {
+    const { cronk, admin, claude } = await delegatedSetup(2);
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const notified = new Promise<unknown>((resolve) => mcp.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => resolve(n.params)));
+
+    await admin.delete("/api/tickets/CRONK-1/relations/blocks/CRONK-2");
+
+    expect(await notified).toMatchObject({
+      level: "notice",
+      logger: "cronk",
+      data: { message: expect.stringMatching(/CRONK-2: Ticket 2[\s\S]*`claim`/), ticketReady: { key: "CRONK-2", title: "Ticket 2" } },
+    });
+  });
+});

@@ -20,6 +20,7 @@ import type { User } from "./users.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { findTicketsByIds } from "../work/tickets.js";
+import { tellNewlyReady } from "../coordination/ready.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
 const agentParams = pathParams({ id: agentId });
@@ -166,6 +167,8 @@ export function agentRoutes(ctx: AppContext) {
         const ended = await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now());
         if (!ended) throw new HttpError(404, "No such token");
         ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ended.ticketIds));
+        // Their Claims were live, so they weren't Ready; the Agent's other tokens may pick them up.
+        await tellNewlyReady(ctx, ended.ticketIds, new Map());
         return reply.code(204).send();
       },
     );

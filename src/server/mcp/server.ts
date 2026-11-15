@@ -7,9 +7,12 @@ import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
 import type { AgentSession, WaitingWork, Welcome } from "../api-types.js";
+
+/** A Ticket Ready for the Agent, as its welcome lists it. */
+type ReadyTicket = Welcome["readyTickets"][number];
 import { followEvents, ownBaseUrl } from "./events.js";
 import type { LiveEvent } from "../live/live-updates.js";
-import { waitingLines, welcomeText } from "./welcome.js";
+import { readyLine, waitingLines, welcomeText } from "./welcome.js";
 
 /**
  * One MCP connection: its transport and server, the hash of the token that opened it (the
@@ -20,7 +23,7 @@ interface Connection {
   server: McpServer;
   tokenHash: string;
   endsIfSilentAt: Date;
-  /** Stops pushing waiting work to it. */
+  /** Stops pushing waiting work and newly Ready Tickets to it. */
   stopNotifying: () => void;
 }
 
@@ -82,15 +85,20 @@ export function mcpRoutes(ctx: AppContext) {
         );
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
-        // Work starting to wait for the Agent reaches it as a log message, from the API's own stream
+        // Work starting to wait for the Agent, and Tickets becoming Ready for it, reach it as log messages, from the API's own stream
         // of it, which ends as soon as the Agent Session does or its token is revoked. That stream needs
         // real HTTP, so when Cronk doesn't listen (its requests are only injected) nothing is pushed.
         const baseUrl = ownBaseUrl(app);
         const notify = ({ event, data }: LiveEvent) => {
-          if (event !== "waiting") return;
-          const { waiting } = data as { waiting: WaitingWork };
-          const text = waitingLines(waiting).join("\n");
-          void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message: `Work is waiting for you:\n${text}`, waiting } }).catch(() => {});
+          const notice = (message: string, about: object) =>
+            void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message, ...about } }).catch(() => {});
+          if (event === "waiting") {
+            const { waiting } = data as { waiting: WaitingWork };
+            notice(`Work is waiting for you:\n${waitingLines(waiting).join("\n")}`, { waiting });
+          } else if (event === "ticketReady") {
+            const { ticket } = data as { ticket: ReadyTicket };
+            notice(`A Ticket is now Ready for you:\n${readyLine(ticket)}\nClaim it with the \`tickets\` tool's \`claim\` action.`, { ticketReady: ticket });
+          }
         };
         const stopNotifying = baseUrl
           ? await followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", notify)
