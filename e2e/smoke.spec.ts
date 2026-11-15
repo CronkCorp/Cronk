@@ -381,7 +381,7 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Quoting");
   await page.getByRole("button", { name: "Create Document" }).click();
-  await page.getByLabel("Body (Markdown)").fill("> Quoted and\n> wrapped, a\\*b &amp; c.\n\n- Listed and\n  continued.");
+  await page.getByLabel("Body (Markdown)").fill("> Quoted and\n> wrapped, a\\*b &amp; c.\n\n- Listed and\n  continued.\n\nSee x\\*y in CRONK-1.");
   await page.getByRole("button", { name: "Save" }).click();
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("wrapped, a*b & c.");
@@ -419,6 +419,11 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await select("li", "and", "li", "continued");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("and\n  continued");
+
+  // Text split around a Ticket reference keeps its place in the Markdown past an escape before it.
+  await select("p:has(a)", "x*y", "p a", "CRONK-1");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("x\\*y in CRONK-1");
 });
 
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
