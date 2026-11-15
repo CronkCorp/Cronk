@@ -320,6 +320,45 @@ describe("An Agent Session's live updates", () => {
     expect((await again.next())?.event).toBe("ready");
   });
 
+  it("replay, from `ready`'s id, work whose post committed before the stream opened but was pushed only after `ready`", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+
+    const held = cronk.holdPushes();
+    expect((await admin.post("/api/tickets/CRONK-1/comments", { body: "Committed, not yet pushed." })).status).toBe(201);
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    const ready = await stream.next();
+    expect(ready?.event).toBe("ready");
+    stream.close();
+    held.release();
+
+    const reopened = await agent.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! });
+    expect((await reopened.next())?.data.waiting?.comment.body).toBe("Committed, not yet pushed.");
+    expect((await reopened.next())?.event).toBe("ready");
+  });
+
+  it("don't hold `ready`'s id back for work whose post rolled back", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const codex = await registerAgent(admin, "codex");
+    const agent = await session();
+
+    // The post takes claude-laptop's position, then waits to take codex's, and fails there.
+    const held = await cronk.holdRow("agents", codex.agentId);
+    const failing = admin.post("/api/tickets/CRONK-1/comments", { body: "@claude-laptop @codex, rolled back." });
+    await held.waiters(1);
+    // Fails the post's waiting query as on a database blip; the table named is incidental, as nothing else waits.
+    await cronk.interruptQueriesOn("schema_migrations", async () => {});
+    expect((await failing).status).toBe(500);
+    await held.release();
+    expect((await admin.post("/api/tickets/CRONK-1/comments", { body: "Later." })).status).toBe(201);
+
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    const ready = await stream.next();
+    stream.close();
+    const reopened = await agent.events("/api/agent-sessions/current/events", { "last-event-id": ready!.id! });
+    expect((await reopened.next())?.event).toBe("ready");
+  });
+
   it("push work for one Agent while a post for another Agent is still uncommitted", async () => {
     const { cronk, admin, session } = await delegatedSetup();
     const codex = await registerAgent(admin, "codex");

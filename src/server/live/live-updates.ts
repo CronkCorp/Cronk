@@ -33,10 +33,37 @@ const HEARTBEAT_MS = 25_000;
 export class LiveUpdates {
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly streams = new Set<() => void>();
+  /** Per topic, the positions of events whose change committed (or is about to) but that aren't published yet. */
+  private readonly pending = new Map<string, Set<bigint>>();
 
-  /** Tells everyone watching `topic` about `event`. */
+  /**
+   * Tells everyone watching `topic` about `event`. Publishing an event with a position that was
+   * `expect`ed settles it.
+   */
   publish(topic: string, event: LiveEvent): void {
+    if (event.id !== undefined) this.settle(topic, BigInt(event.id));
     for (const listener of this.listeners.get(topic) ?? []) listener(event);
+  }
+
+  /**
+   * Notes that an event with position `id` will be published on `topic`: call it before the
+   * change it tells of commits. Until it is published, a stream on `topic` that catches up keeps
+   * `ready`'s id below it, so a stream reopened from `ready` replays it even if it is published
+   * only after `ready` was written. Call the returned function if the change rolls back instead.
+   */
+  expect(topic: string, id: string): () => void {
+    const position = BigInt(id);
+    const set = this.pending.get(topic) ?? new Set();
+    this.pending.set(topic, set);
+    set.add(position);
+    return () => this.settle(topic, position);
+  }
+
+  /** Forgets that an event with position `position` is still to be published on `topic`. */
+  private settle(topic: string, position: bigint): void {
+    const set = this.pending.get(topic);
+    if (!set?.delete(position)) return;
+    if (set.size === 0) this.pending.delete(topic);
   }
 
   /** Calls `listener` for every event published on `topic` until the returned function is called. */
@@ -65,8 +92,10 @@ export class LiveUpdates {
    * positions, decimal integers: `ready` carries the furthest of the id `catchUp` answers and
    * every id sent, so every event published before `ready` is sent before it, and a stream
    * reopened from `ready`'s id misses nothing published later that has a further position.
-   * Not yet closed: an event whose change committed before `catchUp` read its id, but that is
-   * published only after `ready` is written, can be at or below `ready`'s id.
+   * The id `catchUp` answers is first kept below every position still `expect`ed on `topic`:
+   * an event whose change committed before `catchUp` read its id, but that is published only
+   * after `ready` is written, is then above `ready`'s id too, as long as its position was
+   * `expect`ed before its change committed.
    */
   stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>, catchUp?: () => Promise<CatchUp>): void {
     reply.hijack();
@@ -112,6 +141,8 @@ export class LiveUpdates {
       try {
         const { missed, readyId } = await catchUp();
         let furthest = BigInt(readyId);
+        // Read once `catchUp` has: whatever committed before it read `readyId` is either still pending or was published, and so held.
+        for (const position of this.pending.get(topic) ?? []) if (position <= furthest) furthest = position - 1n;
         // Sends `event` unless it was sent already; false once the stream has ended.
         const send = async (event: LiveEvent) => {
           if (!fresh(event)) return true;

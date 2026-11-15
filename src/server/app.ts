@@ -34,9 +34,10 @@ export interface AppConfig {
 
 /**
  * Builds the Cronk HTTP application: connects to Postgres, migrates the schema
- * and registers the API. The caller decides whether to listen or inject.
+ * and registers the API. The caller decides whether to listen or inject. `live` defaults to a
+ * new `LiveUpdates`; tests pass their own to stage when events are published.
  */
-export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?: boolean }): Promise<FastifyInstance> {
+export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?: boolean; live?: LiveUpdates }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
     // Refuse fields a route doesn't declare (its schema's `additionalProperties: false`) instead of
@@ -51,7 +52,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
     await db.end();
     throw err;
   }
-  const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure, live: new LiveUpdates() };
+  const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure, live: opts.live ?? new LiveUpdates() };
 
   // Open live-update streams would otherwise keep the server from closing.
   app.addHook("preClose", async () => ctx.live.close());

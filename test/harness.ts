@@ -6,8 +6,29 @@ import { inject, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/server/app.js";
 import type { Clock } from "../src/server/clock.js";
+import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js";
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+/** Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed. */
+class HoldableLiveUpdates extends LiveUpdates {
+  private holding: [string, LiveEvent][] | null = null;
+
+  override publish(topic: string, event: LiveEvent): void {
+    if (this.holding) this.holding.push([topic, event]);
+    else super.publish(topic, event);
+  }
+
+  /** Holds every publish from now on until the returned function is called, which publishes them in order. */
+  hold(): () => void {
+    this.holding ??= [];
+    return () => {
+      const held = this.holding ?? [];
+      this.holding = null;
+      for (const [topic, event] of held) super.publish(topic, event);
+    };
+  }
+}
 
 /** A clock tests control. Starts at a fixed instant and only moves when told to. */
 export class FakeClock implements Clock {
@@ -181,12 +202,23 @@ export interface Cronk {
   /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
   holdTable(table: string): Promise<HeldLock>;
   /**
+   * Holds back every live update the server pushes from now on, as if each change committed
+   * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
+   */
+  holdPushes(): HeldPushes;
+  /**
    * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
    * before it shipped, so the next `restart` applies it again over the data already there.
    */
   undoMigration(id: string, undo: string): Promise<void>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
+}
+
+/** Live updates held by `Cronk.holdPushes`, until released. */
+export interface HeldPushes {
+  /** Pushes the held updates, in the order they were made, and stops holding. */
+  release(): void;
 }
 
 /** A row held by `Cronk.holdRow`, or a table held by `Cronk.holdTable`, until released. */
@@ -227,7 +259,8 @@ export async function startCronk(): Promise<Cronk> {
   const databaseUrl = url.toString();
 
   const clock = new FakeClock();
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock });
+  let live!: HoldableLiveUpdates;
+  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()) });
 
   const cronk: Cronk = {
     app: await start(),
@@ -275,6 +308,11 @@ export async function startCronk(): Promise<Cronk> {
     },
     holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
     holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
+    holdPushes: () => {
+      const release = live.hold();
+      onTestFinished(release);
+      return { release };
+    },
     undoMigration: async (id, undo) => {
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
