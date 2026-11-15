@@ -367,7 +367,7 @@ export function coordinationRoutes(ctx: AppContext) {
                 "has taken since, then any pushed while it did so. Pushed work is still listed in the welcome of the Agent's next Agent Session. " +
                 "Each time one of the Agent's Tickets becomes Ready for it (delegated to it, unblocked, moved back into unfinished work, or its " +
                 "Claim released, ended or lapsed) or its Project opens up to it (unarchived, made open, or its Agent Access raised; or the Agent's " +
-                "Owner granted Write there, unlisted from an open Project, made an Admin or reactivated), " +
+                "Owner granted Write there, unlisted from an open Project, or made an Admin), " +
                 "a `ticketReady` event arrives whose data is `{ ticket }`, the Ticket as the welcome lists it; " +
                 "it has no `id` and isn't sent again on reopening, as the next welcome lists Ready Tickets anyway. Changes made at the same " +
                 "moment can, rarely, tell of one Ticket twice, and another Session may Claim it first, so a Claim can still be refused. A read-only token's stream " +

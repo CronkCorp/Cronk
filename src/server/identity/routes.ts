@@ -298,8 +298,9 @@ export function identityRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change Users");
-        // Becoming an Admin, or active again, can make Tickets delegated to the User's Agents Ready.
-        const opensUp = request.body.role === "admin" || request.body.active === true;
+        // Becoming an Admin can make Tickets delegated to the User's Agents Ready. Becoming active again can too,
+        // but deactivating ended their Agents' Sessions, so the next Session's welcome lists them instead.
+        const opensUp = request.body.role === "admin";
         const updated = await tellReadyAfter(ctx, opensUp ? { ownerId: request.params.id } : undefined, (tx) =>
           updateUser(tx, user.workspaceId, request.params.id, request.body, ctx.clock.now()),
         );
