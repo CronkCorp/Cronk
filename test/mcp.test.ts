@@ -61,6 +61,9 @@ describe("the MCP endpoint", () => {
     cronk.clock.advance(4 * 60_000);
     await mcp.client.ping();
     cronk.clock.advance(4 * 60_000);
+    // A heartbeat now, as a timer firing late would run, doesn't refresh it: connectMcp's client
+    // isn't listening, so it holds no stream for the heartbeat to refresh the Session through.
+    await cronk.heartbeat();
     expect(await liveSessions()).toEqual([mcp.transport.sessionId]);
 
     cronk.clock.advance(60_000);

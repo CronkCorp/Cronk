@@ -10,9 +10,17 @@ import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js"
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-/** Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed. */
+/**
+ * Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed.
+ * No timer runs their streams' heartbeats, which would refresh Agent Sessions at whatever the fake clock reads
+ * whenever real time lets it fire; tests run them with `Cronk.heartbeat`.
+ */
 class HoldableLiveUpdates extends LiveUpdates {
   private holding: [string, LiveEvent][] | null = null;
+
+  constructor() {
+    super({ heartbeatMs: null });
+  }
 
   override publish(topic: string, event: LiveEvent): void {
     if (this.holding) this.holding.push([topic, event]);
@@ -207,8 +215,9 @@ export interface Cronk {
    */
   holdPushes(): HeldPushes;
   /**
-   * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does,
-   * and waits until each has run. Streams a test closed just before are given a moment to end first.
+   * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does
+   * outside tests (no timer runs it in them), and waits until each has run. Streams a test closed
+   * just before are given a moment to end first.
    */
   heartbeat(): Promise<void>;
   /**
@@ -440,6 +449,8 @@ export interface McpConnection {
 /**
  * Connects a real MCP client to Cronk's MCP endpoint with `token`; closed when the test ends.
  * With `listening`, also waits until the client has opened the stream it hears notifications on.
+ * Without it, the client never opens that stream (its GET is answered 405, as by a server that
+ * offers none), so its Agent Session stays silent between its requests whatever heartbeats run.
  */
 export async function connectMcp(cronk: Cronk, token: string, opts: { listening?: boolean } = {}): Promise<McpConnection> {
   let listening!: () => void;
@@ -447,6 +458,7 @@ export async function connectMcp(cronk: Cronk, token: string, opts: { listening?
   const transport = new StreamableHTTPClientTransport(new URL("/mcp", await cronk.url()), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
     fetch: async (url, init) => {
+      if (init?.method === "GET" && !opts.listening) return new globalThis.Response(null, { status: 405 });
       const res = await fetch(url, init);
       if (init?.method === "GET" && res.ok) listening();
       return res;
