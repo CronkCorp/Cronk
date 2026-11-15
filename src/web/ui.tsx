@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode, type Ref } from "react";
 
 export const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -82,11 +82,20 @@ export function Field(props: {
   );
 }
 
-export function TextArea(props: { label: string; value: string; onChange: (v: string) => void; rows?: number; placeholder?: string; disabled?: boolean }) {
+export function TextArea(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  placeholder?: string;
+  disabled?: boolean;
+  inputRef?: Ref<HTMLTextAreaElement>;
+}) {
   return (
     <label className="field">
       <span>{props.label}</span>
       <textarea
+        ref={props.inputRef}
         disabled={props.disabled}
         value={props.value}
         rows={props.rows ?? 6}
