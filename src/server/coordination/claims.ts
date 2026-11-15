@@ -71,6 +71,32 @@ export async function setClaim(db: Queryable, ticketId: string, sessionId: strin
   );
 }
 
+/** The Claims live at `now`, as a map from Ticket id to the id of the Agent Session holding it. */
+export async function listLiveClaims(db: Queryable, now: Date): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; session_id: string }>(
+    `SELECT t.id, s.id AS session_id FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id ${WITH_WORKSPACE} WHERE ${isLiveAt("$1")}`,
+    [now],
+  );
+  return new Map(rows.map((r) => [r.id, r.session_id]));
+}
+
+/**
+ * The Tickets whose Claims lapsed since the last look, at `since`, when `claims` (Ticket id to
+ * Agent Session id) were live: the Ticket still names the Session, which nobody ended, and it
+ * is no longer live at `now`, having been live at `since` or having lapsed after it. Claims
+ * released, or whose Session was ended, are left out, as is any taken by another Session since.
+ */
+export async function findLapsedClaims(db: Queryable, claims: Map<string, string>, since: Date, now: Date): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.id FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id ${WITH_WORKSPACE}
+     WHERE s.ended_at IS NULL AND NOT (${isLiveAt("$4")})
+       AND (s.last_seen_at > $3::timestamptz - make_interval(secs => w.silence_threshold_seconds)
+            OR (t.id, s.id) IN (SELECT * FROM unnest($1::uuid[], $2::uuid[])))`,
+    [[...claims.keys()], [...claims.values()], since, now],
+  );
+  return rows.map((r) => r.id);
+}
+
 /** Drops the Ticket's Claim, as when it is released or its Delegate changes. */
 export async function clearClaim(db: Queryable, ticketId: string): Promise<void> {
   await db.query("UPDATE tickets SET claim_session_id = NULL, claimed_at = NULL, claim_id = NULL WHERE id = $1", [ticketId]);

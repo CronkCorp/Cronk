@@ -18,7 +18,7 @@ import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } fr
 import { agentTopic, ticketTopic } from "../live/topics.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
-import { readyScope, readyTicket, tellNewlyReady } from "./ready.js";
+import { claimsEnded, readyScope, readyTicket } from "./ready.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -205,9 +205,7 @@ export function coordinationRoutes(ctx: AppContext) {
           await clearClaim(tx, ticket.id);
           return ticket;
         });
-        ticketsChanged(ctx.live, [released]);
-        // It was Claimed, so it wasn't Ready.
-        await tellNewlyReady(ctx, [released.id], new Map());
+        await claimsEnded(ctx, [released.id]);
         return reply.code(204).send();
       },
     );
@@ -398,8 +396,7 @@ export function coordinationRoutes(ctx: AppContext) {
       async (request, reply) => {
         const session = requireSession(await requireActor(ctx, request));
         const { ticketIds } = await endAgentSession(ctx.db, session.id, ctx.clock.now());
-        ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
-        await tellNewlyReady(ctx, ticketIds, new Map());
+        await claimsEnded(ctx, ticketIds);
         return reply.code(204).send();
       },
     );

@@ -8,6 +8,7 @@ import { agentTopic } from "../live/topics.js";
 import { listProjects } from "../work/projects.js";
 import { findTicketsByIds, type Ticket } from "../work/tickets.js";
 import { findDelegatedTicketsInTheClear, type ReadyScope } from "./claims.js";
+import { ticketsChanged } from "../work/ticket-changes.js";
 
 /**
  * Telling an Agent when a Ticket becomes Ready for it (delegated to it, unblocked, or its Claim
@@ -57,7 +58,7 @@ export async function ticketsBlockedBy(db: Queryable, ticketIds: string[]): Prom
   return rows.map((r) => r.id);
 }
 
-/** A Ticket as a `ready` event and the welcome list it: what the Agent needs to pick it. */
+/** A Ticket as the welcome and a `ticketReady` event list it: what the Agent needs to pick it. */
 export const readyTicket = (t: Ticket) => ({ key: t.key, title: t.title, priority: t.priority, status: t.status });
 
 /** The `ticketReady` event telling an Agent that `ticket` became Ready for it. */
@@ -82,4 +83,15 @@ export async function tellNewlyReady(ctx: AppContext, ticketIds: string[], befor
   } catch {
     // Nothing to undo: the change stands, and the Agent's next welcome lists what is Ready.
   }
+}
+
+/**
+ * Tells the watchers of these Tickets that their live Claims ended (released, lapsed, or ended
+ * with their Agent Session), and their Delegates which of them are now Ready. Being Claimed,
+ * none of them was Ready before. Call once the change is committed.
+ */
+export async function claimsEnded(ctx: AppContext, ticketIds: string[]): Promise<void> {
+  if (ticketIds.length === 0) return;
+  ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
+  await tellNewlyReady(ctx, ticketIds, new Map());
 }

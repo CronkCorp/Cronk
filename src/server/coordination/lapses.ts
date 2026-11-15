@@ -1,41 +1,30 @@
 import type { AppContext } from "../context.js";
-import { ticketsChanged } from "../work/ticket-changes.js";
-import { findTicketsByIds } from "../work/tickets.js";
-import { tellNewlyReady } from "./ready.js";
+import { findLapsedClaims, listLiveClaims } from "./claims.js";
+import { claimsEnded } from "./ready.js";
 
 /**
- * Claims lapse by time alone, when their Agent Session stays silent too long, so no call
- * marks the moment. Every `intervalMs` this looks for the Claims that lapsed since it last
- * looked, by the application's clock, and tells their Tickets' watchers and the Agents they are
- * now Ready for.
- * Claims that lapse while the server is down aren't told of; a stream reopening catches up
- * with its `ready`. Stops when the returned function is called.
+ * Claims lapse by time alone, when their Agent Session stays silent too long (or the Workspace
+ * shortens its silence threshold), so no call marks the moment. Every `intervalMs` this notes
+ * which Claims are live, by the application's clock, and finds those that lapsed since it last
+ * looked (live then, or lapsing after then), to tell their Tickets' watchers and the Agents they
+ * are now Ready for.
+ * Claims released or whose Agent Session was ended are told of where that happens. Claims that
+ * lapse while the server is down aren't told of; a stream reopening catches up with its `ready`.
+ * Stops when the returned function is called.
  */
 export function watchClaimLapses(ctx: AppContext, intervalMs: number): () => void {
-  let since = ctx.clock.now();
+  let last = { at: ctx.clock.now(), live: new Map<string, string>() };
   let looking = false;
   const look = async () => {
     const now = ctx.clock.now();
-    if (now <= since) return;
-    const { rows } = await ctx.db.query<{ id: string }>(
-      `SELECT t.id FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id
-       JOIN agents a ON a.id = s.agent_id JOIN workspaces w ON w.id = a.workspace_id
-       WHERE s.ended_at IS NULL
-         AND s.last_seen_at + make_interval(secs => w.silence_threshold_seconds) > $1
-         AND s.last_seen_at + make_interval(secs => w.silence_threshold_seconds) <= $2`,
-      [since, now],
-    );
-    since = now;
-    if (rows.length === 0) return;
-    const ids = rows.map((r) => r.id);
-    ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ids));
-    // They were Claimed, so they weren't Ready.
-    await tellNewlyReady(ctx, ids, new Map());
+    const lapsed = await findLapsedClaims(ctx.db, last.live, last.at, now);
+    if (lapsed.length > 0) await claimsEnded(ctx, lapsed);
+    last = { at: now, live: await listLiveClaims(ctx.db, now) };
   };
   const timer = setInterval(() => {
     if (looking) return;
     looking = true;
-    // A failed look (a database blip) is tried again next time, over the same span.
+    // A failed look (a database blip) is tried again next time, from the same Claims.
     look()
       .catch(() => {})
       .finally(() => (looking = false));
