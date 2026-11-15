@@ -59,10 +59,9 @@ export const agentActor = (agent: { name: string; owner?: { name: string } }, se
  */
 export function Actor(props: { actor: ActorLike; owner?: boolean }) {
   const { actor } = props;
-  const initial = actor.name.trim().charAt(0).toUpperCase();
   return (
     <span className={`actor ${actor.kind}`}>
-      <span className="avatar" data-initial={initial} aria-hidden="true" />
+      <Avatar actor={actor} />
       <span className="actor-name">{actor.name}</span>
       {actor.kind === "agent" && actor.session && (
         <>
@@ -73,4 +72,10 @@ export function Actor(props: { actor: ActorLike; owner?: boolean }) {
       {actor.kind === "agent" && actor.owner && props.owner !== false && <span className="muted"> for {actor.owner.name}</span>}
     </span>
   );
+}
+
+/** Just an Actor's avatar: round for a User, square and violet for an Agent. Pass `large` for a card's head. */
+export function Avatar(props: { actor: Pick<ActorLike, "kind" | "name">; large?: boolean }) {
+  const initial = props.actor.name.trim().charAt(0).toUpperCase();
+  return <span className={`avatar ${props.actor.kind}${props.large ? " large" : ""}`} data-initial={initial} aria-hidden="true" />;
 }

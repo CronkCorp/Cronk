@@ -208,15 +208,30 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await page.getByRole("link", { name: "Agents" }).click();
-  await page.getByLabel("Agent name").fill("claude-laptop");
+  // Registering happens in a dialog opened from the page head.
+  await page.getByRole("button", { name: "Register an Agent" }).click();
+  const registerDialog = page.getByRole("dialog", { name: "Register an Agent" });
+  await registerDialog.getByLabel("Agent name").fill("claude-laptop");
   // Outside the sign-in forms a button sizes to its label rather than filling its form.
-  const register = (await page.getByRole("button", { name: "Register Agent" }).boundingBox())!;
-  const agentName = (await page.getByLabel("Agent name").boundingBox())!;
+  const register = (await registerDialog.getByRole("button", { name: "Register Agent" }).boundingBox())!;
+  const agentName = (await registerDialog.getByLabel("Agent name").boundingBox())!;
   expect(register.width).toBeLessThan(agentName.width / 2);
-  await page.getByRole("button", { name: "Register Agent" }).click();
-  await page.getByRole("button", { name: "Issue full token" }).click();
-  const token = await page.getByLabel("New token").inputValue();
-  await expect(page.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+  await registerDialog.getByRole("button", { name: "Register Agent" }).click();
+  await expect(registerDialog).toBeHidden();
+  const card = page.getByRole("listitem", { name: "claude-laptop" });
+  await expect(card).toContainText("Not connected");
+  // Tokens are issued in the Manage tokens dialog, which shows a new secret once.
+  await card.getByRole("button", { name: "Manage tokens" }).click();
+  const tokensDialog = page.getByRole("dialog", { name: "Tokens of claude-laptop" });
+  await tokensDialog.getByRole("button", { name: "Issue full token" }).click();
+  const token = await tokensDialog.getByLabel("New token").inputValue();
+  await expect(tokensDialog.getByRole("button", { name: "Copy" })).toBeVisible();
+  await expect(tokensDialog.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
+  await tokensDialog.getByRole("button", { name: "Done" }).click();
+  await expect(card).toContainText("1 token: full");
+  await card.getByRole("button", { name: "Manage tokens" }).click();
+  await expect(tokensDialog.getByLabel("New token")).toHaveCount(0);
+  await tokensDialog.getByRole("button", { name: "Done" }).click();
 
   const created = await request.post("/api/projects/CRONK/tickets", {
     headers: { authorization: `Bearer ${token}` },
@@ -253,11 +268,17 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await page.getByLabel("Assignee").selectOption({ label: "Ada" });
   await page.getByLabel("Delegate").selectOption({ label: "claude-laptop" });
   await expect(page.getByRole("list", { name: "History" })).toContainText("Ada delegated it to claude-laptop");
+  // The open Agents page shows what the Session works on as it Claims, without a reload.
+  await page.getByRole("link", { name: "Agents" }).click();
+  // The server notices Agent Session changes every 5 seconds, so these wait a little longer than usual.
+  await expect(liveSessions).toContainText("Connected, no Claim");
+  await expect(page.getByText("Live", { exact: true }).first()).toBeVisible();
   const claimed = await request.post(`/api/tickets/${ticket.key}/claim`, {
     headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
   });
   expect(claimed.status()).toBe(200);
-  await page.reload();
+  await expect(liveSessions).toContainText(`Working on ${ticket.key}`, { timeout: 10_000 });
+  await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop ${sessionName}`);
   // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
   const timeline = page.getByRole("list", { name: "Timeline" });

@@ -194,14 +194,32 @@ a.link:hover { text-decoration: underline; }
 .add-member { margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .panel h3 { font-size: 15px; margin: 16px 0 8px; }
 
-.agent + .agent { border-top: 1px solid var(--border); }
-.agent-tokens { padding: 0 14px 12px; }
-.token-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: 14px; }
+/* Agents page (docs/ui.md § Agents): one card per Agent. */
+.agent-cards { list-style: none; margin: 0 0 24px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.agent-card-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
+.agent-name { font-weight: 600; color: var(--agent); }
+.agent-summary { font-size: 12px; }
+.agent-card-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--bg); border-top: 1px solid var(--border); }
+.agent-card-error { padding: 0 16px 10px; }
+.session-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.session { display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+.session + .session { border-top: 1px solid var(--border); }
+.session-work { min-width: 160px; }
+.session-since { font-size: 12px; }
+.claim-key { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.not-connected { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.offline-dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--muted); flex: none; }
+.silence-meter { display: flex; flex-direction: column; gap: 2px; width: 120px; }
+.meter { display: block; height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.meter-fill { display: block; height: 100%; background: var(--agent); transition: width 1s linear; }
+.meter-label { font-size: 12px; color: var(--muted); }
+.others-head { margin-top: 8px; }
+.others-badge { font-size: 12px; font-weight: 600; }
+.token-list { list-style: none; margin: 0 0 12px; padding: 0; }
 .token { display: flex; align-items: center; gap: 8px; }
-.secret { margin-top: 8px; }
-.session-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: 14px; }
-.session { display: flex; align-items: center; gap: 8px; }
-.secret p { margin: 0 0 6px; font-size: 14px; }
+.secret { margin-top: 12px; }
+.secret p { margin: 0 0 6px; }
 .inline-input { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .field.inline select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .page-head .field.inline { margin-bottom: 0; }
@@ -257,7 +275,8 @@ a.link:hover { text-decoration: underline; }
 .actor .muted { font-weight: 400; }
 .avatar { align-self: center; width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 600; }
 .avatar::before { content: attr(data-initial); }
-.actor.agent .avatar { border-radius: 4px; background: var(--agent-soft); color: var(--agent); }
+.actor.agent .avatar, .avatar.agent { border-radius: 4px; background: var(--agent-soft); color: var(--agent); }
+.avatar.large { width: 32px; height: 32px; font-size: 13px; }
 .actor.agent .actor-name { color: var(--agent); }
 .session-name { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
 .time { color: var(--muted); font-size: 13px; }
@@ -296,3 +315,4 @@ a.link:hover { text-decoration: underline; }
 .dialog-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .dialog-description { color: var(--muted); margin: 0 0 16px; }
 .dialog-actions { justify-content: flex-end; }
+.dialog-foot { margin-top: 16px; }
