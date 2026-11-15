@@ -2,7 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import { endAgentSessionsOf, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
+import { listAgentWork } from "../coordination/agent-work.js";
 import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
+import { userActor } from "../actor.js";
 import { requireAdmin } from "./access.js";
 import {
   findAgent,
@@ -16,7 +18,7 @@ import {
   revokeAgentToken,
   type Agent,
 } from "./agents.js";
-import type { User } from "./users.js";
+import { findUserById, type User } from "./users.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
@@ -104,6 +106,39 @@ export function agentRoutes(ctx: AppContext) {
         // Its open questions leave its Owner's Inbox.
         inboxesChanged(ctx.live, [user.id]);
         return reply.code(204).send();
+      },
+    );
+
+    // What an Agent did across the Workspace, for its Owner or an Admin.
+    app.get<{ Params: { id: string }; Querystring: { since?: string; limit?: number } }>(
+      "/api/agents/:id/work",
+      {
+        schema: {
+          params: agentParams,
+          querystring: {
+            type: "object",
+            properties: {
+              since: { type: "string", format: "date-time", description: "Leave out what it did before this time." },
+              limit: { type: "integer", minimum: 1, maximum: 500, default: 100, description: "At most this many entries." },
+            },
+          },
+          response: {
+            200: answer(
+              "What the Agent did, newest first: the changes it made, the Activities and Comments it wrote and the Versions it saved, leaving out what the caller can't read",
+              listing("work", ref("AgentWork")),
+            ),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const agent = await findAgent(ctx.db, user.workspaceId, request.params.id);
+        if (!agent || (agent.ownerId !== user.id && user.role !== "admin")) throw new HttpError(404, "No such Agent");
+        const owner = (await findUserById(ctx.db, agent.ownerId))!;
+        const { since, limit = 100 } = request.query;
+        const by = { id: agent.id, name: agent.name, owner: { id: owner.id, name: owner.name } };
+        return { work: await listAgentWork(ctx.db, userActor(user), by, { since: since === undefined ? undefined : new Date(since), limit }) };
       },
     );
 

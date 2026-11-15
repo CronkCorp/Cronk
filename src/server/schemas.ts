@@ -57,7 +57,8 @@ export type SharedSchemaName =
   | "StaleGuidance"
   | "GuidanceMerge"
   | "SearchResult"
-  | "LinkedDocument";
+  | "LinkedDocument"
+  | "AgentWork";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -415,6 +416,21 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       markdown: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
       conflicts: { type: "integer", description: "How many sections conflict." },
       sections: mergedSections("Markdown"),
+    }),
+  },
+  AgentWork: {
+    description: "One thing an Agent did. `kind` says which; the field named after it holds what, and the other three are null.",
+    ...object({
+      kind: { type: "string", enum: ["change", "activity", "comment", "version"] },
+      at: timestamp,
+      session: { ...nullable(object({ id })), description: "The Agent Session it was done in; null for imported history that names none." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Document in the Workspace outside any Project." },
+      ticket: { ...nullable(ticketName), description: "The Ticket it was on: a change's, Activity's or Comment's, or a Report's." },
+      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document or Report it was on, for a Comment or a saved Version." },
+      change: { ...nullable(ref("RecordedChange")), description: "A change it made to the Ticket." },
+      activity: nullable(object({ id, kind: { type: "string", enum: ACTIVITY_KINDS }, body: { type: "string" }, blocking: { type: "boolean" } })),
+      comment: nullable(object({ id, body: { type: "string" } })),
+      version: { ...nullable(object({ number: { type: "integer" } })), description: "A Version of the Document it saved." },
     }),
   },
   SearchResult: {

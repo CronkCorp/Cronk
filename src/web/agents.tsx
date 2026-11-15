@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { api, sessionName, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
+import { api, sessionName, type Agent, type AgentAccess, type AgentSession, type AgentWork, type User } from "./api.js";
+import { Link } from "./router.js";
+import { ACTIVITY_NAMES } from "./timeline.js";
 import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
+import { describeChange } from "./work.js";
 
 /** The signed-in User's Agents and their tokens; an Admin also sees everyone else's Agents. */
 export function AgentsPage(props: { me: User }) {
@@ -98,6 +101,7 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
       </div>
       <div className="agent-tokens">
         <LiveSessions agent={a} />
+        <WorkLog agent={a} />
         <Show state={tokens}>
           {(list) => (
             <ul className="token-list" aria-label={`Tokens of ${a.name}`}>
@@ -151,6 +155,72 @@ function LiveSessions(props: { agent: Agent }) {
   );
 }
 
+/** What an Agent did across the Workspace, newest first, shown on request. */
+function WorkLog(props: { agent: Agent }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="work-log">
+      <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? "Hide what it did" : "Show what it did"}
+      </button>
+      {open && <WorkEntries agent={props.agent} />}
+    </div>
+  );
+}
+
+function WorkEntries(props: { agent: Agent }) {
+  const [work] = useLoad(() => api.agentWork(props.agent.id), [props.agent.id]);
+  return (
+    <Show state={work}>
+      {(entries) =>
+        entries.length === 0 ? (
+          <p className="muted">It hasn't done anything yet.</p>
+        ) : (
+          <ol className="history" aria-label={`What ${props.agent.name} did`}>
+            {entries.map((entry, i) => (
+              <li key={i}>
+                <span className="muted">
+                  {new Date(entry.at).toLocaleString()}
+                  {entry.session && `, ${sessionName(entry.session.id)}`}
+                </span>{" "}
+                {describeWork(entry)} <WorkPlace entry={entry} />
+              </li>
+            ))}
+          </ol>
+        )
+      }
+    </Show>
+  );
+}
+
+/** What one entry of an Agent's work was, as a phrase like "logged a Plan". */
+function describeWork(entry: AgentWork): string {
+  if (entry.change) return describeChange(entry.change);
+  if (entry.activity) return `logged ${entry.activity.blocking ? "a blocking question" : `a ${ACTIVITY_NAMES[entry.activity.kind]}`}`;
+  if (entry.comment) return "commented";
+  return entry.version!.number === 1 ? "wrote" : `saved Version ${entry.version!.number} of`;
+}
+
+/** Where an entry of an Agent's work happened: its Ticket, or the Document it was on. */
+function WorkPlace(props: { entry: AgentWork }) {
+  const { ticket, document, version } = props.entry;
+  // A saved Version is of its Document, even a Report, which also names its Ticket.
+  if (document && (version || !ticket)) {
+    return (
+      <>
+        {!version && "on "}
+        <Link to={`/documents/${document.id}`} className="link">{document.title}</Link>
+        {ticket && <span className="muted"> ({ticket.key})</span>}
+      </>
+    );
+  }
+  return (
+    <>
+      on <Link to={`/tickets/${ticket!.key}`} className="link">{ticket!.key}</Link> <span className="muted">{ticket!.title}</span>
+    </>
+  );
+}
+
 /** Every other User's Agents, for an Admin to see. Only an Agent's Owner can change it. */
 function OthersAgents(props: { me: User }) {
   const [agents] = useLoad(() => api.agents(true), []);
@@ -172,6 +242,7 @@ function OthersAgents(props: { me: User }) {
                   </div>
                   <div className="agent-tokens">
                     <LiveSessions agent={a} />
+                    <WorkLog agent={a} />
                   </div>
                 </li>
               ))}

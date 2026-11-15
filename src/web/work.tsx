@@ -707,7 +707,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
                     ({change.actor.session ? `${sessionName(change.actor.session.id)}, for` : "Agent of"} {change.actor.owner.name})
                   </span>
                 )}{" "}
-                {describe(change)}
+                {describeChange(change)}
               </li>
             ))}
           </ol>
@@ -1001,7 +1001,7 @@ function EditTicket(props: { ticket: Ticket; onDone: (ticket: Ticket) => void; o
 
 const RELATION_PHRASES: Record<RelationKind, string> = { blocks: "blocking", blocked_by: "blocked by", relates_to: "related to" };
 
-function describe(change: RecordedChange): string {
+export function describeChange(change: RecordedChange): string {
   switch (change.change) {
     case "created":
       return `created the Ticket in ${change.status.name}`;

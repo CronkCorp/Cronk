@@ -9,7 +9,7 @@ import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
  * and Comments (conversation) show together but look different; replies sit under what they reply to.
  */
 
-const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
+export const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
 
 /** What a timeline entry is: an Activity, a Report, or a Comment that replies to neither a Comment nor an Activity. */
 type Entry = { kind: "activity"; activity: Activity } | { kind: "report"; report: Report } | { kind: "comment"; comment: Comment };
