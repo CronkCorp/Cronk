@@ -36,7 +36,7 @@ export const ticketDetailSchema = {
       type: "array",
       items: ref("LinkedDocument"),
       description:
-        "Its Reports, oldest first, then the Documents the caller can read whose current Version mentions its key, most recently changed first (at most 20).",
+        "Its Reports, oldest first; then the Documents the caller can read that were linked to it, in the order linked; then those whose current Version mentions its key, most recently changed first (at most 20). Each is listed once.",
     },
     claim: { anyOf: [ref("Claim"), { type: "null" }], description: "Null unless an Agent Session holds a live Claim." },
   },

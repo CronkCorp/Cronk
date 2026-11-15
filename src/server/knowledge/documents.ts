@@ -311,6 +311,9 @@ export async function deleteDocument(db: Queryable, tree: Tree, document: Docume
   return true;
 }
 
+/** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
+export type LinkReason = "report" | "linked" | "mention";
+
 /** A Document as a Ticket lists it among its linked Documents, without its body; read it by its id. */
 export interface LinkedDocument {
   id: string;
@@ -321,31 +324,42 @@ export interface LinkedDocument {
   ticketKey: string | null;
   version: number;
   updatedAt: Date;
+  reason: LinkReason;
 }
 
-/** How many Documents mentioning a Ticket it lists, besides its Reports. */
+/** How many Documents mentioning a Ticket it lists, besides its Reports and the Documents linked to it. */
 const MENTIONS_LIMIT = 20;
 
 /**
- * The Documents linked to a Ticket: its own Reports, oldest first, then the Documents (other Tickets'
- * Reports included) whose current Version mentions its key, as Markdown links Ticket keys, most
- * recently changed first. Only those in `readable` places are listed; the Ticket's Reports always are,
- * as they share its Project.
+ * The Documents linked to a Ticket, each once: its own Reports, oldest first; then the Documents
+ * linked to it, in the order they were linked; then the other Documents (other Tickets' Reports
+ * included) whose current Version mentions its key, as Markdown links Ticket keys, most recently
+ * changed first. Only those in `readable` places are listed; the Ticket's Reports always are, as
+ * they share its Project.
  */
 export async function listLinkedDocuments(
   db: Queryable,
   ticket: { id: string; key: string },
   readable: Readable,
 ): Promise<LinkedDocument[]> {
-  const select = `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt"
-                  FROM (${SELECT_DOCUMENTS}) d`;
-  const reports = await db.query<LinkedDocument>(`${select} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
-  const mentions = await db.query<LinkedDocument>(
-    `${select} JOIN document_ticket_mentions m ON m.document_id = d.id AND m.ticket_key = $2
-     WHERE d.ticket_id IS DISTINCT FROM $1
-       AND ${documentReadableSql("d", "$3::uuid[]", "$4::uuid")}
-     ORDER BY d.updated_at DESC, d.id LIMIT ${MENTIONS_LIMIT}`,
-    [ticket.id, ticket.key, readable.projectIds, readable.workspaceId],
+  const select = (reason: LinkReason) =>
+    `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason
+     FROM (${SELECT_DOCUMENTS}) d`;
+  const isReadable = documentReadableSql("d", "$2::uuid[]", "$3::uuid");
+  const reports = await db.query<LinkedDocument>(`${select("report")} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
+  const linked = await db.query<LinkedDocument>(
+    `${select("linked")} JOIN ticket_document_links l ON l.document_id = d.id AND l.ticket_id = $1
+     WHERE d.ticket_id IS DISTINCT FROM $1 AND ${isReadable}
+     ORDER BY l.seq`,
+    [ticket.id, readable.projectIds, readable.workspaceId],
   );
-  return [...reports.rows, ...mentions.rows];
+  const mentions = await db.query<LinkedDocument>(
+    `${select("mention")} JOIN document_ticket_mentions m ON m.document_id = d.id AND m.ticket_key = $4
+     WHERE d.ticket_id IS DISTINCT FROM $1
+       AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.ticket_id = $1 AND l.document_id = d.id)
+       AND ${isReadable}
+     ORDER BY d.updated_at DESC, d.id LIMIT ${MENTIONS_LIMIT}`,
+    [ticket.id, readable.projectIds, readable.workspaceId, ticket.key],
+  );
+  return [...reports.rows, ...linked.rows, ...mentions.rows];
 }

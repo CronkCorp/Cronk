@@ -16,6 +16,7 @@ import { knowledgeRoutes } from "./knowledge/routes.js";
 import { portabilityRoutes } from "./portability/routes.js";
 import { searchRoutes } from "./search/routes.js";
 import { workRoutes } from "./work/routes.js";
+import { documentLinkRoutes } from "./work/document-link-routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
@@ -125,6 +126,7 @@ export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?:
   await app.register(agentRoutes(ctx));
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
+  await app.register(documentLinkRoutes(ctx));
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));

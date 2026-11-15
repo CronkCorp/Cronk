@@ -361,7 +361,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   LinkedDocument: {
-    description: "A Document linked to a Ticket: one of its Reports, or a Document that mentions its key. Read it as a Document by its id.",
+    description:
+      "A Document linked to a Ticket: one of its Reports, a Document linked to it from the Ticket's side, or a Document that mentions its key. Read it as a Document by its id.",
     ...object({
       id,
       title: { type: "string" },
@@ -369,6 +370,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket a Report is on; null for any other Document." },
       version: { type: "integer", description: "The number of its current Version." },
       updatedAt: timestamp,
+      reason: {
+        type: "string",
+        enum: ["report", "linked", "mention"],
+        description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
+      },
     }),
   },
   DocumentTreeEntry: {
