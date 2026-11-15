@@ -228,6 +228,8 @@ describe("importing an export", () => {
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
     expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
+    const moves = (await admin.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
+    expect(moves.map((c: { to: { name: string } }) => c.to.name)).toEqual(["In Progress"]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>

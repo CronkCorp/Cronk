@@ -15,9 +15,9 @@ export type ActorRef = string | { agent: string; session: string | null };
 /**
  * What a field of a Ticket change holds in `<KEY>.history.md`. Records are written as Cronk recorded them, with the
  * names they had at the time, plus what an import finds them by: a `user` by its `email`, an `agent` by its id in
- * `people.md`, and a `status` by its `current` name in the Project, when it still has one.
+ * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -27,7 +27,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   created: { title: { holds: "title" }, description: { holds: "text" }, status: { holds: "status" } },
   title: fromTo("title"),
   description: fromTo("text"),
-  status: fromTo("status"),
+  // `sentBack` is written only for a Send back's move.
+  status: { ...fromTo("status"), sentBack: { holds: "flag" } },
   priority: fromTo("priority"),
   labels: fromTo("labels"),
   assignee: fromTo("user", true),

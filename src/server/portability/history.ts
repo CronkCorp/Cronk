@@ -87,7 +87,11 @@ async function importedChange(change: TicketChange["change"], fields: Record<str
   for (const [field, { holds, nullable }] of Object.entries(CHANGE_FIELDS[change])) {
     const value = fields[field];
     const at = `${where}.${field}`;
-    if (nullable && value === null) recorded[field] = null;
+    if (holds === "flag") {
+      // A flag is left out when false.
+      if (value !== undefined && typeof value !== "boolean") refuse(`${at} must be true or false`);
+      if (value === true) recorded[field] = true;
+    } else if (nullable && value === null) recorded[field] = null;
     else if (holds === "title") recorded[field] = text(value, at);
     else if (holds === "text") recorded[field] = typeof value === "string" ? value : refuse(`${at} must be text`);
     else if (holds === "priority") recorded[field] = oneOf(value, PRIORITIES, at);
