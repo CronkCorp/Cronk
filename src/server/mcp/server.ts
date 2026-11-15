@@ -7,9 +7,12 @@ import { hashToken } from "../identity/tokens.js";
 import { callApi } from "./api.js";
 import { registerTools } from "./tools.js";
 import type { AgentSession, WaitingWork, Welcome } from "../api-types.js";
+
+/** A Ticket Ready for the Agent, as its welcome lists it. */
+type ReadyTicket = Welcome["readyTickets"][number];
 import { followEvents, ownBaseUrl } from "./events.js";
 import type { LiveEvent } from "../live/live-updates.js";
-import { waitingLines, welcomeText } from "./welcome.js";
+import { readyLine, waitingLines, welcomeText } from "./welcome.js";
 
 /**
  * One MCP connection: its transport and server, the hash of the token that opened it (the
@@ -21,11 +24,11 @@ interface Connection {
   tokenHash: string;
   /** When its Agent Session ends if it stays silent, as last heard; meaningless while the client listens. */
   endsIfSilentAt: Date;
-  /** Starts pushing waiting work to it, resolving once it is, to a function that stops it. */
+  /** Starts pushing waiting work and newly Ready Tickets to it, resolving once it is, to a function that stops it. */
   notify: () => Promise<() => void>;
   /** How many of the client's streams it hears notifications on are open; while any is, its Agent Session is kept alive. */
   listening: number;
-  /** Pushing waiting work to it, while it is: resolves to a function that stops it. */
+  /** Pushing waiting work and newly Ready Tickets to it, while it is: resolves to a function that stops it. */
   notifying?: Promise<() => void>;
 }
 
@@ -37,7 +40,7 @@ function noteEndsIfSilentAt(connection: Connection, answer: { session: AgentSess
   connection.endsIfSilentAt = new Date(answer.session.endsIfSilentAt);
 }
 
-/** Stops pushing waiting work to the connection, if it is. */
+/** Stops pushing waiting work and newly Ready Tickets to the connection, if it is. */
 function stopNotifying(connection: Connection): void {
   const notifying = connection.notifying;
   connection.notifying = undefined;
@@ -102,20 +105,25 @@ export function mcpRoutes(ctx: AppContext) {
         );
         registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, caller, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
-        // Work starting to wait for the Agent reaches it as a log message, from the API's own stream
+        // Work starting to wait for the Agent, and Tickets becoming Ready for it, reach it as log messages, from the API's own stream
         // of it, which ends as soon as the Agent Session does or its token is revoked. That stream needs
         // real HTTP, so when Cronk doesn't listen (its requests are only injected) nothing is pushed.
-        const pushWaiting = ({ event, data }: LiveEvent) => {
-          if (event !== "waiting") return;
-          const { waiting } = data as { waiting: WaitingWork };
-          const text = waitingLines(waiting).join("\n");
-          void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message: `Work is waiting for you:\n${text}`, waiting } }).catch(() => {});
+        const pushNotices = ({ event, data }: LiveEvent) => {
+          const notice = (message: string, about: object) =>
+            void server.server.sendLoggingMessage({ level: "notice", logger: "cronk", data: { message, ...about } }).catch(() => {});
+          if (event === "waiting") {
+            const { waiting } = data as { waiting: WaitingWork };
+            notice(`Work is waiting for you:\n${waitingLines(waiting).join("\n")}`, { waiting });
+          } else if (event === "ticketReady") {
+            const { ticket } = data as { ticket: ReadyTicket };
+            notice(`A Ticket is now Ready for you:\n${readyLine(ticket)}\nClaim it with the \`tickets\` tool's \`claim\` action.`, { ticketReady: ticket });
+          }
         };
         const notify = async () => {
           const baseUrl = ownBaseUrl(app);
           // Refused, the Agent Session has ended or its token was revoked, so the connection can't go on either.
           const ended = () => void drop(session.id);
-          return baseUrl ? followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", pushWaiting, ended) : () => {};
+          return baseUrl ? followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", pushNotices, ended) : () => {};
         };
         if (closing) return refuse(reply, 503, "Cronk is shutting down; reconnect once it is back");
         connections.set(session.id, {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
   sessionName,
@@ -7,6 +7,7 @@ import {
   type DocumentTreeEntry,
   type RecordedActor,
   type Version,
+  watchDocument,
 } from "./api.js";
 import { ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentComments } from "./timeline.js";
@@ -182,6 +183,29 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   const d = props.document;
   const canWrite = useCanWrite(d.projectKey);
   const [panel, setPanel] = useState<Panel>(props.startEditing ? "edit" : "none");
+  // The newest Version anyone saved, as the Document's stream tells it, and how often its Comments changed.
+  const [latest, setLatest] = useState(d.version);
+  const [commentsGeneration, setCommentsGeneration] = useState(0);
+  useEffect(
+    () =>
+      watchDocument(d.id, {
+        // On (re)connecting, catch up on what was saved and posted meanwhile.
+        ready: () => {
+          setCommentsGeneration((g) => g + 1);
+          api.document(d.id).then((current) => setLatest((v) => Math.max(v, current.version)), () => {});
+        },
+        on: {
+          comment: () => setCommentsGeneration((g) => g + 1),
+          version: ({ version }) => setLatest((v) => Math.max(v, version)),
+        },
+      }),
+    [d.id],
+  );
+  // Someone else's Version is shown at once, unless it would pull the Document out from under an edit.
+  const newer = latest > d.version ? latest : undefined;
+  useEffect(() => {
+    if (newer !== undefined && panel !== "edit") props.onReload();
+  }, [newer, panel]);
   const remove = useAction(
     async () => {
       if (!confirm(`Delete ${d.title} and all its Versions?`)) return false;
@@ -198,6 +222,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
       {panel === "edit" ? (
         <EditDocument
           document={d}
+          newerVersion={newer}
           onCancel={() => setPanel("none")}
           onSaved={(saved) => {
             props.onChanged(saved);
@@ -245,7 +270,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
           </div>
           <h2>Comments</h2>
           {/* Keyed by Version, so whether each anchor is still in the Document is asked again after a save. */}
-          <DocumentComments key={d.version} documentId={d.id} canWrite={canWrite} />
+          <DocumentComments key={d.version} documentId={d.id} canWrite={canWrite} generation={commentsGeneration} />
         </>
       )}
     </article>
@@ -257,7 +282,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
  * someone saved since, it is refused, and the editor shows their edit and merges it into this one
  * section by section. Sections both changed differently wait for the User to choose or combine.
  */
-function EditDocument(props: { document: Document; onSaved: (d: Document) => void; onCancel: () => void }) {
+function EditDocument(props: { document: Document; newerVersion: number | undefined; onSaved: (d: Document) => void; onCancel: () => void }) {
   const id = props.document.id;
   const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
     draft: { title: props.document.title, text: props.document.body },
@@ -278,6 +303,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
 
   return (
     <section className="panel wide">
+      {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile document={props.document} version={props.newerVersion} />}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
@@ -294,6 +320,33 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
         </form>
       )}
     </section>
+  );
+}
+
+/**
+ * Warns, while a Document is being edited, that someone saved a newer Version meanwhile: who,
+ * and what they changed since the Version the edit started from. Saving then merges it in.
+ */
+function SavedMeanwhile(props: { document: Document; version: number }) {
+  const { id, version: started } = props.document;
+  const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
+  return (
+    <div className="merged" role="status">
+      <Show state={versions}>
+        {([base, theirs]) => (
+          <>
+            <p>
+              <strong>{actorName(theirs.actor)}</strong> saved Version {theirs.number} while you were editing Version {base.number}. Saving
+              merges their changes into yours.
+            </p>
+            <details>
+              <summary>See what they changed</summary>
+              <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+            </details>
+          </>
+        )}
+      </Show>
+    </div>
   );
 }
 
