@@ -321,13 +321,14 @@ export async function listTickets(db: Queryable, projectId: string, filter: Tick
   const param = (value: unknown) => `$${params.push(value)}`;
   if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${param(filter.statusIds)}::uuid[])`);
   if (filter.categories?.length) conditions.push(`s.category = ANY(${param(filter.categories)}::text[])`);
-  const anyOf = (column: string, values: (string | null)[]) => {
+  /** Adds the condition that `column` holds one of `values`, where null means it is empty. */
+  const matchAnyOrNone = (column: string, values: (string | null)[]) => {
     const ids = values.filter((id) => id !== null);
     const orNone = ids.length < values.length;
     conditions.push(`(${column} = ANY(${param(ids)}::uuid[])${orNone ? ` OR ${column} IS NULL` : ""})`);
   };
-  if (filter.assigneeIds?.length) anyOf("t.assignee_id", filter.assigneeIds);
-  if (filter.delegateIds?.length) anyOf("t.delegate_id", filter.delegateIds);
+  if (filter.assigneeIds?.length) matchAnyOrNone("t.assignee_id", filter.assigneeIds);
+  if (filter.delegateIds?.length) matchAnyOrNone("t.delegate_id", filter.delegateIds);
   if (filter.priorities?.length) conditions.push(`t.priority = ANY(${param(filter.priorities)}::text[])`);
   if (filter.labels?.length) {
     conditions.push(

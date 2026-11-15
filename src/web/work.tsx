@@ -237,6 +237,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
           )}
           {showsTickets(props.view) && (
             <FilterBar
+              me={props.me}
               projectKey={p.key}
               statuses={statuses}
               filter={props.filter}
@@ -297,10 +298,12 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
   );
 }
 
-function FilterBar(props: { projectKey: string; statuses: Status[]; filter: TicketFilter; onChange: (filter: TicketFilter) => void }) {
+function FilterBar(props: { me: User; projectKey: string; statuses: Status[]; filter: TicketFilter; onChange: (filter: TicketFilter) => void }) {
   const [users] = useLoad(api.users, []);
   const [labels] = useLoad(() => api.labels(props.projectKey), [props.projectKey]);
-  const [agents] = useLoad(() => api.agents(), []);
+  // An Admin sees every User's Agents; anyone else, their own.
+  const everyone = props.me.role === "admin";
+  const [agents] = useLoad(() => api.agents(everyone), [everyone]);
   const set = (field: keyof TicketFilter) => (value: string) => {
     const { [field]: _, ...rest } = props.filter;
     props.onChange(value ? { ...rest, [field]: value } : rest);
@@ -309,8 +312,11 @@ function FilterBar(props: { projectKey: string; statuses: Status[]; filter: Tick
   const labelList = loaded<string[]>(labels) ?? [];
   // Keep a filtered Label selectable even when no Ticket has it any more.
   const labelOptions = props.filter.label && !labelList.includes(props.filter.label) ? [props.filter.label, ...labelList] : labelList;
-  // The User's own Agents, the ones they can delegate to; a filtered Agent that isn't theirs stays selectable.
-  const agentOptions = (loaded<Agent[]>(agents) ?? []).map((a): [string, string] => [a.id, a.name]);
+  // A filtered Agent the User can't list stays selectable.
+  const agentOptions = (loaded<Agent[]>(agents) ?? []).map((a): [string, string] => [
+    a.id,
+    a.owner.id === props.me.id ? a.name : `${a.name} (${a.owner.name})`,
+  ]);
   if (props.filter.delegate && props.filter.delegate !== "none" && !agentOptions.some(([id]) => id === props.filter.delegate)) {
     agentOptions.unshift([props.filter.delegate, "Another User's Agent"]);
   }

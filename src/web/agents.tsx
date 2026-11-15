@@ -179,6 +179,7 @@ function WorkLog(props: { agent: Agent }) {
   );
 }
 
+/** The entries of an Agent's work, loaded when shown. */
 function WorkEntries(props: { agent: Agent }) {
   const [work] = useLoad(() => api.agentWork(props.agent.id), [props.agent.id]);
   return (

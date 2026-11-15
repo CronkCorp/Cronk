@@ -67,7 +67,8 @@ const SELECTS = [
    FROM comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
    WHERE c.actor_agent_id = $1 AND ${documentReadableSql("d", "$2", "$3")}`,
   // A Report lies with its Ticket, so whoever can read the Ticket can read it.
-  `SELECT 'version', v.at, v.actor_session_id, p.key, CASE WHEN t.id IS NULL THEN NULL ELSE ${ticketKeySql("p", "t")} END, t.title, d.id, d.title,
+  `SELECT 'version', v.at, v.actor_session_id, p.key,
+     CASE WHEN t.id IS NULL THEN NULL ELSE ${ticketKeySql("p", "t")} END, t.title, d.id, d.title,
      jsonb_build_object('number', v.number), v.number::bigint
    FROM document_versions v JOIN documents d ON d.id = v.document_id LEFT JOIN tickets t ON t.id = d.ticket_id
      LEFT JOIN projects p ON p.id = coalesce(t.project_id, d.project_id)
