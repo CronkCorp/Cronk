@@ -310,11 +310,28 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Onboarding");
   await page.getByRole("button", { name: "Create Document" }).click();
-  await page.getByLabel("Body (Markdown)").fill("Start with CRONK-1.");
+  // The toolbar formats the selected text, and the preview shows the Markdown as it will read.
+  const editor = page.getByLabel("Body (Markdown)");
+  await editor.fill("Start with CRONK-1.");
+  await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 5));
+  await page.getByRole("button", { name: "Bold" }).click();
+  await expect(editor).toHaveValue("**Start** with CRONK-1.");
+  await page.getByRole("button", { name: "Heading" }).click();
+  await expect(editor).toHaveValue("## **Start** with CRONK-1.");
+  await expect(page.getByRole("region", { name: "Preview" }).getByRole("heading", { name: "Start with CRONK-1." })).toBeVisible();
+  await page.getByRole("button", { name: "Heading" }).click();
+  await expect(editor).toHaveValue("**Start** with CRONK-1.");
+  const preview = page.getByRole("region", { name: "Preview" });
+  await expect(preview.locator("strong")).toHaveText("Start");
+  await expect(preview.getByRole("link", { name: "CRONK-1" })).toBeVisible();
   await page.getByRole("button", { name: "Save" }).click();
 
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("Start with CRONK-1.");
+  await expect(body.locator("strong")).toHaveText("Start");
+  // What was saved is exactly the Markdown the editor showed.
+  const id = new URL(page.url()).pathname.split("/").pop()!;
+  expect((await (await page.request.get(`/api/documents/${id}`)).json()).document.body).toBe("**Start** with CRONK-1.");
   await expect(body.getByRole("link", { name: "CRONK-1" })).toHaveAttribute("href", "/tickets/CRONK-1");
 
   await page.getByRole("button", { name: "Edit" }).click();
@@ -330,13 +347,24 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(versions).toContainText("Version 4");
   await expect(versions).toContainText("restored Version 2");
 
+  // Selecting text in the Document offers to comment on it, quoting the Markdown the selection reads from.
+  await body.evaluate((el) => {
+    const range = document.createRange();
+    const reference = el.querySelector("a")!;
+    range.setStart(el.querySelector("strong")!, 0);
+    range.setEnd(reference, reference.childNodes.length);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  });
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**Start** with CRONK-1");
+  await expect(page.getByLabel("Comment", { exact: true })).toBeFocused();
   // A Comment anchored to a passage shows the passage it is about.
-  await page.getByLabel("About the passage (optional)").fill("CRONK-1");
   await page.getByLabel("Comment", { exact: true }).fill("Which Ticket is this?");
   await page.getByRole("button", { name: "Post Comment" }).click();
   const comments = page.getByRole("list", { name: "Comments" });
   await expect(comments).toContainText("Which Ticket is this?");
-  await expect(comments.locator("blockquote")).toHaveText("CRONK-1");
+  await expect(comments.locator("blockquote")).toHaveText("**Start** with CRONK-1");
 
   await page.getByRole("link", { name: "Documents", exact: true }).last().click();
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
