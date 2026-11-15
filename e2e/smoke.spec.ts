@@ -415,6 +415,40 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
 });
 
 // Runs after the tests above, so CRONK exists.
+test("see the board, a Ticket and a Document follow changes made elsewhere", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("link", { name: /CRONK/ })).toBeVisible();
+
+  // Changes come through the API behind the page's back, as another User or an Agent would make them.
+  await page.goto("/projects/CRONK?view=board");
+  await expect(page.getByRole("region", { name: "Backlog" })).toBeVisible();
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Arrived live" } })).json();
+  await expect(page.getByRole("region", { name: "Backlog" })).toContainText("Arrived live");
+
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("heading", { name: "Arrived live" })).toBeVisible();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
+  await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
+
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await expect(page.getByTestId("document-body")).toContainText("First.");
+  await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Seen from afar." } });
+  await expect(page.getByRole("list", { name: "Comments" })).toContainText("Seen from afar.");
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: "Second." } });
+  await expect(page.getByTestId("document-body")).toContainText("Second.");
+
+  // While editing, a newer Version is announced instead of replacing the draft.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 2, body: "Third." } });
+  await expect(page.getByRole("status")).toContainText("Someone saved Version 3 while you were editing Version 2");
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("Second.");
+});
+
+// Runs after the tests above, so CRONK exists.
 test("merge a Guidance edit someone else saved underneath", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Email").fill(ada.email);

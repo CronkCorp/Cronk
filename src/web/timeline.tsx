@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, sessionName, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
@@ -27,7 +27,7 @@ function latestById<T extends { id: string }>(items: T[]): T[] {
  * The Activities and Reports Agent Sessions wrote on a Ticket and its Comments, oldest first, kept up to
  * date as new ones arrive. Replies show under what they reply to; a reply to a question answers it.
  */
-export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) {
+export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; onTicketChanged?: () => void }) {
   const [loaded, reload] = useLoad(
     async () => {
       const [activities, reports, comments] = await Promise.all([
@@ -43,6 +43,9 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
   const [arrivedActivities, setArrivedActivities] = useState<Activity[]>([]);
   const [arrivedReports, setArrivedReports] = useState<Report[]>([]);
   const [arrivedComments, setArrivedComments] = useState<Comment[]>([]);
+  // The latest handler, so the stream, opened once per Ticket, never calls an outdated one.
+  const onTicketChanged = useRef(props.onTicketChanged);
+  onTicketChanged.current = props.onTicketChanged;
   useEffect(() => {
     setArrivedActivities([]);
     setArrivedReports([]);
@@ -50,8 +53,12 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
     return watchTicket(props.ticketKey, {
       // Load the lists again once watching, and on every reconnect, so nothing posted before the stream was
       // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
-      ready: reload,
+      ready: () => {
+        reload();
+        onTicketChanged.current?.();
+      },
       on: {
+        changed: () => onTicketChanged.current?.(),
         activity: ({ activity }) => setArrivedActivities((list) => [...list, activity]),
         report: ({ report }) => setArrivedReports((list) => [...list, report]),
         comment: ({ comment }) => setArrivedComments((list) => [...list, comment]),
@@ -237,9 +244,12 @@ function CommentForm(props: {
   );
 }
 
-/** A Document's Comments, oldest first, each reply under the Comment it replies to; a new one may anchor to a passage. */
-export function DocumentComments(props: { documentId: string; canWrite: boolean }) {
-  const [comments, reload] = useLoad(() => api.documentComments(props.documentId), [props.documentId]);
+/**
+ * A Document's Comments, oldest first, each reply under the Comment it replies to; a new one may anchor to a passage.
+ * They are loaded again whenever `generation` changes, as when a new one arrives.
+ */
+export function DocumentComments(props: { documentId: string; canWrite: boolean; generation?: number }) {
+  const [comments, reload] = useLoad(() => api.documentComments(props.documentId), [props.documentId, props.generation]);
   const [passage, setPassage] = useState("");
   const post = (input: NewComment) => api.postDocumentComment(props.documentId, { ...input, ...(passage.trim() && { anchor: { passage } }) });
   const posted = () => {
