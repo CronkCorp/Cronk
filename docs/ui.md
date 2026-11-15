@@ -2,7 +2,7 @@
 
 How Cronk's web UI looks and behaves. Read this before changing anything under `src/web/`. Vocabulary follows `GLOSSARY.md`; the UI holds no rules (ADR 0010, `docs/testing.md`), so everything here is about presentation.
 
-The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 brought the tokens, fonts and components, and #105 to #110 rework the screens. Until those land, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main.
+The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 brought the tokens, fonts and components, and #105 to #110 rework the screens. Until those land, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main. Phase 2's screens were chosen the same way; their prototype is on `prototype/phase-2-ui`, and their screenshots are `docs/ui/phase-2-*.png`.
 
 ## Principles
 
@@ -21,7 +21,7 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
 - **Sidebar, top to bottom:**
   - The Workspace name and mark.
   - Search, which `/` focuses.
-  - Inbox, Documents and Agents, plus Triage once it exists (Phase 2). Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
+  - Inbox, Triage, Documents, Terms, Decisions and Agents. Triage shows the number of items the User could act on, in `--muted`. Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
   - **Projects**, each listed by key and name. Archived Projects are left out.
   - **Workspace**: Guidance, plus Users and Settings for Admins.
   - The signed-in User and their role, which opens the sign-out menu.
@@ -99,6 +99,10 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - A timeline shows clock times (`<RelativeTime clock>`) with a separator for each day ("Today", "Yesterday", "14 Nov").
 - **Empty states:** a short heading saying what will appear and one line saying how it gets there ("Agents write a Report when they hand work over").
 - **Silence meter** (`<SilenceMeter>`): a thin `--agent` bar that empties from when an Agent Session was last heard to when it would fall silent, with "heard 40 s ago" under it. It counts down every second on the client between live updates.
+- **Protected** (`<ProtectedMark>`): a pill with a lock and "Protected", in `--muted` with a border, after the item's title. On a Document that covers a branch it adds "covers 4 under it". Its tooltip says Agents may read but not edit.
+- **Decision status** (`<DecisionStatus>`): 11px uppercase pill. Proposed is outlined `--warn`, Accepted filled `--ok-soft` with `--ok` text, Superseded outlined `--info`, Rejected outlined `--muted`, and Deprecated dashed `--muted`.
+- **Reasoning** (`<Reasoning>`): an Agent's "why" on a Suggestion or proposed Decision, in an `--agent-soft` box with a 3px `--agent` left border and a `WHY` kind label.
+- **Diff** (`<Diff>`): mono lines on `--surface`, removed lines on `--danger-soft` and struck through, added on `--ok-soft`, with a header naming the two Versions. A Unified / Side by side segmented control switches it, remembered per User; below 700px it is always unified.
 - **Live indicator** (`<LiveIndicator>`): a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
 
 ## Screens
@@ -185,6 +189,56 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button, together with Cronk's MCP address and a ready-made command to connect Claude Code.
   - **"Show what it did"** below the Agent Sessions opens what the Agent did across the Workspace, newest first: its Changes, Activities, Comments and saved Versions, each with when, its Agent Session and a link to the Ticket or Document.
 - **Admins** also see "Everyone else's Agents" below, as rows of Agent, Owner and liveness, read-only.
+
+### Inbox and Triage in Phase 2
+
+![Suggestion](ui/phase-2-suggestion.png)
+
+- **New groups**, after To review: **Unverified**, **Suggestions**, **Discovered** and **Proposed Decisions**, each with its own kind label.
+- **A Suggestion** shows the item with its key, status and Protected mark, the Agent, its Agent Session, the base Version and the Ticket it came from, then the Agent's reasoning and the Diff. Actions: **Accept** (primary), **Edit and accept…**, which opens the suggested text in the editor (accepting it then credits the User and links the Suggestion), and **Reject…**, which opens a required reason box. The note beside them says who the new Version will be credited to.
+- **An outdated Suggestion** gets an `--info` banner naming the newer Version and its author. Accept becomes **Merge and accept…**, which opens the merge panel from the Document screen, with the Suggestion and the current Version as the two sides.
+- **An Unverified completion** shows the Report like a review, an `--info` banner listing Tickets that already continued on it, and **Accept** (primary) and **Reopen…**.
+- **Reopen…** opens a dialog: a required "What is wrong" box, then every dependent that already continued, each with a choice. In progress: **Keep going** (default) or **Pause**, which releases its Claim and moves it to Unstarted. Completed: **Keep** (default) or **Reopen too**. Not started: no choice, it waits again.
+- **A Discovered Ticket** shows where it was found and a `--warn` banner listing the Tickets it pauses, with a link to remove a block. Actions: **Delegate to <Agent>** (primary, the Agent that found it), **Delegate to…**, **Keep in Backlog**, and Cancel in the ghost style.
+- **A proposed Decision** shows its body and **Accept** (primary) and **Reject…**.
+- **Triage** is the same split view, with the same keyboard shortcuts. A Discovered Ticket's primary action is **Take it**, which assigns it to the User.
+
+| Side by side | Merge on accept | Reopen | Triage |
+|---|---|---|---|
+| ![Suggestion, side by side](ui/phase-2-suggestion-side-by-side.png) | ![Merge](ui/phase-2-suggestion-merge.png) | ![Reopen](ui/phase-2-reopen.png) | ![Triage](ui/phase-2-triage.png) |
+
+### Terms
+
+| Terms | A Term | Dark |
+|---|---|---|
+| ![Terms](ui/phase-2-terms.png) | ![Term](ui/phase-2-term.png) | ![Terms, dark](ui/phase-2-terms-dark.png) |
+
+- **Terms page** (`/terms`): reads like a glossary. The page head holds a Workspace / Project scope switch, preselecting the Project the User came from, then Export and **New Term**. A filter box matches names and words to avoid.
+- **Each Term**, under its group: the name, the Protected mark, "Overrides the Workspace Term" in `--info` where it does, its scope, a Suggestion count in `--agent`, and "used in n · Version n". Then the definition, and "Avoid:" with the words struck through.
+- **A Term's page**: the name, Protected mark and actions, an `--info` banner for an override linking the other Term, the definition, words to avoid and group, then Mentioned in, Decisions and History.
+
+### Decisions
+
+![Decisions](ui/phase-2-decisions.png)
+
+- **Register** (`/decisions`): the same scope switch, status and group filter chips with counts, and a table of key, title, status, group and date. A superseded Decision carries "→ CRONK-D7" after its title.
+- **A Decision's page**: key, status and Protected mark, the title at 24px, a banner for what it supersedes (`--info`) or what superseded it (`--warn`), the body at Document size, and a side panel with status, group, who proposed it, Mentioned in and Terms.
+
+### Artifact
+
+![Artifact](ui/phase-2-artifact.png)
+
+- **Full bleed** under a thin bar: title, the Version menu (which also lists Versions and where the Artifact is embedded), its source Ticket and Agent, any declared extra origins as a `--warn` pill, **Copy link to Version n**, Open full size, and **Comments n**.
+- **Comments** open in a 300px drawer on the right, each saying which Version it was on. Below 900px the drawer moves under the Artifact.
+- **Embedded** in a Report or Document: a bordered block with a bar (kind label, title, Version chip, Open full size) above the sandboxed frame.
+
+### Ticket Attachments
+
+![Ticket with Attachments](ui/phase-2-ticket-attachments.png)
+
+- **Under the description:** the Ticket's own Attachments as 168px thumbnails (a frame for video, the type for other files) with name, size and who attached them, and a drop zone.
+- **Files** in the side panel: every Attachment on the Ticket, in Comments and Reports too, and the Artifacts from its work, each with type, size and Actor.
+- **Dropping a file anywhere** on the Ticket page attaches it to the Ticket. Video and images posted in a Comment or Report show inline where they were posted.
 
 ## Live updates
 
