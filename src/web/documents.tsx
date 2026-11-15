@@ -1,3 +1,4 @@
+import { Chip } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
@@ -249,7 +250,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
         <>
           <div className="page-head">
             <h1>
-              {d.title} {d.ticketKey && <span className="badge">Report on {d.ticketKey}</span>}
+              {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>}
             </h1>
             <div className="actions">
               <LiveIndicator state={live} />
@@ -473,7 +474,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
                 <span className="grow">
                   <strong>Version {v.number}</strong> <RelativeTime at={v.at} /> <Actor actor={v.actor} />
                   {v.restoredFrom !== null && <span className="muted"> (restored Version {v.restoredFrom})</span>}
-                  {v.number === d.version && <span className="badge">Current</span>}
+                  {v.number === d.version && <Chip>Current</Chip>}
                 </span>
                 <button className="link" onClick={() => void view.run(v.number)} disabled={view.busy}>View</button>
                 {props.canWrite && v.number !== d.version && (

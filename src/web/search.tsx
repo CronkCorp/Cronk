@@ -1,3 +1,4 @@
+import { Chip } from "./components/tags.js";
 import { useState, type FormEvent } from "react";
 import { SEARCH_KINDS } from "../shared/values.js";
 import { api, type SearchKind, type SearchResult } from "./api.js";
@@ -74,7 +75,7 @@ export function SearchPage(props: { filter: SearchFilter }) {
                 <li key={i} className="row">
                   <Link to={resultPath(r)} className="row-link search-result">
                     <div className="search-result-head">
-                      <span className="badge">{KIND_NAMES[r.kind]}</span>
+                      <Chip>{KIND_NAMES[r.kind]}</Chip>
                       {r.ticketKey && <span className="key">{r.ticketKey}</span>}
                       <span className="grow">{r.kind === "comment" ? `On ${r.title}` : r.title}</span>
                       <span className="muted">{r.projectKey ?? "Workspace"}</span>

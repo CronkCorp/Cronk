@@ -1,3 +1,4 @@
+import { KindLabel } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useState } from "react";
@@ -102,7 +103,7 @@ function QuestionEntry(props: { item: Extract<InboxItem, { kind: "question" }>; 
   return (
     <li className={`activity question${question.blocking ? " blocking" : ""}`} aria-label={`Question on ${ticket.key}`}>
       <div className="activity-head">
-        <span className="activity-kind">{question.blocking ? "Blocking question" : "Question"}</span>
+        <KindLabel kind={question.blocking ? "blocking" : "question"}>{question.blocking ? "Blocking question" : "Question"}</KindLabel>
         <Actor actor={agentActor(question.agent, question.session)} owner={false} />
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
         <RelativeTime at={question.at} />
@@ -149,7 +150,7 @@ function ReviewEntry(props: { item: Extract<InboxItem, { kind: "review" }>; onDo
   return (
     <li className="activity review" aria-label={`Review ${ticket.key}`}>
       <div className="activity-head">
-        <span className="activity-kind">To review</span>
+        <KindLabel kind="review">To review</KindLabel>
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
         <StatusPill status={ticket.status} />
         {ticket.delegate && <span className="muted">by <Actor actor={{ kind: "agent", name: ticket.delegate.name }} /></span>}

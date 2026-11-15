@@ -1,3 +1,4 @@
+import { Chip, KindLabel } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState, type Ref } from "react";
@@ -125,10 +126,10 @@ function ActivityItem(props: { activity: Activity } & Thread) {
   return (
     <li className={`activity ${a.kind}${a.blocking ? " blocking" : ""}${a.answer ? " answered" : ""}`}>
       <div className="activity-head">
-        <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
+        <KindLabel kind={a.blocking ? "blocking" : a.kind}>{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</KindLabel>
         <Actor actor={agentActor(a.agent, a.session)} />
         <RelativeTime at={a.at} />
-        {isQuestion && (a.answer ? <span className="badge answered">Answered</span> : <span className="badge">Waiting for an answer</span>)}
+        {isQuestion && (a.answer ? <Chip tone="ok">Answered</Chip> : <Chip>Waiting for an answer</Chip>)}
       </div>
       <div className="activity-body">
         <CronkMarkdown>{a.body}</CronkMarkdown>
@@ -145,7 +146,7 @@ function ReportItem(props: { report: Report }) {
   return (
     <li className="activity report" aria-label={`Report: ${r.title}`}>
       <div className="activity-head">
-        <span className="activity-kind">Report</span>
+        <KindLabel kind="report">Report</KindLabel>
         <Actor actor={agentActor(r.agent, r.session)} />
         <RelativeTime at={r.createdAt} />
       </div>
@@ -165,7 +166,7 @@ function CommentItem(props: { comment: Comment } & Thread) {
   return (
     <li className="comment">
       <div className="comment-head">
-        <span className="comment-kind">Comment</span>
+        <KindLabel kind="comment">Comment</KindLabel>
         <Actor actor={c.actor} />
         <RelativeTime at={c.at} />
       </div>

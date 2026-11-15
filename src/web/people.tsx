@@ -1,3 +1,4 @@
+import { Chip } from "./components/tags.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
 import { useState } from "react";
@@ -104,9 +105,9 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
         <Actor actor={{ kind: "user", name: u.name }} />
         {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>
         {!u.joined ? (
-          <span className="badge">Imported, not signed in yet</span>
+          <Chip>Imported, not signed in yet</Chip>
         ) : (
-          !u.active && <span className="badge">Deactivated</span>
+          !u.active && <Chip>Deactivated</Chip>
         )}
         {change.error && <span className="error" role="alert"> {change.error}</span>}
         {invite.error && <span className="error" role="alert"> {invite.error}</span>}

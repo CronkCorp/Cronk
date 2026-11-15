@@ -1,3 +1,4 @@
+import { Chip, PRIORITY_NAMES, PriorityTag } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor, agentActor } from "./components/actor.js";
@@ -29,7 +30,6 @@ import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
-const PRIORITY_NAMES: Record<Priority, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low", none: "No Priority" };
 
 const CATEGORY_NAMES: Record<StatusCategory, string> = {
   backlog: "Backlog",
@@ -85,8 +85,8 @@ export function ProjectsPage(props: { archived: boolean }) {
                   <Link to={`/projects/${project.key}`} className="row">
                     <span className="key">{project.key}</span>
                     <span className="grow">{project.name}</span>
-                    {project.visibility === "private" && <span className="badge">Private</span>}
-                    {project.access === "read" && <span className="badge">Read only</span>}
+                    {project.visibility === "private" && <Chip>Private</Chip>}
+                    {project.access === "read" && <Chip>Read only</Chip>}
                   </Link>
                 </li>
               ))}
@@ -199,9 +199,9 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             <div>
               <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
               <h1>
-                {p.name} {p.archived && <span className="badge">Archived</span>}{" "}
-                {p.visibility === "private" && <span className="badge">Private</span>}{" "}
-                {p.access === "read" && <span className="badge">Read only</span>}
+                {p.name} {p.archived && <Chip>Archived</Chip>}{" "}
+                {p.visibility === "private" && <Chip>Private</Chip>}{" "}
+                {p.access === "read" && <Chip>Read only</Chip>}
               </h1>
             </div>
             <div className="actions">
@@ -294,7 +294,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                         {list.map((ticket) => (
                           <li key={ticket.key}>
                             <Link to={`/tickets/${ticket.key}`} className="row">
-                              <PriorityIcon priority={ticket.priority} />
+                              <PriorityTag priority={ticket.priority} />
                               <span className="key">{ticket.key}</span>
                               <span className="grow">{ticket.title}</span>
                               <LabelChips labels={ticket.labels} />
@@ -388,7 +388,7 @@ function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
               <Link key={ticket.key} to={`/tickets/${ticket.key}`} className="card">
                 <span className="card-head">
                   <span className="key">{ticket.key}</span>
-                  <PriorityIcon priority={ticket.priority} />
+                  <PriorityTag priority={ticket.priority} />
                 </span>
                 <span>{ticket.title}</span>
                 <LabelChips labels={ticket.labels} />
@@ -583,21 +583,12 @@ export function StatusPill(props: { status: Status }) {
   );
 }
 
-function PriorityIcon(props: { priority: Priority }) {
-  if (props.priority === "none") return null;
-  return (
-    <span className={`priority ${props.priority}`} title={`Priority: ${PRIORITY_NAMES[props.priority]}`}>
-      {PRIORITY_NAMES[props.priority]}
-    </span>
-  );
-}
-
 function LabelChips(props: { labels: string[] }) {
   if (props.labels.length === 0) return null;
   return (
     <span className="chips">
       {props.labels.map((label) => (
-        <span key={label} className="chip">{label}</span>
+        <Chip key={label}>{label}</Chip>
       ))}
     </span>
   );
@@ -836,20 +827,14 @@ function LabelEditor(props: { ticket: Ticket; busy: boolean; readOnly: boolean; 
       {labels.length > 0 && (
         <ul className="chips" aria-label="Labels">
           {labels.map((label) => (
-            <li key={label} className="chip">
+            <Chip
+              key={label}
+              as="li"
+              disabled={props.busy}
+              {...(props.readOnly ? {} : { onRemove: () => props.onChange(labels.filter((l) => l !== label)) })}
+            >
               {label}
-              {!props.readOnly && (
-                <button
-                  type="button"
-                  className="chip-remove"
-                  aria-label={`Remove ${label}`}
-                  disabled={props.busy}
-                  onClick={() => props.onChange(labels.filter((l) => l !== label))}
-                >
-                  ×
-                </button>
-              )}
-            </li>
+            </Chip>
           ))}
         </ul>
       )}
@@ -989,7 +974,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onCha
               <Link to={`/documents/${d.id}`} className="row-link">
                 <span className="grow">{d.title}</span>
                 <span className="muted">{whereDocumentIs(d)}</span>
-                <span className="badge">{d.reason === "linked" ? "Linked" : "Mentions it"}</span>
+                <Chip>{d.reason === "linked" ? "Linked" : "Mentions it"}</Chip>
               </Link>
               {d.reason === "linked" && !props.readOnly && (
                 <button className="link" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
