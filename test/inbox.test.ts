@@ -147,10 +147,11 @@ describe("Sending a Ticket back", () => {
   });
 
   it("marks only its own Comment as a Send back's", async () => {
-    const { admin } = await delegatedSetup();
+    const { cronk, admin } = await delegatedSetup();
     await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") });
     const ordinary = await admin.post("/api/tickets/CRONK-1/comments", { body: "Looking now." });
     expect(ordinary.body.comment.sendBack).toBe(false);
+    cronk.clock.tickEachRead(1);
     const sent = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
     expect(sent.body.comment.sendBack).toBe(true);
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
@@ -158,6 +159,9 @@ describe("Sending a Ticket back", () => {
       ["Looking now.", false],
       ["Add a test.", true],
     ]);
+    // The move back and the Comment are one Send back, recorded at the same instant.
+    const moves = (await admin.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { change: string }) => c.change === "status");
+    expect(moves.at(-1).at).toBe(sent.body.comment.at);
   });
 
   it("takes another Started Status, but refuses one in another Status Category, a Ticket not In Review, and Agents", async () => {

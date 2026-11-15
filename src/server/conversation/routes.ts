@@ -25,8 +25,8 @@ interface NewComment {
   replyToCommentId?: string;
   replyToActivityId?: string;
   anchor?: { passage: string };
-  /** Set only by the send-back route, never from a request body. */
-  sendBack?: boolean;
+  /** Set only by the send-back route, never from a request body: it marks its Comment, posted at the instant it moves the Ticket. */
+  sendBack?: { at: Date };
 }
 
 const id = { type: "string", format: "uuid" } as const;
@@ -94,7 +94,8 @@ export function conversationRoutes(ctx: AppContext) {
         throw new HttpError(400, `Version ${document!.version} of the Document doesn't hold that passage; quote it exactly`);
       }
       const anchor = input.anchor ? { passage: input.anchor.passage, version: document!.version } : null;
-      const comment = await insertComment(tx, target, actor, { body: input.body, replyToCommentId, replyToActivityId, anchor, sendBack: input.sendBack }, ctx.clock.now());
+      const fields = { body: input.body, replyToCommentId, replyToActivityId, anchor, sendBack: input.sendBack !== undefined };
+      const comment = await insertComment(tx, target, actor, fields, input.sendBack?.at ?? ctx.clock.now());
       // A User answers a question by replying to it; the first such reply is its answer.
       const answered = activity && actor.kind === "user" && (await markAnswered(tx, activity, comment.id)) ? await findActivity(tx, activity.ticketId, activity.id) : undefined;
       const asker = answered ? { agentId: answered.agent.id } : null;
@@ -202,9 +203,11 @@ export function conversationRoutes(ctx: AppContext) {
             // Locked so it can't be removed before the move commits.
             const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
             if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
-            const moved = await updateTicket(tx, ticket, { status }, actor, ctx.clock.now());
+            // The move and the Comment share one instant, so the timeline can tell they are one Send back.
+            const at = ctx.clock.now();
+            const moved = await updateTicket(tx, ticket, { status }, actor, at);
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
+            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: { at } }) };
           },
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
