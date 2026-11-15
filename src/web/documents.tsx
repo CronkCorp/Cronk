@@ -1,3 +1,4 @@
+import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -188,9 +189,11 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   // The newest Version anyone saved, as the Document's stream tells it, and how often its Comments changed.
   const [latest, setLatest] = useState(d.version);
   const [commentsGeneration, setCommentsGeneration] = useState(0);
+  const [live, onLive] = useLiveState();
   useEffect(
     () =>
       watchDocument(d.id, {
+        onLive,
         // On (re)connecting, catch up on what was saved and posted meanwhile.
         ready: () => {
           setCommentsGeneration((g) => g + 1);
@@ -249,6 +252,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               {d.title} {d.ticketKey && <span className="badge">Report on {d.ticketKey}</span>}
             </h1>
             <div className="actions">
+              <LiveIndicator state={live} />
               <span className="muted">Version {d.version}</span>
               <button className="secondary" onClick={() => toggle("versions")}>Versions</button>
               {canWrite && (

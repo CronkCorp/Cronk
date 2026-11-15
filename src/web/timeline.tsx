@@ -1,3 +1,4 @@
+import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState, type Ref } from "react";
 import { Actor, agentActor } from "./components/actor.js";
@@ -45,6 +46,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; on
   const [arrivedActivities, setArrivedActivities] = useState<Activity[]>([]);
   const [arrivedReports, setArrivedReports] = useState<Report[]>([]);
   const [arrivedComments, setArrivedComments] = useState<Comment[]>([]);
+  const [live, onLive] = useLiveState();
   // The latest handler, so the stream, opened once per Ticket, never calls an outdated one.
   const onTicketChanged = useRef(props.onTicketChanged);
   onTicketChanged.current = props.onTicketChanged;
@@ -53,6 +55,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; on
     setArrivedReports([]);
     setArrivedComments([]);
     return watchTicket(props.ticketKey, {
+      onLive,
       // Load the lists again once watching, and on every reconnect, so nothing posted before the stream was
       // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
       ready: () => {
@@ -85,6 +88,7 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; on
         const posted = (comment: Comment) => setArrivedComments((list) => [...list, comment]);
         return (
           <>
+            <LiveIndicator state={live} />
             <ol className="timeline" aria-label="Timeline">
               {entries.length === 0 && <li className="muted">Nothing yet.</li>}
               {entries.map((e) =>

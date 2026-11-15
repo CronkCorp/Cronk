@@ -300,6 +300,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
   expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
   await page.getByRole("link", { name: "Inbox" }).click();
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   const inbox = page.getByRole("list", { name: "Inbox" });
   const review = inbox.getByRole("listitem", { name: `Review ${ticket.key}` });
   await expect(review.getByRole("list", { name: `Reports on ${ticket.key}` })).toContainText("What I found");
@@ -503,17 +504,21 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   // Changes come through the API behind the page's back, as another User or an Agent would make them.
   await page.goto("/projects/CRONK?view=board");
   await expect(page.getByRole("region", { name: "Backlog" })).toBeVisible();
+  // Each view that follows changes says it is live.
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Arrived live" } })).json();
   await expect(page.getByRole("region", { name: "Backlog" })).toContainText("Arrived live");
 
   await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByRole("heading", { name: "Arrived live" })).toBeVisible();
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
   await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
 
   const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
   await page.goto(`/documents/${document.id}`);
   await expect(page.getByTestId("document-body")).toContainText("First.");
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
   await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Seen from afar." } });
   await expect(page.getByRole("list", { name: "Comments" })).toContainText("Seen from afar.");
   await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: "Second." } });

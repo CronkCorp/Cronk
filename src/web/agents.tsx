@@ -1,3 +1,4 @@
+import { LiveIndicator } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useState } from "react";
 import { Actor, SessionName } from "./components/actor.js";
@@ -140,9 +141,8 @@ function LiveSessions(props: { agent: Agent }) {
       {sessions.length === 0 && <li className="muted">Not connected.</li>}
       {sessions.map((s) => (
         <li key={s.id} className="session">
-          <span className="live-dot" aria-hidden="true" />
           <span className="grow">
-            Live <SessionName id={s.id} />{" "}
+            <LiveIndicator state="live" /> <SessionName id={s.id} />{" "}
             <span className="muted">
               connected <RelativeTime at={s.startedAt} />, last heard <RelativeTime at={s.lastSeenAt} />
             </span>

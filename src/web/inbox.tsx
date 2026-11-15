@@ -1,3 +1,4 @@
+import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
@@ -34,13 +35,15 @@ export function InboxPage(props: { filter: InboxFilter }) {
   const [projects] = useLoad(() => api.projects(), []);
   const [agents] = useLoad(() => api.agents(), []);
   // Reload on every (re)connect, so changes made while the stream was away aren't missed, and on each change.
-  useEffect(() => watchInbox({ ready: reload, on: { changed: reload } }), [filter.kind, filter.project, filter.agent]);
+  const [live, onLive] = useLiveState();
+  useEffect(() => watchInbox({ ready: reload, onLive, on: { changed: reload } }), [filter.kind, filter.project, filter.agent]);
   const setFilter = (changes: InboxFilter) => navigate(inboxPath({ ...filter, ...changes }));
 
   return (
     <section>
       <div className="page-head">
         <h1>Inbox</h1>
+        <LiveIndicator state={live} />
       </div>
       <div className="filters">
         <label className="filter">

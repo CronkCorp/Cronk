@@ -368,11 +368,19 @@ export interface DocumentEvents {
  * Watches a live-update stream (server-sent events) until the returned function is called.
  * `ready` is called each time the stream (re)connects, so whatever it shows can be loaded
  * again to catch up on what happened while it was away; `on` maps event names to handlers
- * of their JSON data. The browser reconnects by itself after the connection drops.
+ * of their JSON data. The browser reconnects by itself after the connection drops; `onLive`
+ * hears when the stream is in place (true) and when it is away (false).
  */
-function watch<Events>(path: string, handlers: { ready: () => void; on: { [E in keyof Events]?: (data: Events[E]) => void } }): () => void {
+function watch<Events>(
+  path: string,
+  handlers: { ready: () => void; onLive?: (live: boolean) => void; on: { [E in keyof Events]?: (data: Events[E]) => void } },
+): () => void {
   const source = new EventSource(path, { withCredentials: true });
-  source.addEventListener("ready", () => handlers.ready());
+  source.addEventListener("ready", () => {
+    handlers.onLive?.(true);
+    handlers.ready();
+  });
+  source.addEventListener("error", () => handlers.onLive?.(false));
   for (const [event, handle] of Object.entries(handlers.on) as [string, (data: unknown) => void][]) {
     source.addEventListener(event, (e) => handle(JSON.parse((e as MessageEvent<string>).data)));
   }

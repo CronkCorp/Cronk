@@ -210,7 +210,6 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .secret { margin-top: 8px; }
 .session-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: 14px; }
 .session { display: flex; align-items: center; gap: 8px; }
-.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
 .secret p { margin: 0 0 6px; font-size: 14px; }
 .inline-input { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .field.inline select { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
@@ -271,3 +270,9 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .actor.agent .actor-name { color: var(--agent); }
 .session-name { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
 .time { color: var(--muted); font-size: 13px; }
+
+/* Live indicator: docs/ui.md § Component conventions. */
+.live-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ok); font-weight: 600; }
+.live-indicator.away { color: var(--muted); font-weight: 400; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.live-indicator.away .live-dot { background: var(--muted); }

@@ -1,3 +1,4 @@
+import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor, agentActor } from "./components/actor.js";
 import { useEffect, useState, type FormEvent } from "react";
@@ -154,9 +155,11 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
   // The list and board follow the Project's changes; a change to its Statuses reloads the Project, which holds them.
+  const [live, onLive] = useLiveState();
   useEffect(
     () =>
       watchProject(props.projectKey, {
+        onLive,
         ready: () => {
           reloadProject();
           reloadTickets();
@@ -202,6 +205,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
               </h1>
             </div>
             <div className="actions">
+              <LiveIndicator state={live} />
               {p.access === "write" && (
                 <AgentAccessSelect value={p.agentAccess} disabled={agentAccess.busy} onChange={(a) => void agentAccess.run(a)} />
               )}
