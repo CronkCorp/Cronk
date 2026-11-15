@@ -750,6 +750,53 @@ test("see the Claim card on a Claimed Ticket, and see it go once the Claim is re
   await expect(card).toHaveCount(0);
 });
 
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("answer a blocking question in the timeline, where only Comments and questions offer Reply", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket, agentCall } = await delegatedTicket(page, request, "question-bot", "Asks before it ships");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await page.goto(`/tickets/${ticket.key}`);
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  await expect(timeline).toContainText("Ada delegated it to question-bot");
+  await page.evaluate(() => window.scrollTo(0, 120));
+
+  // Entries arrive live, in place, and the page stays where the User is reading.
+  const write = (path: string, data: object) => request.post(`/api/tickets/${ticket.key}/${path}`, { headers: agentCall, data });
+  await write("activities", { kind: "plan", body: "Count failed sign-ins." });
+  await write("reports", { title: "What I found", body: "# Findings\n\nIt was the **cache**." });
+  await write("activities", { kind: "question", body: "Per email or per IP?", blocking: true });
+  const question = timeline.getByRole("listitem").filter({ hasText: "Per email or per IP?" });
+  await expect(question).toContainText("Blocking question");
+  expect(await page.evaluate(() => window.scrollY)).toBe(120);
+
+  // A Plan offers no Reply; a Report is a card with its headings scaled down and a link to open it.
+  const plan = timeline.getByRole("listitem").filter({ hasText: "Count failed sign-ins." });
+  await expect(plan).toContainText("Plan");
+  await expect(plan.getByRole("button", { name: "Reply" })).toHaveCount(0);
+  const report = timeline.getByRole("listitem", { name: "Report: What I found" });
+  await expect(report.getByRole("heading", { name: "Findings" })).toHaveCSS("font-size", "14px");
+  await expect(report.getByRole("link", { name: "Open Report" })).toHaveAttribute("href", /^\/documents\//);
+
+  // The open question shows its answer box; once answered, it offers Reply instead.
+  await expect(question).toContainText("The answer reaches question-bot as Waiting Work.");
+  await question.getByLabel("Answer", { exact: true }).fill("Per email.");
+  await question.getByRole("button", { name: "Post answer" }).click();
+  await expect(question).toContainText("Answered");
+  await expect(question.getByRole("list", { name: "Replies" })).toContainText("Per email.");
+  await expect(question.getByLabel("Answer", { exact: true })).toHaveCount(0);
+  await expect(question.getByRole("button", { name: "Reply" })).toBeVisible();
+
+  // A Comment offers Reply, and its replies sit under it.
+  await page.getByLabel("Comment", { exact: true }).fill("Ship per email first.");
+  await page.getByRole("button", { name: "Post Comment" }).click();
+  const comment = timeline.getByRole("listitem").filter({ hasText: "Ship per email first." });
+  await comment.getByRole("button", { name: "Reply" }).click();
+  await comment.getByLabel("Reply", { exact: true }).fill("Agreed.");
+  await comment.getByRole("button", { name: "Post reply" }).click();
+  await expect(comment.getByRole("list", { name: "Replies" })).toContainText("Agreed.");
+});
+
 /**
  * Registers an Agent of Ada's with a full token, starts an Agent Session for it, and files a Ticket assigned
  * to Ada and delegated to the Agent. Calls with `agentCall` act as that Agent Session.
