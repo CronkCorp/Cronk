@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -402,6 +402,28 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
 });
 
+/** Selects the rendered text inside `root` from `from` in the element matching `startIn` up to `to` in `endIn`. */
+const selectText = (root: Locator, startIn: string, from: string, endIn: string, to: string) =>
+  root.evaluate(
+    (el, { startIn, from, endIn, to }) => {
+      const textOf = (selector: string, holding: string) => {
+        for (const container of el.querySelectorAll(selector)) {
+          const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) if (walker.currentNode.textContent!.includes(holding)) return walker.currentNode as Text;
+        }
+        throw new Error(`no text holding ${holding}`);
+      };
+      const start = textOf(startIn, from);
+      const end = textOf(endIn, to);
+      const range = document.createRange();
+      range.setStart(start, start.data.indexOf(from));
+      range.setEnd(end, end.data.indexOf(to) + to.length);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    },
+    { startIn, from, endIn, to },
+  );
+
 // Runs after the tests above, so Ada and the CRONK Project exist.
 test("comment on passages through soft-wrapped lines, escapes and entities", async ({ page }) => {
   await page.goto("/");
@@ -418,30 +440,8 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("wrapped, a*b & c.");
 
-  /** Selects the rendered text from `from` in the element matching `startIn` up to `to` in `endIn`. */
-  const select = (startIn: string, from: string, endIn: string, to: string) =>
-    body.evaluate(
-      (el, { startIn, from, endIn, to }) => {
-        const textOf = (selector: string, holding: string) => {
-          for (const container of el.querySelectorAll(selector)) {
-            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-            while (walker.nextNode()) if (walker.currentNode.textContent!.includes(holding)) return walker.currentNode as Text;
-          }
-          throw new Error(`no text holding ${holding}`);
-        };
-        const start = textOf(startIn, from);
-        const end = textOf(endIn, to);
-        const range = document.createRange();
-        range.setStart(start, start.data.indexOf(from));
-        range.setEnd(end, end.data.indexOf(to) + to.length);
-        getSelection()!.removeAllRanges();
-        getSelection()!.addRange(range);
-      },
-      { startIn, from, endIn, to },
-    );
-
   // The selection starts in the first quoted line and ends past an escape and an entity on the next.
-  await select("blockquote", "and", "blockquote", "b &");
+  await selectText(body, "blockquote", "and", "blockquote", "b &");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("and\n> wrapped, a\\*b &amp;");
   await page.getByLabel("Comment", { exact: true }).fill("Why quote this?");
@@ -450,27 +450,27 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await expect(comments).toContainText("Why quote this?");
 
   // A list item's indented continuation line is skipped the same way.
-  await select("li", "and", "li", "continued");
+  await selectText(body, "li", "and", "li", "continued");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("and\n  continued");
 
   // Text split around a Ticket reference keeps its place in the Markdown past an escape before it.
-  await select("p:has(a)", "x*y", "p a", "CRONK-1");
+  await selectText(body, "p:has(a)", "x*y", "p a", "CRONK-1");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("x\\*y in CRONK-1");
 
   // Text that also reads verbatim elsewhere in its Markdown is still tied to where it came from.
-  await select("p", "&amp;", "p", "&amp;");
+  await selectText(body, "p", "&amp;", "p", "&amp;");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("&amp;amp;");
 
   // Something that only looks like an entity is plain text, character by character.
-  await select("p", "foo; next", "p", "foo; next");
+  await selectText(body, "p", "foo; next", "p", "foo; next");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("foo; next");
 
   // Selecting all of a bold run takes in its markup, even with an escape inside.
-  await select("strong", "bold", "strong", "a*b");
+  await selectText(body, "strong", "bold", "strong", "a*b");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**bold a\\*b**");
 });
@@ -595,6 +595,89 @@ test("settle a stale save by using their side of the conflict", async ({ page })
   await expect(page.getByRole("heading", { name: "Rate limits per IP" })).toBeVisible();
   await expect(page.getByTestId("document-body")).toContainText("Five per email and fifty per IP.");
   expect((await (await page.request.get(`/api/documents/${document.id}`)).json()).document.version).toBe(3);
+});
+
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("comment on passages of code inside blockquotes and list items", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: "Documents" }).last().click();
+  await page.getByRole("button", { name: "New Document" }).click();
+  await page.getByLabel("Title").fill("Quoted code");
+  await page.getByRole("button", { name: "Create Document" }).click();
+  await page
+    .getByLabel("Body (Markdown)")
+    .fill(
+      [
+        "> ```",
+        "> quoted one",
+        ">   quoted two",
+        "> ```",
+        "",
+        "- listed",
+        "",
+        "  ```",
+        "  listed one",
+        "    listed two",
+        "  ```",
+        "",
+        "- indented",
+        "",
+        "      indent one",
+        "        indent two",
+        "",
+        "Between.",
+        "",
+        "> - nested",
+        ">",
+        ">   ```",
+        ">   nested one",
+        ">     nested two",
+        ">   ```",
+        "",
+        "- tabbed",
+        "",
+        "  ```",
+        "\ttab one",
+        "  tab two",
+        "  ```",
+      ].join("\n"),
+    );
+  await page.getByRole("button", { name: "Save" }).click();
+  const body = page.getByTestId("document-body");
+  await expect(body).toContainText("nested one");
+  const passage = page.getByLabel("About the passage (optional)");
+
+  // Across the lines of a fenced code block in a blockquote: the `> ` goes into the passage, the code's own spaces stay.
+  await selectText(body, "blockquote > pre", "one", "blockquote > pre", "  quoted");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("one\n>   quoted");
+  await page.getByLabel("Comment", { exact: true }).fill("Why quote code?");
+  await page.getByRole("button", { name: "Post Comment" }).click();
+  await expect(page.getByRole("list", { name: "Comments" })).toContainText("Why quote code?");
+
+  // In a list item, past its content indentation.
+  await selectText(body, "li pre", "one", "li pre", "  listed");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("one\n    listed");
+
+  // An indented code block in a list item.
+  await selectText(body, "li pre", "indent one", "li pre", "  indent two");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("indent one\n        indent two");
+
+  // A list item inside a blockquote: both prefixes, in order.
+  await selectText(body, "blockquote li pre", "one", "blockquote li pre", "  nested");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("one\n>     nested");
+
+  // A tab's width depends on its column, so code indented with one is tied to nothing and offers nothing.
+  await selectText(body, "li pre", "tab one", "li pre", "tab two");
+  await expect(body).toContainText("tab two");
+  await expect(page.getByRole("button", { name: "Comment on this passage" })).toBeHidden();
 });
 
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.

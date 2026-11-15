@@ -2,7 +2,7 @@ import Markdown, { type Components } from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
-import { alignToSource, encodeBounds, type SourceBounds } from "./source-map.js";
+import { alignCodeToSource, alignToSource, encodeBounds, type Container, type SourceBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
@@ -73,6 +73,47 @@ interface HastNode {
 /** Inline elements whose Markdown wraps their text in markup, such as `**` around bold. */
 const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
 
+/** Where a hast node's Markdown starts and ends in the source, if it is known. */
+function spanOf(node: HastNode | undefined): { start: number; end: number } | undefined {
+  const start = node?.position?.start.offset;
+  const end = node?.position?.end.offset;
+  return start === undefined || end === undefined ? undefined : { start, end };
+}
+
+/** `node` wrapped in a span naming where its Markdown starts, and how its characters sit from there when `bounds` says. */
+function sourceSpan(node: HastNode, start: number, bounds?: SourceBounds): HastNode {
+  const map = bounds && encodeBounds(bounds, start);
+  return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [node] };
+}
+
+/**
+ * Where the text of a code block (`code` in `pre`) sits in the source, if that is known for certain: each
+ * line is tied to the source past the prefix every blockquote and list item around it puts before it, or,
+ * failing that, the text is found exactly once inside the block's stretch.
+ */
+function codeBounds(value: string, code: HastNode, ancestors: HastNode[], source: string): SourceBounds | undefined {
+  const span = spanOf(code);
+  if (!span) return undefined;
+  const containers: Container[] = [];
+  for (const ancestor of ancestors) {
+    const kind = ancestor.tagName === "blockquote" ? "blockquote" : ancestor.tagName === "li" ? "listItem" : undefined;
+    if (!kind) continue;
+    const start = spanOf(ancestor)?.start;
+    if (start === undefined) return undefined;
+    containers.push({ kind, start });
+  }
+  return alignCodeToSource(value, source, span, containers) ?? verbatimBounds(value, span, source);
+}
+
+/** Where code that shows its Markdown as it is sits, when its text is found exactly once inside its stretch, as inside backticks. */
+function verbatimBounds(value: string, span: { start: number; end: number }, source: string): SourceBounds | undefined {
+  const stretch = source.slice(span.start, span.end);
+  const found = stretch.indexOf(value);
+  if (found < 0 || stretch.indexOf(value, found + 1) >= 0) return undefined;
+  const offsets = Array.from({ length: value.length + 1 }, (_, k) => span.start + found + k);
+  return { starts: offsets, ends: offsets };
+}
+
 /** A passage to highlight in rendered Markdown, such as a Comment's anchor, named by `id`. */
 export interface Highlight {
   id: string;
@@ -137,13 +178,10 @@ function sliceBounds(bounds: SourceBounds, a: number, b: number): SourceBounds {
   return { starts: [...bounds.starts.slice(a, b), bounds.ends[b]!], ends: [bounds.starts[a]!, ...bounds.ends.slice(a + 1, b + 1)] };
 }
 
-/** A span naming where `bounds`' text sits in the source, as `markSourceAndHighlights` writes it. */
-function sourceSpan(value: string, bounds: SourceBounds, bare: boolean): HastNode {
+/** A piece of a run of text, wrapped in a span naming where it sits in the source unless `bare`. */
+function pieceSpan(value: string, bounds: SourceBounds, bare: boolean): HastNode {
   const text: HastNode = { type: "text", value };
-  if (bare) return text;
-  const start = bounds.ends[0]!;
-  const map = encodeBounds(bounds, start);
-  return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [text] };
+  return bare ? text : sourceSpan(text, bounds.ends[0]!, bounds);
 }
 
 /**
@@ -174,7 +212,7 @@ function highlightPassages(runs: Run[], source: string, highlights: Highlight[])
       const key = [...perChar[a]!].join(" ");
       let b = a + 1;
       while (b < run.value.length && [...perChar[b]!].join(" ") === key) b++;
-      const piece = sourceSpan(run.value.slice(a, b), sliceBounds(run.bounds, a, b), run.bare);
+      const piece = pieceSpan(run.value.slice(a, b), sliceBounds(run.bounds, a, b), run.bare);
       if (!key) pieces.push(piece);
       else {
         const first = [...perChar[a]!].some((id) => !focusable.has(id));
@@ -196,13 +234,15 @@ function highlightPassages(runs: Run[], source: string, highlights: Highlight[])
  * source (`data-source-start`), when that is known for certain: each of its characters can be tied to
  * the stretch it was parsed from, skipping what Markdown dropped (`data-source-map`, as `encodeBounds`
  * writes it), or, for code, the text is found exactly once inside that stretch, as inside its
- * backticks. Inline elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
+ * backticks. A code block's lines are tied past the prefixes of the blockquotes and list items around
+ * it. Inline elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
  * every run of their text was parsed from inside it; a code block's fences are left out of it.
  * Then it highlights `highlights` (see `highlightPassages`).
  */
 function markSourceAndHighlights(source: string, highlights: Highlight[]) {
   const runs: Run[] = [];
-  const mark = (node: HastNode, parent?: HastNode): HastNode => {
+  const mark = (node: HastNode, ancestors: HastNode[]): HastNode => {
+    const parent = ancestors[ancestors.length - 1];
     if (node.type !== "text") {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
@@ -210,48 +250,41 @@ function markSourceAndHighlights(source: string, highlights: Highlight[]) {
       if (inline && start !== undefined && end !== undefined && textWithin(node, start, end)) {
         node.properties = { ...node.properties, dataMarkupStart: start, dataMarkupEnd: end };
       }
-      node.children = node.children?.map((child) => mark(child, node));
+      node.children = node.children?.map((child) => mark(child, [...ancestors, node]));
       return node;
     }
     const value = node.value ?? "";
-    const start = node.position?.start.offset;
-    const end = node.position?.end.offset;
-    if (start === undefined || end === undefined) {
+    // A code block's text carries no place of its own; its `code` element does.
+    const codeBlock = parent?.tagName === "code" && ancestors[ancestors.length - 2]?.tagName === "pre";
+    const span = spanOf(codeBlock ? parent : node);
+    if (!span) {
       // Whitespace the renderer puts between blocks is no text of the Document's own.
       if (value.trim()) runs.push({ kind: "unmapped" });
       return node;
     }
-    const bounds = alignToSource(value, source, start, end);
     if (!value.trim()) {
       // Whitespace between inline elements is left as it is, but a highlight may run through it.
-      if (bounds) {
-        const wrapper: HastNode = { type: "text", value };
-        runs.push({ kind: "mapped", value, bounds, wrapper, bare: true });
-        return wrapper;
-      }
-      return node;
-    }
-    if (bounds) {
-      const wrapper = sourceSpan(value, bounds, false);
-      runs.push({ kind: "mapped", value, bounds, wrapper, bare: false });
+      const bounds = codeBlock ? undefined : alignToSource(value, source, span.start, span.end);
+      if (!bounds) return node;
+      const wrapper: HastNode = { type: "text", value };
+      runs.push({ kind: "mapped", value, bounds, wrapper, bare: true });
       return wrapper;
     }
-    // Code shows its Markdown as it is, inside backticks or fences the run's stretch includes.
-    const stretch = source.slice(start, end);
-    const at = stretch.indexOf(value);
-    if (parent?.tagName !== "code" || at < 0 || stretch.indexOf(value, at + 1) >= 0) {
-      runs.push({ kind: "unmapped", from: start, to: end });
+    const bounds = codeBlock
+      ? codeBounds(value, parent, ancestors, source)
+      : // Inline code shows its Markdown as it is, inside backticks the run's stretch includes.
+        (alignToSource(value, source, span.start, span.end) ?? (parent?.tagName === "code" ? verbatimBounds(value, span, source) : undefined));
+    if (!bounds) {
+      runs.push({ kind: "unmapped", from: span.start, to: span.end });
       return node;
     }
-    const offsets = Array.from({ length: value.length + 1 }, (_, k) => start + at + k);
-    const codeBounds = { starts: offsets, ends: offsets };
-    const wrapper = sourceSpan(value, codeBounds, false);
-    runs.push({ kind: "mapped", value, bounds: codeBounds, wrapper, bare: false });
+    const wrapper = sourceSpan(node, bounds.ends[0]!, bounds);
+    runs.push({ kind: "mapped", value, bounds, wrapper, bare: false });
     return wrapper;
   };
   return () => (tree: HastNode) => {
     runs.length = 0;
-    mark(tree);
+    mark(tree, []);
     if (highlights.length > 0) highlightPassages(runs, source, highlights);
   };
 }
