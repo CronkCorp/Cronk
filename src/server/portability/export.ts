@@ -3,7 +3,8 @@ import { STATUS_CATEGORIES } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { Folder } from "./archive.js";
 import { writeFrontmatter } from "./frontmatter.js";
-import { FORMAT, README, slug, type ActorRef } from "./format.js";
+import { CHANGE_FIELDS, FORMAT, README, isRecord, slug, type ActorRef } from "./format.js";
+import type { TicketChange } from "../work/tickets.js";
 
 /**
  * Exporting the Workspace or one Project as a folder of Markdown files with YAML frontmatter
@@ -160,10 +161,11 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
 
   for (const p of projects) {
     const dir = `projects/${p.key}`;
-    const { rows: statuses } = await db.query<{ name: string; category: string }>(
-      `SELECT name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
+    const { rows: statuses } = await db.query<{ id: string; name: string; category: string }>(
+      `SELECT id, name, category FROM statuses WHERE project_id = $1 ORDER BY array_position($2::text[], category), position`,
       [p.id, STATUS_CATEGORIES],
     );
+    const statusNow = new Map(statuses.map((s) => [s.id, s.name]));
     const { rows: members } = await db.query<{ user_id: string; access: string }>(
       "SELECT m.user_id, m.access FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY lower(u.email)",
       [p.id],
@@ -176,7 +178,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
       archivedAt: iso(p.archived_at),
       createdAt: iso(p.created_at),
       nextTicketNumber: p.next_ticket_number,
-      statuses,
+      statuses: statuses.map(({ name, category }) => ({ name, category })),
       members: members.map((m) => ({ user: user(m.user_id), access: m.access })),
     });
     await writeGuidance(`${dir}/guidance`, p.id);
@@ -263,6 +265,14 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
         );
       }
 
+      const { rows: changes } = await db.query<ActorColumns & { at: Date; change: TicketChange["change"]; data: Record<string, unknown> }>(
+        "SELECT * FROM ticket_changes WHERE ticket_id = $1 ORDER BY id",
+        [t.id],
+      );
+      add(`${base}.history.md`, {
+        changes: changes.map((c) => ({ at: iso(c.at), by: actor(c), change: c.change, ...changeToExport(c.change, c.data, emailOf, statusNow) })),
+      });
+
       const { rows: reports } = await db.query<{ id: string; title: string; body: string; version: number; created_at: Date; updated_at: Date; claim_id: string }>(
         "SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id",
         [t.id],
@@ -298,6 +308,18 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
 
   // README first, then people, so someone opening the archive reads them first.
   return new Map([...folder].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/** A Ticket change's fields as the export writes them (see `CHANGE_FIELDS`): a User with their `email`, a Status with its `current` name. */
+function changeToExport(change: TicketChange["change"], data: Record<string, unknown>, emailOf: Map<string, string>, statusNow: Map<string, string>): Record<string, unknown> {
+  const written = { ...data };
+  for (const [field, { holds }] of Object.entries(CHANGE_FIELDS[change])) {
+    const ref = data[field];
+    if (!isRecord(ref)) continue;
+    if (holds === "user") written[field] = { ...ref, email: emailOf.get(String(ref.id)) };
+    if (holds === "status") written[field] = { ...ref, current: statusNow.get(String(ref.id)) };
+  }
+  return written;
 }
 
 const rank = (path: string) => (path === "README.md" ? 0 : path === "people.md" ? 1 : 2);
