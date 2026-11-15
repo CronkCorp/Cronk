@@ -1,4 +1,4 @@
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
@@ -126,6 +126,19 @@ export function forgetProjectKeys(): void {
 }
 
 /**
+ * How rendered Markdown shows its elements. Defined once, not per render: a new component each render
+ * would remount every link, and a selection ending inside one would lose its end.
+ */
+const COMPONENTS: Components = {
+  a: ({ href, children }) =>
+    href?.startsWith("/") ? (
+      <Link to={href} className="link">{children}</Link>
+    ) : (
+      <a href={href} className="link">{children}</a>
+    ),
+};
+
+/**
  * Renders Cronk Markdown: CommonMark plus Ticket references as links. With `sourceOffsets`, each run of
  * text says where it sits in the Markdown, so a selection can be read back as the Markdown it shows.
  */
@@ -136,14 +149,7 @@ export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean
     <Markdown
       remarkPlugins={[linkTicketReferences(known, props.children)]}
       rehypePlugins={props.sourceOffsets ? [markSourceOffsets(props.children)] : []}
-      components={{
-        a: ({ href, children }) =>
-          href?.startsWith("/") ? (
-            <Link to={href} className="link">{children}</Link>
-          ) : (
-            <a href={href} className="link">{children}</a>
-          ),
-      }}
+      components={COMPONENTS}
     >
       {props.children}
     </Markdown>
