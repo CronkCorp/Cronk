@@ -14,7 +14,7 @@ import {
   type Version,
   watchDocument,
 } from "./api.js";
-import { ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown, type Highlight } from "./markdown.js";
@@ -421,7 +421,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
  */
 function EditDocument(props: { document: Document; newerVersion: number | undefined; onSaved: (d: Document) => void; onCancel: () => void }) {
   const id = props.document.id;
-  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+  const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
     draft: { title: props.document.title, text: props.document.body },
     baseVersion: props.document.version,
     save: (d, baseVersion) => api.saveDocument(id, { baseVersion, title: d.title, body: d.text }),
@@ -439,30 +439,36 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
   });
 
   return (
-    <section className="panel wide">
+    <>
+      <div className="page-head">
+        <h1>{props.document.title}</h1>
+      </div>
       {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile document={props.document} version={props.newerVersion} />}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
       ) : (
-        <form onSubmit={save}>
-          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
-          <MarkdownEditor
-            label="Body (Markdown)"
-            value={draft.text}
-            onChange={(text) => setDraft((d) => ({ ...d, text }))}
-            disabled={busy}
-            projectKey={props.document.projectKey}
-          />
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="actions">
-            <Button type="submit" disabled={busy}>Save</Button>
-            <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
-          </div>
-        </form>
+        <section className="panel wide">
+          <form onSubmit={save}>
+            {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+            <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
+            <MarkdownEditor
+              label="Body (Markdown)"
+              value={draft.text}
+              onChange={(text) => setDraft((d) => ({ ...d, text }))}
+              disabled={busy}
+              projectKey={props.document.projectKey}
+            />
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={busy}>Save</Button>
+              <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+              {discardMine && <DiscardMine {...discardMine} />}
+            </div>
+          </form>
+        </section>
       )}
-    </section>
+    </>
   );
 }
 
@@ -474,13 +480,15 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
   const { id, version: started } = props.document;
   const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
   return (
-    <div className="merged" role="status">
+    <div className="banner warn" role="status">
       <Show state={versions}>
         {([base, theirs]) => (
           <>
             <p>
-              <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}. Saving
-              merges their changes into yours.
+              <strong>
+                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
+              </strong>{" "}
+              Saving merges their changes into yours.
             </p>
             <details>
               <summary>See what they changed</summary>

@@ -1,4 +1,5 @@
 import { Button } from "./components/button.js";
+import { Chip } from "./components/tags.js";
 import { Actor, type ActorLike } from "./components/actor.js";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
@@ -23,32 +24,53 @@ export interface SavedText {
  */
 export type MergeStage = "conflict" | "merged" | "resolved" | "behind";
 
-const STAGE_ADVICE: Record<MergeStage, string> = {
-  conflict: "You both changed the same part; choose or combine below, then save.",
-  merged: "Their changes touched other sections and are merged into yours below; check them and save again.",
-  resolved: "Your choices are merged into your draft below; check it and save again.",
-  behind: "Your draft is still behind theirs; save again to merge them.",
-};
+/** What the banner advises at each stage; `choices` counts the parts that need a choice. */
+function stageAdvice(stage: MergeStage, choices: number): string {
+  switch (stage) {
+    case "conflict":
+      return `${choices} ${choices === 1 ? "section needs" : "sections need"} your choice; the rest merged cleanly. Choose or combine below, then save.`;
+    case "merged":
+      return "Their changes touched other sections and are merged into yours below; check them and save again.";
+    case "resolved":
+      return "Your choices are merged into your draft below; check it and save again.";
+    case "behind":
+      return "Your draft is still behind theirs; save again to merge them.";
+  }
+}
 
 /**
- * Tells the User their save was refused because `by` saved `theirs` since `base`, shows what they
- * changed, and offers to drop the draft and edit their Version instead (not while `disabled`, as during a save).
+ * The information banner telling the User their save was refused because `by` saved `theirs` since
+ * `base`, and what to do next. Outside a conflict, their changes follow, folded; while one is
+ * settled, `ResolveMerge` shows them instead.
  */
-export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
+export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs: SavedText; stage: MergeStage; choices: number }) {
   const { base, theirs } = props;
   return (
-    <div className={props.stage === "conflict" ? "conflict" : "merged"} role="alert">
-      <p>
-        <Actor actor={props.by} /> saved Version {theirs.number} while you were editing, so your save was not made. {STAGE_ADVICE[props.stage]}
-      </p>
-      <details open={props.stage === "conflict"}>
-        <summary>Their changes (Version {base.number} to {theirs.number})</summary>
-        <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
-      </details>
-      <div className="actions">
-        <Button type="button" variant="secondary" onClick={props.onDiscardMine} disabled={props.disabled}>Discard mine and edit theirs</Button>
+    <>
+      <div className="banner info" role="alert">
+        <p>
+          <strong>
+            <Actor actor={props.by} /> saved Version {theirs.number} while you were editing, so your save was not made.
+          </strong>{" "}
+          {stageAdvice(props.stage, props.choices)}
+        </p>
       </div>
-    </div>
+      {props.stage !== "conflict" && (
+        <details className="folded-diff">
+          <summary>Their changes (Version {base.number} to {theirs.number})</summary>
+          <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+        </details>
+      )}
+    </>
+  );
+}
+
+/** Drops the User's draft for the Version someone saved meanwhile; it sits in the editor's action row. */
+export function DiscardMine(props: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <Button type="button" variant="secondary" onClick={props.onClick} disabled={props.disabled}>
+      Discard mine and edit theirs
+    </Button>
   );
 }
 
@@ -86,8 +108,8 @@ interface OtherEdit extends Pick<StaleMerge, "base" | "theirs" | "by"> {
  * section by section, leaving sections both changed differently for the User to choose or combine.
  * Documents and Guidance share it; each passes its own save and merge calls, adapted to a `Draft`.
  * The merge call runs once per refused save and may also tell the page what the Version now is.
- * Hands back the draft, the save handler, and the props for `StaleSaveNotice` and `ResolveMerge`
- * while there is a refused save to settle.
+ * Hands back the draft, the save handler, and the props for `StaleSaveNotice`, `ResolveMerge` and
+ * `DiscardMine` while there is a refused save to settle.
  */
 export function useStaleSave<D extends Draft, T>(options: {
   draft: D;
@@ -154,43 +176,54 @@ export function useStaleSave<D extends Draft, T>(options: {
     base: other.base,
     theirs: other.theirs,
     stage: resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged",
-    onDiscardMine: () => takeTheirs(other.theirs),
-    disabled: busy,
+    choices: resolving ? conflictCount(resolving.merge) : 0,
   };
-  const resolve: Parameters<typeof ResolveMerge>[0] | undefined = resolving && {
-    merge: resolving.merge,
-    onResolved: (resolved) => {
-      replaceDraft(resolved.body, resolved.title);
-      setBase(resolving.onto);
-      setResolving(undefined);
-    },
-    onBack: backToDraft,
-  };
+  /** Drops the draft for their Version, while someone else's save is in the way; not while saving. */
+  const discardMine = other && { onClick: () => takeTheirs(other.theirs), disabled: busy };
+  const resolve: Parameters<typeof ResolveMerge>[0] | undefined = resolving &&
+    other && {
+      merge: resolving.merge,
+      mine: draft.text,
+      theirsLabel: `${other.by.name}, Version ${other.theirs.number}`,
+      onResolved: (resolved) => {
+        replaceDraft(resolved.body, resolved.title);
+        setBase(resolving.onto);
+        setResolving(undefined);
+      },
+      onBack: backToDraft,
+      onDiscardMine: () => takeTheirs(other.theirs),
+    };
 
-  return { draft, setDraft, save, busy, error, notice, resolve };
+  return { draft, setDraft, save, busy, error, notice, resolve, discardMine };
 }
 
-/** One conflicting part: base, mine and theirs side by side, and the text to keep, which starts as mine. */
-function ConflictChoice(props: { label: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
+/**
+ * One conflicting part as a panel: the User's side and theirs next to each other, buttons to take
+ * either or both, and the text to keep, which starts as the User's own.
+ */
+function ConflictChoice(props: { label: string; theirsLabel: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
   const c = props.conflict;
   const side = (name: string, text: string | null) => (
-    <div className="side">
-      <span className="muted">{name}</span>
-      <pre className="theirs">{text ?? "(removed)"}</pre>
-    </div>
+    <section className="merge-side" aria-label={name}>
+      <span className="merge-side-name">{name}</span>
+      <pre>{text ?? "(removed)"}</pre>
+    </section>
   );
   return (
     <section className="merge-conflict" aria-label={props.label}>
-      <h3>{props.label}</h3>
-      <div className="sides">
-        {side("Before", c.base)}
-        {side("Mine", c.mine)}
-        {side("Theirs", c.theirs)}
+      <div className="merge-conflict-head">
+        <h3>{props.label}</h3>
+        <Chip tone="danger">Both changed</Chip>
       </div>
-      <div className="actions">
+      <div className="merge-sides">
+        {side("Yours", c.mine)}
+        {side(props.theirsLabel, c.theirs)}
+      </div>
+      <div className="actions merge-choices">
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</Button>
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</Button>
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>
+        <span className="muted">or edit below</span>
       </div>
       <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
     </section>
@@ -204,30 +237,59 @@ interface Mergeable {
   sections: MergedSection[];
 }
 
+/** How many parts of a merge, its title included, need the User's choice. */
+function conflictCount(m: Mergeable): number {
+  return (m.titleConflict ? 1 : 0) + m.sections.filter((s) => s.conflict).length;
+}
+
 /**
  * Lets the User settle each conflict of a merge, then hands back the merged title (empty without one) and body.
- * `onBack` leaves without settling, back to the User's own draft.
+ * What merged cleanly shows as a folded diff from `mine`, the User's draft; `theirsLabel` names the other side.
+ * `onBack` leaves without settling, back to the User's own draft; `onDiscardMine` takes their Version instead.
  */
-export function ResolveMerge(props: { merge: Mergeable; onResolved: (r: { title: string; body: string }) => void; onBack: () => void }) {
+export function ResolveMerge(props: {
+  merge: Mergeable;
+  mine: string;
+  theirsLabel: string;
+  onResolved: (r: { title: string; body: string }) => void;
+  onBack: () => void;
+  onDiscardMine: () => void;
+}) {
   const m = props.merge;
   const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
-  const [kept, setKept] = useState<string[]>(m.sections.map((s) => s.text ?? s.conflict?.mine ?? ""));
+  const initial = m.sections.map((s) => s.text ?? s.conflict?.mine ?? "");
+  const [kept, setKept] = useState<string[]>(initial);
   const keep = (i: number, text: string) => setKept(kept.map((k, at) => (at === i ? text : k)));
   const sectionName = (s: MergedSection) => s.heading ?? (m.sections.length === 1 ? "The whole text" : "Before the first heading");
+  const clean = m.sections.filter((s) => !s.conflict).length;
+  // Mine with every clean section merged in: what merging cleanly changed in the User's draft.
+  const cleanlyMerged = initial.join("");
   return (
     <form
+      className="resolve-merge"
       onSubmit={(event) => {
         event.preventDefault();
         props.onResolved({ title, body: kept.join("") });
       }}
     >
-      {m.titleConflict && <ConflictChoice label="Title" conflict={m.titleConflict} value={title} onChange={setTitle} rows={1} />}
+      {m.titleConflict && (
+        <ConflictChoice label="Title" theirsLabel={props.theirsLabel} conflict={m.titleConflict} value={title} onChange={setTitle} rows={1} />
+      )}
       {m.sections.map((s, i) =>
-        s.conflict ? <ConflictChoice key={i} label={sectionName(s)} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} /> : null,
+        s.conflict ? (
+          <ConflictChoice key={i} label={sectionName(s)} theirsLabel={props.theirsLabel} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} />
+        ) : null,
+      )}
+      {cleanlyMerged !== props.mine && (
+        <details className="folded-diff" aria-label="Merged cleanly">
+          <summary>Merged cleanly ({clean} {clean === 1 ? "section" : "sections"})</summary>
+          <VersionDiff before={{ body: props.mine }} after={{ body: cleanlyMerged }} label="Changes merged cleanly into yours" />
+        </details>
       )}
       <div className="actions">
         <Button type="submit">Use these and keep editing</Button>
         <Button type="button" variant="secondary" onClick={props.onBack}>Back to my draft</Button>
+        <DiscardMine onClick={props.onDiscardMine} />
       </div>
     </form>
   );

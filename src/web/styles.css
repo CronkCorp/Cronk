@@ -167,7 +167,6 @@ a.link:hover { text-decoration: underline; }
 .comment-form { margin-top: 12px; }
 .history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .guidance .actions { margin: 12px 0; }
-.conflict { border: 1px solid var(--danger); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
 .filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
@@ -211,12 +210,7 @@ a.link:hover { text-decoration: underline; }
 .page-tree .depth-6 { padding-left: 134px; }
 .versions .version { display: flex; align-items: center; gap: 8px; }
 .version-view { margin-top: 12px; }
-.conflict { border: 1px solid var(--danger); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-.conflict p { margin: 0 0 8px; }
-.theirs { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 14px; }
 
-.merged { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-.merged p { margin: 0 0 8px; }
 .compare { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 12px; }
 .compare .field { margin-bottom: 0; }
 .diff-lines { list-style: none; margin: 8px 0 0; padding: 8px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-family: var(--font-mono); font-size: 13px; max-height: 420px; overflow: auto; }
@@ -224,10 +218,30 @@ a.link:hover { text-decoration: underline; }
 .diff-added { background: var(--ok-soft); }
 .diff-removed { background: var(--danger-soft); }
 .diff-fold { font-style: italic; }
-.merge-conflict { border: 1px solid var(--danger); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-.merge-conflict h3 { margin: 0 0 8px; }
-.merge-conflict .sides { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.merge-conflict .side { flex: 1 1 200px; min-width: 0; }
+
+/* Banners above an editor: docs/ui.md § Document. Information (a merge to settle) and warnings (a newer Version saved meanwhile). */
+.banner { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; font-size: 13px; }
+.banner p { margin: 0; }
+.banner details { margin-top: 6px; }
+.banner summary { color: var(--accent); cursor: pointer; }
+.banner.info { background: var(--info-soft); border-color: var(--info); }
+.banner.warn { background: var(--warn-soft); border-color: var(--warn); }
+.folded-diff { margin-bottom: 16px; }
+.folded-diff summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+/* Settling a merge: each conflicting part a panel, the User's side and theirs next to each other. */
+.resolve-merge { display: flex; flex-direction: column; }
+.merge-conflict { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px; }
+.merge-conflict .field { margin-bottom: 0; }
+.merge-conflict-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.merge-conflict-head h3 { margin: 0; font-family: var(--font-mono); font-size: 13px; }
+.merge-sides { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.merge-side { flex: 1 1 240px; min-width: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.merge-side + .merge-side { border-left: 1px solid var(--border); }
+.merge-side-name { font-size: 12px; color: var(--muted); }
+.merge-side pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 240px; overflow: auto; }
+.merge-choices { align-items: center; }
+.merge-choices .muted { font-size: 12px; }
 
 .search-box input { font: inherit; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); width: 200px; }
 .search-box input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -306,6 +320,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .priority.medium { color: var(--warn); background: var(--warn-soft); }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; padding: 1px 8px; border-radius: 4px; background: var(--surface-2); color: var(--text); vertical-align: middle; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); border-radius: 999px; }
 .chip-remove { background: none; border: none; color: var(--muted); padding: 0 2px; line-height: 1; cursor: pointer; font: inherit; }
 
 /* Radix overlays (popover, menu, dialog) and tabs: styled here, behaviour from Radix. Shadows are for these only. */

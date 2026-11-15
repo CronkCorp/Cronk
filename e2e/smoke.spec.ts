@@ -549,6 +549,54 @@ test("highlight a repeated passage once, and list passages that can't be placed 
   await expect(cards.nth(1).locator("blockquote")).toHaveCSS("text-decoration-line", "line-through");
 });
 
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("settle a stale save by using their side of the conflict", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const original = "## Setup\n\nInstall it.\n\n## Limits\n\nFive per minute.\n";
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Rate limits", body: original } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Title").fill("Rate limits per IP");
+  await page.getByLabel("Body (Markdown)").fill("## Setup\n\nInstall it.\n\n## Limits\n\nFive per minute, sliding.\n");
+  const theirs = "## Setup\n\nInstall it with npm.\n\n## Limits\n\nFive per email and fifty per IP.\n";
+  expect((await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: theirs } })).status()).toBe(200);
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // An information banner, under the Document's title, says who saved which Version and what needs a choice.
+  await expect(page.getByRole("heading", { name: "Rate limits" })).toBeVisible();
+  const banner = page.getByRole("alert");
+  await expect(banner).toContainText("Ada saved Version 2 while you were editing");
+  await expect(banner).toContainText("1 section needs your choice");
+  await expect(banner).toHaveClass(/banner info/);
+  // The conflict shows both sides next to each other; the section that merged cleanly is folded.
+  const limits = page.getByRole("region", { name: "## Limits" });
+  await expect(limits.getByText("Both changed")).toBeVisible();
+  const yours = limits.getByRole("region", { name: "Yours" });
+  const theirSide = limits.getByRole("region", { name: "Ada, Version 2" });
+  await expect(yours).toContainText("Five per minute, sliding.");
+  await expect(theirSide).toContainText("Five per email and fifty per IP.");
+  expect((await theirSide.boundingBox())!.x).toBeGreaterThan((await yours.boundingBox())!.x);
+  const clean = page.getByRole("group", { name: "Merged cleanly" });
+  await expect(clean.getByRole("list")).toBeHidden();
+  await clean.getByText("Merged cleanly").click();
+  await expect(clean).toContainText("+ Install it with npm.");
+  await expect(page.getByRole("button", { name: "Discard mine and edit theirs" })).toBeVisible();
+
+  await limits.getByRole("button", { name: "Use theirs" }).click();
+  await expect(limits.getByLabel("Keep for ## Limits")).toHaveValue("## Limits\n\nFive per email and fifty per IP.\n");
+  await page.getByRole("button", { name: "Use these and keep editing" }).click();
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue(theirs);
+  await page.getByRole("button", { name: "Save" }).click();
+  // Their body is kept, with the title only this edit changed.
+  await expect(page.getByRole("heading", { name: "Rate limits per IP" })).toBeVisible();
+  await expect(page.getByTestId("document-body")).toContainText("Five per email and fifty per IP.");
+  expect((await (await page.request.get(`/api/documents/${document.id}`)).json()).document.version).toBe(3);
+});
+
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
 test("link a Document to a Ticket from the Ticket's page, then unlink it", async ({ page }) => {
   await page.goto("/");
