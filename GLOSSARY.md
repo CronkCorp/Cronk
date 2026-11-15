@@ -53,7 +53,7 @@ A User's after-the-fact judgement on a Ticket an Agent completed: Unverified unt
 _Avoid_: Approval, sign-off, QA
 
 **Send back**:
-A User's return of a Ticket In Review to its Delegate, with a Comment saying what is left to do. The Ticket moves back to a Started Status and the Comment waits for the Delegate. Unlike Reopen, which undoes an Unverified completion, Send back acts before anything was completed.
+A User's return of a Ticket In Review to its Delegate and a Started Status, with a Comment saying what is left to do.
 _Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
@@ -81,7 +81,7 @@ One timestamped entry an Agent Session writes on a Ticket while working: a plan,
 _Avoid_: Log line, event, comment, thought
 
 **Change**:
-One recorded change to a Ticket's fields (Status, Priority, Assignee, Delegate, Labels or Relations) by an Actor, shown in the Ticket's timeline.
+One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or Relations, or its creation, shown in the Ticket's timeline.
 _Avoid_: Event, history entry, field change
 
 **Comment**:
@@ -111,7 +111,7 @@ A code repository on an external Git host that a Project lists as holding its co
 _Avoid_: Repo (in the product), codebase, source
 
 **Pull Request**:
-A proposed code change on a Git host, linked to one or more Tickets. Covers GitLab's merge requests too.
+A proposed edit to code on a Git host, linked to one or more Tickets. Covers GitLab's merge requests too.
 _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's Changes)
 
 ### Knowledge

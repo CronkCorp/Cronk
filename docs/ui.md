@@ -139,7 +139,7 @@ Follow-up: #110.
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
-  - **Comment:** the body in a bordered bubble, with replies indented under it. A send-back Comment is labelled `SENT BACK`.
+  - **Comment:** the body in a bordered bubble, with replies indented under it. The Comment of a Send back is labelled `SENT BACK`.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
   - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review".
 - **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
