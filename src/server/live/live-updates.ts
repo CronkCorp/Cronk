@@ -112,7 +112,7 @@ export class LiveUpdates {
       if (!open) return;
       open = false;
       unsubscribe();
-      clearInterval(heartbeat);
+      clearInterval(beating);
       this.streams.delete(end);
       this.heartbeats.delete(beat);
       res.end();
@@ -137,7 +137,7 @@ export class LiveUpdates {
       checked(() => res.write(": keep-alive\n\n"));
       return queue;
     };
-    const heartbeat = setInterval(beat, HEARTBEAT_MS).unref();
+    const beating = setInterval(beat, HEARTBEAT_MS).unref();
     this.streams.add(end);
     this.heartbeats.add(beat);
     res.on("close", end);
