@@ -130,22 +130,25 @@ describe("Workspace Document access", () => {
 });
 
 describe("Deleting a Document", () => {
-  it("is refused to Agents with Write, in a Project or the Workspace, and allowed to Users", async () => {
-    const { cronk, admin, id, unchanged } = await projectDocument();
-    const handbook: string = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "v1" })).body.document.id;
+  it("is refused to Agents, even on Documents they wrote, in a Project or the Workspace, and allowed to Users", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     const claude = await agentOf(cronk, admin, "claude-laptop");
+    const written: string[] = [
+      (await claude.post("/api/projects/CRONK/documents", { title: "Notes", body: "v1" })).body.document.id,
+      (await claude.post("/api/workspace/documents", { title: "Handbook", body: "v1" })).body.document.id,
+    ];
 
-    for (const doc of [id, handbook]) {
-      const refused = await claude.delete(`/api/documents/${doc}?baseVersion=1`);
+    for (const documentId of written) {
+      const refused = await claude.delete(`/api/documents/${documentId}?baseVersion=1`);
       expect(refused.status).toBe(403);
       expect(refused.body.error).toMatch(/only a User may delete/);
-      expect((await admin.get(`/api/documents/${doc}`)).status).toBe(200);
+      expect((await admin.get(`/api/documents/${documentId}`)).body.document).toMatchObject({ body: "v1", version: 1 });
     }
-    await unchanged();
 
-    for (const doc of [id, handbook]) {
-      expect((await admin.delete(`/api/documents/${doc}?baseVersion=1`)).status).toBe(204);
-      expect((await admin.get(`/api/documents/${doc}`)).status).toBe(404);
+    for (const documentId of written) {
+      expect((await admin.delete(`/api/documents/${documentId}?baseVersion=1`)).status).toBe(204);
+      expect((await admin.get(`/api/documents/${documentId}`)).status).toBe(404);
     }
   });
 });

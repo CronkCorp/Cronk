@@ -205,7 +205,7 @@ _Avoid_: Trigger, callback, wake-up hook
 ### Access
 
 **Agent Access**:
-The most a Project (or the Workspace) lets Agents do in it: None, Read or Write. An Agent never gets more than its Owner has, or than its token allows.
+The most a Project (or the Workspace) lets Agents do in it: None, Read or Write. Even with Write, only a User may delete a Document. An Agent never gets more than its Owner has, or than its token allows.
 _Avoid_: AI permissions, bot role, agent scope
 
 **Token**:
