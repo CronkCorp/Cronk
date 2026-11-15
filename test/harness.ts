@@ -149,6 +149,8 @@ export class EventStream {
   private buffer = "";
   private readonly reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   private readonly decoder = new TextDecoder();
+  /** A read still waiting when `next` last gave up, which the next call waits on instead of losing what it brings. */
+  private reading: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
 
   constructor(
     res: globalThis.Response,
@@ -158,7 +160,10 @@ export class EventStream {
     this.reader = res.ok ? res.body!.getReader() : undefined;
   }
 
-  /** The next event, skipping comments; null once the server ends the stream. Fails if none comes within `timeoutMs`. */
+  /**
+   * The next event, skipping comments; null once the server ends the stream. Fails if none comes within `timeoutMs`,
+   * in which case a later call still gets the event that comes after.
+   */
   async next(timeoutMs = 5_000): Promise<ServerEvent | null> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -174,10 +179,12 @@ export class EventStream {
         return { event: field("event") ?? "message", data: data === undefined ? undefined : JSON.parse(data), ...(id !== undefined && { id }) };
       }
       if (!this.reader) return null;
+      this.reading ??= this.reader.read().catch(() => ({ done: true as const, value: undefined }));
       const read = await Promise.race([
-        this.reader.read().catch(() => ({ done: true as const, value: undefined })),
+        this.reading,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("No server-sent event came in time")), Math.max(0, deadline - Date.now()))),
       ]);
+      this.reading = undefined;
       if (read.done) return null;
       this.buffer += this.decoder.decode(read.value, { stream: true });
     }

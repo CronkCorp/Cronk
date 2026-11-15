@@ -20,7 +20,7 @@ import { documentLinkRoutes } from "./work/document-link-routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
-import { watchClaimLapses } from "./coordination/lapses.js";
+import { watchSilence } from "./coordination/lapses.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -65,7 +65,7 @@ export async function buildApp(opts: {
 
   // Open live-update streams would otherwise keep the server from closing.
   app.addHook("preClose", async () => ctx.live.close());
-  const stopWatchingLapses = watchClaimLapses(ctx, opts.lapseCheckMs ?? 5_000);
+  const stopWatchingLapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
   app.addHook("onClose", async () => {
     stopWatchingLapses();
     await db.end();

@@ -393,6 +393,9 @@ function watch<Events>(
 /** Watches the signed-in User's Inbox; `changed` arrives whenever it may have changed (see `watch`). */
 export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/inbox/events", handlers);
 
+/** Watches the signed-in User's own Agents; `changed` arrives every few seconds while their live Agent Sessions change (see `watch`). */
+export const watchAgents = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/agents/events", handlers);
+
 /** Watches one Ticket's changes as they happen (see `watch`). */
 export const watchTicket = (key: string, handlers: Parameters<typeof watch<TicketEvents>>[1]) =>
   watch<TicketEvents>(`/api/tickets/${encodeURIComponent(key)}/events`, handlers);
