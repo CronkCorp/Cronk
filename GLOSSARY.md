@@ -49,8 +49,12 @@ The Document of findings an Agent writes on a Ticket it worked on, with supporti
 _Avoid_: Summary, write-up, result
 
 **Verification**:
-A User's after-the-fact judgement on a Ticket an Agent completed: Unverified until a User either Accepts it (Verified) or Reopens it back to the Delegate.
+A User's after-the-fact judgement on a Ticket an Agent completed: Unverified until a User either Accepts it (Verified) or Reopens it back to the Delegate. Reopen applies only to an Unverified completion; work still In Review goes back by Send back instead.
 _Avoid_: Approval, sign-off, QA
+
+**Send back**:
+A User's return of a Ticket In Review to its Delegate, with a Comment saying what is left to do. The Ticket moves back to a Started Status and the Comment waits for the Delegate. Unlike Reopen, which undoes an Unverified completion, Send back acts before anything was completed.
+_Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
 A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on. It waits in Backlog until a User delegates it, and may block other Tickets meanwhile.
@@ -75,6 +79,10 @@ _Avoid_: Dependency, link (as the term)
 **Activity**:
 One timestamped entry an Agent Session writes on a Ticket while working: a plan, progress, finding, question or error. Activities also keep the Agent Session's Claim alive.
 _Avoid_: Log line, event, comment, thought
+
+**Change**:
+One recorded change to a Ticket's fields (Status, Priority, Assignee, Delegate, Labels or Relations) by an Actor, shown in the Ticket's timeline.
+_Avoid_: Event, history entry, field change
 
 **Comment**:
 A message any Actor posts on a Ticket or Document, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. Conversation, as opposed to an Agent's own Activities.
@@ -104,7 +112,7 @@ _Avoid_: Repo (in the product), codebase, source
 
 **Pull Request**:
 A proposed code change on a Git host, linked to one or more Tickets. Covers GitLab's merge requests too.
-_Avoid_: Merge request, MR, PR (in the product), change
+_Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's Changes)
 
 ### Knowledge
 

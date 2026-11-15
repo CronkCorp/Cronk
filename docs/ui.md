@@ -8,7 +8,7 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
 
 - **What waits on the User comes first.** Blocking questions before other questions, questions before reviews, unread before read. Counts in the navigation say how much is waiting.
 - **Agents and Users always look different.** A User's avatar is round and neutral. An Agent's is square and violet (`--agent`), and its name is violet wherever it appears. An Agent's Agent Session appears next to it in the mono face.
-- **One chronology per thing.** A Ticket has one timeline, which also holds its field changes. There is no separate History list.
+- **One chronology per thing.** A Ticket has one timeline, which also holds its Changes. There is no separate History list.
 - **Kinds are labelled, not just coloured.** Every Activity, Comment and Report carries a small uppercase kind label (`PLAN`, `BLOCKING QUESTION`, `REPORT`). Colour backs the label up and never replaces it.
 - **Live, in place.** Open views update without a reload and without moving what the User is reading (see [Live updates](#live-updates)).
 - **Product words only.** Labels use glossary terms ("Send back", "Claim", "Delegate"), never API words ("PATCH", "statusId").
@@ -141,7 +141,7 @@ Follow-up: #110.
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
   - **Comment:** the body in a bordered bubble, with replies indented under it. A send-back Comment is labelled `SENT BACK`.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
-  - **Field change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review".
+  - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review".
 - **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
 
 ![Ticket, dark](ui/ticket-dark.png)
