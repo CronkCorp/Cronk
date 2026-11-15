@@ -41,18 +41,11 @@ class HoldableLiveUpdates extends LiveUpdates {
 /** A clock tests control. Starts at a fixed instant and only moves when told to. */
 export class FakeClock implements Clock {
   private current: Date;
-  private step = 0;
   constructor(start = new Date("2026-01-01T09:00:00Z")) {
     this.current = start;
   }
   now(): Date {
-    const now = new Date(this.current);
-    this.advance(this.step);
-    return now;
-  }
-  /** Moves the clock on by `ms` after every read from now on, as a real clock moves within a request; 0 stops it. */
-  tickEachRead(ms: number): void {
-    this.step = ms;
+    return new Date(this.current);
   }
   advance(ms: number): void {
     this.current = new Date(this.current.getTime() + ms);
