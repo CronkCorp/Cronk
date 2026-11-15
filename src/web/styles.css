@@ -124,7 +124,7 @@ h3 { font-size: 14px; font-weight: 600; }
   .search-box { flex: 1 1 100%; }
   .nav-main { flex-direction: row; flex-wrap: wrap; gap: 4px; }
   .sidebar-more, .sidebar-user { display: none; }
-  /* Until the page heads are reworked (#110), their action bars and tabs wrap rather than push the page sideways. */
+  /* Page-head action bars and tabs wrap rather than push the page sideways. */
   .actions, .tabs { flex-wrap: wrap; }
 }
 
@@ -164,9 +164,14 @@ a.link:hover { text-decoration: underline; }
 .tab { padding: 6px 12px; background: none; border: none; border-bottom: 2px solid transparent; font: inherit; color: var(--muted); cursor: pointer; }
 .tab.active, .tab[data-state="active"] { color: var(--text); border-bottom-color: var(--accent); }
 
+/* The board fills the main column; open columns share its width, and collapsed ones keep only their dot and count. */
 .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
-.column { flex: 0 0 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-.column-head { font-size: 14px; margin: 0 0 4px; display: flex; align-items: center; gap: 6px; }
+.column { flex: 1 1 0; min-width: 160px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.column.collapsed { flex: 0 0 44px; min-width: 0; padding: 8px 4px; }
+.column-head { font-size: 14px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.column-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.column-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0; background: none; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
+.column.collapsed .column-head, .column.collapsed .column-toggle { flex-direction: column; gap: 4px; }
 .card { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
 .card:hover { border-color: var(--accent); }
 

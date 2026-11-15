@@ -181,6 +181,8 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
   );
   const [creating, setCreating] = useState(false);
   const [confirmingArchive, setConfirmingArchive] = useState(false);
+  // The board's collapsed columns the User opened; kept while they stay on the page, never stored.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const agentAccess = useAction(
     async (access: AgentAccess) => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -202,7 +204,14 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
       {({ project: p, statuses }) => (
         <section>
           <div className="muted crumbs">
-            <Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}
+            <Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> /{" "}
+            {props.view === "settings" ? (
+              <>
+                <Link to={projectPath(p.key, "list", {})} className="link">{p.key}</Link> / Settings
+              </>
+            ) : (
+              p.key
+            )}
           </div>
           <div className="page-head" data-testid="page-head">
             <h1>
@@ -317,7 +326,18 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                       </div>
                     )}
                     {props.view === "board" ? (
-                      <Board statuses={statuses} tickets={list} />
+                      <Board
+                        statuses={statuses}
+                        tickets={list}
+                        expanded={expanded}
+                        onToggle={(id) =>
+                          setExpanded((now) => {
+                            const next = new Set(now);
+                            if (!next.delete(id)) next.add(id);
+                            return next;
+                          })
+                        }
+                      />
                     ) : list.length === 0 ? (
                       !filtered && <div className="empty"><h2>No Tickets yet</h2></div>
                     ) : (
@@ -438,30 +458,60 @@ export function FilterSelect(props: { name: string; value: string | undefined; o
   );
 }
 
-function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
+/** The Status Categories whose columns start collapsed to their count, so the open work fits the screen. */
+const COLLAPSED_CATEGORIES: ReadonlySet<StatusCategory> = new Set(["completed", "canceled"]);
+
+/**
+ * The Tickets in one column per Status, filling the main column. Completed and Canceled columns start collapsed
+ * to their dot and count; `expanded` holds the ones the User opened, for as long as they stay on the page.
+ */
+function Board(props: { statuses: Status[]; tickets: Ticket[]; expanded: ReadonlySet<string>; onToggle: (statusId: string) => void }) {
   return (
-    <div className="board">
+    <div className="board" role="group" aria-label="Board">
       {props.statuses.map((status) => {
         const inStatus = props.tickets.filter((t) => t.status.id === status.id);
+        const collapsible = COLLAPSED_CATEGORIES.has(status.category);
+        const open = !collapsible || props.expanded.has(status.id);
+        const count = `${inStatus.length} ${inStatus.length === 1 ? "Ticket" : "Tickets"}`;
+        const head = (
+          <>
+            <span className={`dot ${status.category}`} aria-hidden="true" />
+            {open && <span className="column-name">{status.name}</span>}
+            <span className="muted">{inStatus.length}</span>
+          </>
+        );
         return (
-          <section key={status.id} className="column" aria-label={status.name}>
+          <section key={status.id} className={open ? "column" : "column collapsed"} aria-label={status.name}>
             <h3 className="column-head">
-              <span className={`dot ${status.category}`} />
-              {status.name} <span className="muted">{inStatus.length}</span>
+              {collapsible ? (
+                <button
+                  type="button"
+                  className="column-toggle"
+                  aria-expanded={open}
+                  aria-label={`${status.name}, ${count}`}
+                  title={open ? `Collapse ${status.name}` : `${status.name}: ${count}`}
+                  onClick={() => props.onToggle(status.id)}
+                >
+                  {head}
+                </button>
+              ) : (
+                head
+              )}
             </h3>
-            {inStatus.map((ticket) => (
-              <Link key={ticket.key} to={`/tickets/${ticket.key}`} className="card">
-                <span className="card-head">
-                  <span className="key">{ticket.key}</span>
-                  <PriorityTag priority={ticket.priority} />
-                </span>
-                <span>{ticket.title}</span>
-                <span className="card-foot">
-                  <LabelChips labels={ticket.labels} />
-                  <TicketPeople ticket={ticket} />
-                </span>
-              </Link>
-            ))}
+            {open &&
+              inStatus.map((ticket) => (
+                <Link key={ticket.key} to={`/tickets/${ticket.key}`} className="card">
+                  <span className="card-head">
+                    <span className="key">{ticket.key}</span>
+                    <PriorityTag priority={ticket.priority} />
+                  </span>
+                  <span>{ticket.title}</span>
+                  <span className="card-foot">
+                    <LabelChips labels={ticket.labels} />
+                    <TicketPeople ticket={ticket} />
+                  </span>
+                </Link>
+              ))}
           </section>
         );
       })}
