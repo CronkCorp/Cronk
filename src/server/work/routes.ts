@@ -18,7 +18,7 @@ import {
 } from "../schemas.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
 import { addRelation, listRelations, removeRelation } from "./relations.js";
-import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
+import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
@@ -367,6 +367,7 @@ export function workRoutes(ctx: AppContext) {
           let moved: Ticket[] = [];
           if (target) {
             moved = await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
+            if (endsClaim(target)) for (const ticket of moved) await clearClaim(tx, ticket.id);
           } else {
             const inUse = await countTicketsInStatus(tx, status.id);
             if (inUse > 0) {
@@ -664,8 +665,7 @@ export function workRoutes(ctx: AppContext) {
           }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
-          // A finished Ticket has no work left to Claim, and only Users finish work.
-          const finishes = changes.status !== undefined && FINISHED_CATEGORIES.includes(changes.status.category);
+          const finishes = changes.status !== undefined && endsClaim(changes.status);
           if (finishes || (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id)) await clearClaim(tx, ticket.id);
           return { before: ticket, ticket: await updateTicket(tx, ticket, changes, actor, ctx.clock.now()) };
         });
@@ -711,8 +711,11 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
 /** The Status Categories an Agent may move a Ticket into; only Users complete, cancel or shelve work. */
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
 
-/** The Status Categories that finish a Ticket. */
-const FINISHED_CATEGORIES: StatusCategory[] = ["completed", "canceled"];
+/**
+ * Whether moving a Ticket into `status` ends its Claim: a finished Ticket has no work left to Claim,
+ * and only Users finish work.
+ */
+const endsClaim = (status: Status) => FINISHED_CATEGORIES.includes(status.category);
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or

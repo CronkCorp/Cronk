@@ -103,6 +103,20 @@ describe("A Claim", () => {
     }
   });
 
+  it("ends when removing its Status moves the Ticket into a Completed Status", async () => {
+    const { admin, session } = await delegatedSetup();
+    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
+    const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
+    const extra = (await admin.post("/api/projects/CRONK/statuses", { name: "Doing", category: "started" })).body.status;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: extra.id });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${extra.id}?moveTo=${inCategory("completed")}`)).status).toBe(204);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    expect((await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body: "Still going" })).status).toBe(409);
+  });
+
   it("has its silence threshold set only by Admins", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");
