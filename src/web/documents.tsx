@@ -303,12 +303,7 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
 
   return (
     <section className="panel wide">
-      {props.newerVersion !== undefined && !notice && !resolve && (
-        <p className="merged" role="status">
-          Someone saved Version {props.newerVersion} while you were editing Version {props.document.version}. Saving merges their changes into
-          yours.
-        </p>
-      )}
+      {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile document={props.document} version={props.newerVersion} />}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
@@ -325,6 +320,33 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
         </form>
       )}
     </section>
+  );
+}
+
+/**
+ * Warns, while a Document is being edited, that someone saved a newer Version meanwhile: who,
+ * and what they changed since the Version the edit started from. Saving then merges it in.
+ */
+function SavedMeanwhile(props: { document: Document; version: number }) {
+  const { id, version: started } = props.document;
+  const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
+  return (
+    <div className="merged" role="status">
+      <Show state={versions}>
+        {([base, theirs]) => (
+          <>
+            <p>
+              <strong>{actorName(theirs.actor)}</strong> saved Version {theirs.number} while you were editing Version {base.number}. Saving
+              merges their changes into yours.
+            </p>
+            <details>
+              <summary>See what they changed</summary>
+              <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+            </details>
+          </>
+        )}
+      </Show>
+    </div>
   );
 }
 

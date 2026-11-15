@@ -444,7 +444,10 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   // While editing, a newer Version is announced instead of replacing the draft.
   await page.getByRole("button", { name: "Edit" }).click();
   await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 2, body: "Third." } });
-  await expect(page.getByRole("status")).toContainText("Someone saved Version 3 while you were editing Version 2");
+  const savedMeanwhile = page.getByRole("status");
+  await expect(savedMeanwhile).toContainText("Ada saved Version 3 while you were editing Version 2");
+  await savedMeanwhile.getByText("See what they changed").click();
+  await expect(savedMeanwhile).toContainText("+ Third.");
   await expect(page.getByLabel("Body (Markdown)")).toHaveValue("Second.");
 });
 
