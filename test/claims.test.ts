@@ -62,7 +62,11 @@ describe("A Claim", () => {
     cronk.clock.advance(4 * 60_000);
     await first.get("/api/projects");
     cronk.clock.advance(4 * 60_000);
-    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:09:00.000Z" });
+    // Last heard at 09:04, so it lapses the five-minute silence threshold later.
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({
+      lastSeenAt: "2026-01-01T09:04:00.000Z",
+      endsIfSilentAt: "2026-01-01T09:09:00.000Z",
+    });
     const second = await session();
     expect((await second.post("/api/tickets/CRONK-1/claim")).status).toBe(409);
 

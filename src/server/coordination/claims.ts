@@ -3,7 +3,7 @@ import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
 import { ticketKeySql, type AgentRef, type Ticket } from "../work/tickets.js";
-import { isLiveAt, WITH_WORKSPACE } from "./agent-sessions.js";
+import { isLiveAt, silenceWindow, WITH_WORKSPACE } from "./agent-sessions.js";
 
 /**
  * An Agent Session's exclusive, temporary hold on a Ticket. A Ticket stores at most one
@@ -15,6 +15,8 @@ export interface Claim {
   agent: AgentRef;
   session: { id: string };
   claimedAt: Date;
+  /** When its Agent Session was last heard from: its last call, or its open stream's last heartbeat. */
+  lastSeenAt: Date;
   /** When the Claim lapses if its Agent Session stays silent until then. */
   endsIfSilentAt: Date;
 }
@@ -53,7 +55,7 @@ async function findLiveClaimWithId(db: Queryable, ticketId: string, now: Date): 
         agent: { id: row.agent_id, name: row.agent_name },
         session: { id: row.session_id },
         claimedAt: row.claimed_at,
-        endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+        ...silenceWindow(row),
       },
     }
   );
