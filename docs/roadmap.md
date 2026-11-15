@@ -53,6 +53,8 @@ Workspace, Projects, Users (Admin, Member), open and private Projects, Agents wi
 
 ## Phase 2: Knowledge and review
 
+Spec: GitHub issue #149; its 31 tickets are sub-issues #150–#180 with native blocking dependencies, and the Reconcile fixes #138–#145 are sub-issues too. Screens: `docs/ui.md`.
+
 Scope:
 
 - **Terms and Decisions** as typed records, with Project Terms layered over Workspace Terms, exported as `GLOSSARY.md` and `docs/adr/`.
