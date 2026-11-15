@@ -514,7 +514,7 @@ const INBOX = [
 // ---------------------------------------------------------------- screens
 const SCREENS = {
   inbox: { name: "Inbox · Suggestions", nav: "inbox", variants: {
-    a: ["Unified diff", "The Inbox gains Unverified, Suggestions, Discovered and Proposed Decisions groups. A Suggestion opens as a unified diff against its base Version, with the Agent's reasoning above it. Try \"Simulate a newer Version\" for the outdated case, and Reject or Edit and accept.", () => inbox()],
+    a: ["Unified diff (chosen, with a Side by side switch)", "The Inbox gains Unverified, Suggestions, Discovered and Proposed Decisions groups. A Suggestion opens as a unified diff against its base Version, with the Agent's reasoning above it. Try \"Simulate a newer Version\" for the outdated case, and Reject or Edit and accept.", () => inbox()],
     b: ["Side by side", "Same Inbox; the Suggestion shows the current Version and the suggested text side by side, changed paragraphs tinted. Easier for prose, wider.", () => inbox()],
     c: ["Edit in place", "Same Inbox; the suggested text opens straight in an editor with the changes marked. Accepting unchanged credits the Agent; typing turns the button into \"Accept as edited\" and credits you.", () => inbox()],
   }},
@@ -539,7 +539,7 @@ const SCREENS = {
     b: ["Page with tabs", "Like a Document: title and source on top, the Artifact in a framed panel, then tabs for Comments, Versions and where it is embedded.", () => artifactB()],
   }},
   ticket: { name: "Ticket · Attachments", nav: "projects", variants: {
-    a: ["Attachments under the description", "Attachments sit as thumbnails under the description with a drop zone; a Report embeds its Artifact (pinned to a Version) and lists its Attachments.", () => ticketA()],
+    a: ["Under the description and in Files (chosen)", "Attachments sit as thumbnails under the description, and the side panel's Files lists every file and Artifact on the Ticket; a Report embeds its Artifact (pinned to a Version) and lists its Attachments.", () => ticketA()],
     b: ["Files in the side panel", "Attachments and Artifacts are listed in the side panel's Files section; media plays inline only where it is posted in the timeline.", () => ticketB()],
   }},
 };
@@ -630,8 +630,10 @@ function sugActions() {
     <span class="muted small" id="accept-note">${note}</span></div>`;
 }
 function suggestionDetail() {
-  const body = state.variant === "b" && state.screen === "inbox" ? sideBySide() : state.variant === "c" && state.screen === "inbox" ? editInPlace() : unified();
-  return `${sugHead()}${sugOutdatedBanner()}${state.merging && state.outdated ? "" : body}${sugActions()}
+  const sxs = state.diffView ? state.diffView === "sxs" : state.variant === "b" && state.screen === "inbox";
+  const body = state.variant === "c" && state.screen === "inbox" ? editInPlace() : sxs ? sideBySide() : unified();
+  const toggle = state.variant === "c" && state.screen === "inbox" ? "" : `<div class="seg" role="group" aria-label="Diff view" style="align-self:flex-start"><button aria-pressed="${!sxs}" data-diffview="uni">Unified</button><button aria-pressed="${sxs}" data-diffview="sxs">Side by side</button></div>`;
+  return `${sugHead()}${sugOutdatedBanner()}${state.merging && state.outdated ? "" : toggle + body}${sugActions()}
     <button class="proto-sim" data-outdated="1">${state.outdated ? "Prototype: undo the newer Version" : "Prototype: simulate a newer Version saved meanwhile"}</button>`;
 }
 function termSuggestion() {
@@ -907,7 +909,7 @@ function ticketA() {
       <li class="sys"><span class="gut"></span>claude-laptop filed Discovered Ticket CRONK-31 and marked it as blocking CRONK-22 <span class="small">10:31</span></li>
       ${reportWithEmbed(true)}
       <li class="sys"><span class="gut"></span>claude-laptop moved it from In Progress to In Review; its Claim ended <span class="small">10:58</span></li>
-    </ul></div>${tkSide(false)}</div>`;
+    </ul></div>${tkSide(true)}</div>`;
 }
 function ticketB() {
   return `${tkHeader()}<div class="tk-layout"><div class="tk-main">
@@ -958,7 +960,7 @@ document.addEventListener("input", e => {
   }
 });
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-screen],[data-sel],[data-tsel],[data-t],[data-outdated],[data-merging],[data-reject],[data-reopen],[data-dep],[data-choice],[data-term],[data-dec],[data-drawer],[data-aftab]");
+  const t = e.target.closest("[data-screen],[data-sel],[data-tsel],[data-t],[data-outdated],[data-merging],[data-reject],[data-reopen],[data-dep],[data-choice],[data-term],[data-dec],[data-drawer],[data-aftab],[data-diffview]");
   if (!t) return;
   const d = t.dataset;
   if (d.screen) { resetLocal(); go(d.screen, "a"); return; }
@@ -975,6 +977,7 @@ document.addEventListener("click", e => {
   if (d.dec) state.dec = d.dec;
   if (d.drawer) state.drawer = state.drawer === false;
   if (d.aftab) state.aftab = d.aftab;
+  if (d.diffview) state.diffView = d.diffview;
   render();
 });
 function markTheme() {
