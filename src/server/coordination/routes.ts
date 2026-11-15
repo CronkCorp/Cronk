@@ -367,7 +367,8 @@ export function coordinationRoutes(ctx: AppContext) {
                 "Claim released, ended or lapsed) or its Project opens up to it (unarchived, made open, or its Agent Access raised; or the Agent's " +
                 "Owner granted Write there, unlisted from an open Project, made an Admin or reactivated), " +
                 "a `ticketReady` event arrives whose data is `{ ticket }`, the Ticket as the welcome lists it; " +
-                "it has no `id` and isn't sent again on reopening, as the next welcome lists Ready Tickets anyway. A read-only token's stream " +
+                "it has no `id` and isn't sent again on reopening, as the next welcome lists Ready Tickets anyway. Changes made at the same " +
+                "moment can, rarely, tell of one Ticket twice, and another Session may Claim it first, so a Claim can still be refused. A read-only token's stream " +
                 "gets none, as it can't Claim them. " +
                 "While it is open the Agent Session isn't silent: the stream refreshes it on its heartbeat (every 25 seconds), so it and its Claims stay alive.",
               content: { "text/event-stream": { schema: { type: "string" } } },
