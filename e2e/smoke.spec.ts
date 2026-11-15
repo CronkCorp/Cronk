@@ -381,7 +381,7 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Quoting");
   await page.getByRole("button", { name: "Create Document" }).click();
-  await page.getByLabel("Body (Markdown)").fill("> Quoted and\n> wrapped, a\\*b &amp; c.\n\n- Listed and\n  continued.\n\nSee x\\*y in CRONK-1.");
+  await page.getByLabel("Body (Markdown)").fill("> Quoted and\n> wrapped, a\\*b &amp; c.\n\n- Listed and\n  continued.\n\nSee x\\*y in CRONK-1.\n\nWrite &amp;amp;\n\nUnknown &foo; next to x\\*y.");
   await page.getByRole("button", { name: "Save" }).click();
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("wrapped, a*b & c.");
@@ -391,8 +391,10 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
     body.evaluate(
       (el, { startIn, from, endIn, to }) => {
         const textOf = (selector: string, holding: string) => {
-          const walker = document.createTreeWalker(el.querySelector(selector)!, NodeFilter.SHOW_TEXT);
-          while (walker.nextNode()) if (walker.currentNode.textContent!.includes(holding)) return walker.currentNode as Text;
+          for (const container of el.querySelectorAll(selector)) {
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+            while (walker.nextNode()) if (walker.currentNode.textContent!.includes(holding)) return walker.currentNode as Text;
+          }
           throw new Error(`no text holding ${holding}`);
         };
         const start = textOf(startIn, from);
@@ -424,6 +426,16 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await select("p:has(a)", "x*y", "p a", "CRONK-1");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("x\\*y in CRONK-1");
+
+  // Text that also reads verbatim elsewhere in its Markdown is still tied to where it came from.
+  await select("p", "&amp;", "p", "&amp;");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("&amp;amp;");
+
+  // Something that only looks like an entity is plain text, character by character.
+  await select("p", "foo; next", "p", "foo; next");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("foo; next");
 });
 
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.

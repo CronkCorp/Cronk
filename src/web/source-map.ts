@@ -50,8 +50,9 @@ export function alignToSource(value: string, source: string, from: number, to: n
     }
     ENTITY.lastIndex = j;
     const entity = source[j] === "&" ? ENTITY.exec(source)?.[0] : undefined;
+    // Something that only looks like an entity, as `&foo;`, reads as it is, so it is matched character by character.
     const decoded = entity && j + entity.length <= to ? decodeEntity(entity) : undefined;
-    if (entity && decoded && value.startsWith(decoded, i)) {
+    if (entity && decoded && decoded !== entity && value.startsWith(decoded, i)) {
       for (let k = 0; k < decoded.length; k++) {
         starts.push(j);
         ends.push(j + entity.length);

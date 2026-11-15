@@ -71,9 +71,9 @@ const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
 
 /**
  * A rehype plugin that wraps each run of text in a span naming where the text sits in the Markdown
- * source (`data-source-start`), when that is known for certain: the text is found exactly once in the
- * stretch it was parsed from, as code is inside its backticks, or each of its characters can be tied to
- * that stretch, skipping what Markdown dropped (`data-source-map`, as `encodeBounds` writes it). Inline
+ * source (`data-source-start`), when that is known for certain: each of its characters can be tied to
+ * the stretch it was parsed from, skipping what Markdown dropped (`data-source-map`, as `encodeBounds`
+ * writes it), or, for code, the text is found exactly once inside that stretch, as inside its backticks. Inline
  * elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
  * the Markdown there holds their text as shown; a code block's fences are left out of it.
  */
@@ -93,14 +93,17 @@ function markSourceOffsets(source: string) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (!value.trim() || start === undefined || end === undefined) return node;
+    const bounds = alignToSource(value, source, start, end);
+    if (bounds) {
+      const map = encodeBounds(bounds, start);
+      return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [node] };
+    }
+    // Code shows its Markdown as it is, inside backticks or fences the run's stretch includes.
+    if (parent?.tagName !== "code") return node;
     const stretch = source.slice(start, end);
     const at = stretch.indexOf(value);
-    if (at >= 0 && stretch.indexOf(value, at + 1) < 0) {
-      return { type: "element", tagName: "span", properties: { dataSourceStart: start + at }, children: [node] };
-    }
-    const bounds = alignToSource(value, source, start, end);
-    if (!bounds) return node;
-    return { type: "element", tagName: "span", properties: { dataSourceStart: start, dataSourceMap: encodeBounds(bounds, start) }, children: [node] };
+    if (at < 0 || stretch.indexOf(value, at + 1) >= 0) return node;
+    return { type: "element", tagName: "span", properties: { dataSourceStart: start + at }, children: [node] };
   };
   return () => (tree: HastNode) => {
     mark(tree);
