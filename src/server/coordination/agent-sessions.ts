@@ -3,7 +3,7 @@ import type { Queryable } from "../db/database.js";
 /**
  * One continuous connection of an Agent, from connect to disconnect. It is live until it is
  * ended or stays silent longer than the Workspace's silence threshold; every call made in it
- * refreshes it.
+ * refreshes it, as does its open stream of waiting work, on each heartbeat.
  */
 export interface AgentSession {
   id: string;
@@ -86,19 +86,37 @@ export async function findLiveAgentSession(db: Queryable, agentId: string, id: s
   return rows[0] && toAgentSession(rows[0]);
 }
 
+/** Ends the Sessions `column` picks, and returns the Tickets whose live Claims they held. */
+async function endSessions(db: Queryable, column: "id" | "token_id" | "agent_id", value: string, now: Date): Promise<ClaimHolders> {
+  const { rows } = await db.query<{ id: string }>(
+    `WITH ended AS (
+       UPDATE agent_sessions s SET ended_at = $2 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
+       WHERE a.id = s.agent_id AND s.${column} = $1 AND s.ended_at IS NULL
+       RETURNING s.id, s.last_seen_at > $2::timestamptz - make_interval(secs => w.silence_threshold_seconds) AS was_live)
+     SELECT t.id FROM tickets t JOIN ended ON ended.id = t.claim_session_id WHERE ended.was_live`,
+    [value, now],
+  );
+  return { ticketIds: rows.map((r) => r.id) };
+}
+
+/** What ending Agent Sessions changed: the Tickets whose live Claims they held, which no longer have one. */
+export interface ClaimHolders {
+  ticketIds: string[];
+}
+
 /** Ends a Session now. */
-export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE id = $1 AND ended_at IS NULL", [id, now]);
+export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "id", id, now);
 }
 
 /** Ends every Session a token started, as when it is revoked. */
-export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE token_id = $1 AND ended_at IS NULL", [tokenId, now]);
+export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "token_id", tokenId, now);
 }
 
 /** Ends every Session of an Agent, as when it is removed. */
-export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE agent_id = $1 AND ended_at IS NULL", [agentId, now]);
+export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "agent_id", agentId, now);
 }
 
 /** The live Sessions of each of these Agents, oldest first. */

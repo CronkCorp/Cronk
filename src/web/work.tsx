@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
@@ -17,6 +17,7 @@ import {
   type TicketRef,
   type User,
   sessionName,
+  watchProject,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { GuidanceSection } from "./guidance.js";
@@ -151,6 +152,23 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
   const filterKey = JSON.stringify(filter);
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
+  // The list and board follow the Project's changes; a change to its Statuses reloads the Project, which holds them.
+  useEffect(
+    () =>
+      watchProject(props.projectKey, {
+        ready: () => {
+          reloadProject();
+          reloadTickets();
+        },
+        on: {
+          changed: ({ ticket }) => {
+            if (ticket === null) reloadProject();
+            reloadTickets();
+          },
+        },
+      }),
+    [props.projectKey],
+  );
   const [creating, setCreating] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
   const agentAccess = useAction(
@@ -681,7 +699,8 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
       <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
       <TicketDocuments detail={props.detail} readOnly={!canWrite} onChanged={changed} />
       <h2>Timeline</h2>
-      <TicketTimeline ticketKey={t.key} canWrite={canWrite} />
+      {/* Its stream also tells of changes to the Ticket itself: its fields, Claim and History are loaded again. */}
+      <TicketTimeline ticketKey={t.key} canWrite={canWrite} onTicketChanged={changed} />
       <h2>History</h2>
       <Show state={history}>
         {(changes) => (
