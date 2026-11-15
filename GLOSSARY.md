@@ -166,6 +166,10 @@ _Avoid_: Bot, AI user, integration
 One continuous connection of an Agent, from connect to disconnect. Many Agent Sessions of the same Agent may run at once.
 _Avoid_: Run, instance, conversation
 
+**Transcript**:
+The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did.
+_Avoid_: Chat log, conversation, chat history, session log
+
 **Owner**:
 The User an Agent acts on behalf of and who is accountable for its actions.
 _Avoid_: Operator, sponsor, parent

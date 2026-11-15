@@ -4,15 +4,18 @@ Cronk is built in three phases. Vocabulary follows `GLOSSARY.md`; decisions are 
 
 1. **Reconcile.** Check `GLOSSARY.md` and the ADRs against what was actually built in the previous phase, and fix whichever is wrong. `/retro` on the build sessions is a separate, optional step: it improves the agent environment (checks, navigation, coding standards), not the design.
 2. **Grill** the phase's open questions with `/grill-with-docs`, starting from the "Decided so far" and "Open questions" lists below.
-3. **Spec** with `/to-spec`, then **tickets** with `/to-tickets` (published as GitHub issues: the spec as a parent, tickets as sub-issues), in the same session as the grilling, since both synthesise from that conversation.
-4. **Build**, then update this roadmap.
+3. **Prototype** the phase's new or changed key screens with `/prototype` (throwaway HTML), when the phase adds UI. Choose a direction with the User and record it in `docs/ui.md`, so tickets follow one design instead of each inventing its own.
+4. **Spec** with `/to-spec`, then **tickets** with `/to-tickets` (published as GitHub issues: the spec as a parent, tickets as sub-issues), in the same session as the grilling, since both synthesise from that conversation.
+5. **Build**, then update this roadmap.
+
+Phase 1 was built without step 3; #98 reviewed its UI afterwards and wrote the first `docs/ui.md`, which later phases extend.
 
 ## Where the design lives
 
 A session starting a later phase should read, in order:
 
 1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
-2. `docs/adr/`: decisions that are hard to reverse (0001–0012).
+2. `docs/adr/`: decisions that are hard to reverse (0001–0013).
 3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
 4. The Phase 1 spec, GitHub issue #1 (`gh issue view 1`): the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
 5. `docs/testing.md`: the test seams every phase uses.
@@ -57,6 +60,7 @@ Scope:
 - **Discovered Tickets** filed by Agents into Backlog, and the shared **Triage** view.
 - **Artifacts** with Versions, served from a separate hostname (ADR 0007), and **Attachments**.
 - Inbox extended with Unverified completions, Suggestions and Discovered Tickets.
+- **Transcripts** of chats that led Agents to change things, uploaded from the client side and linked to what they led to (ADR 0013). A separate slice that nothing else in the phase depends on, so it can be built last or cut.
 
 Decided so far (beyond the glossary and ADRs):
 
@@ -70,6 +74,16 @@ Decided so far (beyond the glossary and ADRs):
 - Artifacts belong to a Project or the Workspace, never to a Ticket or chat; they record the Ticket or Agent Session they came from and can be embedded in many places.
 - Each Artifact publish creates a new Version; the Artifact's address shows the latest Version, and a link can name a specific Version. A publish based on an outdated Version is refused, so the publisher merges first.
 - Artifact pages may load scripts only from a short CDN allow-list by default; anything more is declared when publishing, kept minimal.
+- Transcripts are verbatim, never an Agent's summary. Cronk never captures chats; a client-side hook uploads them with the Agent's full token (read-only tokens are refused), and Cronk links them by scanning for the uploading Agent's own Agent Session ids (ADR 0013). One Transcript may cover many Agent Sessions.
+- Only Transcripts whose linked Agent Sessions changed at least one thing are kept; others are refused, so a hook can upload every chat.
+- Re-uploads upsert by (Agent, client chat id), such as Claude Code's `session_id`: the new text replaces the old and links only grow. If the new text doesn't continue the stored one, the old text is kept as well.
+- A Transcript is readable by its Owner and by anyone with Read in every Project its Agent Sessions changed things in (Workspace read for Workspace-level changes); Agents are capped as usual (ADR 0004). The Owner may delete it. Transcripts outlive their Agent's removal.
+- Cronk scrubs known secret patterns on upload (its own tokens, private keys, common provider tokens, `Authorization` headers) and never stores the originals; the Owner can also redact passages by hand, and those redactions survive re-uploads. Scrubbing is documented as best-effort.
+- Transcripts are uploaded as Markdown following a documented turn convention (`## User`, `## Assistant`, tool calls and results as fenced blocks). Cronk ships a reference Claude Code hook that converts deterministically and trims long tool output; Cronk parses no client formats.
+- Users and Agents can search Transcripts, as a separate result type ranked below Documents, Terms and Decisions, with hits pointing at the matching turn. Context on claim lists linked Transcripts but never includes their text.
+- Every item a linked Agent Session changed gets a "From Transcript" link to the turn where its key or id first appears, falling back to the top; the Transcript view marks those turns with chips for the items.
+- A Transcript may be at most 10 MB by default (configurable per Workspace); it is kept until its Owner deletes it.
+- Transcripts are always part of the full export, as Markdown with frontmatter (Agent, client chat id, linked Agent Sessions and items), with hand redactions applied, and are restored on import.
 
 Open questions to grill before writing the spec:
 
