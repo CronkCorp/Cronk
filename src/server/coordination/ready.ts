@@ -1,6 +1,7 @@
+import type pg from "pg";
 import type { AgentActor } from "../actor.js";
 import type { AppContext } from "../context.js";
-import type { Queryable } from "../db/database.js";
+import { transaction, type Queryable } from "../db/database.js";
 import { visibleProjects } from "../identity/access.js";
 import { listAgents } from "../identity/agents.js";
 import type { LiveEvent } from "../live/live-updates.js";
@@ -11,8 +12,9 @@ import { findDelegatedTicketsInTheClear, type ReadyScope } from "./claims.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 
 /**
- * Telling an Agent when a Ticket becomes Ready for it (delegated to it, unblocked, or its Claim
- * released or lapsed), through its live Agent Sessions' event stream, as a `ticketReady` event.
+ * Telling an Agent when a Ticket becomes Ready for it (delegated to it, unblocked, its Claim
+ * released or lapsed, or its Project opened up to it by an access or archive change), through its
+ * live Agent Sessions' event stream, as a `ticketReady` event.
  *
  * A route that may make Tickets Ready asks which of them already are (`readyNow`) inside its
  * transaction, before changing anything, and after it commits passes that answer to
@@ -94,4 +96,36 @@ export async function claimsEnded(ctx: AppContext, ticketIds: string[]): Promise
   if (ticketIds.length === 0) return;
   ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
   await tellNewlyReady(ctx, ticketIds, new Map());
+}
+
+/**
+ * The delegated Tickets an access or archive change can make Ready: those in a Project, those
+ * delegated to one of a User's Agents, or, for the User's access in one Project, both at once.
+ */
+export type AffectedTickets = { projectId: string; ownerId?: string } | { projectId?: undefined; ownerId: string };
+
+/** The ids of the delegated Tickets `affected` describes. */
+async function delegatedTicketIds(db: Queryable, affected: AffectedTickets): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.id FROM tickets t JOIN agents a ON a.id = t.delegate_id
+     WHERE ($1::uuid IS NULL OR t.project_id = $1) AND ($2::uuid IS NULL OR a.owner_id = $2)`,
+    [affected.projectId ?? null, affected.ownerId ?? null],
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Makes an access or archive change in a transaction, then tells the Delegates of the Tickets
+ * `affected` describes which of them the change made Ready. A change that can't make anything
+ * Ready (archiving, lowering access) passes no `affected`, and only runs. Returns what `change` returns.
+ */
+export async function tellReadyAfter<T>(ctx: AppContext, affected: AffectedTickets | undefined, change: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
+  if (!affected) return transaction(ctx.db, change);
+  const { result, ticketIds, before } = await transaction(ctx.db, async (tx) => {
+    const ticketIds = await delegatedTicketIds(tx, affected);
+    const before = await readyNow(tx, ticketIds, ctx.clock.now());
+    return { result: await change(tx), ticketIds, before };
+  });
+  await tellNewlyReady(ctx, ticketIds, before);
+  return result;
 }

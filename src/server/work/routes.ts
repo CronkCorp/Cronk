@@ -66,7 +66,7 @@ import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRel
 import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
 import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
-import { readyNow, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
+import { readyNow, tellReadyAfter, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -195,7 +195,11 @@ export function workRoutes(ctx: AppContext) {
           ...(visibility !== undefined && { visibility }),
           ...(agentAccess !== undefined && { agentAccess }),
         };
-        const updated = await updateProject(ctx.db, project.id, changes, ctx.clock.now());
+        // Unarchiving, opening, or raising Agent Access can make the Project's delegated Tickets Ready.
+        const opensUp = archived === false || visibility === "open" || agentAccess === "write";
+        const updated = await tellReadyAfter(ctx, opensUp ? { projectId: project.id } : undefined, (tx) =>
+          updateProject(tx, project.id, changes, ctx.clock.now()),
+        );
         if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
         return { project: { ...updated, access } };
       },
@@ -249,7 +253,9 @@ export function workRoutes(ctx: AppContext) {
         const member = await findUserById(ctx.db, request.params.userId);
         if (!member || member.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(404, "No such User");
         if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
-        await setMembership(ctx.db, project.id, member.id, request.body.access);
+        // Write for the Owner can make Tickets delegated to their Agents here Ready.
+        const affected = request.body.access === "write" ? { projectId: project.id, ownerId: member.id } : undefined;
+        await tellReadyAfter(ctx, affected, (tx) => setMembership(tx, project.id, member.id, request.body.access));
         inboxesChanged(ctx.live, [member.id]);
         return { member: { user: publicUser(member), access: request.body.access } };
       },
@@ -267,7 +273,9 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         requireAdmin(actor, "change who is in a Project");
-        await removeMembership(ctx.db, project.id, request.params.userId);
+        // In an open Project, no longer being listed with Read gives Write, which can make Tickets Ready.
+        const affected = project.visibility === "open" ? { projectId: project.id, ownerId: request.params.userId } : undefined;
+        await tellReadyAfter(ctx, affected, (tx) => removeMembership(tx, project.id, request.params.userId));
         inboxesChanged(ctx.live, [request.params.userId]);
         return reply.code(204).send();
       },
