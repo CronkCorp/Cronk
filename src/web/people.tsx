@@ -1,3 +1,4 @@
+import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Access, type Invitation, type Member, type Project, type Role, type User } from "./api.js";
@@ -83,7 +84,7 @@ function Invitations(props: { invitations: Invitation[]; onChanged: () => void }
         {props.invitations.map((i) => (
           <li key={i.id} className="row">
             <span className="grow">{i.email}</span>
-            <span className="muted">{roleName(i.role)}, until {new Date(i.expiresAt).toLocaleDateString()}</span>
+            <span className="muted">{roleName(i.role)}, until <RelativeTime at={i.expiresAt} /></span>
             <button className="link" disabled={withdraw.busy} onClick={() => void withdraw.run(i.id)}>Withdraw</button>
           </li>
         ))}

@@ -1,3 +1,4 @@
+import { RelativeTime } from "./components/time.js";
 import { useState } from "react";
 import { Actor, SessionName } from "./components/actor.js";
 import { api, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
@@ -107,7 +108,7 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
                 <li key={t.id} className="token">
                   <span className="grow">
                     {t.readOnly ? "Read-only token" : "Full token"}{" "}
-                    <span className="muted">issued {new Date(t.createdAt).toLocaleString()}</span>
+                    <span className="muted">issued <RelativeTime at={t.createdAt} /></span>
                   </span>
                   <button className="link" disabled={revoke.busy} onClick={() => void revoke.run(t.id)}>Revoke</button>
                 </li>
@@ -143,7 +144,7 @@ function LiveSessions(props: { agent: Agent }) {
           <span className="grow">
             Live <SessionName id={s.id} />{" "}
             <span className="muted">
-              since {new Date(s.startedAt).toLocaleString()}, last heard from {new Date(s.lastSeenAt).toLocaleTimeString()}
+              connected <RelativeTime at={s.startedAt} />, last heard <RelativeTime at={s.lastSeenAt} />
             </span>
           </span>
         </li>

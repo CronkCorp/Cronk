@@ -1,3 +1,4 @@
+import { RelativeTime } from "./components/time.js";
 import { useEffect, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
@@ -101,7 +102,7 @@ function QuestionEntry(props: { item: Extract<InboxItem, { kind: "question" }>; 
         <span className="activity-kind">{question.blocking ? "Blocking question" : "Question"}</span>
         <Actor actor={agentActor(question.agent, question.session)} owner={false} />
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
-        <span className="muted">{new Date(question.at).toLocaleString()}</span>
+        <RelativeTime at={question.at} />
       </div>
       <div className="activity-body">
         <CronkMarkdown>{question.body}</CronkMarkdown>

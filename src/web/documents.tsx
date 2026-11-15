@@ -1,3 +1,4 @@
+import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -466,7 +467,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
             {list.map((v) => (
               <li key={v.number} className="version">
                 <span className="grow">
-                  <strong>Version {v.number}</strong> <span className="muted">{new Date(v.at).toLocaleString()}</span> <Actor actor={v.actor} />
+                  <strong>Version {v.number}</strong> <RelativeTime at={v.at} /> <Actor actor={v.actor} />
                   {v.restoredFrom !== null && <span className="muted"> (restored Version {v.restoredFrom})</span>}
                   {v.number === d.version && <span className="badge">Current</span>}
                 </span>

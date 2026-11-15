@@ -270,3 +270,4 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .actor.agent .avatar { border-radius: 4px; background: var(--agent-soft); color: var(--agent); }
 .actor.agent .actor-name { color: var(--agent); }
 .session-name { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+.time { color: var(--muted); font-size: 13px; }

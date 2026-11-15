@@ -1,3 +1,4 @@
+import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState, type Ref } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
@@ -122,7 +123,7 @@ function ActivityItem(props: { activity: Activity } & Thread) {
       <div className="activity-head">
         <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
         <Actor actor={agentActor(a.agent, a.session)} />
-        <span className="muted">{new Date(a.at).toLocaleString()}</span>
+        <RelativeTime at={a.at} />
         {isQuestion && (a.answer ? <span className="badge answered">Answered</span> : <span className="badge">Waiting for an answer</span>)}
       </div>
       <div className="activity-body">
@@ -142,7 +143,7 @@ function ReportItem(props: { report: Report }) {
       <div className="activity-head">
         <span className="activity-kind">Report</span>
         <Actor actor={agentActor(r.agent, r.session)} />
-        <span className="muted">{new Date(r.createdAt).toLocaleString()}</span>
+        <RelativeTime at={r.createdAt} />
       </div>
       <h3 className="report-title">
         <Link to={`/documents/${r.id}`} className="link">{r.title}</Link>
@@ -162,7 +163,7 @@ function CommentItem(props: { comment: Comment } & Thread) {
       <div className="comment-head">
         <span className="comment-kind">Comment</span>
         <Actor actor={c.actor} />
-        <span className="muted">{new Date(c.at).toLocaleString()}</span>
+        <RelativeTime at={c.at} />
       </div>
       {c.anchor && (
         <blockquote className={`anchor${c.anchor.inCurrentVersion ? "" : " detached"}`}>

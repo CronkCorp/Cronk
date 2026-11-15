@@ -1,3 +1,4 @@
+import { RelativeTime } from "./components/time.js";
 import { Actor, agentActor } from "./components/actor.js";
 import { useEffect, useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
@@ -707,7 +708,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
           <ol className="history" aria-label="History">
             {changes.map((change, i) => (
               <li key={i}>
-                <span className="muted">{new Date(change.at).toLocaleString()}</span> <Actor actor={change.actor} />{" "}
+                <RelativeTime at={change.at} /> <Actor actor={change.actor} />{" "}
                 {describe(change)}
               </li>
             ))}
@@ -739,7 +740,7 @@ function ReportsView(props: { projectKey: string }) {
                     {r.title} <span className="muted">on {r.ticketTitle}</span>
                   </span>
                   <Actor actor={agentActor(r.agent, r.session)} owner={false} />
-                  <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                  <RelativeTime at={r.createdAt} />
                 </Link>
               </li>
             ))}
@@ -807,8 +808,8 @@ function ClaimLine(props: { claim: TicketDetail["claim"] }) {
     <p className="muted claim" data-testid="ticket-claim">
       {claim ? (
         <>
-          Claimed by <Actor actor={agentActor(claim.agent, claim.session)} /> since {new Date(claim.claimedAt).toLocaleString()}; lapses if
-          silent until {new Date(claim.endsIfSilentAt).toLocaleTimeString()}
+          Claimed by <Actor actor={agentActor(claim.agent, claim.session)} /> <RelativeTime at={claim.claimedAt} />; lapses <RelativeTime at={claim.endsIfSilentAt} /> if
+          silent
         </>
       ) : (
         "Not Claimed"

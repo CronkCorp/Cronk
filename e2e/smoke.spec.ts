@@ -264,6 +264,10 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   });
   expect(asked.status()).toBe(201);
   await expect(timeline).toContainText("Blocking question");
+  // A recent time reads relatively, with the exact time in its tooltip.
+  const askedAt = timeline.getByRole("listitem").first().locator("time");
+  await expect(askedAt).toHaveText(/^(just now|\d+ min ago)$/);
+  await expect(askedAt).toHaveAttribute("title", new RegExp(String(new Date().getFullYear())));
   await expect(timeline.getByRole("strong").filter({ hasText: "Postgres" })).toBeVisible();
   await expect(timeline).toContainText("Waiting for an answer");
   // Ada answers the question by replying to it; the answer shows under it as a Comment.
