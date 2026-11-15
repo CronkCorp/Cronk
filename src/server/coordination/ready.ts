@@ -1,6 +1,7 @@
 import type { AgentActor } from "../actor.js";
 import type { AppContext } from "../context.js";
-import type { Queryable } from "../db/database.js";
+import { transaction, type Queryable } from "../db/database.js";
+import type pg from "pg";
 import { visibleProjects } from "../identity/access.js";
 import { listAgents } from "../identity/agents.js";
 import type { LiveEvent } from "../live/live-updates.js";
@@ -94,4 +95,30 @@ export async function claimsEnded(ctx: AppContext, ticketIds: string[]): Promise
   if (ticketIds.length === 0) return;
   ticketsChanged(ctx.live, await findTicketsByIds(ctx.db, ticketIds));
   await tellNewlyReady(ctx, ticketIds, new Map());
+}
+
+/** Which delegated Tickets an access or archive change can make Ready: a Project's, or those delegated to a User's Agents. */
+export type DelegatedTickets = { projectId: string } | { ownerId: string };
+
+/** The ids of the Tickets with a Delegate in a Project, or delegated to one of a User's Agents. */
+async function delegatedTicketIds(db: Queryable, of: DelegatedTickets): Promise<string[]> {
+  const { rows } =
+    "projectId" in of
+      ? await db.query<{ id: string }>("SELECT id FROM tickets WHERE project_id = $1 AND delegate_id IS NOT NULL", [of.projectId])
+      : await db.query<{ id: string }>("SELECT t.id FROM tickets t JOIN agents a ON a.id = t.delegate_id WHERE a.owner_id = $1", [of.ownerId]);
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Makes an access or archive change in a transaction, then tells the Delegates of the Tickets
+ * `of` lists which of them the change made Ready. Returns what `change` returns.
+ */
+export async function changeAccess<T>(ctx: AppContext, of: DelegatedTickets, change: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
+  const { result, ticketIds, before } = await transaction(ctx.db, async (tx) => {
+    const ticketIds = await delegatedTicketIds(tx, of);
+    const before = await readyNow(tx, ticketIds, ctx.clock.now());
+    return { result: await change(tx), ticketIds, before };
+  });
+  await tellNewlyReady(ctx, ticketIds, before);
+  return result;
 }

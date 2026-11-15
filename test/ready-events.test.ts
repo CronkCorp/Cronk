@@ -101,3 +101,40 @@ describe("An Agent Session's event stream", () => {
     expect((await stream.next())?.event).toBe("waiting");
   });
 });
+
+describe("An Agent Session's event stream, on access and archive changes", () => {
+  it("tells the Agent of its Tickets in a Project that is unarchived", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    await admin.patch("/api/projects/CRONK", { archived: true });
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { archived: false });
+    const told = [await stream.next(), await stream.next()];
+    expect(told).toEqual(expect.arrayContaining([readyEvent("CRONK-1"), readyEvent("CRONK-2")]));
+  });
+  it("tells the Agent of its Tickets in a Project whose Agent Access goes from Read to Write", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    await admin.patch("/api/projects/CRONK", { agentAccess: "read" });
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { agentAccess: "write" });
+    expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
+  });
+
+  it("tells the Agent nothing when a change leaves its Tickets as Ready as they were", async () => {
+    const { admin, claude, session } = await delegatedSetup(2);
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: null });
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { name: "Renamed", archived: false, agentAccess: "write", visibility: "open" });
+    // CRONK-1 was Ready already, so the next thing the Agent hears of is CRONK-2.
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId });
+    expect(await stream.next()).toEqual(readyEvent("CRONK-2"));
+  });
+});

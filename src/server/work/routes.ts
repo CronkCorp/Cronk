@@ -66,7 +66,7 @@ import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRel
 import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
 import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
-import { readyNow, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
+import { changeAccess, readyNow, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -195,7 +195,8 @@ export function workRoutes(ctx: AppContext) {
           ...(visibility !== undefined && { visibility }),
           ...(agentAccess !== undefined && { agentAccess }),
         };
-        const updated = await updateProject(ctx.db, project.id, changes, ctx.clock.now());
+        // Unarchiving, opening, or raising Agent Access can make the Project's delegated Tickets Ready.
+        const updated = await changeAccess(ctx, { projectId: project.id }, (tx) => updateProject(tx, project.id, changes, ctx.clock.now()));
         if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
         return { project: { ...updated, access } };
       },
