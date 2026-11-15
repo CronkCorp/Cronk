@@ -598,6 +598,18 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
   await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
   await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
+  // A field changed elsewhere shows in the side panel and as a line in the timeline.
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { priority: "urgent" } });
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Priority/ })).toContainText("Urgent");
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada set the Priority to Urgent");
+  // On a phone the side panel sits above the timeline, and nothing on the Ticket's page runs off the side.
+  await page.setViewportSize({ width: 375, height: 800 });
+  const side = (await page.getByRole("complementary", { name: "Ticket fields" }).boundingBox())!;
+  const timelineBox = (await page.getByRole("list", { name: "Timeline" }).boundingBox())!;
+  expect(side.y + side.height).toBeLessThanOrEqual(timelineBox.y);
+  const widest = await page.evaluate(() => Math.max(...[...document.querySelectorAll("article.ticket *")].map((e) => e.getBoundingClientRect().right)));
+  expect(widest).toBeLessThanOrEqual(375);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
   await page.goto(`/documents/${document.id}`);
