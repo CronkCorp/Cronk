@@ -250,10 +250,10 @@ export function DocumentComments(props: {
   commentRef?: Ref<HTMLTextAreaElement>;
 }) {
   const [comments, reload] = useLoad(() => api.documentComments(props.documentId), [props.documentId]);
-  const { passage, onPassageChange: setPassage } = props;
+  const { passage } = props;
   const post = (input: NewComment) => api.postDocumentComment(props.documentId, { ...input, ...(passage.trim() && { anchor: { passage } }) });
   const posted = () => {
-    setPassage("");
+    props.onPassageChange("");
     reload();
   };
   return (
@@ -270,7 +270,7 @@ export function DocumentComments(props: {
           </ol>
           {props.canWrite && (
             <>
-              <TextArea label="About the passage (optional)" value={passage} onChange={setPassage} rows={2} placeholder="Quote the text exactly" />
+              <TextArea label="About the passage (optional)" value={passage} onChange={props.onPassageChange} rows={2} placeholder="Quote the text exactly" />
               <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={posted} inputRef={props.commentRef} />
             </>
           )}

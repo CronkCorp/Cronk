@@ -2,7 +2,7 @@ import { useId, useRef } from "react";
 import { CronkMarkdown } from "./markdown.js";
 
 /** A change a toolbar button makes: the text that replaces [start, end), and what to select afterwards, relative to `start`. */
-interface Edit {
+interface TextChange {
   start: number;
   end: number;
   insert: string;
@@ -10,37 +10,35 @@ interface Edit {
 }
 
 /** Wraps the selection in `before` and `after`, or a placeholder when nothing is selected, keeping the wrapped text selected. */
-const wrap = (before: string, after: string, placeholder: string) => (text: string, start: number, end: number): Edit => {
+const wrap = (before: string, after: string, placeholder: string) => (text: string, start: number, end: number): TextChange => {
   const inner = text.slice(start, end) || placeholder;
   return { start, end, insert: `${before}${inner}${after}`, select: [before.length, before.length + inner.length] };
 };
 
-/** Puts `prefix` before every line the selection touches. */
-const prefixLines = (prefix: string) => (text: string, start: number, end: number): Edit => {
-  const from = text.lastIndexOf("\n", start - 1) + 1;
+/** Puts `prefix` before every line the selection touches, or takes it off again if they all have it. */
+const prefixLines = (prefix: string) => (text: string, start: number, end: number): TextChange => {
+  const from = start === 0 ? 0 : text.lastIndexOf("\n", start - 1) + 1;
   const newline = text.indexOf("\n", end > start ? end - 1 : end);
   const to = newline < 0 ? text.length : newline;
-  const insert = text
-    .slice(from, to)
-    .split("\n")
-    .map((line) => prefix + line)
-    .join("\n");
+  const lines = text.slice(from, to).split("\n");
+  const prefixed = lines.every((line) => line.startsWith(prefix));
+  const insert = lines.map((line) => (prefixed ? line.slice(prefix.length) : prefix + line)).join("\n");
   return { start: from, end: to, insert, select: [insert.length, insert.length] };
 };
 
 /** Turns the selection into a link, selecting the address to type over. */
-const link = (text: string, start: number, end: number): Edit => {
+const link = (text: string, start: number, end: number): TextChange => {
   const label = text.slice(start, end) || "text";
   const insert = `[${label}](https://)`;
   return { start, end, insert, select: [label.length + 3, insert.length - 1] };
 };
 
 /** Inline code for a selection within a line; a fenced block for one spanning lines. */
-const code = (text: string, start: number, end: number): Edit =>
+const code = (text: string, start: number, end: number): TextChange =>
   text.slice(start, end).includes("\n") ? wrap("```\n", "\n```", "")(text, start, end) : wrap("`", "`", "code")(text, start, end);
 
 /** What a toolbar button does to the text and its selection; nothing, if it was called off. */
-type Action = (text: string, start: number, end: number) => Edit | undefined;
+type Action = (text: string, start: number, end: number) => TextChange | undefined;
 
 /**
  * A Markdown editor: a textarea with a formatting toolbar beside a live preview, rendered as the
@@ -50,7 +48,6 @@ export function MarkdownEditor(props: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  rows?: number;
   disabled?: boolean;
   /** The Project whose Ticket keys a Ticket reference starts with, if any. */
   projectKey?: string | null;
@@ -73,8 +70,9 @@ export function MarkdownEditor(props: {
     el.setSelectionRange(edit.start + edit.select[0], edit.start + edit.select[1]);
   };
 
-  const ticketReference: Action = (_text, start, end) => {
-    const key = prompt("Ticket key", props.projectKey ? `${props.projectKey}-` : "")?.trim();
+  /** Asks for a Ticket key, starting from the selection or this Project's prefix, and puts it in place of the selection. */
+  const ticketReference: Action = (text, start, end) => {
+    const key = prompt("Ticket key", text.slice(start, end) || (props.projectKey ? `${props.projectKey}-` : ""))?.trim();
     return key ? { start, end, insert: key, select: [key.length, key.length] } : undefined;
   };
 
@@ -100,7 +98,7 @@ export function MarkdownEditor(props: {
               </button>
             ))}
           </div>
-          <textarea id={id} ref={area} disabled={props.disabled} value={props.value} rows={props.rows ?? 18} onChange={(e) => props.onChange(e.target.value)} />
+          <textarea id={id} ref={area} disabled={props.disabled} value={props.value} rows={18} onChange={(e) => props.onChange(e.target.value)} />
         </div>
       </div>
       <section className="markdown-editor-pane" aria-label="Preview">

@@ -12,7 +12,8 @@ interface MdNode extends MarkdownNode {
 
 /**
  * Where `length` characters from `from` in a text node's value sit in the source, if the node's
- * position is known, counting as if the value were the source text it was parsed from.
+ * position is known, counting as if the value were the source text it was parsed from. Lines and
+ * columns are counted too: without them the rest of the pipeline drops the position.
  */
 function positionWithin(node: MarkdownNode, from: number, length: number): Pick<MarkdownNode, "position"> {
   const start = node.position?.start;
@@ -40,8 +41,8 @@ function linkTicketReferences(projectKeys: Set<string>) {
     for (const match of text.matchAll(TICKET_REFERENCE)) {
       if (!projectKeys.has(match[1]!)) continue;
       if (match.index > last) parts.push({ type: "text", value: text.slice(last, match.index), ...positionWithin(node, last, match.index - last) });
-      const reference = { type: "text", value: match[0], ...positionWithin(node, match.index, match[0].length) };
-      parts.push({ type: "link", url: `/tickets/${match[0]}`, children: [reference], ...positionWithin(node, match.index, match[0].length) });
+      const at = positionWithin(node, match.index, match[0].length);
+      parts.push({ type: "link", url: `/tickets/${match[0]}`, children: [{ type: "text", value: match[0], ...at }], ...at });
       last = match.index + match[0].length;
     }
     if (last === 0) return [node];
@@ -50,6 +51,9 @@ function linkTicketReferences(projectKeys: Set<string>) {
   };
   return () => (tree: MdNode) => replaceReferenceText(tree, split);
 }
+
+/** The text a hast node shows. */
+const textOf = (node: HastNode): string => node.value ?? (node.children ?? []).map(textOf).join("");
 
 /** The hast nodes `markSourceOffsets` touches. */
 interface HastNode {
@@ -68,17 +72,19 @@ const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
  * A rehype plugin that wraps each run of text in a span naming where the text sits in the Markdown
  * source (`data-source-start`), when that is known for certain: the text is either the whole stretch
  * it was parsed from, or found exactly once inside it, as code is inside its backticks. Inline
- * elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`).
+ * elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
+ * the Markdown there holds their text as shown; a code block's fences are left out of it.
  */
 function markSourceOffsets(source: string) {
-  const mark = (node: HastNode): HastNode => {
+  const mark = (node: HastNode, parent?: HastNode): HastNode => {
     if (node.type !== "text") {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
-      if (node.tagName && INLINE_MARKUP.has(node.tagName) && start !== undefined && end !== undefined) {
+      const inline = node.tagName && INLINE_MARKUP.has(node.tagName) && !(node.tagName === "code" && parent?.tagName === "pre");
+      if (inline && start !== undefined && end !== undefined && source.slice(start, end).includes(textOf(node))) {
         node.properties = { ...node.properties, dataMarkupStart: start, dataMarkupEnd: end };
       }
-      node.children = node.children?.map(mark);
+      node.children = node.children?.map((child) => mark(child, node));
       return node;
     }
     const value = node.value ?? "";

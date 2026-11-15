@@ -316,6 +316,11 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 5));
   await page.getByRole("button", { name: "Bold" }).click();
   await expect(editor).toHaveValue("**Start** with CRONK-1.");
+  await page.getByRole("button", { name: "Heading" }).click();
+  await expect(editor).toHaveValue("## **Start** with CRONK-1.");
+  await expect(page.getByRole("region", { name: "Preview" }).getByRole("heading", { name: "Start with CRONK-1." })).toBeVisible();
+  await page.getByRole("button", { name: "Heading" }).click();
+  await expect(editor).toHaveValue("**Start** with CRONK-1.");
   const preview = page.getByRole("region", { name: "Preview" });
   await expect(preview.locator("strong")).toHaveText("Start");
   await expect(preview.getByRole("link", { name: "CRONK-1" })).toBeVisible();
