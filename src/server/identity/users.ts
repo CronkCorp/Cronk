@@ -1,3 +1,4 @@
+import { endAgentSessionsOfOwner } from "../coordination/agent-sessions.js";
 import type { Queryable } from "../db/database.js";
 
 export type Role = "admin" | "member";
@@ -118,7 +119,8 @@ export async function listUsers(db: Queryable, workspaceId: string): Promise<Use
 
 /**
  * Changes a User's role and/or deactivates or reactivates them, refusing to leave
- * the Workspace without an active Admin. Deactivating ends all their sign-ins.
+ * the Workspace without an active Admin. Deactivating ends all their sign-ins and their
+ * Agents' Sessions, so the Claims those held lapse at once.
  * Making them an Admin drops their Project listings, since Admins have Write everywhere;
  * demoting them later starts them with only the open Projects.
  * Returns undefined if there is no such User. Run inside a transaction.
@@ -148,7 +150,10 @@ export async function updateUser(
     [workspaceId, id, changes.role ?? null, changes.active ?? null, now],
   );
   if (!rows[0]) return undefined;
-  if (changes.active === false) await db.query("DELETE FROM sign_ins WHERE user_id = $1", [id]);
+  if (changes.active === false) {
+    await db.query("DELETE FROM sign_ins WHERE user_id = $1", [id]);
+    await endAgentSessionsOfOwner(db, id, now);
+  }
   if (changes.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [id]);
   return toUser(rows[0]);
 }

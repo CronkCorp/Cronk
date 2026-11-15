@@ -101,6 +101,14 @@ export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Da
   await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE agent_id = $1 AND ended_at IS NULL", [agentId, now]);
 }
 
+/** Ends every Session of every Agent `ownerId` owns, as when the Owner is deactivated. */
+export async function endAgentSessionsOfOwner(db: Queryable, ownerId: string, now: Date): Promise<void> {
+  await db.query(
+    "UPDATE agent_sessions SET ended_at = $2 WHERE agent_id IN (SELECT id FROM agents WHERE owner_id = $1) AND ended_at IS NULL",
+    [ownerId, now],
+  );
+}
+
 /** The live Sessions of each of these Agents, oldest first. */
 export async function liveAgentSessions(db: Queryable, agentIds: string[], now: Date): Promise<Map<string, AgentSession[]>> {
   const { rows } = await db.query<AgentSessionRow>(
