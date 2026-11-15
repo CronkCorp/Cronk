@@ -21,7 +21,7 @@ A unit of work tracked within a Project.
 _Avoid_: Issue, task, work item, card, story
 
 **Status**:
-Where a Ticket currently stands in its Project's workflow. Each Project defines its own Statuses, each belonging to exactly one Status Category, and keeps at least one Status in every Category. A new Ticket starts in the Project's first Status, Backlog by default.
+Where a Ticket currently stands in its Project's workflow. Each Project defines its own Statuses, each belonging to exactly one Status Category, and keeps at least one Status in every Category. A new Ticket starts in the Project's first Status, Backlog by default. Only Users add, rename, reorder or remove Statuses: removing one moves its Tickets, which an Agent may not finish that way.
 _Avoid_: State, column, stage
 
 **Status Category**:
