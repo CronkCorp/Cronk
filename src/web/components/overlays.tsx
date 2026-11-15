@@ -8,13 +8,29 @@ import { Button } from "./button.js";
 // Radix UI's headless primitives, each wrapped once and styled by our classes (docs/ui.md § Component conventions).
 // Radix handles focus, dismissal and keyboard use; these wrappers only give them Cronk's look.
 
-/** A floating panel anchored to `trigger`, such as a picker's list. */
-export function Popover(props: { trigger: ReactNode; children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void; label?: string }) {
+/**
+ * A floating panel anchored to `trigger`, such as a picker's list. `onOpenAutoFocus` may move focus
+ * somewhere other than the panel's first control when it opens.
+ */
+export function Popover(props: {
+  trigger: ReactNode;
+  children: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  label?: string;
+  onOpenAutoFocus?: (event: Event) => void;
+}) {
   return (
     <RadixPopover.Root {...(props.open === undefined ? {} : { open: props.open })} {...(props.onOpenChange ? { onOpenChange: props.onOpenChange } : {})}>
       <RadixPopover.Trigger asChild>{props.trigger}</RadixPopover.Trigger>
       <RadixPopover.Portal>
-        <RadixPopover.Content className="popover" align="start" sideOffset={4} aria-label={props.label}>
+        <RadixPopover.Content
+          className="popover"
+          align="start"
+          sideOffset={4}
+          aria-label={props.label}
+          {...(props.onOpenAutoFocus ? { onOpenAutoFocus: props.onOpenAutoFocus } : {})}
+        >
           {props.children}
         </RadixPopover.Content>
       </RadixPopover.Portal>

@@ -475,6 +475,48 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**bold a\\*b**");
 });
 
+// Runs after the tests above, so Ada and the CRONK Project exist.
+test("see a Comment in the margin beside the passage it is about", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByTestId("workspace-name")).toHaveText("Acme");
+  const intro = "Cronk stores every password as an **Argon2id** hash.\n\n";
+  const { document } = await (
+    await page.request.post("/api/projects/CRONK/documents", {
+      data: { title: "Security notes", body: `${intro.repeat(12)}## Rate limits\n\nFailed sign-ins are limited to five per minute. The limit slides.\n` },
+    })
+  ).json();
+  const passage = "Failed sign-ins are limited to five per minute";
+  await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Per IP too?", anchor: { passage } } });
+  await page.goto(`/documents/${document.id}`);
+
+  // The passage is highlighted in the body, and its Comment's card sits in the margin beside it.
+  const highlighted = page.getByTestId("document-body").locator("mark");
+  await expect(highlighted).toHaveText(passage);
+  const card = page.getByRole("list", { name: "Comments" }).getByRole("listitem").filter({ hasText: "Per IP too?" });
+  await expect(card).toBeVisible();
+  const passageBox = (await highlighted.boundingBox())!;
+  const cardBox = (await card.boundingBox())!;
+  expect(cardBox.x).toBeGreaterThan(passageBox.x + passageBox.width);
+  expect(Math.abs(cardBox.y - passageBox.y)).toBeLessThan(24);
+
+  // Hovering or focusing either one highlights both.
+  await highlighted.hover();
+  await expect(highlighted).toHaveClass(/active/);
+  await expect(card).toHaveClass(/active/);
+  await page.mouse.move(0, 0);
+  await expect(highlighted).not.toHaveClass(/active/);
+  await card.focus();
+  await expect(highlighted).toHaveClass(/active/);
+
+  // On a narrow screen the Comments move under the body.
+  await page.setViewportSize({ width: 800, height: 900 });
+  const narrowBody = (await page.getByTestId("document-body").boundingBox())!;
+  expect((await card.boundingBox())!.y).toBeGreaterThan(narrowBody.y + narrowBody.height);
+});
+
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
 test("link a Document to a Ticket from the Ticket's page, then unlink it", async ({ page }) => {
   await page.goto("/");

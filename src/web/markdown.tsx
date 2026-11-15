@@ -2,7 +2,7 @@ import Markdown, { type Components } from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
-import { alignToSource, encodeBounds } from "./source-map.js";
+import { alignToSource, encodeBounds, type SourceBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
@@ -73,6 +73,114 @@ interface HastNode {
 /** Inline elements whose Markdown wraps their text in markup, such as `**` around bold. */
 const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
 
+/** A passage to highlight in rendered Markdown, such as a Comment's anchor, named by `id`. */
+export interface Highlight {
+  id: string;
+  passage: string;
+}
+
+/**
+ * A run of rendered text as `markSourceOffsets` found it: where in the source each of its characters
+ * sits, with the span it was wrapped in, or `unmapped` when that is not known for certain (with the
+ * stretch it was parsed from, when known).
+ */
+type Run =
+  | { kind: "mapped"; value: string; bounds: SourceBounds; wrapper: HastNode; bare: boolean }
+  | { kind: "unmapped"; from?: number; to?: number };
+
+/**
+ * Which characters of each run show the Markdown from `from` to `to`: those whose own Markdown lies
+ * inside it. Nothing when no character does, or when a run of text that can't be tied to the source
+ * may show part of it, so a passage is never highlighted on a guess.
+ */
+function place(runs: Run[], from: number, to: number): Map<Run, [number, number]> | undefined {
+  const covered = new Map<Run, [number, number]>();
+  let firstAt = -1;
+  let lastAt = -1;
+  const unknown: number[] = [];
+  runs.forEach((run, at) => {
+    if (run.kind === "unmapped") {
+      if (run.from === undefined || run.to === undefined) unknown.push(at);
+      else if (run.from < to && from < run.to) unknown.push(-1);
+      return;
+    }
+    const { starts, ends } = run.bounds;
+    let start = -1;
+    let end = -1;
+    for (let k = 0; k < run.value.length; k++) {
+      if (starts[k]! >= from && ends[k + 1]! <= to) {
+        if (start < 0) start = k;
+        end = k + 1;
+      }
+    }
+    if (start < 0) return;
+    covered.set(run, [start, end]);
+    if (firstAt < 0) firstAt = at;
+    lastAt = at;
+  });
+  if (covered.size === 0 || unknown.some((at) => at < 0 || (firstAt < at && at < lastAt))) return undefined;
+  return covered;
+}
+
+/** The part of `bounds` from character `a` up to `b`, as `alignToSource` would give it for that text alone. */
+function sliceBounds(bounds: SourceBounds, a: number, b: number): SourceBounds {
+  return { starts: [...bounds.starts.slice(a, b), bounds.ends[b]!], ends: [bounds.starts[a]!, ...bounds.ends.slice(a + 1, b + 1)] };
+}
+
+/** A span naming where `bounds`' text sits in the source, as `markSourceOffsets` writes it. */
+function sourceSpan(value: string, bounds: SourceBounds, bare: boolean): HastNode {
+  const text: HastNode = { type: "text", value };
+  if (bare) return text;
+  const start = bounds.ends[0]!;
+  const map = encodeBounds(bounds, start);
+  return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [text] };
+}
+
+/**
+ * Highlights each passage at the first place its Markdown appears in `source`, as the API finds it,
+ * when the rendered text there can be tied to it for certain: the runs showing it are split, and
+ * each piece inside it is wrapped in a `mark` naming the passages it belongs to (`data-highlights`).
+ * The first piece of each passage can take focus.
+ */
+function highlightPassages(runs: Run[], source: string, highlights: Highlight[]) {
+  const ids = new Map<Run, Set<string>[]>();
+  for (const h of highlights) {
+    const from = h.passage ? source.indexOf(h.passage) : -1;
+    if (from < 0) continue;
+    const placed = place(runs, from, from + h.passage.length);
+    for (const [run, [start, end]] of placed ?? []) {
+      if (run.kind !== "mapped") continue;
+      const perChar = ids.get(run) ?? Array.from({ length: run.value.length }, () => new Set<string>());
+      ids.set(run, perChar);
+      for (let k = start; k < end; k++) perChar[k]!.add(h.id);
+    }
+  }
+  const focusable = new Set<string>();
+  for (const run of runs) {
+    const perChar = run.kind === "mapped" ? ids.get(run) : undefined;
+    if (run.kind !== "mapped" || !perChar) continue;
+    const pieces: HastNode[] = [];
+    for (let a = 0; a < run.value.length; ) {
+      const key = [...perChar[a]!].join(" ");
+      let b = a + 1;
+      while (b < run.value.length && [...perChar[b]!].join(" ") === key) b++;
+      const piece = sourceSpan(run.value.slice(a, b), sliceBounds(run.bounds, a, b), run.bare);
+      if (!key) pieces.push(piece);
+      else {
+        const first = [...perChar[a]!].some((id) => !focusable.has(id));
+        perChar[a]!.forEach((id) => focusable.add(id));
+        pieces.push({ type: "element", tagName: "mark", properties: { className: ["highlight"], dataHighlights: key, ...(first && { tabIndex: 0 }) }, children: [piece] });
+      }
+      a = b;
+    }
+    run.wrapper.type = "element";
+    run.wrapper.tagName = "span";
+    run.wrapper.properties = {};
+    run.wrapper.children = pieces;
+    delete run.wrapper.value;
+  }
+}
+
 /**
  * A rehype plugin that wraps each run of text in a span naming where the text sits in the Markdown
  * source (`data-source-start`), when that is known for certain: each of its characters can be tied to
@@ -80,8 +188,10 @@ const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
  * writes it), or, for code, the text is found exactly once inside that stretch, as inside its
  * backticks. Inline elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
  * every run of their text was parsed from inside it; a code block's fences are left out of it.
+ * Then it highlights `highlights` (see `highlightPassages`).
  */
-function markSourceOffsets(source: string) {
+function markSourceOffsets(source: string, highlights: Highlight[]) {
+  const runs: Run[] = [];
   const mark = (node: HastNode, parent?: HastNode): HastNode => {
     if (node.type !== "text") {
       const start = node.position?.start.offset;
@@ -96,21 +206,42 @@ function markSourceOffsets(source: string) {
     const value = node.value ?? "";
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
-    if (!value.trim() || start === undefined || end === undefined) return node;
+    if (start === undefined || end === undefined) {
+      // Whitespace the renderer puts between blocks is no text of the Document's own.
+      if (value.trim()) runs.push({ kind: "unmapped" });
+      return node;
+    }
     const bounds = alignToSource(value, source, start, end);
+    if (!value.trim()) {
+      // Whitespace between inline elements is left as it is, but a highlight may run through it.
+      if (bounds) {
+        const wrapper: HastNode = { type: "text", value };
+        runs.push({ kind: "mapped", value, bounds, wrapper, bare: true });
+        return wrapper;
+      }
+      return node;
+    }
     if (bounds) {
-      const map = encodeBounds(bounds, start);
-      return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [node] };
+      const wrapper = sourceSpan(value, bounds, false);
+      runs.push({ kind: "mapped", value, bounds, wrapper, bare: false });
+      return wrapper;
     }
     // Code shows its Markdown as it is, inside backticks or fences the run's stretch includes.
-    if (parent?.tagName !== "code") return node;
     const stretch = source.slice(start, end);
     const at = stretch.indexOf(value);
-    if (at < 0 || stretch.indexOf(value, at + 1) >= 0) return node;
-    return { type: "element", tagName: "span", properties: { dataSourceStart: start + at }, children: [node] };
+    if (parent?.tagName !== "code" || at < 0 || stretch.indexOf(value, at + 1) >= 0) {
+      runs.push({ kind: "unmapped", from: start, to: end });
+      return node;
+    }
+    const offsets = Array.from({ length: value.length + 1 }, (_, k) => start + at + k);
+    const wrapper = sourceSpan(value, { starts: offsets, ends: [...offsets] }, false);
+    runs.push({ kind: "mapped", value, bounds: { starts: offsets, ends: [...offsets] }, wrapper, bare: false });
+    return wrapper;
   };
   return () => (tree: HastNode) => {
+    runs.length = 0;
     mark(tree);
+    if (highlights.length > 0) highlightPassages(runs, source, highlights);
   };
 }
 
@@ -147,15 +278,16 @@ const COMPONENTS: Components = {
 
 /**
  * Renders Cronk Markdown: CommonMark plus Ticket references as links. With `sourceOffsets`, each run of
- * text says where it sits in the Markdown, so a selection can be read back as the Markdown it shows.
+ * text says where it sits in the Markdown, so a selection can be read back as the Markdown it shows, and
+ * `highlights` are marked where their passages first appear.
  */
-export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean }) {
+export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean; highlights?: Highlight[] }) {
   const [keys] = useLoad(loadProjectKeys, []);
   const known = keys.kind === "loaded" ? keys.value : new Set<string>();
   return (
     <Markdown
       remarkPlugins={[linkTicketReferences(known, props.children)]}
-      rehypePlugins={props.sourceOffsets ? [markSourceOffsets(props.children)] : []}
+      rehypePlugins={props.sourceOffsets ? [markSourceOffsets(props.children, props.highlights ?? [])] : []}
       components={COMPONENTS}
     >
       {props.children}

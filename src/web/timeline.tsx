@@ -2,7 +2,7 @@ import { Button } from "./components/button.js";
 import { Chip, KindLabel } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
-import { useEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -161,26 +161,42 @@ function ReportItem(props: { report: Report }) {
   );
 }
 
-function CommentItem(props: { comment: Comment } & Thread) {
+/** How a Comment is shown as a card in a Document's margin: highlighted with its passage, and told when it is hovered or focused. */
+interface Card {
+  active: boolean;
+  onActive: (active: boolean) => void;
+}
+
+function CommentItem(props: { comment: Comment; card?: Card } & Thread) {
   const c = props.comment;
   const replies = props.comments.filter((r) => r.replyToCommentId === c.id);
+  const card = props.card;
+  const detached = c.anchor && !c.anchor.inCurrentVersion;
   return (
-    <li className="comment">
+    <li
+      className={`comment${card ? " margin-card" : ""}${card?.active ? " active" : ""}`}
+      {...(card && {
+        "data-comment-id": c.id,
+        tabIndex: 0,
+        onMouseEnter: () => card.onActive(true),
+        onMouseLeave: () => card.onActive(false),
+        onFocus: () => card.onActive(true),
+        onBlur: (e: FocusEvent<HTMLLIElement>) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) card.onActive(false);
+        },
+      })}
+    >
+      {c.anchor && <blockquote className={`passage${detached ? " detached" : ""}`}>{c.anchor.passage}</blockquote>}
+      {c.anchor && detached && <p className="detached-note muted">No longer in the Document (was in Version {c.anchor.version})</p>}
       <div className="comment-head">
         <KindLabel kind="comment">Comment</KindLabel>
         <Actor actor={c.actor} />
         <RelativeTime at={c.at} />
       </div>
-      {c.anchor && (
-        <blockquote className={`anchor${c.anchor.inCurrentVersion ? "" : " detached"}`}>
-          {c.anchor.passage}
-          {!c.anchor.inCurrentVersion && <span className="muted"> (no longer in the Document; was in Version {c.anchor.version})</span>}
-        </blockquote>
-      )}
       <div className="comment-body">
         <CronkMarkdown>{c.body}</CronkMarkdown>
       </div>
-      <Replies {...props} replies={replies} replyTo={{ replyToCommentId: c.id }} replyLabel="Reply" />
+      <Replies comments={props.comments} canWrite={props.canWrite} post={props.post} onPosted={props.onPosted} replies={replies} replyTo={{ replyToCommentId: c.id }} replyLabel="Reply" />
     </li>
   );
 }
@@ -246,46 +262,124 @@ function CommentForm(props: {
   );
 }
 
+/** Whether the Comments sit in a margin beside the Document's body, as on wide screens, rather than under it. */
+const WIDE = "(min-width: 900px)";
+
 /**
- * A Document's Comments, oldest first, each reply under the Comment it replies to. A new one may
- * anchor to a passage, typed here or picked by selecting it in the Document. They are loaded again
- * whenever `generation` changes, as when a new one arrives.
+ * Moves each card in `margin` marked `data-aligned` down to the passage it is about in `body`, but never
+ * up into the card above it. On narrow screens, where the margin sits under the body, cards stay in flow.
  */
-export function DocumentComments(props: {
+function alignCards(margin: HTMLElement, body: HTMLElement) {
+  const cards = [...margin.querySelectorAll<HTMLElement>(".margin-card")];
+  for (const card of cards) card.style.marginTop = "";
+  if (!window.matchMedia(WIDE).matches) return;
+  for (const card of cards) {
+    const id = card.dataset.commentId;
+    const passage = id && body.querySelector(`mark[data-highlights~="${CSS.escape(id)}"]`);
+    if (!passage) continue;
+    const below = passage.getBoundingClientRect().top - card.getBoundingClientRect().top;
+    if (below > 0) card.style.marginTop = `${below}px`;
+  }
+}
+
+/**
+ * A Document's Comments as cards down its margin. Those whose passage is highlighted in the body
+ * (`placed`, in the order they appear there) come first, each aligned with its passage; then the
+ * rest, oldest first: Comments on the whole Document, passages the page can't place, and passages
+ * no longer in the Document. "Comment on the whole Document" ends the margin. Hovering or focusing
+ * a card makes it `active`, as hovering its passage does.
+ */
+export function DocumentMargin(props: {
   documentId: string;
+  comments: Comment[];
+  placed: string[];
+  bodyRef: RefObject<HTMLElement | null>;
+  active: string | undefined;
+  onActive: (id: string | undefined) => void;
   canWrite: boolean;
-  generation?: number;
+  onPosted: () => void;
+}) {
+  const marginAt = useRef<HTMLDivElement>(null);
+  const [writing, setWriting] = useState(false);
+  const all = props.comments;
+  const top = all.filter((c) => !c.replyToCommentId);
+  const byId = new Map(top.map((c) => [c.id, c]));
+  const ordered = [...props.placed.flatMap((id) => byId.get(id) ?? []), ...top.filter((c) => !props.placed.includes(c.id))];
+  const post = (input: NewComment) => api.postDocumentComment(props.documentId, input);
+
+  useLayoutEffect(() => {
+    const margin = marginAt.current;
+    const body = props.bodyRef.current;
+    if (!margin || !body) return;
+    const align = () => alignCards(margin, body);
+    align();
+    const resized = new ResizeObserver(align);
+    resized.observe(body);
+    margin.querySelectorAll(".margin-card").forEach((card) => resized.observe(card));
+    const wide = window.matchMedia(WIDE);
+    wide.addEventListener("change", align);
+    void document.fonts?.ready.then(align);
+    return () => {
+      resized.disconnect();
+      wide.removeEventListener("change", align);
+    };
+  });
+
+  let cards: ReactNode;
+  if (top.length === 0) cards = <li className="muted">No Comments yet.</li>;
+  else
+    cards = ordered.map((c) => (
+      <CommentItem
+        key={c.id}
+        comment={c}
+        comments={all}
+        canWrite={props.canWrite}
+        post={post}
+        onPosted={props.onPosted}
+        card={{ active: props.active === c.id, onActive: (on) => props.onActive(on ? c.id : undefined) }}
+      />
+    ));
+  return (
+    <aside className="comment-margin" ref={marginAt} aria-label="Comments on this Document">
+      <ol className="timeline margin-cards" aria-label="Comments">{cards}</ol>
+      {props.canWrite &&
+        (writing ? (
+          <div className="margin-form">
+            <CommentForm
+              label="Comment on the whole Document"
+              submitLabel="Post Comment"
+              post={post}
+              onPosted={() => {
+                setWriting(false);
+                props.onPosted();
+              }}
+              onCancel={() => setWriting(false)}
+            />
+          </div>
+        ) : (
+          <Button variant="secondary" className="whole-document" onClick={() => setWriting(true)}>Comment on the whole Document</Button>
+        ))}
+    </aside>
+  );
+}
+
+/**
+ * The form for a Comment on a passage selected in a Document: the passage, which the User may
+ * correct, and the Comment. Shown in the popover "Comment on this passage" opens.
+ */
+export function PassageCommentForm(props: {
+  documentId: string;
   passage: string;
   onPassageChange: (passage: string) => void;
+  onPosted: () => void;
   commentRef?: Ref<HTMLTextAreaElement>;
 }) {
-  const [comments, reload] = useLoad(() => api.documentComments(props.documentId), [props.documentId, props.generation]);
-  const { passage } = props;
-  const post = (input: NewComment) => api.postDocumentComment(props.documentId, { ...input, ...(passage.trim() && { anchor: { passage } }) });
-  const posted = () => {
-    props.onPassageChange("");
-    reload();
-  };
+  const post = (input: NewComment) =>
+    api.postDocumentComment(props.documentId, { ...input, ...(props.passage.trim() && { anchor: { passage: props.passage } }) });
   return (
-    <Show state={comments}>
-      {(all) => (
-        <>
-          <ol className="timeline" aria-label="Comments">
-            {all.length === 0 && <li className="muted">No Comments yet.</li>}
-            {all
-              .filter((c) => !c.replyToCommentId)
-              .map((c) => (
-                <CommentItem key={c.id} comment={c} comments={all} canWrite={props.canWrite} post={(input) => api.postDocumentComment(props.documentId, input)} onPosted={reload} />
-              ))}
-          </ol>
-          {props.canWrite && (
-            <>
-              <TextArea label="About the passage (optional)" value={passage} onChange={props.onPassageChange} rows={2} placeholder="Quote the text exactly" />
-              <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={posted} inputRef={props.commentRef} />
-            </>
-          )}
-        </>
-      )}
-    </Show>
+    <div className="passage-comment">
+      <TextArea label="About the passage (optional)" value={props.passage} onChange={props.onPassageChange} rows={2} placeholder="Quote the text exactly" />
+      <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={props.onPosted} inputRef={props.commentRef} />
+    </div>
   );
 }
