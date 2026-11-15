@@ -282,7 +282,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     anyOf: [
       object({ change: { const: "created" }, title: { type: "string" }, description: { type: "string" }, status: ref("Status") }),
       ...(["title", "description"] as const).map((c) => object({ change: { const: c }, from: { type: "string" }, to: { type: "string" } })),
-      object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
+      object({
+        change: { const: "status" },
+        from: ref("Status"),
+        to: ref("Status"),
+        sentBack: { type: "boolean", description: "True for the move back to a Started Status a User made sending the Ticket back from review." },
+      }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
       ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
@@ -337,6 +342,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The passage of its Document it is anchored to; null when it isn't anchored.",
       },
       body: { type: "string", description: "Markdown." },
+      sendBack: { type: "boolean", description: "True for the Comment a User sent its Ticket back from review with." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },
     }),

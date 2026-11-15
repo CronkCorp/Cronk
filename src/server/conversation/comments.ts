@@ -18,6 +18,8 @@ export interface Comment {
   /** The passage of its Document it is anchored to; null when it isn't anchored. */
   anchor: Anchor | null;
   body: string;
+  /** Whether a User posted it sending its Ticket back from review. */
+  sendBack: boolean;
   at: Date;
   actor: RecordedActor;
 }
@@ -44,6 +46,7 @@ interface CommentRow extends RecordedActorRow {
   anchor_version: number | null;
   anchor_in_current_version: boolean | null;
   body: string;
+  send_back: boolean;
   at: Date;
   ticket_title: string | null;
   document_title: string | null;
@@ -57,7 +60,7 @@ interface CommentRow extends RecordedActorRow {
 const selectFrom = (source: string) => `
   SELECT c.id, c.ticket_id, p.key || '-' || t.number AS ticket_key, c.document_id, c.reply_to_comment_id, c.reply_to_activity_id,
     c.anchor_passage, c.anchor_version, strpos(d.body, c.anchor_passage) > 0 AS anchor_in_current_version,
-    c.body, c.at, t.title AS ticket_title, d.title AS document_title, coalesce(t.project_id, d.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
+    c.body, c.send_back, c.at, t.title AS ticket_title, d.title AS document_title, coalesce(t.project_id, d.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
   FROM ${source} c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
     LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN documents d ON d.id = c.document_id`;
 
@@ -73,6 +76,7 @@ const toComment = (row: CommentRow): Comment => ({
       ? null
       : { passage: row.anchor_passage, version: row.anchor_version!, inCurrentVersion: row.anchor_in_current_version! },
   body: row.body,
+  sendBack: row.send_back,
   at: row.at,
   actor: toRecordedActor(row),
 });
@@ -97,14 +101,16 @@ export async function insertComment(
     replyToCommentId: string | null;
     replyToActivityId: string | null;
     anchor: Omit<Anchor, "inCurrentVersion"> | null;
+    /** Set for the Comment a Ticket is sent back from review with; false if left out. */
+    sendBack?: boolean;
   },
   at: Date,
 ): Promise<Comment> {
   const { rows } = await db.query<CommentRow>(
     `WITH inserted AS (
        INSERT INTO comments (ticket_id, document_id, reply_to_comment_id, reply_to_activity_id, anchor_passage, anchor_version,
-         body, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *)
+         body, send_back, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *)
      ${selectFrom("inserted")}`,
     [
       ...targetColumns(target),
@@ -113,6 +119,7 @@ export async function insertComment(
       input.anchor?.passage ?? null,
       input.anchor?.version ?? null,
       input.body,
+      input.sendBack ?? false,
       at,
       ...actorColumns(actor),
     ],

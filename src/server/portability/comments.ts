@@ -24,6 +24,7 @@ export async function exportComments(
       anchor_passage: string | null;
       anchor_version: number | null;
       body: string;
+      send_back: boolean;
       at: Date;
     }
   >(`SELECT * FROM comments WHERE ${on} = $1 ORDER BY seq`, [id]);
@@ -37,6 +38,7 @@ export async function exportComments(
         replyToComment: c.reply_to_comment_id === null ? undefined : numbers.get(c.reply_to_comment_id),
         replyToActivity: c.reply_to_activity_id === null ? undefined : activityNumbers.get(c.reply_to_activity_id),
         anchor: c.anchor_passage === null ? undefined : { passage: c.anchor_passage, version: c.anchor_version },
+        sendBack: c.send_back || undefined,
       },
       c.body,
     );
@@ -66,13 +68,15 @@ export async function importComments(
     const anchor = c.data.anchor as { passage?: unknown; version?: unknown } | undefined;
     const version = anchor ? Math.min(integer(anchor.version, `${c.path} anchor.version`), documentVersion) : null;
     const passage = anchor ? text(anchor.passage, `${c.path} anchor.passage`) : null;
+    const sendBack = c.data.sendBack === true;
+    if (sendBack && !("ticketId" in target)) refuse(`${c.path} sendBack is only for a Comment on a Ticket`);
     const at = date(c.data.at, `${c.path} at`);
     const by = await ctx.actor(c.data.by, `${c.path} by`);
     const comment = await insertComment(
       ctx.db,
       target,
       by,
-      { body: c.body, replyToCommentId, replyToActivityId, anchor: passage === null ? null : { passage, version: version! } },
+      { body: c.body, replyToCommentId, replyToActivityId, anchor: passage === null ? null : { passage, version: version! }, sendBack },
       at,
     );
     ids.set(n, comment.id);

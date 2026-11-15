@@ -422,4 +422,12 @@ export const migrations: Migration[] = [
       CREATE INDEX ticket_document_links_document ON ticket_document_links (document_id);
     `,
   },
+  {
+    id: "0017_send_back_comments",
+    sql: `
+      -- The Comment a User sent a Ticket back from review with (the send-back route), so the Ticket's
+      -- timeline can label it without pairing it with the Status Change by time.
+      ALTER TABLE comments ADD COLUMN send_back boolean NOT NULL DEFAULT false CHECK (NOT send_back OR ticket_id IS NOT NULL);
+    `,
+  },
 ];
