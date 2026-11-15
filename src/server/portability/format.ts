@@ -63,11 +63,12 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
 - \`projects/<KEY>/project.md\`: a Project's settings, Statuses and members; beside it its \`guidance.md\`, \`documents/\` and \`tickets/\`.
 - \`documents/\`: the page tree. Each Document is \`<n>-<title>.md\`, numbered in tree order, with the Documents under it in a
   folder of the same name. \`<name>.versions/\` holds its Versions when the export includes them, \`<name>.comments/\` its Comments.
-- \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key. Beside it,
+- \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key, and \`documents\` lists the
+  Documents and Reports linked to it by the path of their file, in the order they were linked. Beside it,
   \`<KEY>.activities/\`, \`<KEY>.comments/\` and \`<KEY>.reports/\` hold its Activities, Comments and Reports, each numbered from 1
   in the order they were written; replies and answers name them by that number. \`<KEY>.history.md\` holds its history, oldest
   first, with the names recorded at the time; a User in it also has their \`email\`, a Status its \`current\` name if it is
-  still in the Project, and an Agent its id from \`people.md\`.
+  still in the Project, an Agent its id from \`people.md\`, and a Document the \`path\` of its file if the export holds it.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
 already in the installation an export is imported into come in deactivated, since they have no password there; an Admin

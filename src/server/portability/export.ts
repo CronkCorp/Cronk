@@ -36,6 +36,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
     await exportTree(ctx, `${dir}/documents`, p.id);
     await exportTickets(ctx, dir, p, statusNow);
   }
+  ctx.writePending();
   // Last, so a Project export lists only who the other files name.
   await exportPeople(ctx);
   const whole = scope.projectId === null;
