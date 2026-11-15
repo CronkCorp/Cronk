@@ -303,9 +303,9 @@ function formatRemaining(ms: number): string {
 
 /**
  * The Ticket's Claim: the Agent and its Agent Session, since when, and a meter counting down until the Claim
- * lapses if the Agent Session stays silent. The meter spans the silence threshold, from the Agent Session's last
- * call to the lapse time. When the time is up, `onDue` reads the Claim again: the Agent Session may have called in
- * meanwhile, which moves the lapse time without anything being pushed.
+ * lapses if the Agent Session stays silent. The meter spans the silence threshold, from when the Agent Session
+ * was last heard from to the lapse time. When the time is up, `onDue` reads the Claim again: the Agent Session
+ * may have called in meanwhile, which moves the lapse time without anything being pushed.
  */
 function ClaimCard(props: { claim: NonNullable<TicketDetail["claim"]>; onDue: () => void }) {
   const { claim } = props;
