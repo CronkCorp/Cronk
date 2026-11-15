@@ -18,6 +18,7 @@ import type {
   InboxKind,
   IssuedAgentToken,
   Invitation,
+  LinkedDocument,
   Member,
   Merge,
   MergedSection,
@@ -66,6 +67,7 @@ export type {
   InboxKind,
   IssuedAgentToken,
   Invitation,
+  LinkedDocument,
   Member,
   Merge,
   MergedSection,
@@ -266,6 +268,16 @@ export const api = {
       "DELETE",
       `/api/tickets/${encodeURIComponent(key)}/relations/${kind}/${encodeURIComponent(otherKey)}`,
     ).then((r) => r.relations),
+  /** Links a Document to a Ticket; answers the Ticket's Documents. */
+  linkDocument: (key: string, documentId: string) =>
+    request<{ documents: LinkedDocument[] }>("POST", `/api/tickets/${encodeURIComponent(key)}/documents/${encodeURIComponent(documentId)}`).then(
+      (r) => r.documents,
+    ),
+  /** Unlinks a Document from a Ticket; answers the Ticket's remaining Documents. */
+  unlinkDocument: (key: string, documentId: string) =>
+    request<{ documents: LinkedDocument[] }>("DELETE", `/api/tickets/${encodeURIComponent(key)}/documents/${encodeURIComponent(documentId)}`).then(
+      (r) => r.documents,
+    ),
   documentTree: (projectKey?: string) =>
     request<{ documents: DocumentTreeEntry[] }>("GET", `${treePath(projectKey)}/documents`).then((r) => r.documents),
   createDocument: (projectKey: string | undefined, input: { title: string; body?: string; parentId?: string }) =>

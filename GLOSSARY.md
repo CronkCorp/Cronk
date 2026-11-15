@@ -112,6 +112,10 @@ _Avoid_: Merge request, MR, PR (in the product), change
 A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown.
 _Avoid_: Page, doc, wiki page, note
 
+**Linked Document**:
+A Document an Actor linked to a Ticket from the Ticket's side, so it is one click away without editing the Document. The Ticket lists it beside its Reports and the Documents that mention its key. Unlike a Relation, it never blocks.
+_Avoid_: Relation (reserved for Ticket to Ticket), attachment, reference
+
 **Version**:
 One saved state of a Document, Artifact or Guidance, recording which Actor produced it.
 _Avoid_: Revision, snapshot, history entry

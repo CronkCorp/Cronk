@@ -2,6 +2,7 @@ import { insertActivity, markAnswered, type Activity } from "../coordination/act
 import { ACTIVITY_KINDS, PRIORITIES } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { storeRelation } from "../work/relations.js";
+import { storeDocumentLink } from "../work/document-links.js";
 import { exportComments, importComments } from "./comments.js";
 import { exportDocument, importDocument, type DocumentRow } from "./documents.js";
 import { exportHistory, importHistory } from "./history.js";
@@ -11,8 +12,9 @@ import type { ImportContext } from "./import-context.js";
 import type { ImportedProject, ProjectRow } from "./projects.js";
 
 /**
- * Tickets: `tickets/<KEY>.md` with the description as its body and relations naming other
- * Tickets by key; beside it `<KEY>.activities/`, `<KEY>.comments/` and `<KEY>.reports/`.
+ * Tickets: `tickets/<KEY>.md` with the description as its body, relations naming other
+ * Tickets by key and linked Documents naming their files by path; beside it `<KEY>.activities/`,
+ * `<KEY>.comments/` and `<KEY>.reports/`.
  */
 
 interface TicketRow {
@@ -66,25 +68,34 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
     return relations.filter((r) => r.kind === kind && r[`${side}_id`] === t.id).map((r) => r[`${other}_key`]);
   };
   const sorted = (keys: string[]) => (keys.length > 0 ? keys.sort(natural) : undefined);
-  ctx.add(
-    `${base}.md`,
-    {
-      key,
-      title: t.title,
-      status: t.status,
-      priority: t.priority,
-      labels: t.labels,
-      assignee: ctx.user(t.assignee_id),
-      delegate: ctx.agent(t.delegate_id),
-      parent: t.parent_number === null ? null : `${projectKey}-${t.parent_number}`,
-      blocks: sorted(related("blocks", "from")),
-      blockedBy: sorted(related("blocks", "to")),
-      relatesTo: sorted([...related("relates_to", "from"), ...related("relates_to", "to")]),
-      createdAt: iso(t.created_at),
-      updatedAt: iso(t.updated_at),
-    },
-    t.description,
+  const { rows: links } = await ctx.db.query<{ document_id: string }>(
+    "SELECT document_id FROM ticket_document_links WHERE ticket_id = $1 ORDER BY seq",
+    [t.id],
   );
+  // Once every Document is written, so linked Documents can be named by path; those the export leaves out are left out.
+  ctx.afterDocuments(() => {
+    const documents = links.map((l) => ctx.documentPaths.get(l.document_id)).filter((p): p is string => p !== undefined);
+    ctx.add(
+      `${base}.md`,
+      {
+        key,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        labels: t.labels,
+        assignee: ctx.user(t.assignee_id),
+        delegate: ctx.agent(t.delegate_id),
+        parent: t.parent_number === null ? null : `${projectKey}-${t.parent_number}`,
+        blocks: sorted(related("blocks", "from")),
+        blockedBy: sorted(related("blocks", "to")),
+        relatesTo: sorted([...related("relates_to", "from"), ...related("relates_to", "to")]),
+        documents: documents.length > 0 ? documents : undefined,
+        createdAt: iso(t.created_at),
+        updatedAt: iso(t.updated_at),
+      },
+      t.description,
+    );
+  });
   await exportActivitiesAndComments(ctx, base, t.id);
   await exportHistory(ctx, base, t.id, statusNow);
   const { rows: reports } = await ctx.db.query<DocumentRow>("SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id", [t.id]);
@@ -126,10 +137,19 @@ interface PendingRelation {
   to: string;
 }
 
-/** The Tickets an import brought in so far, by key, and the relations and history they hold, to import once every Project is in. */
+/** A Document a Ticket file links, by the path of its file, to store once every Document is in. */
+interface PendingDocumentLink {
+  ticketId: string;
+  path: string;
+  /** Where the Ticket file names it, for refusing a path the export doesn't hold. */
+  where: string;
+}
+
+/** The Tickets an import brought in so far, by key, and the relations, links and history they hold, to import once every Project is in. */
 export class ImportedTickets {
   readonly ids = new Map<string, string>();
   readonly relations: PendingRelation[] = [];
+  readonly documentLinks: PendingDocumentLink[] = [];
   readonly histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
 
   /** Stores the relations between Tickets this import brought in: a key elsewhere may name another Ticket here. */
@@ -139,6 +159,14 @@ export class ImportedTickets {
       const to = this.ids.get(r.to);
       if (!from || !to || from === to) continue;
       await storeRelation(ctx.db, { kind: r.kind, from, to });
+    }
+  }
+
+  /** Stores the Documents the Tickets link, in the order each Ticket file lists them: a path may name a Document of another Project here. */
+  async storeDocumentLinks(ctx: ImportContext): Promise<void> {
+    for (const { ticketId, path, where } of this.documentLinks) {
+      const documentId = ctx.documentIds.get(path) ?? refuse(`${where} names ${path}, which isn't a Document or Report in the export`);
+      await storeDocumentLink(ctx.db, ticketId, documentId);
     }
   }
 
@@ -158,6 +186,7 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
     tickets.ids.set(key, id);
     if (typeof t.data.parent === "string") parents.push({ ticketId: id, parent: t.data.parent.toUpperCase(), path });
     tickets.relations.push(...relationsOf(t, key));
+    tickets.documentLinks.push(...documentLinksOf(t, id));
     const base = path.slice(0, -".md".length);
     const history = ctx.read(`${base}.history.md`);
     if (history) tickets.histories.push({ ticketId: id, statusIds: project.statusIds, file: history });
@@ -214,6 +243,13 @@ function relationsOf(t: File, key: string): PendingRelation[] {
     }
   }
   return relations;
+}
+
+/** The Documents the Ticket file `t`, imported as `ticketId`, links. */
+function documentLinksOf(t: File, ticketId: string): PendingDocumentLink[] {
+  const paths = t.data.documents ?? [];
+  if (!Array.isArray(paths) || !paths.every((p) => typeof p === "string")) refuse(`${t.path} documents must be a list of Document paths`);
+  return paths.map((path) => ({ ticketId, path, where: `${t.path} documents` }));
 }
 
 /** Imports the Activities and Comments beside `${base}.md` onto the Ticket `ticketId`, then which Comments answer which questions. */

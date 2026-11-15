@@ -15,6 +15,8 @@ export class ImportContext {
   readonly agentIds = new Map<string, { id: string; ownerId: string }>();
   /** Agent Sessions by their id in the export. */
   readonly sessionIds = new Map<string, string>();
+  /** Documents and Reports imported so far, by the path of their file in the export. */
+  readonly documentIds = new Map<string, string>();
 
   constructor(
     readonly db: Queryable,

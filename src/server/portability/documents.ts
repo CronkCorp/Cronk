@@ -31,6 +31,7 @@ export async function exportDocument(ctx: ExportContext, base: string, d: Docume
   );
   const first = versions[0]!;
   const current = versions.find((v) => v.number === d.version)!;
+  ctx.documentPaths.set(d.id, `${base}.md`);
   ctx.add(
     `${base}.md`,
     {
@@ -98,6 +99,7 @@ export async function importDocument(ctx: ImportContext, base: string, place: Do
     updatedAt: date(d.data.updatedAt, `${d.path} updatedAt`),
     claimId,
   });
+  ctx.documentIds.set(`${base}.md`, id);
   if (versions.length === 0) {
     // Without its Versions, it starts at Version 1 by whoever first wrote it, so a Report keeps its Agent.
     const by = await ctx.actor(d.data.createdBy, `${d.path} createdBy`);

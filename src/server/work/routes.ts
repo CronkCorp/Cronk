@@ -743,7 +743,7 @@ export function workRoutes(ctx: AppContext) {
           params: ticketParams,
           response: {
             200: answer(
-              "The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see",
+              "The Ticket's history, oldest first, leaving out relations to Tickets and links to Documents the caller can't see",
               listing("changes", ref("RecordedChange")),
             ),
             ...errors(401, 404, 410),
