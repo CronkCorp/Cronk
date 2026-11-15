@@ -1,11 +1,10 @@
+import { Actor } from "./components/actor.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   api,
-  sessionName,
   staleVersionOf,
   type Document,
   type DocumentTreeEntry,
-  type RecordedActor,
   type Version,
   watchDocument,
 } from "./api.js";
@@ -29,7 +28,7 @@ const explainStale = (reload: () => void, doing: string) => (err: unknown): neve
   const current = staleVersionOf(err);
   if (!current) throw err;
   reload();
-  throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before ${doing}`);
+  throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
 
 /** Whether the signed-in User may change Documents in a Project's tree, or the Workspace's (every User may). */
@@ -328,7 +327,7 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
       return {
         base: started,
         theirs: merge.onto,
-        by: actorName(merge.onto.actor),
+        by: merge.onto.actor,
         merge,
         merged: merge.conflicts === 0 ? { title: merge.title!, text: merge.body! } : null,
       };
@@ -377,7 +376,7 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
         {([base, theirs]) => (
           <>
             <p>
-              <strong>{actorName(theirs.actor)}</strong> saved Version {theirs.number} while you were editing Version {base.number}. Saving
+              <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}. Saving
               merges their changes into yours.
             </p>
             <details>
@@ -467,7 +466,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
             {list.map((v) => (
               <li key={v.number} className="version">
                 <span className="grow">
-                  <strong>Version {v.number}</strong> <span className="muted">{new Date(v.at).toLocaleString()}</span> {actorName(v.actor)}
+                  <strong>Version {v.number}</strong> <span className="muted">{new Date(v.at).toLocaleString()}</span> <Actor actor={v.actor} />
                   {v.restoredFrom !== null && <span className="muted"> (restored Version {v.restoredFrom})</span>}
                   {v.number === d.version && <span className="badge">Current</span>}
                 </span>
@@ -528,10 +527,4 @@ function CompareVersions(props: { current: number; busy: boolean; onCompare: (fr
       <button type="submit" className="secondary" disabled={props.busy}>Compare</button>
     </form>
   );
-}
-
-/** Who saved a Version, as the UI names them. */
-function actorName(actor: RecordedActor): string {
-  if (actor.kind === "user") return actor.name;
-  return `${actor.name} (${actor.session ? `${sessionName(actor.session.id)}, for` : "Agent of"} ${actor.owner.name})`;
 }

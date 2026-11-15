@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { api, sessionName, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
+import { Actor, agentActor } from "./components/actor.js";
+import { api, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
@@ -120,8 +121,7 @@ function ActivityItem(props: { activity: Activity } & Thread) {
     <li className={`activity ${a.kind}${a.blocking ? " blocking" : ""}${a.answer ? " answered" : ""}`}>
       <div className="activity-head">
         <span className="activity-kind">{a.blocking ? "Blocking question" : ACTIVITY_NAMES[a.kind]}</span>
-        <strong>{a.agent.name}</strong>
-        <span className="muted">({sessionName(a.session.id)}, for {a.agent.owner.name})</span>
+        <Actor actor={agentActor(a.agent, a.session)} />
         <span className="muted">{new Date(a.at).toLocaleString()}</span>
         {isQuestion && (a.answer ? <span className="badge answered">Answered</span> : <span className="badge">Waiting for an answer</span>)}
       </div>
@@ -141,8 +141,7 @@ function ReportItem(props: { report: Report }) {
     <li className="activity report" aria-label={`Report: ${r.title}`}>
       <div className="activity-head">
         <span className="activity-kind">Report</span>
-        <strong>{r.agent.name}</strong>
-        <span className="muted">({sessionName(r.session.id)}, for {r.agent.owner.name})</span>
+        <Actor actor={agentActor(r.agent, r.session)} />
         <span className="muted">{new Date(r.createdAt).toLocaleString()}</span>
       </div>
       <h3 className="report-title">
@@ -162,12 +161,7 @@ function CommentItem(props: { comment: Comment } & Thread) {
     <li className="comment">
       <div className="comment-head">
         <span className="comment-kind">Comment</span>
-        <strong>{c.actor.name}</strong>
-        {c.actor.kind === "agent" && (
-          <span className="muted">
-            ({c.actor.session ? `${sessionName(c.actor.session.id)}, for` : "Agent of"} {c.actor.owner.name})
-          </span>
-        )}
+        <Actor actor={c.actor} />
         <span className="muted">{new Date(c.at).toLocaleString()}</span>
       </div>
       {c.anchor && (

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api, sessionName, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
+import { SessionName } from "./components/actor.js";
+import { api, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
 import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
 
 /** The signed-in User's Agents and their tokens; an Admin also sees everyone else's Agents. */
@@ -140,7 +141,7 @@ function LiveSessions(props: { agent: Agent }) {
         <li key={s.id} className="session">
           <span className="live-dot" aria-hidden="true" />
           <span className="grow">
-            Connected, {sessionName(s.id)}{" "}
+            Live <SessionName id={s.id} />{" "}
             <span className="muted">
               since {new Date(s.startedAt).toLocaleString()}, last heard from {new Date(s.lastSeenAt).toLocaleTimeString()}
             </span>

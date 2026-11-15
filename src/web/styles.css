@@ -261,3 +261,12 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 /* A Document's body, with the button that comments on the passage selected in it. */
 .selectable { position: relative; }
 .comment-on-selection { position: absolute; z-index: 1; padding: 4px 10px; font-size: 13px; box-shadow: var(--shadow); }
+
+/* Actor and Agent Session: docs/ui.md § Component conventions. A User is round and neutral, an Agent square and violet. */
+.actor { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-weight: 600; }
+.actor .muted { font-weight: 400; }
+.avatar { align-self: center; width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 600; }
+.avatar::before { content: attr(data-initial); }
+.actor.agent .avatar { border-radius: 4px; background: var(--agent-soft); color: var(--agent); }
+.actor.agent .actor-name { color: var(--agent); }
+.session-name { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }

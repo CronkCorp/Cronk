@@ -222,7 +222,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   const { ticket } = await created.json();
 
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop (Agent of Ada) created the Ticket");
+  await expect(page.getByRole("list", { name: "History" })).toContainText("claude-laptop for Ada created the Ticket");
 
   // An Agent Session (one per MCP connection) shows on the Agents page and in the history of what it changed.
   const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
@@ -234,9 +234,15 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   });
   expect(renamed.status()).toBe(200);
   await page.reload();
-  await expect(page.getByRole("list", { name: "History" })).toContainText(`claude-laptop (session ${session.slice(0, 4)}, for Ada) renamed it`);
+  // The Session goes by a readable two-word name, the same everywhere, with its full id in the tooltip.
+  const renamedBy = page.getByRole("list", { name: "History" }).getByRole("listitem").filter({ hasText: "renamed it" });
+  await expect(renamedBy).toContainText(/claude-laptop [a-z]+-[a-z]+ for Ada renamed it/);
+  await expect(renamedBy.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
+  const sessionName = (await renamedBy.getByTitle(session).textContent())!;
   await page.getByRole("link", { name: "Agents" }).click();
-  await expect(page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" })).toContainText(`Connected, session ${session.slice(0, 4)}`);
+  const liveSessions = page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" });
+  await expect(liveSessions).toContainText(`Live ${sessionName}`);
+  await expect(liveSessions.getByTitle(session)).toHaveText(sessionName);
   // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
   await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByTestId("ticket-claim")).toHaveText("Not Claimed");
@@ -248,7 +254,7 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   });
   expect(claimed.status()).toBe(200);
   await page.reload();
-  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop (session ${session.slice(0, 4)})`);
+  await expect(page.getByTestId("ticket-claim")).toContainText(`Claimed by claude-laptop ${sessionName}`);
   // The Session logs Activities and writes a Report; the open Ticket page's timeline shows them as they arrive, without a reload.
   const timeline = page.getByRole("list", { name: "Timeline" });
   await expect(timeline).toContainText("Nothing yet.");

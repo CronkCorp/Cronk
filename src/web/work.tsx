@@ -1,3 +1,4 @@
+import { Actor, agentActor } from "./components/actor.js";
 import { useEffect, useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
@@ -16,7 +17,6 @@ import {
   type TicketFilter,
   type TicketRef,
   type User,
-  sessionName,
   watchProject,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
@@ -707,13 +707,7 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
           <ol className="history" aria-label="History">
             {changes.map((change, i) => (
               <li key={i}>
-                <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>
-                {change.actor.kind === "agent" && (
-                  <span className="muted">
-                    {" "}
-                    ({change.actor.session ? `${sessionName(change.actor.session.id)}, for` : "Agent of"} {change.actor.owner.name})
-                  </span>
-                )}{" "}
+                <span className="muted">{new Date(change.at).toLocaleString()}</span> <Actor actor={change.actor} />{" "}
                 {describe(change)}
               </li>
             ))}
@@ -811,10 +805,14 @@ function ClaimLine(props: { claim: TicketDetail["claim"] }) {
   const { claim } = props;
   return (
     <p className="muted claim" data-testid="ticket-claim">
-      {claim
-        ? `Claimed by ${claim.agent.name} (${sessionName(claim.session.id)}) since ${new Date(claim.claimedAt).toLocaleString()}; ` +
-          `lapses if silent until ${new Date(claim.endsIfSilentAt).toLocaleTimeString()}`
-        : "Not Claimed"}
+      {claim ? (
+        <>
+          Claimed by <Actor actor={agentActor(claim.agent, claim.session)} /> since {new Date(claim.claimedAt).toLocaleString()}; lapses if
+          silent until {new Date(claim.endsIfSilentAt).toLocaleTimeString()}
+        </>
+      ) : (
+        "Not Claimed"
+      )}
     </p>
   );
 }

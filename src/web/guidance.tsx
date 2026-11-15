@@ -94,7 +94,7 @@ function GuidanceEditor(props: {
       return {
         base: at(baseVersion),
         theirs: { number: merge.onto.version, body: merge.onto.markdown },
-        by: versions.find((v) => v.version === merge.onto.version)?.actor.name ?? "Someone",
+        by: versions.find((v) => v.version === merge.onto.version)?.actor ?? { kind: "user", name: "Someone" },
         merge,
         merged: merge.conflicts === 0 ? { text: merge.markdown! } : null,
       };

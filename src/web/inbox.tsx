@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, sessionName, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
+import { Actor, agentActor } from "./components/actor.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
@@ -98,8 +99,7 @@ function QuestionEntry(props: { item: Extract<InboxItem, { kind: "question" }>; 
     <li className={`activity question${question.blocking ? " blocking" : ""}`} aria-label={`Question on ${ticket.key}`}>
       <div className="activity-head">
         <span className="activity-kind">{question.blocking ? "Blocking question" : "Question"}</span>
-        <strong>{question.agent.name}</strong>
-        <span className="muted">({sessionName(question.session.id)})</span>
+        <Actor actor={agentActor(question.agent, question.session)} owner={false} />
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
         <span className="muted">{new Date(question.at).toLocaleString()}</span>
       </div>

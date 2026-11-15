@@ -1,3 +1,4 @@
+import { Actor, type ActorLike } from "./components/actor.js";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
 import { diffLines } from "./diff.js";
@@ -32,12 +33,12 @@ const STAGE_ADVICE: Record<MergeStage, string> = {
  * Tells the User their save was refused because `by` saved `theirs` since `base`, shows what they
  * changed, and offers to drop the draft and edit their Version instead (not while `disabled`, as during a save).
  */
-export function StaleSaveNotice(props: { by: string; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
+export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs: SavedText; stage: MergeStage; onDiscardMine: () => void; disabled?: boolean }) {
   const { base, theirs } = props;
   return (
     <div className={props.stage === "conflict" ? "conflict" : "merged"} role="alert">
       <p>
-        <strong>{props.by}</strong> saved Version {theirs.number} while you were editing, so your save was not made. {STAGE_ADVICE[props.stage]}
+        <Actor actor={props.by} /> saved Version {theirs.number} while you were editing, so your save was not made. {STAGE_ADVICE[props.stage]}
       </p>
       <details open={props.stage === "conflict"}>
         <summary>Their changes (Version {base.number} to {theirs.number})</summary>
@@ -63,7 +64,7 @@ export interface StaleMerge {
   /** The Version someone else saved meanwhile, which the merge is onto. */
   theirs: SavedText;
   /** Who saved their Version. */
-  by: string;
+  by: ActorLike;
   /** The merge, for `ResolveMerge` to settle. */
   merge: Mergeable;
   /** The merged draft, or null when the merge left conflicts for the User to settle. */
