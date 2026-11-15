@@ -342,6 +342,29 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
 });
 
+// Runs after the test above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
+test("link a Document to a Ticket from the Ticket's page, then unlink it", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: /CRONK-2/ }).click();
+  await expect(page.getByRole("heading", { name: "Document sign-in" })).toBeVisible();
+
+  await page.getByLabel("Find a Document to link").fill("Onboarding");
+  await page.getByRole("button", { name: "Find" }).click();
+  await page.getByRole("list", { name: "Documents to link" }).getByRole("button", { name: "Link Onboarding" }).click();
+  const documents = page.getByRole("list", { name: "Documents" });
+  await expect(documents).toContainText("Onboarding");
+  await expect(documents).toContainText("Linked");
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada linked the Document “Onboarding”");
+
+  await documents.getByRole("button", { name: "Unlink Onboarding" }).click();
+  await expect(page.getByRole("list", { name: "Documents" })).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada unlinked the Document “Onboarding”");
+});
+
 // Runs after the test above, so CRONK holds Documents already.
 test("compare two Versions, and merge an edit someone else saved underneath", async ({ page }) => {
   await page.goto("/");
