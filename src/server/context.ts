@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { userActor, type Actor } from "./actor.js";
+import { userActor, type Actor, type AgentActor } from "./actor.js";
 import type { Clock } from "./clock.js";
 import { findLiveAgentSession, touchAgentSession } from "./coordination/agent-sessions.js";
 import type { Database } from "./db/database.js";
@@ -62,10 +62,15 @@ export async function requireActor(ctx: AppContext, request: FastifyRequest, opt
   return userActor(user);
 }
 
+/** Refuses an Agent with a 403: only Users do this. `what` completes "Only a User can …". */
+export function refuseAgent(actor: Actor, what: string): asserts actor is Exclude<Actor, AgentActor> {
+  if (actor.kind === "agent") throw new HttpError(403, `Only a User can ${what}, not an Agent`);
+}
+
 /** The signed-in User making the request; a 401 if nobody is, a 403 for an Agent. */
 export async function requireUser(ctx: AppContext, request: FastifyRequest): Promise<User> {
   const actor = await requireActor(ctx, request);
-  if (actor.kind === "agent") throw new HttpError(403, "Only a User can do this, not an Agent");
+  refuseAgent(actor, "do this");
   return actor.user;
 }
 

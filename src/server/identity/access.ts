@@ -173,11 +173,6 @@ export function requireAdmin(who: User | Actor, what: string): void {
   if (user?.role !== "admin") throw new HttpError(403, `Only an Admin can ${what}`);
 }
 
-/** Refuses an Agent: only Users do this. `what` completes "Only a User can …". */
-export function requireUserActor(actor: Actor, what: string): void {
-  if (actor.kind === "agent") throw new HttpError(403, `Only a User can ${what}, not an Agent`);
-}
-
 /** The Project with this key, if `actor` has at least `need` in it (see `requireProjectAccess`). */
 export async function projectFor(db: Queryable, actor: Actor, key: string, need: Access): Promise<{ project: Project; access: Access }> {
   const project = await findProjectByKey(db, actingUser(actor).workspaceId, key);
