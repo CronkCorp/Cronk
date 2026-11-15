@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Actor, agentActor, SessionName, userActor } from "./components/actor.js";
 import { Button } from "./components/button.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { FieldPicker, type PickerOption } from "./components/picker.js";
 import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
-import { RelativeTime } from "./components/time.js";
+import { RelativeTime, useNow } from "./components/time.js";
 import {
   api,
   watchTicket,
@@ -23,7 +23,7 @@ import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
-import { Field, Show, TextArea, useAction, useLoad, useSubmit, type Loaded } from "./ui.js";
+import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
 /**
  * A Ticket's page (docs/ui.md § Ticket): its title and description, one timeline and the Comment box in
@@ -77,6 +77,8 @@ export function TicketPage(props: { ticketKey: string }) {
         <TicketView
           detail={d}
           live={<LiveIndicator state={live} />}
+          // An Agent Session's calls keep its Claim but aren't pushed, so the page reads the Claim again when it would lapse.
+          onClaimDue={reloadDetail}
           // Linking a Document isn't pushed on the Ticket's stream, so the page loads it again itself.
           onDocumentsChanged={() => {
             reloadDetail();
@@ -86,9 +88,9 @@ export function TicketPage(props: { ticketKey: string }) {
             <Show state={entries}>
               {([lists, recorded]) => (
                 <TicketTimeline
-                  activities={latestById([...lists.activities, ...arrived.activities])}
-                  reports={latestById([...lists.reports, ...arrived.reports])}
-                  comments={latestById([...lists.comments, ...arrived.comments])}
+                  activities={latestById([...lists.activities, ...arrived.activities], answeredLater)}
+                  reports={latestById([...lists.reports, ...arrived.reports], laterVersion)}
+                  comments={latestById([...lists.comments, ...arrived.comments], never)}
                   changes={recorded}
                   canWrite={canWrite}
                   ticketKey={key}
@@ -110,22 +112,34 @@ interface Entries {
 }
 const NO_ENTRIES: Entries = { activities: [], reports: [], comments: [] };
 
-/** Keeps the last of each id, in the order each id first appeared: a pushed Activity is newer, as when a question gets answered. */
-function latestById<T extends { id: string }>(items: T[]): T[] {
+/**
+ * One of each id, in the order each id first appeared, keeping the newer copy where a list loaded and a push
+ * disagree. Which copy is newer is read from the item itself, never from where it came from: a list loaded
+ * after a reconnect can be newer than a copy pushed before it.
+ */
+function latestById<T extends { id: string }>(items: T[], newer: (a: T, b: T) => boolean): T[] {
   const byId = new Map<string, T>();
-  for (const item of items) byId.set(item.id, item);
+  for (const item of items) {
+    const kept = byId.get(item.id);
+    if (!kept || newer(item, kept)) byId.set(item.id, item);
+  }
   return [...byId.values()];
 }
 
-/** Two loads as one, loaded once both are. */
-function both<A, B>(a: Loaded<A>, b: Loaded<B>): Loaded<[A, B]> {
-  if (a.kind === "failed") return a;
-  if (b.kind === "failed") return b;
-  if (a.kind === "loading" || b.kind === "loading") return { kind: "loading" };
-  return { kind: "loaded", value: [a.value, b.value] };
-}
+/** An Activity only ever changes by getting answered. */
+const answeredLater = (a: Activity, b: Activity) => a.answer !== null && b.answer === null;
+/** A Report changes by getting a new Version. */
+const laterVersion = (a: Report, b: Report) => a.version > b.version;
+/** A Comment never changes once posted. */
+const never = () => false;
 
-function TicketView(props: { detail: TicketDetail; live: ReactNode; timeline: (canWrite: boolean) => ReactNode; onDocumentsChanged: () => void }) {
+function TicketView(props: {
+  detail: TicketDetail;
+  live: ReactNode;
+  timeline: (canWrite: boolean) => ReactNode;
+  onDocumentsChanged: () => void;
+  onClaimDue: () => void;
+}) {
   const t = props.detail.ticket;
   const [project] = useLoad(() => api.project(t.projectKey), [t.projectKey]);
   const [editing, setEditing] = useState(false);
@@ -161,7 +175,7 @@ function TicketView(props: { detail: TicketDetail; live: ReactNode; timeline: (c
         </div>
         <aside className="ticket-side" aria-label="Ticket fields">
           <TicketFields ticket={t} canWrite={canWrite} statuses={project.kind === "loaded" ? project.value.statuses : [t.status]} />
-          {props.detail.claim && <ClaimCard claim={props.detail.claim} />}
+          {props.detail.claim && <ClaimCard claim={props.detail.claim} onDue={props.onClaimDue} />}
           <section className="side-panel side-related">
             <ParentEditor ticket={t} readOnly={!canWrite} />
             {props.detail.subTickets.length > 0 && (
@@ -187,6 +201,11 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
   const [agents] = useLoad(() => api.agents(), []);
   const [projectLabels] = useLoad(() => api.labels(t.projectKey), [t.projectKey, t.labels.join("\n")]);
   const disabled = update.busy || !props.canWrite;
+  // The Labels as last asked for, so picking several in a row before the Ticket comes back keeps each one.
+  const asked = useRef(t.labels);
+  useEffect(() => {
+    asked.current = t.labels;
+  }, [t.labels.join("\n")]);
 
   // Show the current Assignee and Delegate even before the lists arrive, or when the lists leave them out.
   const known = users.kind === "loaded" ? users.value.filter((u) => u.active) : [];
@@ -260,8 +279,13 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
         options={labels.map((label) => ({ value: label, label }))}
         selected={t.labels}
         disabled={disabled}
-        create={(text) => text}
-        onPick={(label) => void update.run({ labels: t.labels.includes(label) ? t.labels.filter((l) => l !== label) : [...t.labels, label] })}
+        allowNew
+        placeholder="Filter or add a Label"
+        onPick={(label) => {
+          const now = asked.current;
+          asked.current = now.includes(label) ? now.filter((l) => l !== label) : [...now, label];
+          void update.run({ labels: asked.current });
+        }}
       />
       {update.error && <p className="error" role="alert">{update.error}</p>}
     </section>
@@ -269,16 +293,6 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
 }
 
 const SECOND = 1000;
-
-/** Ticks every second while mounted, for a countdown. */
-function useSecondNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), SECOND);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 
 /** "3 min 36 s", "45 s": how long until a moment, to the second. */
 function formatRemaining(ms: number): string {
@@ -290,15 +304,22 @@ function formatRemaining(ms: number): string {
 /**
  * The Ticket's Claim: the Agent and its Agent Session, since when, and a meter counting down until the Claim
  * lapses if the Agent Session stays silent. The meter runs from when this page last heard of the Claim, since
- * the API says when it lapses but not the silence threshold.
+ * the API says when it lapses but not the silence threshold. When the time is up, `onDue` reads the Claim again:
+ * the Agent Session may have called in meanwhile, which moves the lapse time without anything being pushed.
  */
-function ClaimCard(props: { claim: NonNullable<TicketDetail["claim"]> }) {
+function ClaimCard(props: { claim: NonNullable<TicketDetail["claim"]>; onDue: () => void }) {
   const { claim } = props;
-  const now = useSecondNow();
+  const now = useNow(SECOND).getTime();
   const endsAt = Date.parse(claim.endsIfSilentAt);
   // Heard anew whenever the Ticket is loaded again: each load brings a fresh lapse time.
   const [heardAt, setHeardAt] = useState(() => Date.now());
   useEffect(() => setHeardAt(Date.now()), [claim.endsIfSilentAt]);
+  const onDue = useRef(props.onDue);
+  onDue.current = props.onDue;
+  useEffect(() => {
+    const timer = setTimeout(() => onDue.current(), Math.max(endsAt - Date.now(), 0) + SECOND);
+    return () => clearTimeout(timer);
+  }, [endsAt]);
   const span = Math.max(endsAt - heardAt, 1);
   const left = Math.max(endsAt - now, 0);
   const share = Math.min(left / span, 1);
@@ -326,7 +347,7 @@ function ClaimCard(props: { claim: NonNullable<TicketDetail["claim"]> }) {
         <div className="meter-fill" style={{ width: `${share * 100}%` }} />
       </div>
       <p className="claim-note muted">
-        {left > 0 ? <>Lapses if silent for {formatRemaining(left)} more</> : <>Lapses now unless its Agent Session calls in</>}
+        {left > 0 ? <>Lapses if silent for {formatRemaining(left)} more</> : <>Checking whether its Agent Session called in…</>}
       </p>
     </section>
   );

@@ -108,8 +108,11 @@ test("set a Ticket's fields and relations, follow a Ticket reference and filter 
   await page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Labels/ }).click();
   await page.getByLabel("Filter Labels").fill("docs");
   await page.getByLabel("Filter Labels").press("Enter");
+  // Labels picked one right after the other are all kept.
+  await page.getByLabel("Filter Labels").fill("sign-in");
+  await page.getByLabel("Filter Labels").press("Enter");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Labels/ })).toContainText("docs");
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Labels/ })).toContainText("docssign-in");
   await page.getByLabel("Parent").fill("CRONK-1");
   await page.getByRole("button", { name: "Set parent" }).click();
   await expect(page.getByTestId("ticket-parent")).toContainText("CRONK-1");

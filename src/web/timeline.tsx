@@ -2,7 +2,7 @@ import { Fragment, useRef, useState, type ReactNode, type Ref } from "react";
 import { Actor, agentActor, Avatar, type ActorLike } from "./components/actor.js";
 import { Button } from "./components/button.js";
 import { Chip, KindLabel, PRIORITY_NAMES } from "./components/tags.js";
-import { formatDay, RelativeTime, sameDay } from "./components/time.js";
+import { formatDay, RelativeTime, sameDay, useNow } from "./components/time.js";
 import { api, type Activity, type ActivityKind, type Comment, type NewComment, type RecordedChange, type RelationKind, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
@@ -106,7 +106,7 @@ export function TicketTimeline(props: {
     post: (input) => api.postTicketComment(props.ticketKey, input),
     onPosted: props.onPosted,
   };
-  const now = new Date();
+  const now = useNow();
 
   return (
     <>

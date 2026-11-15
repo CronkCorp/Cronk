@@ -46,13 +46,13 @@ export function formatDay(at: Date, now: Date): string {
 /** Whether two times fall on the same local day. */
 export const sameDay = (a: Date, b: Date) => startOfDay(a) === startOfDay(b);
 
-/** Re-renders every half minute, so relative times stay true while a page stays open. */
-function useNow(): Date {
+/** The time now, re-rendering every `everyMs` (half a minute by default), so times shown stay true while a page stays open. */
+export function useNow(everyMs = 30_000): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000);
+    const timer = setInterval(() => setNow(new Date()), everyMs);
     return () => clearInterval(timer);
-  }, []);
+  }, [everyMs]);
   return now;
 }
 

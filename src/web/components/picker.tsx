@@ -13,9 +13,10 @@ export interface PickerOption {
 
 /**
  * A field's label beside its value. The value is a button named "<label> <value>" that opens a listbox
- * named `label`, with a "Filter <label>" box above it. Enter in the box picks the first match; the arrow
- * keys move through the list. `selected` marks the chosen values; a picker of one value closes on a pick.
- * `create` offers the typed text as a new value when nothing matches it exactly, as for a new Label.
+ * named `label`, with a "Filter <label>" box above it. Enter in the box picks the first match once something
+ * is typed; the arrow keys move through the list. `selected` marks the chosen values; a picker of one value
+ * closes on a pick. `allowNew` offers the typed text as a new value when nothing matches it exactly, as for a
+ * new Label.
  */
 export function FieldPicker(props: {
   label: string;
@@ -25,7 +26,8 @@ export function FieldPicker(props: {
   onPick: (value: string) => void;
   multiple?: boolean;
   disabled?: boolean;
-  create?: (text: string) => string;
+  allowNew?: boolean;
+  placeholder?: string;
   empty?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -35,8 +37,8 @@ export function FieldPicker(props: {
   const list = useRef<HTMLUListElement>(null);
   const typed = filter.trim();
   const shown = props.options.filter((o) => o.label.toLowerCase().includes(typed.toLowerCase()));
-  const offerNew = props.create && typed && !props.options.some((o) => o.label.toLowerCase() === typed.toLowerCase());
-  const choices: PickerOption[] = offerNew ? [...shown, { value: props.create!(typed), label: typed, content: <>Add “{typed}”</> }] : shown;
+  const offerNew = props.allowNew && typed && !props.options.some((o) => o.label.toLowerCase() === typed.toLowerCase());
+  const choices: PickerOption[] = offerNew ? [...shown, { value: typed, label: typed, content: <>Add “{typed}”</> }] : shown;
 
   const setOpenAndReset = (next: boolean) => {
     setOpen(next);
@@ -49,7 +51,8 @@ export function FieldPicker(props: {
   };
   const options = () => [...(list.current?.querySelectorAll<HTMLElement>("[role=option]") ?? [])];
   const onFilterKey = (event: KeyboardEvent) => {
-    if (event.key === "Enter" && choices[0]) {
+    // With nothing typed, Enter picks nothing, so opening a field and pressing Enter never changes it.
+    if (event.key === "Enter" && typed && choices[0]) {
       event.preventDefault();
       pick(choices[0].value);
     } else if (event.key === "ArrowDown") {
@@ -90,7 +93,7 @@ export function FieldPicker(props: {
         <input
           className="picker-filter"
           aria-label={`Filter ${props.label}`}
-          placeholder={props.create ? `Filter or add a ${props.label.replace(/s$/, "")}` : "Filter"}
+          placeholder={props.placeholder ?? "Filter"}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={onFilterKey}
