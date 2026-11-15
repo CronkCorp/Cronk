@@ -484,7 +484,7 @@ test("comment on passages of code inside blockquotes and list items", async ({ p
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("main").getByRole("link", { name: /CRONK/ }).click();
   await page.getByRole("link", { name: "Documents" }).last().click();
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Quoted code");
