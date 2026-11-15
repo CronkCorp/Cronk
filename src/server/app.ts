@@ -34,9 +34,9 @@ export interface AppConfig {
 
 /**
  * Builds the Cronk HTTP application: connects to Postgres, migrates the schema
- * and registers the API. The caller decides whether to listen or inject.
+ * and registers the API. The caller decides whether to listen or inject. `live` defaults to a
+ * new `LiveUpdates`; tests pass their own to stage when events are published.
  */
-/** `live` defaults to a new `LiveUpdates`; tests pass their own to stage when events are published. */
 export async function buildApp(opts: { config: AppConfig; clock: Clock; logger?: boolean; live?: LiveUpdates }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,

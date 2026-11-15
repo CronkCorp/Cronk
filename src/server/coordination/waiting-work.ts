@@ -111,6 +111,9 @@ function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, 
   });
 }
 
+/** Told each position `markWaiting` takes for an Agent, before the transaction taking it commits. */
+export type Positioned = (agentId: string, seq: string) => void;
+
 /**
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the
  * Agent whose question it answers (`answered`), every Agent it @mentions by name, and the
@@ -125,7 +128,7 @@ export async function markWaiting(
   place: CommentPlace,
   answered: { agentId: string } | null,
   at: Date,
-  positioned: (agentId: string, seq: string) => void,
+  positioned: Positioned,
 ): Promise<WaitingFor[]> {
   const agents = await listAgents(db, actingUser(actor).workspaceId);
   const candidates: Record<WaitingReason, string[]> = {

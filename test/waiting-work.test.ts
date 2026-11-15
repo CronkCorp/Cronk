@@ -346,6 +346,7 @@ describe("An Agent Session's live updates", () => {
     const held = await cronk.holdRow("agents", codex.agentId);
     const failing = admin.post("/api/tickets/CRONK-1/comments", { body: "@claude-laptop @codex, rolled back." });
     await held.waiters(1);
+    // Fails the post's waiting query as on a database blip; the table named is incidental, as nothing else waits.
     await cronk.interruptQueriesOn("schema_migrations", async () => {});
     expect((await failing).status).toBe(500);
     await held.release();
