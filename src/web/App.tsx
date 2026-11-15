@@ -1,4 +1,3 @@
-import { Actor, userActor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
@@ -7,7 +6,8 @@ import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Wo
 import { GuidanceSection } from "./guidance.js";
 import { inboxFilterFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
-import { SearchBox, SearchPage, searchFilterFrom } from "./search.js";
+import { SearchPage, searchFilterFrom } from "./search.js";
+import { Sidebar } from "./frame.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
 import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
@@ -107,10 +107,10 @@ function SignInPage(props: { onDone: (user: User) => void }) {
   );
 }
 
+/** The signed-in frame: the sidebar, and the page for the current address in the main column. */
 function Shell(props: { user: User; onSignedOut: () => void }) {
   const [workspace, setWorkspace] = useState<Workspace>();
   const [loadError, setLoadError] = useState<string>();
-  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     api.workspace().then(setWorkspace, (err) => setLoadError(messageOf(err)));
@@ -120,49 +120,27 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <Link to="/" className="workspace-name">
-          <span data-testid="workspace-name">{workspace?.name}</span>
-        </Link>
-        <div className="topbar-right">
-          <SearchBox />
-          <Link to="/inbox" className="link">Inbox</Link>
-          <Link to="/documents" className="link">Documents</Link>
-          <Link to="/guidance" className="link">Guidance</Link>
-          <Link to="/agents" className="link">Agents</Link>
-          {props.user.role === "admin" && (
-            <>
-              <Link to="/users" className="link">Users</Link>
-              <Button variant="ghost" onClick={() => setRenaming(true)}>Workspace settings</Button>
-            </>
-          )}
-          <Actor actor={userActor(props.user.name)} />
-          <Button variant="ghost" onClick={signOut}>Sign out</Button>
+      <Sidebar me={props.user} workspace={workspace} onSignOut={() => void signOut()} />
+      <main className="main">
+        <div className="content">
+          {loadError && <p className="error" role="alert">{loadError}</p>}
+          <Page me={props.user} workspace={workspace} onWorkspaceChange={setWorkspace} />
         </div>
-      </header>
-      <main className="content">
-        {loadError && <p className="error" role="alert">{loadError}</p>}
-        {renaming && workspace !== undefined ? (
-          <WorkspaceSettings
-            current={workspace}
-            onDone={(updated) => {
-              setWorkspace(updated);
-              setRenaming(false);
-            }}
-            onCancel={() => setRenaming(false)}
-          />
-        ) : (
-          <Page me={props.user} />
-        )}
       </main>
     </div>
   );
 }
 
 /** The page for the current address. */
-function Page(props: { me: User }) {
+function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceChange: (workspace: Workspace) => void }) {
   const { path, search } = useLocation();
-  if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
+  const admin = props.me.role === "admin";
+  if (path === "/users" && admin) return <UsersPage me={props.me} />;
+  if (path === "/settings" && admin) {
+    return props.workspace === undefined ? null : (
+      <WorkspaceSettings current={props.workspace} onDone={props.onWorkspaceChange} onCancel={() => navigate("/")} />
+    );
+  }
   if (path === "/agents") return <AgentsPage me={props.me} />;
   if (path === "/search") return <SearchPage filter={searchFilterFrom(search)} />;
   if (path === "/inbox") return <InboxPage filter={inboxFilterFrom(search)} />;
@@ -188,17 +166,25 @@ function Page(props: { me: User }) {
   return <ProjectsPage archived={path === "/archived"} />;
 }
 
+/** The Admin's Workspace settings, at `/settings`. Saving keeps the page open and tells the frame the new name. */
 function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Workspace) => void; onCancel: () => void }) {
+  const [saved, setSaved] = useState(false);
   const [name, setName] = useState(props.current.name);
   const [agentAccess, setAgentAccess] = useState<AgentAccess>(props.current.agentAccess);
   const [silenceMinutes, setSilenceMinutes] = useState(String(props.current.silenceThresholdSeconds / 60));
   const { submit, error, busy } = useSubmit(
-    () => api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) }),
-    props.onDone,
+    () => {
+      setSaved(false);
+      return api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) });
+    },
+    (workspace) => {
+      setSaved(true);
+      props.onDone(workspace);
+    },
   );
   return (
     <section className="panel">
-      <h2>Workspace settings</h2>
+      <h1>Workspace settings</h1>
       <form onSubmit={submit}>
         <Field label="Workspace name" value={name} onChange={setName} />
         <AgentAccessSelect value={agentAccess} onChange={setAgentAccess} />
@@ -209,6 +195,7 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <div className="actions">
           <Button type="submit" disabled={busy}>Save</Button>
           <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+          {saved && <span className="muted" role="status">Saved.</span>}
         </div>
       </form>
       <h2>Export and import</h2>
