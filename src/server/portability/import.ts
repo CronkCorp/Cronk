@@ -7,6 +7,7 @@ import { CHANGE_FIELDS, FORMAT, isRecord } from "./format.js";
 import { accessSchema, agentAccessSchema, roleSchema } from "../schemas.js";
 import { PROJECT_KEY_PATTERN, VISIBILITIES } from "../work/projects.js";
 import { readFrontmatter } from "./frontmatter.js";
+import { insertUserWithoutPassword } from "../identity/users.js";
 import type { TicketChange } from "../work/tickets.js";
 
 /**
@@ -120,12 +121,15 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
       userIds.set(email.toLowerCase(), rows[0].id);
       continue;
     }
-    // No password hash matches "!", so the User can't sign in until one is set.
-    const { rows: inserted } = await db.query<{ id: string }>(
-      `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at) VALUES ($1, $2, $3, '!', $4, $5, $5) RETURNING id`,
-      [workspaceId, email, text(u.name, `${where}.name`), oneOf(u.role, roleSchema.enum, `${where}.role`), now],
-    );
-    userIds.set(email.toLowerCase(), inserted[0]!.id);
+    // With no password, the User can't sign in until they accept an invitation.
+    const inserted = await insertUserWithoutPassword(db, {
+      workspaceId,
+      email,
+      name: text(u.name, `${where}.name`),
+      role: oneOf(u.role, roleSchema.enum, `${where}.role`),
+      now,
+    });
+    userIds.set(email.toLowerCase(), inserted.id);
   }
 
   const agentIds = new Map<string, { id: string; ownerId: string }>();

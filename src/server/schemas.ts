@@ -138,6 +138,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     name: { type: "string" },
     role: roleSchema,
     active: { type: "boolean", description: "False once an Admin has deactivated the User." },
+    joined: {
+      type: "boolean",
+      description: "False for a User an import brought in who hasn't accepted an invitation yet: they have no password and can't sign in until an Admin invites them and they accept.",
+    },
   }),
   Invitation: object({
     id,

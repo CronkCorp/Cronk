@@ -9,18 +9,17 @@ export function UsersPage(props: { me: User }) {
   const [users, reloadUsers] = useLoad(() => api.users(), []);
   const [invitations, reloadInvitations] = useLoad(() => api.invitations(), []);
   const [lastLink, setLastLink] = useState<string>();
+  const invited = (token: string) => {
+    setLastLink(inviteLink(token));
+    reloadInvitations();
+  };
 
   return (
     <section>
       <div className="page-head">
         <h1>Users</h1>
       </div>
-      <InviteUser
-        onDone={(token) => {
-          setLastLink(inviteLink(token));
-          reloadInvitations();
-        }}
-      />
+      <InviteUser onDone={invited} />
       {lastLink && (
         <div className="panel wide" role="status">
           <p>Send this link to the invitee. It works once, for 7 days.</p>
@@ -35,7 +34,7 @@ export function UsersPage(props: { me: User }) {
         {(list) => (
           <ul className="rows" aria-label="Users">
             {list.map((user) => (
-              <UserRow key={user.id} user={user} isMe={user.id === props.me.id} onChanged={reloadUsers} />
+              <UserRow key={user.id} user={user} isMe={user.id === props.me.id} onChanged={reloadUsers} onInvited={invited} />
             ))}
           </ul>
         )}
@@ -92,16 +91,23 @@ function Invitations(props: { invitations: Invitation[]; onChanged: () => void }
   );
 }
 
-function UserRow(props: { user: User; isMe: boolean; onChanged: () => void }) {
+function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onInvited: (token: string) => void }) {
   const u = props.user;
   const change = useAction((changes: { role?: Role; active?: boolean }) => api.updateUser(u.id, changes), props.onChanged);
+  // A User an import brought in joins by accepting an invitation, keeping their role.
+  const invite = useAction(() => api.invite({ email: u.email, role: u.role }), (result) => props.onInvited(result.token));
   return (
     <li className="row">
       <span className="grow">
         <strong>{u.name}</strong>
         {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>
-        {!u.active && <span className="badge">Deactivated</span>}
+        {!u.joined ? (
+          <span className="badge">Imported, not signed in yet</span>
+        ) : (
+          !u.active && <span className="badge">Deactivated</span>
+        )}
         {change.error && <span className="error" role="alert"> {change.error}</span>}
+        {invite.error && <span className="error" role="alert"> {invite.error}</span>}
       </span>
       <select
         aria-label={`Role of ${u.name}`}
@@ -112,9 +118,16 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void }) {
         <option value="member">Member</option>
         <option value="admin">Admin</option>
       </select>
-      <button className="link" disabled={change.busy} onClick={() => void change.run({ active: !u.active })}>
-        {u.active ? "Deactivate" : "Reactivate"}
-      </button>
+      {(u.joined || u.active) && (
+        <button className="link" disabled={change.busy} onClick={() => void change.run({ active: !u.active })}>
+          {u.active ? "Deactivate" : "Reactivate"}
+        </button>
+      )}
+      {!u.joined && (
+        <button className="link" disabled={invite.busy} onClick={() => void invite.run()}>
+          Invite
+        </button>
+      )}
     </li>
   );
 }

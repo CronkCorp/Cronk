@@ -68,5 +68,6 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   still in the Project, and an Agent its id from \`people.md\`.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
-already in the installation an export is imported into come in deactivated, since they have no password there.
+already in the installation an export is imported into come in deactivated, since they have no password there; an Admin
+invites them, and accepting sets their password and reactivates them.
 `;

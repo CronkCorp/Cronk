@@ -207,9 +207,9 @@ describe("importing an export", () => {
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
 
-    // Users who weren't in the installation come in deactivated: they have no password here yet.
+    // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
-      value?.email === "grace@example.com" ? { ...value, active: false } : value,
+      value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
   });
@@ -358,5 +358,51 @@ describe("an export taken apart and archived again", () => {
     const imported = await admin.upload("/api/import", wrapped);
     expect(imported.status).toBe(201);
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.title).toBe("Edited by hand");
+  });
+});
+
+describe("a User an import brought in", () => {
+  /** A fresh installation holding an import of a Workspace where Grace was assigned CRONK-1. */
+  async function importedGrace() {
+    const { cronk: before, admin: beforeAdmin } = await startInstalledCronk();
+    const grace = await joinAs(before, beforeAdmin, "grace@example.com", "member", "Grace");
+    const graceId = (await grace.get("/api/me")).body.user.id;
+    await beforeAdmin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await beforeAdmin.post("/api/projects/CRONK/tickets", { title: "Grace's job" });
+    await beforeAdmin.patch("/api/tickets/CRONK-1", { assigneeId: graceId });
+    const exported = await beforeAdmin.download("/api/export");
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", exported.body)).status).toBe(201);
+    const imported = (await admin.get("/api/users")).body.users.find((u: { email: string }) => u.email === "grace@example.com");
+    return { cronk, admin, imported };
+  }
+
+  it("can be invited, and accepting sets their password, reactivates them and keeps their id and history", async () => {
+    const { cronk, admin, imported } = await importedGrace();
+    expect(imported).toMatchObject({ name: "Grace", active: false, joined: false });
+
+    const invited = await admin.post("/api/invitations", { email: "grace@example.com" });
+    expect(invited.status).toBe(201);
+    const accepted = await cronk.client().post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: "Grace H", password: "graces password" });
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true, joined: true });
+
+    const grace = cronk.client();
+    expect((await grace.post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
+    expect((await grace.get(`/api/projects/CRONK/tickets?assignee=${imported.id}`)).body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1"]);
+  });
+
+  it("can't be invited again once they have a password, so no invitation can take their account", async () => {
+    const { cronk, admin } = await importedGrace();
+    const first = (await admin.post("/api/invitations", { email: "grace@example.com" })).body.token;
+    const replaced = (await admin.post("/api/invitations", { email: "GRACE@example.com" })).body.token;
+    expect((await cronk.client().post(`/api/invitations/by-token/${first}/accept`, { name: "Eve", password: "eves password" })).status).toBe(404);
+    expect((await cronk.client().post(`/api/invitations/by-token/${replaced}/accept`, { name: "Grace", password: "graces password" })).status).toBe(201);
+
+    const again = await admin.post("/api/invitations", { email: "grace@example.com" });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already a User/);
+    expect((await cronk.client().post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
   });
 });
