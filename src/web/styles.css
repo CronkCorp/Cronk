@@ -455,3 +455,14 @@ a.link:hover { text-decoration: underline; }
   .inbox-split.picked .inbox-list { display: none; }
   .inbox-split:not(.picked) .inbox-detail { display: none; }
 }
+.inbox-none { margin: 0; padding: 12px; font-size: 13px; }
+.inbox-resolved { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); font-size: 13px; }
+.inbox-resolved p { margin: 0; font-weight: 600; color: var(--muted); }
+.inbox-item.arrived { animation: arrived-inset 2s ease-out; }
+@keyframes arrived-inset {
+  from { box-shadow: inset 0 0 0 2px var(--accent); }
+  to { box-shadow: inset 0 0 0 2px transparent; }
+}
+@media (max-width: 759px) {
+  .inbox-keys { display: none; }
+}

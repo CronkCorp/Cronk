@@ -1118,6 +1118,47 @@ test("answer a blocking question from the Inbox's detail pane, moving through th
   await expect(list).toBeVisible();
 });
 
+// Runs after the tests above, so Ada exists.
+test("see the selected item marked Resolved elsewhere once it is answered in another page", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox elsewhere", key: "INX" } });
+  const { ticket, agentCall } = await delegatedTicket(page, request, "elsewhere-bot", "Export Labels in frontmatter", "INX");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const ask = (body: string) => request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body } });
+  await ask("Lowercase them all?");
+  await ask("Keep the casing?");
+  await ask("Sort them too?");
+
+  await page.goto("/inbox?project=INX");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await list.getByRole("link", { name: /Keep the casing\?/ }).click();
+  await expect(detail).toContainText("Keep the casing?");
+
+  // Ada answers the same question on the Ticket page, in a second page.
+  const other = await page.context().newPage();
+  await other.goto(`/tickets/${ticket.key}`);
+  const asked = other.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "Keep the casing?" });
+  await asked.getByLabel("Answer", { exact: true }).fill("Keep it.");
+  await asked.getByRole("button", { name: "Post answer" }).click();
+  await expect(asked).toContainText("Answered");
+  await other.close();
+
+  // The list drops it, but the detail pane keeps it, marked and with its actions disabled, linking to the Ticket.
+  await expect(list.getByRole("link", { name: /Keep the casing\?/ })).toHaveCount(0);
+  await expect(list.getByRole("heading", { name: "Questions · 2" })).toBeVisible();
+  await expect(detail.getByRole("status")).toHaveText(/Resolved elsewhere/);
+  await expect(detail).toContainText("Keep the casing?");
+  await expect(detail.getByRole("button", { name: "Post answer" })).toBeDisabled();
+  await expect(detail.getByPlaceholder("Answer elsewhere-bot… (Markdown)")).toBeDisabled();
+  await expect(detail.getByRole("link", { name: "Open Ticket" })).toHaveAttribute("href", `/tickets/${ticket.key}`);
+  // J moves on to the item that followed it.
+  await page.locator("body").press("j");
+  await expect(detail).toContainText("Sort them too?");
+  await expect(detail.getByRole("status")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "Post answer" })).toBeVisible();
+});
+
 /** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */
 async function reviewWithReport(
   page: import("@playwright/test").Page,

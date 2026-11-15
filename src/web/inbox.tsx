@@ -8,7 +8,7 @@ import { Actor, agentActor } from "./components/actor.js";
 import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
 import { Link, navigate } from "./router.js";
-import { CommentForm, ReportCard } from "./timeline.js";
+import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
 
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
@@ -90,7 +90,7 @@ export function InboxPage(props: { address: InboxAddress }) {
           ))}
           <Menu
             label="Filter by Project"
-            trigger={<FilterChip pressed={!!filter.project}>{filter.project ? `Project: ${projectName ?? filter.project} ▾` : "Project ▾"}</FilterChip>}
+            trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${projectName ?? filter.project} ▾` : "Project ▾"}</FilterChip>}
             items={[
               { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
               ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
@@ -98,7 +98,7 @@ export function InboxPage(props: { address: InboxAddress }) {
           />
           <Menu
             label="Filter by Agent"
-            trigger={<FilterChip pressed={!!filter.agent}>{filter.agent ? `Agent: ${agentName ?? "unknown"} ▾` : "Agent ▾"}</FilterChip>}
+            trigger={<FilterChip menu pressed={!!filter.agent}>{filter.agent ? `Agent: ${agentName ?? "unknown"} ▾` : "Agent ▾"}</FilterChip>}
             items={[
               { label: "All Agents", onSelect: () => setFilter({ agent: undefined }) },
               ...(agents.kind === "loaded" ? agents.value.map((a) => ({ label: a.name, onSelect: () => setFilter({ agent: a.id }) })) : []),
@@ -121,10 +121,10 @@ export function InboxPage(props: { address: InboxAddress }) {
 }
 
 /** A filter chip: a toggle button, pressed while its filter applies. Extra props let it be a menu's trigger. */
-function FilterChip(props: { pressed: boolean; children: string; onClick?: () => void }) {
-  const { pressed, children, ...rest } = props;
+function FilterChip(props: { pressed: boolean; children: string; onClick?: () => void; menu?: boolean }) {
+  const { pressed, children, menu, ...rest } = props;
   return (
-    <button type="button" className={`filter-chip${pressed ? " pressed" : ""}`} aria-pressed={pressed} {...rest}>
+    <button type="button" className={`filter-chip${pressed ? " pressed" : ""}`} aria-pressed={menu ? undefined : pressed} {...rest}>
       {children}
     </button>
   );
@@ -148,24 +148,50 @@ function useDetailKeys(keys: { current: DetailKeys }, actions: DetailKeys) {
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
 function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: () => void }) {
   const { items } = props;
-  const ordered = GROUPS.flatMap((group) => items.filter(group.holds));
-  const selectedId = props.address.item && ordered.some((item) => itemId(item) === props.address.item) ? props.address.item : ordered[0] && itemId(ordered[0]);
-  const index = ordered.findIndex((item) => itemId(item) === selectedId);
-  const selected = ordered[index];
+  // Items acted on here leave the list at once rather than waiting for the reload, which would otherwise
+  // find them gone and show them as resolved elsewhere. Once a load no longer holds one, it is forgotten,
+  // so a Ticket handed over for review again shows again.
+  const acted = useRef(new Set<string>());
+  for (const id of acted.current) if (!items.some((item) => itemId(item) === id)) acted.current.delete(id);
+  const ordered = GROUPS.flatMap((group) => items.filter((item) => group.holds(item) && !acted.current.has(itemId(item))));
+  // The selected item as last seen in the list, and where it was. When a reload drops it because it was
+  // resolved elsewhere, the detail pane keeps showing it until the User moves on (docs/ui.md § Live updates).
+  const seen = useRef<{ id: string; item: InboxItem; index: number }>(undefined);
+  const wanted = props.address.item ?? seen.current?.id ?? (ordered[0] && itemId(ordered[0]));
+  let index = ordered.findIndex((item) => itemId(item) === wanted);
+  let resolved = false;
+  if (index < 0 && seen.current && seen.current.id === wanted) {
+    index = seen.current.index;
+    resolved = true;
+  } else {
+    // An address naming an item no longer here, as an old link does, opens the first instead.
+    if (index < 0) index = 0;
+    const item = ordered[index];
+    seen.current = item && { id: itemId(item), item, index };
+  }
+  const selected = seen.current?.item;
+  const arrived = useArrivals(items.map(itemId));
+  const selectedId = selected && itemId(selected);
   const keys = useRef<DetailKeys>({});
-  const select = (item: InboxItem | undefined) => navigate(inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) }), { replace: true });
+  const select = (item: InboxItem | undefined) => {
+    seen.current = undefined;
+    navigate(inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) }), { replace: true });
+  };
 
-  // The latest list, for the keyboard handler registered once below.
-  const move = useRef<(step: 1 | -1) => void>(() => {});
-  move.current = (step) => {
-    const next = ordered[index + step];
+  // The item `step` away from the selected one. A resolved item has left the list, so the one after it took its place.
+  const neighbour = (step: 1 | -1) => ordered[index + (resolved ? Math.min(step, 0) : step)];
+  // The latest of these, for the keyboard handler registered once below and for actions finishing after a reload.
+  const latest = useRef({ neighbour });
+  latest.current = { neighbour };
+  const move = (step: 1 | -1) => {
+    const next = latest.current.neighbour(step);
     if (next) select(next);
   };
 
-  /** After acting on `item`, select the one after it, or the one before when it was the last. */
-  const actedOn = (item: InboxItem) => {
-    const at = ordered.findIndex((other) => itemId(other) === itemId(item));
-    select(ordered[at + 1] ?? ordered[at - 1]);
+  /** After acting on the selected item, select the one after it, or the one before when it was the last. */
+  const actedOn = () => {
+    if (seen.current) acted.current.add(seen.current.id);
+    select(latest.current.neighbour(1) ?? latest.current.neighbour(-1));
     props.onChanged();
   };
 
@@ -173,7 +199,7 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return;
       const key = event.key.toLowerCase();
-      const run = key === "j" ? () => move.current(1) : key === "k" ? () => move.current(-1) : { a: keys.current.answer, c: keys.current.complete, s: keys.current.sendBack }[key];
+      const run = key === "j" ? () => move(1) : key === "k" ? () => move(-1) : { a: keys.current.answer, c: keys.current.complete, s: keys.current.sendBack }[key];
       if (!run) return;
       // Kept from the field a shortcut focuses, so A and S don't type their own letter into it.
       event.preventDefault();
@@ -183,7 +209,7 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  if (ordered.length === 0) {
+  if (!selected) {
     return (
       <div className="empty">
         <h2>Nothing waiting on you</h2>
@@ -193,36 +219,40 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
   }
 
   return (
-    <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
-      <section className="inbox-list" aria-label="Inbox items">
-        {GROUPS.map((group) => {
-          const held = ordered.filter(group.holds);
-          if (held.length === 0) return null;
-          return (
-            <div key={group.name} className="inbox-group">
-              <h2 className="inbox-group-head">{`${group.name} · ${held.length}`}</h2>
-              <ul className="inbox-items" aria-label={group.name}>
-                {held.map((item) => (
-                  <li key={itemId(item)}>
-                    <ListItem item={item} selected={itemId(item) === selectedId} to={inboxPath({ filter: props.address.filter, item: itemId(item) })} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-      </section>
-      <section className="inbox-detail" aria-label="Selected item">
-        <Link to={inboxPath({ filter: props.address.filter })} className="link inbox-back">
-          Back to the list
-        </Link>
-        {selected &&
-          (selected.kind === "question" ? (
-            <QuestionDetail key={itemId(selected)} item={selected} keys={keys} onDone={() => actedOn(selected)} />
-          ) : (
-            <ReviewDetail key={itemId(selected)} item={selected} keys={keys} onDone={() => actedOn(selected)} />
-          ))}
-      </section>
+    <div className="inbox-triage">
+      <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
+        <section className="inbox-list" aria-label="Inbox items">
+          {ordered.length === 0 && <p className="muted inbox-none">Nothing else is waiting.</p>}
+          {GROUPS.map((group) => {
+            const held = ordered.filter(group.holds);
+            if (held.length === 0) return null;
+            return (
+              <div key={group.name} className="inbox-group">
+                <h2 className="inbox-group-head">{`${group.name} · ${held.length}`}</h2>
+                <ul className="inbox-items" aria-label={group.name}>
+                  {held.map((item) => (
+                    <li key={itemId(item)}>
+                      <ListItem item={item} selected={itemId(item) === selectedId} arrived={arrived.has(itemId(item))} to={inboxPath({ filter: props.address.filter, item: itemId(item) })} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </section>
+        <section className="inbox-detail" aria-label="Selected item">
+          <Link to={inboxPath({ filter: props.address.filter })} className="link inbox-back">
+            Back to the list
+          </Link>
+          {selected &&
+            (selected.kind === "question" ? (
+              <QuestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} onDone={actedOn} />
+            ) : (
+              <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} onDone={actedOn} />
+            ))}
+        </section>
+      </div>
+      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes, S sends back.</p>
     </div>
   );
 }
@@ -240,14 +270,14 @@ function kindOf(item: InboxItem): { kind: Kind; label: string } {
 }
 
 /** One item in the list: its kind, Ticket key, time, Ticket title, and a snippet of the question or the Report's title. */
-function ListItem(props: { item: InboxItem; selected: boolean; to: string }) {
+function ListItem(props: { item: InboxItem; selected: boolean; arrived: boolean; to: string }) {
   const { item } = props;
   const { kind, label } = kindOf(item);
   const snippet = item.kind === "question" ? plainText(item.question.body) : item.reports.length ? `Report: ${item.reports.map((r) => r.title).join(", ")}` : "No Report";
   return (
     <Link
       to={props.to}
-      className={`inbox-item${props.selected ? " selected" : ""}${kind === "blocking" ? " blocking" : ""}`}
+      className={`inbox-item${props.selected ? " selected" : ""}${props.arrived ? " arrived" : ""}${kind === "blocking" ? " blocking" : ""}`}
       aria-current={props.selected ? "true" : undefined}
     >
       <span className="inbox-item-head">
@@ -274,17 +304,18 @@ function DetailHead(props: { item: InboxItem; label: string; kind: Kind }) {
 }
 
 /** A question in full: the Agent, its Agent Session, the question, and an answer box. */
-function QuestionDetail(props: { item: QuestionItem; keys: { current: DetailKeys }; onDone: () => void }) {
+function QuestionDetail(props: { item: QuestionItem; resolved: boolean; keys: { current: DetailKeys }; onDone: () => void }) {
   const { question, ticket } = props.item;
   const answerBox = useRef<HTMLTextAreaElement>(null);
-  useDetailKeys(props.keys, { answer: () => answerBox.current?.focus() });
+  useDetailKeys(props.keys, props.resolved ? {} : { answer: () => answerBox.current?.focus() });
   return (
     <div className="inbox-detail-body">
       <DetailHead item={props.item} kind={question.blocking ? "blocking" : "question"} label={question.blocking ? "Blocking question" : "Question"} />
+      {props.resolved && <ResolvedElsewhere ticketKey={ticket.key} />}
       <div className="inbox-detail-who">
         <Actor actor={agentActor(question.agent, question.session)} />
         <RelativeTime at={question.at} />
-        <Chip tone={question.blocking ? "danger" : "warn"}>{`${question.agent.name} is waiting`}</Chip>
+        {!props.resolved && <Chip tone={question.blocking ? "danger" : "warn"}>{`${question.agent.name} is waiting`}</Chip>}
       </div>
       <div className="inbox-question">
         <CronkMarkdown>{question.body}</CronkMarkdown>
@@ -295,6 +326,7 @@ function QuestionDetail(props: { item: QuestionItem; keys: { current: DetailKeys
         placeholder={`Answer ${question.agent.name}… (Markdown)`}
         hint={`The answer reaches ${question.agent.name} as Waiting Work.`}
         inputRef={answerBox}
+        disabled={props.resolved}
         post={(input) => api.postTicketComment(ticket.key, { ...input, replyToActivityId: question.id })}
         onPosted={props.onDone}
       />
@@ -303,7 +335,7 @@ function QuestionDetail(props: { item: QuestionItem; keys: { current: DetailKeys
 }
 
 /** A Ticket to review: its Status, its Delegate, its Reports in full, and Complete, Send back and a link to the Ticket. */
-function ReviewDetail(props: { item: ReviewItem; keys: { current: DetailKeys }; onDone: () => void }) {
+function ReviewDetail(props: { item: ReviewItem; resolved: boolean; keys: { current: DetailKeys }; onDone: () => void }) {
   const { ticket, reports } = props.item;
   const [sendingBack, setSendingBack] = useState(false);
   const [comment, setComment] = useState("");
@@ -323,11 +355,12 @@ function ReviewDetail(props: { item: ReviewItem; keys: { current: DetailKeys }; 
   useEffect(() => {
     if (sendingBack) commentBox.current?.focus();
   }, [sendingBack]);
-  useDetailKeys(props.keys, { complete: runComplete, sendBack: () => (sendingBack ? commentBox.current?.focus() : setSendingBack(true)) });
+  useDetailKeys(props.keys, props.resolved ? {} : { complete: runComplete, sendBack: () => (sendingBack ? commentBox.current?.focus() : setSendingBack(true)) });
 
   return (
     <div className="inbox-detail-body">
       <DetailHead item={props.item} kind="review" label="To review" />
+      {props.resolved && <ResolvedElsewhere />}
       <div className="inbox-detail-who">
         <StatusPill status={ticket.status} />
         {ticket.delegate && <span className="muted">by <Actor actor={agentActor(ticket.delegate)} /></span>}
@@ -340,7 +373,7 @@ function ReviewDetail(props: { item: ReviewItem; keys: { current: DetailKeys }; 
         <p className="muted">No Report.</p>
       )}
       {error && <p className="error" role="alert">{error}</p>}
-      {sendingBack ? (
+      {sendingBack && !props.resolved ? (
         <form
           className="comment-form"
           onSubmit={(e) => {
@@ -356,11 +389,25 @@ function ReviewDetail(props: { item: ReviewItem; keys: { current: DetailKeys }; 
         </form>
       ) : (
         <div className="actions">
-          <Button onClick={runComplete} disabled={complete.busy}>Complete</Button>
-          <Button variant="secondary" onClick={() => setSendingBack(true)}>Send back…</Button>
+          <Button onClick={runComplete} disabled={props.resolved || complete.busy}>Complete</Button>
+          <Button variant="secondary" onClick={() => setSendingBack(true)} disabled={props.resolved}>Send back…</Button>
           <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Marks an item that left the Inbox while selected: answered, completed or sent back in another tab, by
+ * another User, or on the Ticket page. It doesn't say who; the Ticket does. `ticketKey` adds a link to it
+ * where the pane has none of its own.
+ */
+function ResolvedElsewhere(props: { ticketKey?: string }) {
+  return (
+    <div className="inbox-resolved">
+      <p role="status">Resolved elsewhere</p>
+      {props.ticketKey && <Link to={`/tickets/${props.ticketKey}`} className={buttonClass("ghost")}>Open Ticket</Link>}
     </div>
   );
 }

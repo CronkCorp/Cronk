@@ -61,7 +61,7 @@ function findSendBacks(changes: RecordedChange[], comments: Comment[]): { commen
  * The entries that arrived while the timeline was open, by key, so they get the fading ring. The entries
  * first shown are not new; every later one is, and stays marked, so its ring plays out once.
  */
-function useArrivals(keys: string[]): Set<string> {
+export function useArrivals(keys: string[]): Set<string> {
   const known = useRef<Set<string> | null>(null);
   const arrived = useRef(new Set<string>());
   if (known.current === null) known.current = new Set(keys);
