@@ -32,6 +32,20 @@ export function formatTime(at: Date, now: Date): string {
   return `${day} ${clock(at)}`;
 }
 
+/** A time as a timeline shows it: the clock time alone ("10:18"), under a separator for its day. */
+export const formatClock = (at: Date) => clock(at);
+
+/** A timeline's day separator: "Today", "Yesterday", or the day ("14 Nov"), with the year only when it differs from the current one. */
+export function formatDay(at: Date, now: Date): string {
+  const days = Math.round((startOfDay(at) - startOfDay(now)) / (24 * HOUR));
+  if (days === 0) return "Today";
+  if (days === -1) return "Yesterday";
+  return at.toLocaleDateString("en-GB", { day: "numeric", month: "short", ...(at.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
+}
+
+/** Whether two times fall on the same local day. */
+export const sameDay = (a: Date, b: Date) => startOfDay(a) === startOfDay(b);
+
 /** Re-renders every half minute, so relative times stay true while a page stays open. */
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date());
@@ -42,13 +56,16 @@ function useNow(): Date {
   return now;
 }
 
-/** A time, relative while recent, with the exact time in its tooltip. */
-export function RelativeTime(props: { at: Date | string; className?: string }) {
+/**
+ * A time, relative while recent, with the exact time in its tooltip. `clock` shows the clock time alone,
+ * as a timeline does under its day separators.
+ */
+export function RelativeTime(props: { at: Date | string; className?: string; clock?: boolean }) {
   const now = useNow();
   const at = new Date(props.at);
   return (
     <time className={props.className ?? "time"} dateTime={at.toISOString()} title={at.toLocaleString("en-GB", { dateStyle: "full", timeStyle: "medium" })}>
-      {formatTime(at, now)}
+      {props.clock ? formatClock(at) : formatTime(at, now)}
     </time>
   );
 }
