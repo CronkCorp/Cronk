@@ -80,7 +80,8 @@ describe("A Claim", () => {
     const stream = await first.events("/api/agent-sessions/current/events");
     expect((await stream.next())?.event).toBe("ready");
 
-    for (let minute = 4; minute <= 12; minute += 4) {
+    // 12 minutes pass, each four of them ending in the stream's heartbeat.
+    for (let i = 0; i < 3; i++) {
       cronk.clock.advance(4 * 60_000);
       await cronk.heartbeat();
     }

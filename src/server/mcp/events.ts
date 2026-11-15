@@ -32,10 +32,16 @@ const MAX_REOPEN_DELAY_MS = 30_000;
  * backing off while it keeps failing. The API ends a stream when the caller loses access, but
  * also when it can't check that access (a database blip), so opening it again is what tells the
  * two apart: the API refusing it with a client error (a revoked token, an ended Agent Session)
- * stops it for good. A stream is opened again from the furthest id of the events that had one
+ * stops it for good, calling `onRefused`. A stream is opened again from the furthest id of the events that had one
  * (`Last-Event-ID`), so the API can first send what was missed meanwhile, before its `ready`.
  */
-export async function followEvents(baseUrl: string, caller: Caller, path: string, onEvent: (event: LiveEvent) => void): Promise<() => void> {
+export async function followEvents(
+  baseUrl: string,
+  caller: Caller,
+  path: string,
+  onEvent: (event: LiveEvent) => void,
+  onRefused: () => void = () => {},
+): Promise<() => void> {
   let stopped = false;
   let closeStream = () => {};
   let reopening: NodeJS.Timeout | undefined;
@@ -50,7 +56,8 @@ export async function followEvents(baseUrl: string, caller: Caller, path: string
   // Opens the stream, and settles once it is open or has failed to; after either, it is opened again once it ends.
   const follow = async (): Promise<void> => {
     const opened = await openStream(baseUrl, caller, path, last, onEvent, (close) => (closeStream = close));
-    if (stopped || opened === "refused") return;
+    if (stopped) return;
+    if (opened === "refused") return onRefused();
     if (opened === "failed") return reopenLater();
     const openedAt = Date.now();
     void opened.ended.then(() => {

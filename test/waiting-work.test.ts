@@ -162,7 +162,8 @@ describe("An answer to an Agent's question", () => {
     expect((await stream.next())?.event).toBe("ready");
     const question = (await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which one?", blocking: true })).body.activity;
 
-    for (let minute = 4; minute <= 8; minute += 4) {
+    // 8 minutes pass, each four of them ending in the stream's heartbeat.
+    for (let i = 0; i < 2; i++) {
       cronk.clock.advance(4 * 60_000);
       await cronk.heartbeat();
     }

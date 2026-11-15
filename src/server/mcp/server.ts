@@ -29,6 +29,14 @@ interface Connection {
   notifying?: Promise<() => void>;
 }
 
+/** A deadline no sweep reaches, for a connection whose real one is being asked for. */
+const UNTIL_HEARD = new Date(8.64e15);
+
+/** Notes when the connection's Agent Session ends if it stays silent, from the API's answer for the Session. */
+function noteEndsIfSilentAt(connection: Connection, answer: { session: AgentSession }): void {
+  connection.endsIfSilentAt = new Date(answer.session.endsIfSilentAt);
+}
+
 /** Stops pushing waiting work to the connection, if it is. */
 function stopNotifying(connection: Connection): void {
   const notifying = connection.notifying;
@@ -105,7 +113,9 @@ export function mcpRoutes(ctx: AppContext) {
         };
         const notify = async () => {
           const baseUrl = ownBaseUrl(app);
-          return baseUrl ? followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", pushWaiting) : () => {};
+          // Refused, the Agent Session has ended or its token was revoked, so the connection can't go on either.
+          const ended = () => void drop(session.id);
+          return baseUrl ? followEvents(baseUrl, { token, sessionId: session.id }, "/api/agent-sessions/current/events", pushWaiting, ended) : () => {};
         };
         if (closing) return refuse(reply, 503, "Cronk is shutting down; reconnect once it is back");
         connections.set(session.id, {
@@ -138,7 +148,7 @@ export function mcpRoutes(ctx: AppContext) {
         await serve(connection.transport, request, reply, token);
         return drop(sessionId);
       }
-      connection.endsIfSilentAt = new Date((current.body.session as AgentSession).endsIfSilentAt);
+      noteEndsIfSilentAt(connection, current.body);
       if (request.method === "GET") return listen(sessionId, connection, request, reply, token);
       return serve(connection.transport, request, reply, token);
     };
@@ -157,10 +167,11 @@ export function mcpRoutes(ctx: AppContext) {
         if (--connection.listening > 0) return;
         stopNotifying(connection);
         if (connections.get(id) !== connection) return;
+        // What it last heard is stale, as the API's stream kept the Session alive; until it hears anew, it isn't swept.
+        connection.endsIfSilentAt = UNTIL_HEARD;
         void callApi(app, { token, sessionId: id }, "GET", "/api/agent-sessions/current").then(
-          (current) =>
-            current.status >= 400 ? drop(id) : void (connection.endsIfSilentAt = new Date((current.body.session as AgentSession).endsIfSilentAt)),
-          () => {},
+          (current) => (current.status >= 400 ? drop(id) : noteEndsIfSilentAt(connection, current.body)),
+          () => drop(id),
         );
       });
       await (connection.notifying ??= connection.notify());
