@@ -109,6 +109,19 @@ describe("A Project's live updates", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
   });
 
+  it("tell which Ticket changed when its Claim lapses because the Workspace's silence threshold was lowered", async () => {
+    const { cronk, admin, session } = await delegatedSetup(1);
+    await (await session()).post("/api/tickets/CRONK-1/claim");
+    const stream = await admin.events("/api/projects/CRONK/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    cronk.clock.advance(120_000);
+    // Long enough for the server to have looked for lapsed Claims since the clock moved.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await admin.patch("/api/workspace", { silenceThresholdSeconds: 60 })).status).toBe(200);
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+  });
+
   it("tell their watchers when the Project's Statuses change, and which Tickets a removed Status moved", async () => {
     const { admin } = await delegatedSetup(1);
     const stream = await admin.events("/api/projects/CRONK/events");
@@ -124,6 +137,29 @@ describe("A Project's live updates", () => {
     const statuses = (await admin.get("/api/projects/CRONK")).body.statuses;
     await admin.delete(`/api/projects/CRONK/statuses/${checking.id}?moveTo=${statuses.at(-1).id}`);
     expect([await stream.next(), await stream.next()]).toEqual(expect.arrayContaining([statusesChanged, { event: "changed", data: { ticket: "CRONK-1" } }]));
+  });
+
+  it("tell which Ticket changed when it is sent back from review", async () => {
+    const { admin } = await delegatedSetup(1);
+    const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: inReview });
+    const stream = await admin.events("/api/projects/CRONK/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+  });
+
+  it("tell which Tickets changed when finishing a Ticket unblocks them", async () => {
+    const { admin } = await delegatedSetup(2);
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    const completed = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "completed").id;
+    const stream = await admin.events("/api/projects/CRONK/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/tickets/CRONK-1", { statusId: completed });
+    const changed = [await stream.next(), await stream.next()].map((e) => e?.data.ticket).sort();
+    expect(changed).toEqual(["CRONK-1", "CRONK-2"]);
   });
 });
 
