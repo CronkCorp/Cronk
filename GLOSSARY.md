@@ -11,7 +11,7 @@ The single organization a Cronk installation serves. Holds the Projects plus kno
 _Avoid_: Organization, tenant, company
 
 **Project**:
-The main container of work and the knowledge that goes with it, usually corresponding to one product or set of repositories. Its knowledge layers on top of the Workspace's.
+The main container of work and the knowledge that goes with it, usually corresponding to one product or set of repositories. Its knowledge layers on top of the Workspace's. It is **open** or **private** (see Member), and may be **archived**, which hides it from the Project list and takes its Tickets out of Ready.
 _Avoid_: Team, space, board
 
 ### Work
@@ -21,15 +21,15 @@ A unit of work tracked within a Project.
 _Avoid_: Issue, task, work item, card, story
 
 **Status**:
-Where a Ticket currently stands in its Project's workflow. Each Project defines its own Statuses, each belonging to exactly one Status Category.
+Where a Ticket currently stands in its Project's workflow. Each Project defines its own Statuses, each belonging to exactly one Status Category, and keeps at least one Status in every Category. A new Ticket starts in the Project's first Status, Backlog by default.
 _Avoid_: State, column, stage
 
 **Status Category**:
-One of the fixed groups every Status belongs to, shared by all Projects: Backlog, Unstarted, Started, In Review, Completed, Canceled.
+One of the fixed groups every Status belongs to, shared by all Projects: Backlog, Unstarted, Started, In Review, Completed, Canceled. Agents may move Tickets only into Unstarted, Started and In Review; Users decide the rest (ADR 0011).
 _Avoid_: Status type, phase
 
 **Ready**:
-Said of a Ticket an Agent can take up now: delegated to it, not Completed or Canceled, not blocked by an unfinished Ticket, and not Claimed. An Unverified completion counts as finished for blocking.
+Said of a Ticket an Agent can take up now: delegated to it, in a Backlog, Unstarted or Started Status, not blocked by an unfinished Ticket, and not Claimed, in an unarchived Project the Agent may write in, with an active Owner. A Ticket In Review waits on a User, so it is not Ready until Sent back. An Unverified completion counts as finished for blocking.
 _Avoid_: Available, open, unblocked (as the overall term)
 
 **Assignee**:
@@ -77,8 +77,12 @@ A link between two Tickets, in any Projects of the Workspace: one **blocks** the
 _Avoid_: Dependency, link (as the term)
 
 **Activity**:
-One timestamped entry an Agent Session writes on a Ticket while working: a plan, progress, finding, question or error. Activities also keep the Agent Session's Claim alive.
+One timestamped entry an Agent Session writes on a Ticket while working: a plan, progress, finding, Question or error. Like every call in the Agent Session, an Activity keeps its Claim alive.
 _Avoid_: Log line, event, comment, thought
+
+**Question**:
+An Activity in which an Agent asks something of a User, marked **blocking** when the Agent waits for the answer. The first User's Comment reply **answers** it; blocking Questions come first in the Inbox.
+_Avoid_: Prompt, request, clarification
 
 **Change**:
 One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or Relations, or its creation, shown in the Ticket's timeline.
@@ -93,7 +97,7 @@ A Comment that concerns an Agent: it answers the Agent's question, @mentions it,
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
-An Agent Session's exclusive, temporary hold on a Ticket while it works on it. A Ticket has at most one live Claim; a Claim lapses when its Agent Session falls silent for too long.
+An Agent Session's exclusive, temporary hold on a Ticket while it works on it. A Ticket has at most one live Claim. It ends when the Ticket is Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:
@@ -119,6 +123,10 @@ _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's
 **Document**:
 A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown.
 _Avoid_: Page, doc, wiki page, note
+
+**Page tree**:
+The nested arrangement of a Project's or the Workspace's Documents, where each Document may sit under another. Reports live with their Ticket, outside it.
+_Avoid_: Wiki, folder, hierarchy
 
 **Linked Document**:
 A Document an Actor linked to a Ticket from the Ticket's side, so it is one click away without editing the Document. The Ticket lists it beside its Reports and the Documents that mention its key. Unlike a Relation, it never blocks.
@@ -147,28 +155,36 @@ _Avoid_: ADR (in the product), RFC, ruling
 ### Actors
 
 **User**:
-A human who signs in to Cronk. A User an import brought in hasn't **joined** yet: they have no password until an Admin invites them and they accept.
+A human who signs in to Cronk. A User an import brought in hasn't **joined** yet: they have no password until an Admin invites them and they accept. An Admin may **deactivate** a User, who can't sign in and whose Agents are refused until reactivated.
 _Avoid_: Person, human account
 
+**Invitation**:
+A one-time link, valid 7 days, that an Admin creates to let someone join as a User or an imported User set a password. The Admin passes it on themselves until outside-app email arrives.
+_Avoid_: Invite code, signup link
+
 **Admin**:
-A User who manages the Workspace: its Users, settings and Workspace-level knowledge.
+A User who manages the Workspace: its Users, settings and Workspace-level knowledge. Has Write in every Project, private ones included, and can see every Agent but change only their own.
 _Avoid_: Owner (reserved for Agents), superuser
 
 **Member**:
-A User without Admin rights, who works in the Projects open to them or that they were invited to, with Read or Write access in each.
+A User without Admin rights. Has the access a Project lists them with, Read or Write; unlisted, they have Write in an **open** Project and no access to a **private** one, which answers as if it didn't exist.
 _Avoid_: Collaborator, guest, contributor
 
 **Agent**:
-A non-human account that acts in Cronk on behalf of exactly one User. A User may have many Agents active at the same time.
+A non-human account that acts in Cronk on behalf of exactly one User. A User may have many Agents active at the same time. A **removed** Agent is refused for good but stays named in history.
 _Avoid_: Bot, AI user, integration
 
 **Agent Session**:
-One continuous connection of an Agent, from connect to disconnect. Many Agent Sessions of the same Agent may run at once.
+One continuous connection of an Agent, from connect until it disconnects or stays silent longer than the silence threshold, or its token, Agent or Owner is revoked, removed or deactivated. Every call in it, and the heartbeat of its open stream of Waiting Work, keeps it going; once ended it never resumes. Many Agent Sessions of the same Agent may run at once.
 _Avoid_: Run, instance, conversation
 
 **Transcript**:
 The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did.
 _Avoid_: Chat log, conversation, chat history, session log
+
+**Silence threshold**:
+How long an Agent Session may go without a call before it ends and its Claims lapse. Set per Workspace, 5 minutes by default.
+_Avoid_: Timeout, TTL, lease time
 
 **Owner**:
 The User an Agent acts on behalf of and who is accountable for its actions.
@@ -189,8 +205,12 @@ _Avoid_: Trigger, callback, wake-up hook
 ### Access
 
 **Agent Access**:
-The most a Project (or the Workspace) lets Agents do in it: None, Read or Write. An Agent never gets more than its Owner has.
+The most a Project (or the Workspace) lets Agents do in it: None, Read or Write. An Agent never gets more than its Owner has, or than its token allows.
 _Avoid_: AI permissions, bot role, agent scope
+
+**Token**:
+The secret an Agent calls the API with, full or read-only, shown once when issued and stored only as a hash. An Agent may hold several; revoking one refuses it at once.
+_Avoid_: API key, password, credential (as the term)
 
 **Protected**:
 Said of a Document, Term, Decision or Artifact that Agents may read but never edit, regardless of Agent Access.
