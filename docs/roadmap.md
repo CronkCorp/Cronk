@@ -15,7 +15,7 @@ Phase 1 was built without step 3; #98 reviewed its UI afterwards and wrote the f
 A session starting a later phase should read, in order:
 
 1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
-2. `docs/adr/`: decisions that are hard to reverse (0001–0013).
+2. `docs/adr/`: decisions that are hard to reverse (0001–0014).
 3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
 4. The Phase 1 spec, GitHub issue #1 (`gh issue view 1`): the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
 5. `docs/testing.md`: the test seams every phase uses.
@@ -86,24 +86,25 @@ Decided so far (beyond the glossary and ADRs):
 - A Transcript may be at most 10 MB by default (configurable per Workspace); it is kept until its Owner deletes it.
 - Transcripts are always part of the full export, as Markdown with frontmatter (Agent, client chat id, linked Agent Sessions and items), with hand redactions applied, and are restored on import.
 
-Open questions to grill before writing the spec:
+Decided in the Phase 2 grilling:
 
-- **Terms**: exact fields; how a Project Term overrides a Workspace Term (replace, extend, or hide); whether Agents are warned when they write a word a Term says to avoid, and where (on save, on search, in the welcome).
-- **Decisions**: exact fields and statuses; how superseding works in the UI; how Decisions link to Tickets and Terms; whether Decisions can be proposed by Agents directly or only via Suggestions.
-- **Suggestions**: is a Suggestion a diff against a specific Version; what happens when the item changes before the Suggestion is accepted; can a User edit a Suggestion before accepting it.
-- **Protected**: who may mark or unmark; does Protected apply per item only, or also to a whole page-tree branch.
-- **Autonomous Delegation**: is it set per Ticket, per parent Ticket (covering its Sub-Tickets), as a Project default, or all three; what Reopen does to dependents that already continued on the Unverified completion.
-- **Discovered Tickets**: may an Agent mark a Discovered Ticket as blocking queued Tickets on its own; which Inbox or Triage it lands in when the source Ticket's Assignee is known.
-- **Artifacts**: what an Agent publishes (one HTML page or a folder of files); the default CDN allow-list and how a publish declares more; links to a specific Version; how Artifacts embed in Documents and Reports; whether Artifacts take Comments and whether those reach the producing Agent; size limits.
-- **What Agents may write.** Phase 1 lets Agents create Tickets (landing in Backlog with no marker), edit any Ticket's fields and Relations without a Claim, and create Projects; Status and Project management is being limited to Users (#139). Decide how this narrows once Discovered Tickets exist, and whether editing a Ticket needs a Claim.
-- **Agent calls outside an Agent Session.** A bare token can write without a Session, so those changes can never link to a Transcript. Keep this for scripts and CI, or require a Session for writes.
-- **Workspace knowledge.** Any User may write Workspace Documents, but only Admins Workspace Guidance; the glossary says Admins manage Workspace-level knowledge. Pick one rule.
-- **Unassigned In Review Tickets** reach no Inbox. Send them to Triage, or require an Assignee before In Review.
-- **Claiming by key** ignores Ready, so an Agent can Claim a blocked Ticket. Allow it as a deliberate override, or refuse.
-- **Password reset**: none exists, so a forgotten password locks a User out. For example, an Admin-issued reset link like an Invitation.
-- **Transcripts after import**: imported Agent Sessions get new ids, so Transcripts can't link to them. Keep ids on import into an empty Workspace, or remap from Transcript frontmatter.
-- **Artifact origin**: a subdomain such as `artifacts.cronk.example` is same-site with the app, and the sign-in cookie is `SameSite=Lax` with no Origin check. Require a separate registrable domain, or add an Origin check.
-- **Attachments**: size limits; local disk versus S3-compatible storage defaults; video handling.
+- **Suggestions** are full proposed content based on a specific Version (ADR 0014). An outdated one is merged on accept. "Accept" credits the Agent; "edit and accept" credits the User and links the Suggestion. Rejecting needs a Comment, which reaches the Agent as Waiting Work. A Suggestion on a Project item goes to the source Ticket's Assignee, else the Agent's Owner, else Triage; Suggestions on Workspace items always go to Triage.
+- **Protected** is set and unset by any User with Write where the item lives, recorded in its history. Protecting a Document covers every Document under it, including ones added later; adding a Document under a protected branch, or moving one in or out, takes a User or a Suggestion.
+- **Terms** have a name, definition, words to avoid and an optional group. Links come from mentions: a Term's name, matched with its capitalisation, and Decision keys. A Project Term replaces a Workspace Term of the same name (ignoring case), and both views show the override. When an Agent saves text with an avoided word (outside code and quotes), the save succeeds and the result lists the words with the Term to use. The welcome lists Term names, with a tool to look one up.
+- **Decisions** have a number (per Project or Workspace), title, status (proposed, accepted, rejected, deprecated, superseded), a Markdown body prefilled with the ADR sections, and an optional group. They are referred to as `CRONK-D7`, or `D7` in the Workspace. Only Users change status; superseding is set from the new Decision and takes effect when it is accepted. Agents may create proposed Decisions, which go to the source Ticket's Assignee, else the Owner; Reports list them.
+- **Autonomous Delegation** is set by a User per Ticket, inherited by its Sub-Tickets, and pre-filled from a Project default (off unless changed). Reopening lists the dependents that already continued so the User can decide on each; their Agents get Waiting Work.
+- **Discovered Tickets.** Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one: in Backlog, undelegated, recording its source Ticket and Agent Session if any, with no Claim needed. An Agent may add blocks from its own Discovered Tickets. One goes to the source Ticket's Assignee, else the Agent's Owner; Triage only when that User has no access to the Project.
+- **Claims.** Editing any field of a Ticket needs its Claim, except on Discovered Tickets the Agent filed until a User delegates them. Claiming needs the Ticket to be Ready, and a refusal says why. Moving to In Review, or completing, ends the Claim (#138).
+- **Delegating** a Ticket without an Assignee assigns the delegating User. Existing unassigned delegated Tickets get their Delegate's Owner as Assignee once, on upgrade.
+- **Agent writes.** Agents may still create Projects; renaming, archiving and Statuses are for Users (#139). Agents change things only within an Agent Session; reads with a bare token stay allowed.
+- **Workspace knowledge.** Any User writes Workspace Documents, Terms and Decisions; only Admins write Workspace Guidance.
+- **Passwords.** Admins issue one-time reset links, valid 7 days like Invitations; signed-in Users change their own; a server command issues a link for a lost last Admin. Issuing a reset ends the User's sign-ins but not their Agents' Sessions. Emailed self-service reset comes with SMTP in Phase 3.
+- **Import** keeps Agent and Agent Session ids, giving a new id (and keeping the mapping) only when one is taken, so Transcripts keep linking after a move.
+- **Origin.** The API refuses state-changing requests from other Origins, and the sign-in cookie becomes `SameSite=Strict`. Setup docs recommend a separate domain for Artifacts but allow a subdomain.
+- **Artifacts** are published as a folder with `index.html`, the whole folder per Version. Default allow-list: cdnjs, jsDelivr, unpkg and Google Fonts; no network requests by default. A publish may declare extra origins with reasons, shown on the Artifact and never carried over; Admins can edit the list and turn extras off. A bare Artifact link on its own line embeds it (the named Version, else the latest); Reports should embed a Version. Comments record the Version viewed and reach the Agent that published it.
+- **Limits and storage**, per Workspace: 25 MB and 500 files per Artifact Version, 100 MB per Attachment, no quota, storage used shown to Admins. Local disk by default, S3-compatible optional.
+- **Attachments** belong to the Ticket, Document or Report they were attached to, which decides who can read them, and survive across Document Versions. Video and audio are stored as uploaded and play in the browser when MP4 or WebM; no transcoding.
+- **Triage** shows each User the items they could act on (Admins see all), with a count in the sidebar. An item leaves Triage when someone acts on it.
 
 ## Phase 3: Code and reach
 
@@ -129,6 +130,7 @@ Open questions to grill before writing the spec: GitHub and GitLab adapter shape
 ## Later, not scheduled
 
 - Semantic search with pgvector (optional, off by default).
+- Underlining words a Term says to avoid in the editor, for Users.
 - Real-time collaborative editing.
 - Native mobile apps.
 - Deployment guides for standalone servers and Proxmox.
