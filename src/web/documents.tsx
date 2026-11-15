@@ -13,7 +13,8 @@ import { DocumentComments } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
-import { Field, Show, TextArea, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
+import { MarkdownEditor } from "./markdown-editor.js";
+import { Field, Show, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
 
 /** The address of a page tree: a Project's, or the Workspace's without a Project key. */
 const treeAddress = (projectKey: string | null | undefined) => (projectKey ? `/projects/${projectKey}/documents` : "/documents");
@@ -285,7 +286,13 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
         <form onSubmit={save}>
           {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
           <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
-          <TextArea label="Body (Markdown)" value={draft.text} onChange={(text) => setDraft((d) => ({ ...d, text }))} rows={18} disabled={busy} />
+          <MarkdownEditor
+            label="Body (Markdown)"
+            value={draft.text}
+            onChange={(text) => setDraft((d) => ({ ...d, text }))}
+            disabled={busy}
+            projectKey={props.document.projectKey}
+          />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="submit" disabled={busy}>Save</button>

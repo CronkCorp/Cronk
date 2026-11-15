@@ -219,3 +219,13 @@ form.add-status button[type="submit"], .status-row form button[type="submit"] { 
 .search-result { flex-direction: column; align-items: stretch; gap: 4px; }
 .search-result-head { display: flex; align-items: center; gap: 12px; }
 .search-excerpt { margin: 0; font-size: 13px; }
+
+/* The Markdown editor: the source with its toolbar beside a live preview, stacked on narrow screens. */
+.markdown-editor { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; }
+.markdown-editor-pane { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.markdown-editor .field { margin-bottom: 0; flex: 1; }
+.markdown-editor .field label, .pane-label { font-size: 13px; color: var(--muted); }
+.markdown-editor .field textarea { flex: 1; }
+.markdown-editor .markdown { flex: 1; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 4px; }
+.toolbar button { padding: 4px 10px; font-size: 13px; }

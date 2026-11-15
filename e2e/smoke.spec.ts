@@ -310,11 +310,23 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Onboarding");
   await page.getByRole("button", { name: "Create Document" }).click();
-  await page.getByLabel("Body (Markdown)").fill("Start with CRONK-1.");
+  // The toolbar formats the selected text, and the preview shows the Markdown as it will read.
+  const editor = page.getByLabel("Body (Markdown)");
+  await editor.fill("Start with CRONK-1.");
+  await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 5));
+  await page.getByRole("button", { name: "Bold" }).click();
+  await expect(editor).toHaveValue("**Start** with CRONK-1.");
+  const preview = page.getByRole("region", { name: "Preview" });
+  await expect(preview.locator("strong")).toHaveText("Start");
+  await expect(preview.getByRole("link", { name: "CRONK-1" })).toBeVisible();
   await page.getByRole("button", { name: "Save" }).click();
 
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("Start with CRONK-1.");
+  await expect(body.locator("strong")).toHaveText("Start");
+  // What was saved is exactly the Markdown the editor showed.
+  const id = new URL(page.url()).pathname.split("/").pop()!;
+  expect((await (await page.request.get(`/api/documents/${id}`)).json()).document.body).toBe("**Start** with CRONK-1.");
   await expect(body.getByRole("link", { name: "CRONK-1" })).toHaveAttribute("href", "/tickets/CRONK-1");
 
   await page.getByRole("button", { name: "Edit" }).click();
