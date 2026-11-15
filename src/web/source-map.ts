@@ -118,6 +118,11 @@ export interface Container {
  */
 type LinePrefix = { kind: "marker" } | { kind: "indent"; width: number; firstLine?: number; upTo?: boolean };
 
+/** Whether the line in `source` ends at `at`. */
+function lineEndsAt(source: string, at: number): boolean {
+  return at === source.length || source[at] === "\n";
+}
+
 /**
  * Takes `prefixes` off the line starting at `at` in `source`, returning where the rest of the line starts,
  * or nothing if the line doesn't carry them as expected.
@@ -133,7 +138,7 @@ function skipPrefixes(source: string, at: number, prefixes: LinePrefix[]): numbe
       let spaces = 0;
       while (source[at + spaces] === " " && spaces < prefix.width) spaces++;
       // A blank line may be indented less than the rest.
-      const blank = source[at + spaces] === "\n" || at + spaces === source.length;
+      const blank = lineEndsAt(source, at + spaces);
       if (spaces < prefix.width && !blank && !prefix.upTo) return undefined;
       at += spaces;
       continue;
@@ -177,7 +182,7 @@ function linePrefixes(source: string, containers: Container[]): LinePrefix[] | u
     while (source[markerEnd + spaces] === " ") spaces++;
     // A tab's width depends on its column, which is left to doubt.
     if (source[markerEnd + spaces] === "\t") return undefined;
-    const blank = source[markerEnd + spaces] === "\n" || markerEnd + spaces === source.length;
+    const blank = lineEndsAt(source, markerEnd + spaces);
     // Content that starts five or more spaces out, or on a later line, starts one space past the marker.
     const contentAt = blank || spaces >= 5 ? markerEnd + 1 : markerEnd + spaces;
     if (!blank && spaces === 0) return undefined;

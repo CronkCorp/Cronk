@@ -2,7 +2,7 @@ import Markdown, { type Components } from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
-import { alignCodeToSource, alignToSource, encodeBounds, type Container } from "./source-map.js";
+import { alignCodeToSource, alignToSource, encodeBounds, type Container, type SourceBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
@@ -80,6 +80,12 @@ function spanOf(node: HastNode | undefined): { start: number; end: number } | un
   return start === undefined || end === undefined ? undefined : { start, end };
 }
 
+/** `node` wrapped in a span naming where its Markdown starts, and how its characters sit from there when `bounds` says. */
+function sourceSpan(node: HastNode, start: number, bounds?: SourceBounds): HastNode {
+  const map = bounds && encodeBounds(bounds, start);
+  return { type: "element", tagName: "span", properties: { dataSourceStart: start, ...(map && { dataSourceMap: map }) }, children: [node] };
+}
+
 /**
  * Where the text of a code block (`code` in `pre`) sits in the source, if that is known for certain: each
  * line is tied to the source past the prefix every blockquote and list item around it puts before it, or,
@@ -87,8 +93,8 @@ function spanOf(node: HastNode | undefined): { start: number; end: number } | un
  */
 function markCode(node: HastNode, code: HastNode, ancestors: HastNode[], source: string): HastNode {
   const value = node.value ?? "";
-  const at = spanOf(code);
-  if (!value.trim() || !at) return node;
+  const span = spanOf(code);
+  if (!value.trim() || !span) return node;
   const containers: Container[] = [];
   for (const ancestor of ancestors) {
     const kind = ancestor.tagName === "blockquote" ? "blockquote" : ancestor.tagName === "li" ? "listItem" : undefined;
@@ -97,22 +103,17 @@ function markCode(node: HastNode, code: HastNode, ancestors: HastNode[], source:
     if (start === undefined) return node;
     containers.push({ kind, start });
   }
-  const bounds = alignCodeToSource(value, source, at, containers);
-  if (bounds) {
-    const base = bounds.ends[0]!;
-    const map = encodeBounds(bounds, base);
-    return { type: "element", tagName: "span", properties: { dataSourceStart: base, ...(map && { dataSourceMap: map }) }, children: [node] };
-  }
-  return markVerbatim(node, at, source);
+  const bounds = alignCodeToSource(value, source, span, containers);
+  return bounds ? sourceSpan(node, bounds.ends[0]!, bounds) : markVerbatim(node, span, source);
 }
 
 /** Marks code that shows its Markdown as it is where its text is found exactly once inside its stretch, as inside backticks. */
-function markVerbatim(node: HastNode, at: { start: number; end: number }, source: string): HastNode {
+function markVerbatim(node: HastNode, span: { start: number; end: number }, source: string): HastNode {
   const value = node.value ?? "";
-  const stretch = source.slice(at.start, at.end);
+  const stretch = source.slice(span.start, span.end);
   const found = stretch.indexOf(value);
   if (found < 0 || stretch.indexOf(value, found + 1) >= 0) return node;
-  return { type: "element", tagName: "span", properties: { dataSourceStart: at.start + found }, children: [node] };
+  return sourceSpan(node, span.start + found);
 }
 
 /**
@@ -140,15 +141,12 @@ function markSourceOffsets(source: string) {
     // A code block's text carries no place of its own; its `code` element does.
     if (parent?.tagName === "code" && ancestors[ancestors.length - 2]?.tagName === "pre") return markCode(node, parent, ancestors, source);
     const value = node.value ?? "";
-    const at = spanOf(node);
-    if (!value.trim() || !at) return node;
-    const bounds = alignToSource(value, source, at.start, at.end);
-    if (bounds) {
-      const map = encodeBounds(bounds, at.start);
-      return { type: "element", tagName: "span", properties: { dataSourceStart: at.start, ...(map && { dataSourceMap: map }) }, children: [node] };
-    }
+    const span = spanOf(node);
+    if (!value.trim() || !span) return node;
+    const bounds = alignToSource(value, source, span.start, span.end);
+    if (bounds) return sourceSpan(node, span.start, bounds);
     // Inline code shows its Markdown as it is, inside backticks the run's stretch includes.
-    return parent?.tagName === "code" ? markVerbatim(node, at, source) : node;
+    return parent?.tagName === "code" ? markVerbatim(node, span, source) : node;
   };
   return () => (tree: HastNode) => {
     mark(tree, []);
