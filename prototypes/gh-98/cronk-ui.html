@@ -1,0 +1,760 @@
+<title>Cronk UI Directions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* PROTOTYPE for Thundernerd/Cronk#98. Throwaway: every screen is fake data, nothing calls the API.
+   Layout concept: the app frame (sidebar or top bar) hosts one screen at a time; a dark prototype bar on top
+   picks the screen, a floating pill at the bottom cycles that screen's variants (also ← →). */
+:root {
+  /* Proposed Cronk tokens, light */
+  --bg: #f3f4f1;          /* page ground, faintly green-grey */
+  --surface: #ffffff;     /* panels, rows, timeline entries */
+  --surface-2: #e9ece6;   /* sunken: inputs, code, Comment bubbles */
+  --text: #1b1f1c;
+  --muted: #5c655f;
+  --border: #d5dad2;
+  --accent: #116466;      /* ink teal: links, primary buttons, focus */
+  --accent-soft: #d7ebe9;
+  --on-accent: #ffffff;
+  --agent: #6247c2;       /* marks Agents as Actors, never decoration */
+  --agent-soft: #e9e4fb;
+  --danger: #b93a2b;  --danger-soft: #f8e1dd;
+  --warn: #a35f00;    --warn-soft: #fbecd2;
+  --ok: #2c7a42;      --ok-soft: #dcefe1;
+  --info: #2a65ad;    --info-soft: #dde9f7;
+  --cat-backlog: #8a938c; --cat-unstarted: #8a938c; --cat-started: #c98a12; --cat-review: #2a65ad; --cat-completed: #2c7a42; --cat-canceled: #b93a2b;
+  --proto-bg: #202422; --proto-fg: #f1f3ef; --proto-muted: #a9b2ab;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* spacing 4 8 12 16 24 32; radius 4 controls, 8 panels; type 12 13 14 16 20 24 */
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121513; --surface: #1a1e1b; --surface-2: #232825; --text: #e2e6e1; --muted: #98a29b; --border: #2e3430;
+  --accent: #4fb2aa; --accent-soft: #1d3634; --on-accent: #0c1514;
+  --agent: #a793f2; --agent-soft: #2b2545;
+  --danger: #ee7d6b; --danger-soft: #3d211d; --warn: #e3a447; --warn-soft: #3a2c15; --ok: #6cc284; --ok-soft: #1c3324; --info: #74a8ea; --info-soft: #1b2b40;
+  --cat-backlog: #7d877f; --cat-unstarted: #7d877f; --cat-started: #e3a447; --cat-review: #74a8ea; --cat-completed: #6cc284; --cat-canceled: #ee7d6b;
+  --proto-bg: #000000; --proto-fg: #f1f3ef; --proto-muted: #9aa39c;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #121513; --surface: #1a1e1b; --surface-2: #232825; --text: #e2e6e1; --muted: #98a29b; --border: #2e3430;
+  --accent: #4fb2aa; --accent-soft: #1d3634; --on-accent: #0c1514;
+  --agent: #a793f2; --agent-soft: #2b2545;
+  --danger: #ee7d6b; --danger-soft: #3d211d; --warn: #e3a447; --warn-soft: #3a2c15; --ok: #6cc284; --ok-soft: #1c3324; --info: #74a8ea; --info-soft: #1b2b40;
+  --cat-backlog: #7d877f; --cat-unstarted: #7d877f; --cat-started: #e3a447; --cat-review: #74a8ea; --cat-completed: #6cc284; --cat-canceled: #ee7d6b;
+  --proto-bg: #000000; --proto-fg: #f1f3ef; --proto-muted: #9aa39c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; padding-bottom: 72px; }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h1 { font-size: 20px; font-weight: 600; }
+h2 { font-size: 16px; font-weight: 600; }
+h3 { font-size: 14px; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--font-mono); font-size: 13px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.key { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.grow { flex: 1; min-width: 0; }
+.wrap { flex-wrap: wrap; }
+
+/* ---------- prototype chrome (not part of the design) ---------- */
+.proto-bar { background: var(--proto-bg); color: var(--proto-fg); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 13px; }
+.proto-bar strong { font-weight: 600; }
+.proto-bar .note { color: var(--proto-muted); }
+.proto-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.proto-tabs button { background: transparent; border: 1px solid #3a403c; color: var(--proto-fg); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.proto-tabs button[aria-current="true"] { background: var(--proto-fg); color: var(--proto-bg); border-color: var(--proto-fg); }
+.switcher { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; align-items: center; gap: 4px; background: var(--proto-bg); color: var(--proto-fg); border-radius: 999px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.35); max-width: calc(100% - 32px); }
+.switcher button { background: transparent; border: none; color: var(--proto-fg); width: 32px; height: 32px; border-radius: 999px; cursor: pointer; font-size: 16px; flex: none; }
+.switcher button:hover { background: #3a403c; }
+.switcher .vlabel { padding: 0 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proto-bar .seg { border-color: #3a403c; }
+.proto-bar .seg button { background: transparent; color: var(--proto-fg); }
+.proto-bar .seg button + button { border-left-color: #3a403c; }
+.proto-bar .seg button[aria-pressed="true"] { background: var(--proto-fg); color: var(--proto-bg); }
+.variant-note { margin-bottom: 16px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 13px; }
+.variant-note strong { color: var(--text); }
+
+/* ---------- app frame ---------- */
+.frame { display: flex; min-height: calc(100vh - 44px); }
+.frame.top { flex-direction: column; }
+.sidebar { width: 232px; flex: none; background: var(--surface); border-right: 1px solid var(--border); padding: 12px 8px; display: flex; flex-direction: column; gap: 16px; }
+.ws { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-weight: 600; }
+.ws-mark { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.search { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--muted); font-size: 13px; }
+.search kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 8px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--text); cursor: pointer; }
+.nav-item:hover { background: var(--surface-2); text-decoration: none; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.nav-item .count { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.nav-item .count.hot { color: var(--on-accent); background: var(--danger); border-radius: 999px; padding: 0 6px; }
+.nav-item .pkey { font-family: var(--font-mono); font-size: 11px; color: var(--muted); width: 44px; }
+.me { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 8px; border-top: 1px solid var(--border); font-size: 13px; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.topnav { display: flex; gap: 4px; flex-wrap: wrap; }
+.topnav .nav-item { padding: 4px 10px; }
+.topbar .search { width: 220px; }
+.main { flex: 1; min-width: 0; padding-block: 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.main-inner { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.crumbs { font-size: 13px; color: var(--muted); }
+.page-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.page-head h1 { flex: 1; min-width: 0; }
+@media (max-width: 760px) {
+  .frame { flex-direction: column; }
+  .sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .sidebar .nav-group { flex-direction: row; flex-wrap: wrap; }
+  .sidebar .nav-label, .sidebar .projects-group, .sidebar .me, .sidebar .search { display: none; }
+}
+
+/* ---------- components ---------- */
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; cursor: pointer; background: var(--accent); color: var(--on-accent); font-weight: 500; font-size: 13px; }
+.btn.secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.btn.ghost { background: transparent; color: var(--accent); padding: 4px 8px; }
+.btn.danger { background: var(--danger); color: var(--on-accent); }
+.btn.small { padding: 3px 8px; font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.panel-pad { padding: 16px; }
+.input { width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+textarea.input { font-family: var(--font-mono); font-size: 13px; resize: vertical; min-height: 72px; }
+.label { font-size: 12px; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.chip.solid { background: var(--surface-2); border-color: transparent; color: var(--text); }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.status i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; display: inline-block; }
+.status.started { color: var(--cat-started); } .status.started i { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.status.review { color: var(--cat-review); } .status.review i { background: currentColor; box-shadow: inset 0 0 0 2px var(--surface); }
+.status.completed { color: var(--cat-completed); } .status.completed i { background: currentColor; }
+.status.unstarted { color: var(--cat-unstarted); }
+.status span { color: var(--text); }
+.prio { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; }
+.prio.urgent { background: var(--danger); color: var(--on-accent); }
+.prio.high { color: var(--danger); background: var(--danger-soft); }
+.prio.medium { color: var(--warn); background: var(--warn-soft); }
+.prio.low { color: var(--muted); background: var(--surface-2); }
+/* Actors: Users are round, Agents are square and violet, everywhere. */
+.av { width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center; font-size: 10px; font-weight: 600; border-radius: 50%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.av.agent { border-radius: 5px; background: var(--agent-soft); color: var(--agent); border-color: transparent; }
+.av.lg { width: 32px; height: 32px; font-size: 12px; }
+.actor { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; white-space: nowrap; }
+.actor.agent-name { color: var(--agent); }
+.session { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ok); white-space: nowrap; }
+.live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.offline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.offline::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.kind { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.k-plan { color: var(--muted); } .k-progress { color: var(--info); } .k-finding { color: var(--ok); } .k-question { color: var(--warn); } .k-blocking { color: var(--danger); } .k-error { color: var(--danger); } .k-report { color: var(--agent); } .k-comment { color: var(--accent); } .k-review { color: var(--info); }
+.md p + p, .md p + ul, .md ul + p, .md p + ol { margin-top: 8px; }
+.md ul, .md ol { margin: 0; padding-left: 20px; }
+.md h4 { margin: 8px 0 4px; font-size: 14px; }
+.flash { animation: flash 2.4s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none; outline: 2px solid var(--accent); } }
+.empty-line { color: var(--muted); font-size: 13px; }
+.sep { width: 1px; align-self: stretch; background: var(--border); }
+.banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+.banner.warn { background: var(--warn-soft); color: var(--text); border: 1px solid var(--warn); }
+.banner.info { background: var(--info-soft); border: 1px solid var(--info); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; background: var(--surface); padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tabs button { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 10px; cursor: pointer; color: var(--muted); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
+.tabs .n { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+/* ---------- inbox ---------- */
+.ib-split { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; min-height: 560px; }
+.ib-list { width: 360px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.ib-group { padding: 8px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--border); }
+.ib-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
+.ib-item:hover { background: var(--bg); }
+.ib-item[aria-selected="true"] { background: var(--accent-soft); border-left-color: var(--accent); }
+.ib-item.blocking { border-left-color: var(--danger); }
+.ib-item .snip { font-size: 13px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ib-detail { flex: 1; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.report-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; background: var(--bg); }
+.actionbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (max-width: 860px) { .ib-split { flex-direction: column; } .ib-list { width: auto; border-right: none; border-bottom: 1px solid var(--border); } }
+.ib-cards { display: flex; flex-direction: column; gap: 12px; }
+.pinned { border: 1px solid var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.pinned-head { display: flex; align-items: center; gap: 8px; color: var(--danger); font-weight: 600; font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.card-head .t { font-weight: 500; font-size: 14px; color: var(--text); }
+details.report summary { cursor: pointer; color: var(--agent); font-weight: 500; font-size: 13px; }
+details.report[open] summary { margin-bottom: 8px; }
+.ib-tickets { display: flex; flex-direction: column; gap: 12px; }
+.tk-group { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.tk-head .t { font-weight: 600; }
+.tk-entry { display: flex; gap: 12px; padding: 12px 16px; }
+.tk-entry + .tk-entry { border-top: 1px solid var(--border); }
+.tk-gutter { width: 92px; flex: none; }
+@media (max-width: 600px) { .tk-entry { flex-direction: column; gap: 4px; } .tk-gutter { width: auto; } }
+
+/* ---------- ticket ---------- */
+.tk-layout { display: flex; gap: 24px; align-items: flex-start; }
+.tk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.tk-side { width: 280px; flex: none; display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
+@media (max-width: 900px) { .tk-layout { flex-direction: column-reverse; } .tk-side { width: 100%; position: static; } }
+.prop { display: flex; align-items: center; gap: 8px; padding: 6px 12px; min-height: 36px; font-size: 13px; }
+.prop + .prop { border-top: 1px solid var(--border); }
+.prop .label { width: 76px; flex: none; }
+.claim-card { border: 1px solid var(--agent); background: var(--agent-soft); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.meter { height: 4px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--agent); }
+.desc { padding: 12px 16px; }
+.tl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tl > li { position: relative; padding-left: 36px; padding-bottom: 12px; }
+.tl > li::before { content: ""; position: absolute; left: 11px; top: 24px; bottom: 0; width: 1px; background: var(--border); }
+.tl > li:last-child::before { display: none; }
+.tl .gut { position: absolute; left: 0; top: 0; }
+.tl .sys { font-size: 13px; color: var(--muted); padding-top: 2px; }
+.tl .sys .gut { left: 6px; top: 7px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); border: 2px solid var(--border); }
+.act { padding-top: 1px; }
+.act-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.act-body { margin-top: 4px; }
+.act.question .act-body, .act.blocking .act-body { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; }
+.act.blocking .act-body { background: var(--danger-soft); border-color: var(--danger); }
+.act.error .act-body { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); border-left: 3px solid var(--danger); padding: 8px 12px; border-radius: 4px; white-space: pre-wrap; }
+.bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 4px; }
+.reply { margin: 8px 0 0 16px; padding-left: 12px; border-left: 2px solid var(--border); }
+.report-card { margin-top: 4px; border: 1px solid var(--agent); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.report-card .rc-head { padding: 8px 12px; background: var(--agent-soft); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.report-card .rc-body { padding: 10px 12px; }
+.answer-box { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.composer { display: flex; flex-direction: column; gap: 8px; }
+.people-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; font-size: 13px; }
+.arrow { color: var(--muted); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filters .chip { cursor: pointer; padding: 2px 10px; }
+.filters .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.log { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.log li { display: flex; gap: 12px; padding: 6px 12px; align-items: baseline; }
+.log li + li { border-top: 1px solid var(--border); }
+.log .time { font-family: var(--font-mono); font-size: 12px; color: var(--muted); width: 44px; flex: none; }
+.log .kind { width: 72px; flex: none; }
+.lanes { display: flex; flex-direction: column; gap: 10px; }
+.lane-row { display: flex; }
+.lane-row.agent { justify-content: flex-start; }
+.lane-row.human { justify-content: flex-end; }
+.lane-row.center { justify-content: center; }
+.lane-card { max-width: 78%; min-width: 0; border-radius: 10px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface); }
+.lane-row.agent .lane-card { border-color: var(--agent-soft); border-left: 3px solid var(--agent); }
+.lane-row.human .lane-card { background: var(--accent-soft); border-color: transparent; }
+.lane-sys { font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 2px 10px; text-align: center; }
+.lane-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 0 4px; }
+@media (max-width: 600px) { .lane-card { max-width: 100%; } }
+
+/* ---------- document ---------- */
+.doc-layout { display: flex; gap: 24px; align-items: flex-start; }
+.doc-main { flex: 1; min-width: 0; }
+.doc-margin { width: 280px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 900px) { .doc-layout { flex-direction: column; } .doc-margin { width: 100%; } }
+.doc-body { padding: 24px 32px; max-width: 720px; font-size: 15px; line-height: 1.65; }
+.doc-body h2 { font-size: 18px; margin: 20px 0 8px; }
+.doc-body p + p { margin-top: 10px; }
+mark.anchor { background: var(--warn-soft); color: inherit; border-bottom: 2px solid var(--warn); padding: 0 1px; }
+mark.anchor.active { background: var(--accent-soft); border-bottom-color: var(--accent); }
+.sel { background: var(--info-soft); outline: 1px solid var(--info); }
+.pop { display: inline-flex; position: relative; top: -2px; margin-left: 4px; }
+.pop .btn { box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+.mc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.mc.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mc q { color: var(--muted); font-style: italic; }
+.toolbar { display: flex; gap: 2px; flex-wrap: wrap; padding: 4px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.toolbar button { border: none; background: transparent; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 13px; min-width: 30px; }
+.toolbar button:hover { background: var(--surface-2); }
+.toolbar .tsep { width: 1px; background: var(--border); margin: 4px; }
+.editor-split { display: flex; min-height: 420px; }
+.editor-split > * { flex: 1; min-width: 0; }
+.editor-split textarea { border: none; border-right: 1px solid var(--border); border-radius: 0; padding: 16px; background: var(--surface); line-height: 1.6; min-height: 420px; resize: none; }
+.editor-split .preview { padding: 16px 20px; background: var(--bg); font-size: 14px; }
+@media (max-width: 700px) { .editor-split { flex-direction: column; } .editor-split textarea { border-right: none; border-bottom: 1px solid var(--border); min-height: 240px; } }
+.conf { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.conf > div { flex: 1; min-width: 0; padding: 10px 12px; font-size: 13px; }
+.conf > div + div { border-left: 1px solid var(--border); }
+.conf pre { margin: 6px 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 700px) { .conf { flex-direction: column; } .conf > div + div { border-left: none; border-top: 1px solid var(--border); } }
+.choice { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); }
+.choice[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.choice pre { margin: 4px 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; }
+.diff { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.diff div { padding: 1px 10px; white-space: pre-wrap; }
+.diff .add { background: var(--ok-soft); } .diff .del { background: var(--danger-soft); } .diff .fold { color: var(--muted); font-style: italic; }
+
+/* ---------- agents ---------- */
+.agent-cards { display: flex; flex-direction: column; gap: 12px; }
+.agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.agent-card .ac-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; flex-wrap: wrap; }
+.sess { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; font-size: 13px; }
+.sess .working { flex: 1; min-width: 200px; }
+.beat { width: 120px; display: flex; flex-direction: column; gap: 2px; }
+.ac-foot { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); background: var(--bg); font-size: 13px; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12px; }
+
+/* ---------- tokens screen ---------- */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.sw { width: 132px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); font-size: 12px; }
+.sw i { display: block; height: 40px; }
+.sw div { padding: 6px 8px; }
+.typescale > div { display: flex; gap: 16px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.typescale .label { width: 120px; flex: none; }
+</style>
+
+<div class="proto-bar" role="navigation" aria-label="Prototype">
+  <strong>Cronk UI prototype</strong><span class="note">throwaway · #98 · fake data</span>
+  <div class="proto-tabs" id="screens"></div>
+  <div class="seg" id="theme" aria-label="Theme"><button data-t="">System</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+</div>
+<div id="app"></div>
+<div class="switcher" role="group" aria-label="Variant">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="vlabel" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+// ---------------------------------------------------------------- fake data
+const av = (n, agent) => `<span class="av${agent ? " agent" : ""}">${n.split(/[\s-]/).map(s => s[0]).join("").slice(0, 2).toUpperCase()}</span>`;
+const user = n => `<span class="actor">${av(n)}${n}</span>`;
+const agent = (n, owner) => `<span class="actor agent-name">${av(n, true)}${n}</span>${owner ? `<span class="muted small">for ${owner}</span>` : ""}`;
+const sess = s => `<span class="session" title="Agent Session">${s}</span>`;
+const status = (cat, name) => `<span class="status ${cat}"><i></i><span>${name}</span></span>`;
+const prio = p => `<span class="prio ${p.toLowerCase()}">${p}</span>`;
+
+const REPORT9 = `<h4>What changed</h4><p>The Ticket page shows who holds the Claim and when it lapses if the Agent Session stays silent. The time counts down live and turns amber in the last minute.</p><h4>Evidence</h4><ul><li><code>claims.test.ts</code>: 4 new cases, all green</li><li>Smoke test <code>ticket shows its Claim</code> added</li></ul><h4>Not done</h4><p>The board doesn't show Claims yet; that needs the project topic from #94.</p>`;
+const REPORT12 = `<p>Sign-in is limited to 5 failed attempts per email per minute and 50 per IP. Both limits slide. Tests: <code>sign-ins.test.ts</code> 9/9 green.</p>`;
+
+let liveCount = 0;
+
+// ---------------------------------------------------------------- frame
+function nav(active) {
+  const items = [
+    ["inbox", "Inbox", `<span class="count hot">4</span>`],
+    ["triage", "Triage", `<span class="count">0</span>`],
+    ["documents", "Documents", ""],
+    ["agents", "Agents", `<span class="count"><span class="live">2</span></span>`],
+  ];
+  return items.map(([k, n, c]) => `<a class="nav-item${active === k ? " active" : ""}">${n}${c}</a>`).join("");
+}
+function frame(active, inner) {
+  if (state.frame === "b") {
+    return `<div class="frame top">
+      <header class="topbar">
+        <div class="ws"><span class="ws-mark">A</span>Acme</div>
+        <nav class="topnav" aria-label="Main">
+          <a class="nav-item${active === "projects" ? " active" : ""}">Projects ▾</a>
+          ${nav(active)}
+        </nav>
+        <div class="grow"></div>
+        <div class="search">Search Tickets and Documents <kbd>/</kbd></div>
+        ${av("Ada Lovelace")}
+      </header>
+      <main class="main"><div class="main-inner">${inner}</div></main></div>`;
+  }
+  return `<div class="frame">
+    <aside class="sidebar" aria-label="Main">
+      <div class="ws"><span class="ws-mark">A</span>Acme</div>
+      <div class="search">Search <kbd>/</kbd></div>
+      <nav class="nav-group">${nav(active)}</nav>
+      <nav class="nav-group projects-group"><div class="nav-label">Projects</div>
+        <a class="nav-item${active === "projects" ? " active" : ""}"><span class="pkey">CRONK</span>Cronk</a>
+        <a class="nav-item"><span class="pkey">SITE</span>Website</a>
+        <a class="nav-item"><span class="pkey">OPS</span>Operations</a>
+      </nav>
+      <nav class="nav-group"><div class="nav-label">Workspace</div>
+        <a class="nav-item">Guidance</a><a class="nav-item">Users</a><a class="nav-item">Settings</a>
+      </nav>
+      <div class="me">${av("Ada Lovelace")}<span class="grow">Ada Lovelace</span><span class="muted small">Admin</span></div>
+    </aside>
+    <main class="main"><div class="main-inner">${inner}</div></main></div>`;
+}
+
+// ---------------------------------------------------------------- screens
+const SCREENS = {
+  frame: { name: "App frame", variants: {
+    a: ["Sidebar", "Left sidebar: Inbox, Triage, Documents, Agents on top, Projects listed by key, Workspace admin at the bottom. Counts show what is waiting; collapses to a strip on phones.", () => projectsBody()],
+    b: ["Top bar", "Today's top bar, tidied: Projects become a dropdown, everything else stays as links in one row. Less room for counts and Projects.", () => projectsBody()],
+  }},
+  inbox: { name: "Inbox", variants: {
+    a: ["Split triage", "List on the left grouped Blocking, Questions, To review; the selected item opens on the right with its full Report or question and the actions. Keyboard-friendly, like a mail client.", () => inboxSplit()],
+    b: ["Action cards", "One column. Blocking questions pinned in a red band at the top; every item is a card you act on in place, Reports fold open inline.", () => inboxCards()],
+    c: ["By Ticket", "Items grouped under their Ticket, so a Ticket with a question and a review shows once. Fits when Agents ask several things on one Ticket.", () => inboxByTicket()],
+  }},
+  ticket: { name: "Ticket", variants: {
+    a: ["One timeline + side panel", "Fields, people and the live Claim move to a right panel. One timeline interleaves Activities (labelled lines), Comments (bubbles), Reports (violet cards) and field changes (small grey lines, replacing the separate History).", () => ticketA()],
+    b: ["Conversation / Work log tabs", "Two tabs: Conversation (Comments, questions, Reports) and Work log (every Activity as a dense log with kind filters). A strip on top shows Assignee → Delegate → Claim.", () => ticketB()],
+    c: ["Two lanes", "Chat-like lanes: Agent entries on the left, User entries on the right, field changes centred. Makes who-said-what obvious, costs width.", () => ticketC()],
+  }},
+  document: { name: "Document", variants: {
+    a: ["Margin comments, split editor", "Read: Comments sit in the right margin beside their highlighted passage; selecting text offers \"Comment\". Edit: toolbar over a side-by-side Markdown and preview (#97). Merge: mine / theirs side by side per conflicting section.", () => documentA()],
+    b: ["Thread below, Write/Preview tabs", "Read: passages are highlighted, Comments stay in a thread under the Document (as today). Edit: full-width textarea with Write and Preview tabs. Merge: one card per conflict with a choice to pick.", () => documentB()],
+  }},
+  agents: { name: "Agents", variants: {
+    a: ["Agent cards", "One card per Agent with its live Agent Sessions: what each one has Claimed and how long until it falls silent. Tokens fold into the card's footer.", () => agentsA()],
+    b: ["Sessions table", "A live table of every Agent Session across your Agents, then a compact Agent list for managing names and tokens.", () => agentsB()],
+  }},
+  tokens: { name: "Tokens", variants: {
+    a: ["Proposed tokens", "The colour, type and spacing tokens every screen above uses. Switch Light / Dark in the bar above.", () => tokensBody()],
+  }},
+};
+const ACTIVE_NAV = { frame: "projects", inbox: "inbox", ticket: "projects", document: "documents", agents: "agents", tokens: "projects" };
+
+function projectsBody() {
+  const rows = [
+    ["CRONK-12", "Rate-limit sign-in attempts", "started", "In Progress", "High", "Ada Lovelace", "claude-laptop"],
+    ["CRONK-18", "Export Labels in frontmatter", "started", "In Progress", "Medium", "Ada Lovelace", "codex-ci"],
+    ["CRONK-9", "Show Claim expiry on the Ticket page", "review", "In Review", "Medium", "Ada Lovelace", "claude-laptop"],
+    ["CRONK-15", "Fix stale-save merge losing headings", "review", "In Review", "Urgent", "Grace Hopper", "codex-ci"],
+    ["CRONK-21", "Board columns scroll on phones", "unstarted", "Todo", "Low", "Linus Pauling", ""],
+  ];
+  return `<div class="crumbs">Projects / CRONK</div>
+  <div class="page-head"><h1>Cronk</h1><div class="seg"><button aria-pressed="true">List</button><button>Board</button><button>Reports</button></div><button class="btn">New Ticket</button></div>
+  <div class="panel">${rows.map(r => `<div class="prop" style="gap:12px"><span class="key" style="width:72px">${r[0]}</span>${status(r[2], "")}<span class="grow">${r[1]}</span>${prio(r[4])}${r[6] ? `<span class="actor agent-name small">${av(r[6], true)}</span>` : ""}${av(r[5])}</div>`).join("")}</div>`;
+}
+
+// ---- inbox
+const QUESTIONS = [
+  { id: "q1", blocking: true, ticket: "CRONK-12", title: "Rate-limit sign-in attempts", agent: "claude-laptop", sess: "brisk-otter", at: "10:18",
+    body: `<p>Should the limit be per email or per IP? Behind the Compose proxy every request has the proxy's IP (Fastify's <code>trustProxy</code> is off), so a per-IP limit would lock everyone out at once.</p><p>I'd ship per-email only now (5 failures per minute, sliding) and file a Discovered Ticket for per-IP. OK?</p>` },
+  { id: "q2", blocking: false, ticket: "CRONK-18", title: "Export Labels in frontmatter", agent: "codex-ci", sess: "calm-heron", at: "09:47",
+    body: `<p>Labels match ignoring case. Should the export keep the casing of the first use (<code>Backend</code>) or lowercase them all?</p>` },
+];
+const REVIEWS = [
+  { id: "r1", ticket: "CRONK-9", title: "Show Claim expiry on the Ticket page", agent: "claude-laptop", at: "08:55", report: "Claim expiry on the Ticket page", body: REPORT9 },
+  { id: "r2", ticket: "CRONK-15", title: "Fix stale-save merge losing headings", agent: "codex-ci", at: "yesterday", report: "Merge keeps ATX headings", body: `<p>Sections now split on headings that follow a blank line or the start of the body, so a heading directly after a list no longer merges into the list's section. <code>sections.test.ts</code>: 3 new cases.</p>` },
+];
+function questionActions(q) {
+  return `<div class="answer-box"><textarea class="input" id="ans-${q.id}" rows="3" placeholder="Answer ${q.agent}… (Markdown)"></textarea>
+    <div class="row wrap"><button class="btn">Post answer</button><span class="muted small">The answer reaches ${q.agent} as Waiting Work.</span></div></div>`;
+}
+function reviewActions(r) {
+  const open = state.sendBack === r.id;
+  return `<div class="actionbar">
+    <button class="btn" data-act="complete">Complete</button>
+    <button class="btn secondary" data-sendback="${r.id}">Send back…</button>
+    <a class="small" style="margin-left:auto">Open ${r.ticket}</a></div>
+    ${open ? `<div class="answer-box"><textarea class="input" id="sb-${r.id}" rows="3" placeholder="What is left to do (required)"></textarea><div class="row"><button class="btn">Send back to ${r.agent}</button><button class="btn secondary" data-sendback="">Cancel</button></div></div>` : ""}`;
+}
+function inboxHead() {
+  return `<div class="page-head"><h1>Inbox</h1><span class="live">Live</span>
+    <div class="filters"><span class="chip" aria-pressed="true">Everything 4</span><span class="chip">Questions 2</span><span class="chip">To review 2</span><span class="chip">Project ▾</span><span class="chip">Agent ▾</span></div></div>`;
+}
+function inboxSplit() {
+  const sel = state.inboxSel || "q1";
+  const item = (x, kind) => `<div class="ib-item${x.blocking ? " blocking" : ""}" role="option" aria-selected="${sel === x.id}" data-sel="${x.id}">
+    <div class="row"><span class="kind ${kind === "review" ? "k-review" : x.blocking ? "k-blocking" : "k-question"}">${kind === "review" ? "To review" : x.blocking ? "Blocking" : "Question"}</span><span class="key">${x.ticket}</span><span class="grow"></span><span class="muted small">${x.at}</span></div>
+    <div class="row"><span class="grow" style="font-weight:500">${x.title}</span></div>
+    <div class="snip">${kind === "review" ? `Report: ${x.report}` : x.body.replace(/<[^>]+>/g, "")}</div></div>`;
+  const all = [...QUESTIONS, ...REVIEWS];
+  const cur = all.find(x => x.id === sel);
+  const isQ = cur.id.startsWith("q");
+  const detail = isQ ? `
+      <div class="row wrap"><span class="kind ${cur.blocking ? "k-blocking" : "k-question"}">${cur.blocking ? "Blocking question" : "Question"}</span><span class="key">${cur.ticket}</span><a>${cur.title}</a></div>
+      <div class="row wrap">${agent(cur.agent, "Ada")}${sess(cur.sess)}<span class="muted small">${cur.at}</span>${cur.blocking ? `<span class="chip">${cur.agent} is waiting</span>` : ""}</div>
+      <div class="md">${cur.body}</div>${questionActions(cur)}`
+    : `<div class="row wrap"><span class="kind k-review">To review</span><span class="key">${cur.ticket}</span><a>${cur.title}</a>${status("review", "In Review")}</div>
+      <div class="row wrap">${agent(cur.agent, "Ada")}<span class="muted small">handed over ${cur.at}</span></div>
+      <div class="report-box"><div class="row" style="margin-bottom:8px"><span class="kind k-report">Report</span><strong>${cur.report}</strong></div><div class="md">${cur.body}</div></div>${reviewActions(cur)}`;
+  return `${inboxHead()}<div class="ib-split"><div class="ib-list" role="listbox" aria-label="Inbox">
+    <div class="ib-group">Blocking · 1</div>${item(QUESTIONS[0], "q")}
+    <div class="ib-group">Questions · 1</div>${item(QUESTIONS[1], "q")}
+    <div class="ib-group">To review · 2</div>${REVIEWS.map(r => item(r, "review")).join("")}
+    </div><div class="ib-detail">${detail}</div></div>
+    <p class="muted small">J / K moves through the list, A answers, C completes, S sends back.</p>`;
+}
+function qCard(q) {
+  return `<article class="card"><div class="card-head"><span class="kind ${q.blocking ? "k-blocking" : "k-question"}">${q.blocking ? "Blocking question" : "Question"}</span>${agent(q.agent)}${sess(q.sess)}<span class="arrow">on</span><span class="key">${q.ticket}</span><a class="t">${q.title}</a><span class="grow"></span><span class="muted small">${q.at}</span></div>
+    <div class="md">${q.body}</div>${questionActions(q)}</article>`;
+}
+function rCard(r) {
+  return `<article class="card"><div class="card-head"><span class="kind k-review">To review</span><span class="key">${r.ticket}</span><a class="t">${r.title}</a>${status("review", "In Review")}<span class="grow"></span>${agent(r.agent)}<span class="muted small">${r.at}</span></div>
+    <details class="report"${r.id === "r1" ? " open" : ""}><summary>Report: ${r.report}</summary><div class="md">${r.body}</div></details>${reviewActions(r)}</article>`;
+}
+function inboxCards() {
+  return `${inboxHead()}<div class="ib-cards">
+    <section class="pinned" aria-label="Blocking questions"><div class="pinned-head">1 Agent is stopped until you answer</div>${qCard(QUESTIONS[0])}</section>
+    ${qCard(QUESTIONS[1])}${REVIEWS.map(rCard).join("")}</div>`;
+}
+function inboxByTicket() {
+  const groups = [
+    { t: QUESTIONS[0], entries: [["blocking", QUESTIONS[0]]] , st: ["started", "In Progress"]},
+    { t: REVIEWS[0], entries: [["review", REVIEWS[0]]], st: ["review", "In Review"] },
+    { t: QUESTIONS[1], entries: [["question", QUESTIONS[1]]], st: ["started", "In Progress"] },
+    { t: REVIEWS[1], entries: [["review", REVIEWS[1]]], st: ["review", "In Review"] },
+  ];
+  return `${inboxHead()}<div class="ib-tickets">${groups.map((g, i) => `
+    <section class="tk-group"><div class="tk-head"><span class="key">${g.t.ticket}</span><a class="t">${g.t.title}</a>${status(...g.st)}<span class="grow"></span>${agent(g.t.agent)}${i === 0 ? `<span class="chip" style="color:var(--danger);border-color:var(--danger)">blocked</span>` : ""}</div>
+    ${g.entries.map(([k, x]) => `<div class="tk-entry"><div class="tk-gutter"><div class="kind ${k === "review" ? "k-review" : k === "blocking" ? "k-blocking" : "k-question"}">${k === "review" ? "Review" : k === "blocking" ? "Blocking" : "Question"}</div><div class="muted small">${x.at}</div></div>
+      <div class="grow col">${k === "review" ? `<details class="report"><summary>Report: ${x.report}</summary><div class="md">${x.body}</div></details>${reviewActions(x)}` : `<div class="md">${x.body}</div>${questionActions(x)}`}</div></div>`).join("")}
+    </section>`).join("")}</div>`;
+}
+
+// ---- ticket
+const TL = [
+  { t: "sys", at: "09:02", h: `${user("Ada Lovelace")} delegated to ${agent("claude-laptop")}` },
+  { t: "sys", at: "09:05", h: `${agent("claude-laptop")} Claimed it ${sess("brisk-otter")}` },
+  { t: "act", k: "plan", at: "09:06", body: `<ol><li>Count failed sign-ins per email in a sliding window.</li><li>Same per IP.</li><li>Return 429 with <code>Retry-After</code>.</li></ol>` },
+  { t: "act", k: "progress", at: "09:21", body: `<p>Per-email counter in place; 6 of 9 tests green.</p>` },
+  { t: "comment", who: "Grace Hopper", at: "09:24", body: `<p>The e2e smoke signs in four times in a row; keep it under the limit.</p>`,
+    replies: [{ who: "claude-laptop", agent: true, at: "09:26", body: `<p>Noted. The window is 5 per minute, so four sign-ins pass.</p>` }] },
+  { t: "act", k: "finding", at: "09:38", body: `<p>Fastify's <code>trustProxy</code> is off, so behind the Compose proxy every request carries the proxy's IP.</p>` },
+  { t: "report", at: "09:52", title: "Sign-in rate limiting", body: REPORT12 },
+  { t: "sys", at: "09:52", h: `${agent("claude-laptop")} moved it from In Progress to In Review` },
+  { t: "comment", who: "Ada Lovelace", at: "10:05", body: `<p>Sending back: the per-IP limit locks everyone out behind the proxy (see the finding). Hold off on per-IP until <code>trustProxy</code> is configurable.</p>`, sentBack: true },
+  { t: "sys", at: "10:05", h: `${user("Ada Lovelace")} sent it back: In Review → In Progress` },
+  { t: "act", k: "error", at: "10:15", body: `npm test: 1 failing\n  sign-ins.test.ts › locks after 5 attempts\n  expected 429, got 401 (clock not advanced)` },
+  { t: "act", k: "blocking", at: "10:18", body: QUESTIONS[0].body },
+];
+const KIND_NAME = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", blocking: "Blocking question", error: "Error" };
+function ticketHeader() {
+  return `<div class="crumbs">Projects / <a>CRONK</a> / CRONK-12</div>
+  <div class="page-head"><h1>Rate-limit sign-in attempts</h1><button class="btn secondary">Edit</button></div>`;
+}
+function sidePanel() {
+  return `<aside class="tk-side">
+    <div class="panel">
+      <div class="prop"><span class="label">Status</span>${status("started", "In Progress")}</div>
+      <div class="prop"><span class="label">Priority</span>${prio("High")}</div>
+      <div class="prop"><span class="label">Assignee</span>${user("Ada Lovelace")}</div>
+      <div class="prop"><span class="label">Delegate</span>${agent("claude-laptop")}</div>
+      <div class="prop"><span class="label">Labels</span><span class="row wrap"><span class="chip solid">security</span><span class="chip solid">auth</span></span></div>
+    </div>
+    <div class="claim-card"><div class="row"><span class="live">Claimed</span><span class="grow"></span>${sess("brisk-otter")}</div>
+      <div>${agent("claude-laptop")} since 10:09</div>
+      <div class="meter" aria-label="Time until the Claim lapses"><i style="width:72%"></i></div>
+      <div class="muted small">Lapses if silent for 3 min 36 s more</div></div>
+    <div class="panel panel-pad col"><h3>Relations</h3><div class="small">Blocks <span class="key">CRONK-21</span> Board columns scroll…</div><div class="small">Parent <span class="key">CRONK-3</span> Sign-in</div><h3>Mentioned in</h3><div class="small"><a>Security notes</a></div></div>
+  </aside>`;
+}
+function entryA(e) {
+  if (e.t === "sys") return `<li class="sys"><span class="gut"></span>${e.h} <span class="small">${e.at}</span></li>`;
+  if (e.t === "act") return `<li><span class="gut">${av("claude-laptop", true)}</span><div class="act ${e.k}${e.k === "blocking" ? " question" : ""}"><div class="act-head"><span class="kind k-${e.k}">${KIND_NAME[e.k]}</span>${agent("claude-laptop")}${sess("brisk-otter")}<span class="muted small">${e.at}</span>${e.k === "blocking" ? `<span class="chip" style="color:var(--danger);border-color:var(--danger)">Waiting for an answer</span>` : ""}</div><div class="act-body md">${e.body}</div>${e.k === "blocking" ? questionActions({ id: "tq", agent: "claude-laptop" }) : ""}</div></li>`;
+  if (e.t === "report") return `<li><span class="gut">${av("claude-laptop", true)}</span><div class="act"><div class="act-head"><span class="kind k-report">Report</span>${agent("claude-laptop")}<span class="muted small">${e.at}</span></div><div class="report-card"><div class="rc-head"><strong>${e.title}</strong><span class="grow"></span><a class="small">Open Report</a></div><div class="rc-body md">${e.body}</div></div></div></li>`;
+  const c = e;
+  return `<li><span class="gut">${av(c.who)}</span><div class="act"><div class="act-head"><span class="kind k-comment">${c.sentBack ? "Sent back" : "Comment"}</span>${user(c.who)}<span class="muted small">${c.at}</span></div><div class="bubble md">${c.body}${(c.replies || []).map(r => `<div class="reply"><div class="act-head">${r.agent ? agent(r.who) : user(r.who)}<span class="muted small">${r.at}</span></div><div class="md">${r.body}</div></div>`).join("")}</div><button class="btn ghost small">Reply</button></div></li>`;
+}
+function liveEntry() {
+  return liveCount ? `<li class="flash"><span class="gut">${av("claude-laptop", true)}</span><div class="act progress"><div class="act-head"><span class="kind k-progress">Progress</span>${agent("claude-laptop")}${sess("brisk-otter")}<span class="muted small">just now</span></div><div class="act-body md"><p>Clock advanced in the test; 9 of 9 green.</p></div></div></li>` : "";
+}
+function ticketA() {
+  return `${ticketHeader()}<div class="tk-layout"><div class="tk-main">
+    <div class="panel desc md"><p>Sign-in accepts unlimited password attempts. Limit failed attempts so a guessed password can't be brute-forced.</p></div>
+    <div class="row"><h2 class="grow">Timeline</h2><button class="btn secondary small" data-live>Simulate a live Activity</button></div>
+    <ol class="tl">${TL.map(entryA).join("")}${liveEntry()}</ol>
+    <div class="composer"><textarea class="input" id="tcA" rows="3" placeholder="Comment… @claude-laptop mentions an Agent"></textarea><div class="row"><button class="btn">Comment</button></div></div>
+  </div>${sidePanel()}</div>`;
+}
+function ticketB() {
+  const tab = state.tkTab || "conv";
+  const peopleStrip = `<div class="panel people-strip">${user("Ada Lovelace")}<span class="arrow">→ delegated to</span>${agent("claude-laptop")}<span class="sep"></span><span class="live">Claimed</span>${sess("brisk-otter")}<span class="muted small">lapses in 3:36 if silent</span><span class="grow"></span>${status("started", "In Progress")}${prio("High")}<span class="chip solid">security</span><span class="chip solid">auth</span></div>`;
+  const conv = TL.filter(e => e.t === "comment" || e.t === "report" || e.k === "blocking" || e.k === "question");
+  const acts = TL.filter(e => e.t === "act" || e.t === "sys");
+  const body = tab === "conv"
+    ? `<ol class="tl">${conv.map(entryA).join("")}</ol><div class="composer"><textarea class="input" id="tcB" rows="3" placeholder="Comment…"></textarea><div class="row"><button class="btn">Comment</button></div></div>`
+    : `<div class="filters"><span class="chip" aria-pressed="true">All</span>${Object.values(KIND_NAME).slice(0, 5).map(k => `<span class="chip">${k}</span>`).join("")}<span class="chip">Field changes</span></div>
+       <div class="panel"><ul class="log">${acts.map(e => e.t === "sys" ? `<li><span class="time">${e.at}</span><span class="kind muted">Change</span><span class="grow muted">${e.h}</span></li>` : `<li><span class="time">${e.at}</span><span class="kind k-${e.k}">${KIND_NAME[e.k]}</span><span class="grow md">${e.k === "error" ? `<code>${e.body.split("\n")[0]}</code> …` : e.body}</span>${sess("brisk-otter")}</li>`).join("")}${liveCount ? `<li class="flash"><span class="time">now</span><span class="kind k-progress">Progress</span><span class="grow">Clock advanced in the test; 9 of 9 green.</span>${sess("brisk-otter")}</li>` : ""}</ul></div>`;
+  return `${ticketHeader()}${peopleStrip}<div class="panel desc md"><p>Sign-in accepts unlimited password attempts. Limit failed attempts so a guessed password can't be brute-forced.</p></div>
+    <div class="row"><div class="tabs grow" role="tablist"><button role="tab" aria-selected="${tab === "conv"}" data-tab="conv">Conversation<span class="n">${conv.length}</span></button><button role="tab" aria-selected="${tab === "log"}" data-tab="log">Work log<span class="n">${acts.length + liveCount}</span></button><button role="tab" aria-selected="false">Relations<span class="n">3</span></button></div><button class="btn secondary small" data-live>Simulate a live Activity</button></div>${body}`;
+}
+function ticketC() {
+  const row = e => {
+    if (e.t === "sys") return `<div class="lane-row center"><span class="lane-sys">${e.h.replace(/<span class="av[^"]*">[^<]*<\/span>/g, "")} · ${e.at}</span></div>`;
+    if (e.t === "comment") return `<div class="lane-row human"><div class="lane-card"><div class="act-head">${user(e.who)}<span class="muted small">${e.at}</span></div><div class="md act-body">${e.body}</div></div></div>` + (e.replies || []).map(r => `<div class="lane-row agent"><div class="lane-card"><div class="act-head"><span class="kind k-comment">Reply</span>${agent(r.who)}<span class="muted small">${r.at}</span></div><div class="md act-body">${r.body}</div></div></div>`).join("");
+    if (e.t === "report") return `<div class="lane-row agent"><div class="lane-card report-card" style="padding:0"><div class="rc-head"><span class="kind k-report">Report</span><strong>${e.title}</strong></div><div class="rc-body md">${e.body}</div></div></div>`;
+    return `<div class="lane-row agent"><div class="lane-card act ${e.k}${e.k === "blocking" ? " question" : ""}" style="${e.k === "blocking" ? "border-left-color:var(--danger)" : ""}"><div class="act-head"><span class="kind k-${e.k}">${KIND_NAME[e.k]}</span><span class="muted small">${e.at}</span></div><div class="act-body md">${e.body}</div>${e.k === "blocking" ? questionActions({ id: "tqc", agent: "claude-laptop" }) : ""}</div></div>`;
+  };
+  return `${ticketHeader()}<div class="tk-layout"><div class="tk-main">
+    <div class="lane-legend"><span>${agent("claude-laptop")} ${sess("brisk-otter")}</span><span>People</span></div>
+    <div class="lanes">${TL.map(row).join("")}${liveCount ? `<div class="lane-row agent flash"><div class="lane-card"><div class="act-head"><span class="kind k-progress">Progress</span><span class="muted small">just now</span></div><div class="act-body">Clock advanced in the test; 9 of 9 green.</div></div></div>` : ""}</div>
+    <div class="row"><button class="btn secondary small" data-live>Simulate a live Activity</button></div>
+    <div class="composer"><textarea class="input" id="tcC" rows="3" placeholder="Comment…"></textarea><div class="row"><button class="btn">Comment</button></div></div>
+  </div>${sidePanel()}</div>`;
+}
+
+// ---- document
+const DOC_P = [
+  `Cronk stores every password as an Argon2id hash. Sign-in compares in constant time and never says whether the email exists.`,
+  `<mark class="anchor" data-c="c1">Failed sign-ins are limited to five per email per minute</mark>. The limit slides, so a burst can't be timed around a window boundary.`,
+  `Sessions last 30 days and end on sign-out from any tab. ${"<span class=\"sel\">An Admin can end every session of a User</span>"}<span class="pop"><button class="btn small">Comment on this passage</button></span> from the Users page.`,
+];
+function docHead(extra) {
+  return `<div class="crumbs">Documents / Workspace / Security</div><div class="page-head"><h1>Security notes</h1><span class="muted small">Version 7 · Grace Hopper · 2 h ago</span>${extra}</div>`;
+}
+function docModes() {
+  const m = state.docMode || "read";
+  return `<div class="seg">${["read", "edit", "merge"].map(x => `<button data-mode="${x}" aria-pressed="${m === x}">${x[0].toUpperCase() + x.slice(1)}</button>`).join("")}</div>`;
+}
+const SRC = `## Passwords\n\nCronk stores every password as an **Argon2id** hash.\n\n## Rate limits\n\nFailed sign-ins are limited to five per email\nper minute.`;
+function documentA() {
+  const m = state.docMode || "read";
+  if (m === "read") return `${docHead(docModes() + `<button class="btn secondary">Versions</button>`)}
+    <div class="doc-layout"><article class="doc-main panel doc-body"><h2>Passwords</h2><p>${DOC_P[0]}</p><h2>Rate limits</h2><p>${DOC_P[1]}</p><h2>Sessions</h2><p>${DOC_P[2]}</p></article>
+    <aside class="doc-margin" aria-label="Comments"><div class="mc active"><q>Failed sign-ins are limited to five…</q><div class="row">${user("Ada Lovelace")}<span class="muted small">10:30</span></div><p>Per IP too, once <code>trustProxy</code> is settled? See CRONK-12.</p>
+      <div class="reply"><div class="row">${agent("claude-laptop")}</div><p>Filed CRONK-24 for per-IP.</p></div><button class="btn ghost small">Reply</button></div>
+      <div class="mc"><q style="text-decoration:line-through">Sessions last 14 days</q><span class="muted small">No longer in the Document (was in Version 5)</span><div class="row">${user("Linus Pauling")}</div><p>Shouldn't this be 30?</p></div>
+      <button class="btn secondary small">Comment on the whole Document</button></aside></div>`;
+  if (m === "edit") return `${docHead(docModes())}
+    <div class="banner warn"><strong>Grace Hopper saved Version 8 while you were editing.</strong> Saving will merge their changes into yours. <a>See what they changed</a></div>
+    <div class="panel" style="overflow:hidden"><div style="padding:12px 16px;border-bottom:1px solid var(--border)"><input class="input" id="docTitleA" value="Security notes" aria-label="Title"></div>
+    <div class="toolbar" role="toolbar" aria-label="Formatting"><button><b>H</b></button><button><b>B</b></button><button><i>I</i></button><span class="tsep"></span><button>Link</button><button>• List</button><button>1. List</button><button>&lt;/&gt;</button><span class="tsep"></span><button>Ticket ref</button></div>
+    <div class="editor-split"><textarea class="input" id="docSrcA" aria-label="Markdown">${SRC}</textarea><div class="preview md"><h2 style="font-size:16px">Passwords</h2><p>Cronk stores every password as an <strong>Argon2id</strong> hash.</p><h2 style="font-size:16px;margin-top:12px">Rate limits</h2><p>Failed sign-ins are limited to five per email per minute.</p></div></div>
+    <div class="actionbar" style="padding:12px 16px"><button class="btn">Save Version 8</button><button class="btn secondary">Cancel</button><span class="muted small">Markdown is what gets saved.</span></div></div>`;
+  return `${docHead(docModes())}
+    <div class="banner info">Grace Hopper saved Version 8 while you were editing. Two sections merged cleanly; one needs your choice.</div>
+    <div class="panel panel-pad col"><div class="row"><h3 class="grow">## Rate limits</h3><span class="chip" style="color:var(--danger);border-color:var(--danger)">Both changed</span></div>
+      <div class="conf"><div><span class="label">Yours</span><pre>Failed sign-ins are limited to five per email
+per minute, sliding.</pre></div><div><span class="label">Grace Hopper, Version 8</span><pre>Failed sign-ins are limited to five per email
+and fifty per IP per minute.</pre></div></div>
+      <div class="row wrap"><button class="btn secondary small">Use mine</button><button class="btn secondary small">Use theirs</button><button class="btn secondary small">Use both</button><span class="muted small">or edit below</span></div>
+      <textarea class="input" id="keepA" rows="3" aria-label="Keep for Rate limits">Failed sign-ins are limited to five per email
+per minute, sliding.</textarea></div>
+    <div class="row"><button class="btn">Merge into my draft</button><button class="btn secondary">Back to my draft</button></div>`;
+}
+function documentB() {
+  const m = state.docMode || "read";
+  if (m === "read") return `${docHead(docModes() + `<button class="btn secondary">Versions</button>`)}
+    <article class="panel doc-body" style="max-width:none"><h2>Passwords</h2><p>${DOC_P[0]}</p><h2>Rate limits</h2><p>${DOC_P[1]}</p><h2>Sessions</h2><p>${DOC_P[2]}</p></article>
+    <h2>Comments <span class="muted small">2</span></h2>
+    <div class="col"><div class="card"><div class="card-head">${user("Ada Lovelace")}<span class="muted small">10:30</span></div><blockquote style="margin:0;padding-left:10px;border-left:3px solid var(--warn);color:var(--muted)">Failed sign-ins are limited to five per email per minute</blockquote><p>Per IP too, once <code>trustProxy</code> is settled? See CRONK-12.</p><div class="reply"><div class="row">${agent("claude-laptop")}</div><p>Filed CRONK-24 for per-IP.</p></div></div>
+    <div class="card"><div class="card-head">${user("Linus Pauling")}</div><blockquote style="margin:0;padding-left:10px;border-left:3px solid var(--border);color:var(--muted);text-decoration:line-through">Sessions last 14 days</blockquote><span class="muted small">No longer in the Document (was in Version 5)</span><p>Shouldn't this be 30?</p></div>
+    <div class="composer"><textarea class="input" id="dcB" rows="3" placeholder="Comment… select text above to anchor it"></textarea><div class="row"><button class="btn">Comment</button></div></div></div>`;
+  if (m === "edit") return `${docHead(docModes())}
+    <div class="banner warn"><strong>Grace Hopper saved Version 8 while you were editing.</strong> <a>See what they changed</a></div>
+    <div class="panel col panel-pad"><input class="input" id="docTitleB" value="Security notes" aria-label="Title">
+    <div class="row"><div class="tabs grow"><button aria-selected="true">Write</button><button aria-selected="false">Preview</button></div></div>
+    <div class="toolbar" style="border:1px solid var(--border);border-radius:6px"><button><b>H</b></button><button><b>B</b></button><button><i>I</i></button><button>Link</button><button>• List</button><button>&lt;/&gt;</button><button>Ticket ref</button></div>
+    <textarea class="input" id="docSrcB" rows="12" aria-label="Markdown">${SRC}</textarea>
+    <div class="row"><button class="btn">Save</button><button class="btn secondary">Cancel</button></div></div>`;
+  const ch = state.choice || "mine";
+  const c = (k, label, text) => `<div class="choice" role="radio" tabindex="0" aria-checked="${ch === k}" data-choice="${k}"><span>${ch === k ? "◉" : "○"}</span><div class="grow"><strong class="small">${label}</strong><pre>${text}</pre></div></div>`;
+  return `${docHead(docModes())}
+    <div class="banner info">Grace Hopper saved Version 8 while you were editing. 1 of 3 sections needs a choice.</div>
+    <div class="diff"><div class="fold">## Passwords · unchanged</div><div class="del">- Sessions last 14 days.</div><div class="add">+ Sessions last 30 days.</div></div>
+    <div class="panel panel-pad col"><h3>## Rate limits</h3>
+      ${c("mine", "Keep mine", "Failed sign-ins are limited to five per email\nper minute, sliding.")}
+      ${c("theirs", "Keep Grace Hopper's", "Failed sign-ins are limited to five per email\nand fifty per IP per minute.")}
+      ${c("both", "Keep both, then edit", "…mine…\n…theirs…")}</div>
+    <div class="row"><button class="btn">Merge into my draft</button><button class="btn secondary">Back to my draft</button></div>`;
+}
+
+// ---- agents
+function agentsA() {
+  const s = (name, ticket, title, pct, since, heard) => `<div class="sess"><span class="live">Live</span>${sess(name)}<div class="working">${ticket ? `Working on <span class="key">${ticket}</span> ${title}` : `<span class="muted">Connected, no Claim</span>`}</div><span class="muted small">since ${since}</span><div class="beat"><div class="meter"><i style="width:${pct}%"></i></div><span class="muted small">heard ${heard}</span></div></div>`;
+  return `<div class="page-head"><h1>Agents</h1><span class="live">Live</span><button class="btn">Register an Agent</button></div>
+  <p class="muted">An Agent acts for you through a token you give your AI tool. It never gets more access than you have, nor more than a Project's Agent Access allows.</p>
+  <div class="agent-cards">
+    <section class="agent-card"><div class="ac-head">${av("claude-laptop", true).replace('class="av agent"', 'class="av agent lg"')}<div class="grow"><strong>claude-laptop</strong><div class="muted small">2 live Agent Sessions · Delegate on 3 Tickets</div></div><button class="btn ghost small">Rename</button><button class="btn ghost small">Remove</button></div>
+      ${s("brisk-otter", "CRONK-12", "Rate-limit sign-in attempts", 72, "09:05", "40 s ago")}
+      ${s("quiet-finch", "", "", 95, "10:11", "5 s ago")}
+      <div class="ac-foot"><span class="grow">2 tokens: full (issued 3 Nov), read-only (issued 9 Nov)</span><button class="btn ghost small">Manage tokens</button></div></section>
+    <section class="agent-card"><div class="ac-head">${av("codex-ci", true).replace('class="av agent"', 'class="av agent lg"')}<div class="grow"><strong>codex-ci</strong><div class="muted small">Delegate on 2 Tickets</div></div><button class="btn ghost small">Rename</button><button class="btn ghost small">Remove</button></div>
+      <div class="sess"><span class="offline">Not connected</span><span class="muted small">last Session ended yesterday 18:40</span></div>
+      <div class="ac-foot"><span class="grow">1 token: full (issued 1 Nov)</span><button class="btn ghost small">Manage tokens</button></div></section>
+  </div>
+  <h2>Everyone else's Agents <span class="muted small">Admin</span></h2>
+  <div class="panel"><div class="prop">${agent("review-bot", "Grace Hopper")}<span class="grow"></span><span class="offline">Not connected</span></div></div>`;
+}
+function agentsB() {
+  const rows = [
+    ["claude-laptop", "brisk-otter", "09:05", "40 s", "CRONK-12 Rate-limit sign-in attempts", 72],
+    ["claude-laptop", "quiet-finch", "10:11", "5 s", "", 95],
+  ];
+  return `<div class="page-head"><h1>Agents</h1><span class="live">Live</span><button class="btn">Register an Agent</button></div>
+  <h2>Live Agent Sessions <span class="muted small">2</span></h2>
+  <div class="table-wrap"><table><thead><tr><th>Agent</th><th>Session</th><th>Connected</th><th>Last heard</th><th>Lapses in</th><th>Claim</th></tr></thead><tbody>
+  ${rows.map(r => `<tr><td>${agent(r[0])}</td><td>${sess(r[1])}</td><td class="num">${r[2]}</td><td class="num">${r[3]} ago</td><td><div class="meter" style="width:80px;background:var(--surface-2)"><i style="width:${r[5]}%"></i></div></td><td>${r[4] ? `<span class="key">${r[4].slice(0, 8)}</span> ${r[4].slice(9)}` : `<span class="muted">none</span>`}</td></tr>`).join("")}
+  </tbody></table></div>
+  <h2>Your Agents</h2>
+  <div class="table-wrap"><table><thead><tr><th>Agent</th><th>Sessions</th><th>Tokens</th><th></th></tr></thead><tbody>
+    <tr><td>${agent("claude-laptop")}</td><td><span class="live">2 live</span></td><td>full, read-only</td><td><button class="btn ghost small">Issue token</button><button class="btn ghost small">Rename</button><button class="btn ghost small">Remove</button></td></tr>
+    <tr><td>${agent("codex-ci")}</td><td><span class="offline">none</span></td><td>full</td><td><button class="btn ghost small">Issue token</button><button class="btn ghost small">Rename</button><button class="btn ghost small">Remove</button></td></tr>
+  </tbody></table></div>`;
+}
+
+// ---- tokens
+function tokensBody() {
+  const sw = n => `<div class="sw"><i style="background:var(--${n})"></i><div><code>--${n}</code></div></div>`;
+  return `<h1>Proposed tokens</h1>
+  <h2>Surfaces and text</h2><div class="swatches">${["bg", "surface", "surface-2", "border", "text", "muted"].map(sw).join("")}</div>
+  <h2>Accent and Actors</h2><div class="swatches">${["accent", "accent-soft", "agent", "agent-soft"].map(sw).join("")}</div>
+  <h2>Semantic</h2><div class="swatches">${["danger", "warn", "ok", "info", "danger-soft", "warn-soft", "ok-soft", "info-soft"].map(sw).join("")}</div>
+  <h2>Status Categories</h2><div class="row wrap">${status("unstarted", "Unstarted")}${status("started", "Started")}${status("review", "In Review")}${status("completed", "Completed")}</div>
+  <h2>Type</h2><div class="panel panel-pad typescale">
+    <div><span class="label">24 / 600 page title</span><span style="font-size:24px;font-weight:600">Rate-limit sign-in</span></div>
+    <div><span class="label">20 / 600 h1</span><span style="font-size:20px;font-weight:600">Inbox</span></div>
+    <div><span class="label">16 / 600 h2</span><span style="font-size:16px;font-weight:600">Timeline</span></div>
+    <div><span class="label">14 / 400 body</span><span>Sign-in accepts unlimited password attempts.</span></div>
+    <div><span class="label">13 meta</span><span style="font-size:13px" class="muted">since 09:05, heard 40 s ago</span></div>
+    <div><span class="label">11 / 600 caps kind</span><span class="kind k-blocking">Blocking question</span></div>
+    <div><span class="label">12 mono key</span><span class="key">CRONK-12</span></div></div>
+  <h2>Actors</h2><div class="row wrap">${user("Ada Lovelace")}${agent("claude-laptop", "Ada Lovelace")}${sess("brisk-otter")}<span class="live">Live</span><span class="offline">Not connected</span></div>`;
+}
+
+// ---------------------------------------------------------------- shell
+const state = { screen: "inbox", variant: "a", frame: "a" };
+function parseHash() {
+  const m = /^#([a-z]+)-([a-z])$/.exec(location.hash);
+  if (m && SCREENS[m[1]] && SCREENS[m[1]].variants[m[2]]) { state.screen = m[1]; state.variant = m[2]; }
+  if (state.screen === "frame") state.frame = state.variant;
+}
+function go(screen, variant) { location.hash = `${screen}-${variant}`; }
+function render() {
+  const s = SCREENS[state.screen];
+  const [vname, note, body] = s.variants[state.variant];
+  document.getElementById("screens").innerHTML = Object.entries(SCREENS).map(([k, x]) => `<button data-screen="${k}" aria-current="${k === state.screen}">${x.name}</button>`).join("");
+  const keys = Object.keys(s.variants);
+  document.getElementById("vlabel").textContent = `${s.name} ${state.variant.toUpperCase()} of ${keys.length}: ${vname}`;
+  document.getElementById("app").innerHTML = frame(ACTIVE_NAV[state.screen], `<div class="variant-note"><strong>${s.name} ${state.variant.toUpperCase()}, ${vname}.</strong> ${note}</div>${body()}`);
+}
+function cycle(d) {
+  const keys = Object.keys(SCREENS[state.screen].variants);
+  go(state.screen, keys[(keys.indexOf(state.variant) + d + keys.length) % keys.length]);
+}
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-screen],[data-sel],[data-sendback],[data-mode],[data-tab],[data-choice],[data-live],[data-t]");
+  if (!t) return;
+  if (t.dataset.screen) { const k = t.dataset.screen; go(k, k === "frame" ? state.frame : "a"); return; }
+  if (t.dataset.t !== undefined) { if (t.dataset.t) document.documentElement.dataset.theme = t.dataset.t; else delete document.documentElement.dataset.theme; markTheme(); return; }
+  if (t.dataset.sel) state.inboxSel = t.dataset.sel;
+  if (t.dataset.sendback !== undefined) state.sendBack = t.dataset.sendback;
+  if (t.dataset.mode) state.docMode = t.dataset.mode;
+  if (t.dataset.tab) state.tkTab = t.dataset.tab;
+  if (t.dataset.choice) state.choice = t.dataset.choice;
+  if (t.dataset.live !== undefined) liveCount = 1;
+  render();
+});
+function markTheme() {
+  const cur = document.documentElement.dataset.theme || "";
+  document.querySelectorAll("#theme button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === cur)));
+}
+addEventListener("hashchange", () => { parseHash(); render(); });
+parseHash(); markTheme(); render();
+</script>
