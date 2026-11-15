@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -403,6 +403,28 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
 });
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
+/** Selects the rendered text inside `root` from `from` in the element matching `startIn` up to `to` in `endIn`. */
+const selectText = (root: Locator, startIn: string, from: string, endIn: string, to: string) =>
+  root.evaluate(
+    (el, { startIn, from, endIn, to }) => {
+      const textOf = (selector: string, holding: string) => {
+        for (const container of el.querySelectorAll(selector)) {
+          const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) if (walker.currentNode.textContent!.includes(holding)) return walker.currentNode as Text;
+        }
+        throw new Error(`no text holding ${holding}`);
+      };
+      const start = textOf(startIn, from);
+      const end = textOf(endIn, to);
+      const range = document.createRange();
+      range.setStart(start, start.data.indexOf(from));
+      range.setEnd(end, end.data.indexOf(to) + to.length);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    },
+    { startIn, from, endIn, to },
+  );
+
 test("comment on passages through soft-wrapped lines, escapes and entities", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Email").fill(ada.email);
@@ -418,27 +440,7 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("wrapped, a*b & c.");
 
-  /** Selects the rendered text from `from` in the element matching `startIn` up to `to` in `endIn`. */
-  const select = (startIn: string, from: string, endIn: string, to: string) =>
-    body.evaluate(
-      (el, { startIn, from, endIn, to }) => {
-        const textOf = (selector: string, holding: string) => {
-          for (const container of el.querySelectorAll(selector)) {
-            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-            while (walker.nextNode()) if (walker.currentNode.textContent!.includes(holding)) return walker.currentNode as Text;
-          }
-          throw new Error(`no text holding ${holding}`);
-        };
-        const start = textOf(startIn, from);
-        const end = textOf(endIn, to);
-        const range = document.createRange();
-        range.setStart(start, start.data.indexOf(from));
-        range.setEnd(end, end.data.indexOf(to) + to.length);
-        getSelection()!.removeAllRanges();
-        getSelection()!.addRange(range);
-      },
-      { startIn, from, endIn, to },
-    );
+  const select = (startIn: string, from: string, endIn: string, to: string) => selectText(body, startIn, from, endIn, to);
 
   // The selection starts in the first quoted line and ends past an escape and an entity on the next.
   await select("blockquote", "and", "blockquote", "b &");
@@ -473,6 +475,77 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await select("strong", "bold", "strong", "a*b");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**bold a\\*b**");
+});
+
+test("comment on passages of code inside blockquotes and list items", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: "Documents" }).last().click();
+  await page.getByRole("button", { name: "New Document" }).click();
+  await page.getByLabel("Title").fill("Quoted code");
+  await page.getByRole("button", { name: "Create Document" }).click();
+  await page
+    .getByLabel("Body (Markdown)")
+    .fill(
+      [
+        "> ```",
+        "> quoted one",
+        ">   quoted two",
+        "> ```",
+        "",
+        "- listed",
+        "",
+        "  ```",
+        "  listed one",
+        "    listed two",
+        "  ```",
+        "",
+        "- indented",
+        "",
+        "      indent one",
+        "        indent two",
+        "",
+        "Between.",
+        "",
+        "> - nested",
+        ">",
+        ">   ```",
+        ">   nested one",
+        ">     nested two",
+        ">   ```",
+      ].join("\n"),
+    );
+  await page.getByRole("button", { name: "Save" }).click();
+  const body = page.getByTestId("document-body");
+  await expect(body).toContainText("nested one");
+  const select = (startIn: string, from: string, endIn: string, to: string) => selectText(body, startIn, from, endIn, to);
+  const passage = page.getByLabel("About the passage (optional)");
+
+  // Across the lines of a fenced code block in a blockquote: the `> ` goes into the passage, the code's own spaces stay.
+  await select("blockquote > pre", "one", "blockquote > pre", "  quoted");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("one\n>   quoted");
+  await page.getByLabel("Comment", { exact: true }).fill("Why quote code?");
+  await page.getByRole("button", { name: "Post Comment" }).click();
+  await expect(page.getByRole("list", { name: "Comments" })).toContainText("Why quote code?");
+
+  // In a list item, past its content indentation.
+  await select("li pre", "one", "li pre", "  listed");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("one\n    listed");
+
+  // An indented code block in a list item.
+  await select("li pre", "indent one", "li pre", "  indent two");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("indent one\n        indent two");
+
+  // A list item inside a blockquote: both prefixes, in order.
+  await select("blockquote li pre", "one", "blockquote li pre", "  nested");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(passage).toHaveValue("one\n>     nested");
 });
 
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
