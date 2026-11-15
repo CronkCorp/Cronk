@@ -1,7 +1,7 @@
+import type pg from "pg";
 import type { AgentActor } from "../actor.js";
 import type { AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
-import type pg from "pg";
 import { visibleProjects } from "../identity/access.js";
 import { listAgents } from "../identity/agents.js";
 import type { LiveEvent } from "../live/live-updates.js";
@@ -98,25 +98,31 @@ export async function claimsEnded(ctx: AppContext, ticketIds: string[]): Promise
   await tellNewlyReady(ctx, ticketIds, new Map());
 }
 
-/** Which delegated Tickets an access or archive change can make Ready: a Project's, or those delegated to a User's Agents. */
-export type DelegatedTickets = { projectId: string } | { ownerId: string };
+/**
+ * The delegated Tickets an access or archive change can make Ready: those in a Project, those
+ * delegated to one of a User's Agents, or, for the User's access in one Project, both at once.
+ */
+export type AffectedTickets = { projectId: string; ownerId?: string } | { projectId?: undefined; ownerId: string };
 
-/** The ids of the Tickets with a Delegate in a Project, or delegated to one of a User's Agents. */
-async function delegatedTicketIds(db: Queryable, of: DelegatedTickets): Promise<string[]> {
-  const { rows } =
-    "projectId" in of
-      ? await db.query<{ id: string }>("SELECT id FROM tickets WHERE project_id = $1 AND delegate_id IS NOT NULL", [of.projectId])
-      : await db.query<{ id: string }>("SELECT t.id FROM tickets t JOIN agents a ON a.id = t.delegate_id WHERE a.owner_id = $1", [of.ownerId]);
+/** The ids of the delegated Tickets `affected` describes. */
+async function delegatedTicketIds(db: Queryable, affected: AffectedTickets): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.id FROM tickets t JOIN agents a ON a.id = t.delegate_id
+     WHERE ($1::uuid IS NULL OR t.project_id = $1) AND ($2::uuid IS NULL OR a.owner_id = $2)`,
+    [affected.projectId ?? null, affected.ownerId ?? null],
+  );
   return rows.map((r) => r.id);
 }
 
 /**
  * Makes an access or archive change in a transaction, then tells the Delegates of the Tickets
- * `of` lists which of them the change made Ready. Returns what `change` returns.
+ * `affected` describes which of them the change made Ready. A change that can't make anything
+ * Ready (archiving, lowering access) passes no `affected`, and only runs. Returns what `change` returns.
  */
-export async function changeAccess<T>(ctx: AppContext, of: DelegatedTickets, change: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
+export async function tellReadyAfter<T>(ctx: AppContext, affected: AffectedTickets | undefined, change: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
+  if (!affected) return transaction(ctx.db, change);
   const { result, ticketIds, before } = await transaction(ctx.db, async (tx) => {
-    const ticketIds = await delegatedTicketIds(tx, of);
+    const ticketIds = await delegatedTicketIds(tx, affected);
     const before = await readyNow(tx, ticketIds, ctx.clock.now());
     return { result: await change(tx), ticketIds, before };
   });

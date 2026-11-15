@@ -1,6 +1,6 @@
-import { changeAccess } from "../coordination/ready.js";
 import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
+import { tellReadyAfter } from "../coordination/ready.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import {
@@ -299,7 +299,8 @@ export function identityRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change Users");
         // Becoming an Admin, or active again, can make Tickets delegated to the User's Agents Ready.
-        const updated = await changeAccess(ctx, { ownerId: request.params.id }, (tx) =>
+        const opensUp = request.body.role === "admin" || request.body.active === true;
+        const updated = await tellReadyAfter(ctx, opensUp ? { ownerId: request.params.id } : undefined, (tx) =>
           updateUser(tx, user.workspaceId, request.params.id, request.body, ctx.clock.now()),
         );
         if (updated === "last admin") throw new HttpError(409, "The Workspace needs at least one active Admin");
