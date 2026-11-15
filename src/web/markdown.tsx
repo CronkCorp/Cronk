@@ -60,7 +60,7 @@ const textWithin = (node: HastNode, start: number, end: number): boolean => {
   return from !== undefined && to !== undefined && start <= from && to <= end;
 };
 
-/** The hast nodes `markSourceOffsets` touches. */
+/** The hast nodes `markSourceAndHighlights` touches. */
 interface HastNode {
   type: string;
   value?: string;
@@ -83,7 +83,7 @@ export interface Highlight {
 export const highlightIds = (mark: Element): string[] => (mark.getAttribute("data-highlights") ?? "").split(" ").filter(Boolean);
 
 /**
- * A run of rendered text as `markSourceOffsets` found it: where in the source each of its characters
+ * A run of rendered text as `markSourceAndHighlights` found it: where in the source each of its characters
  * sits, with the span it was wrapped in, or `unmapped` when that is not known for certain (with the
  * stretch it was parsed from, when known).
  */
@@ -137,7 +137,7 @@ function sliceBounds(bounds: SourceBounds, a: number, b: number): SourceBounds {
   return { starts: [...bounds.starts.slice(a, b), bounds.ends[b]!], ends: [bounds.starts[a]!, ...bounds.ends.slice(a + 1, b + 1)] };
 }
 
-/** A span naming where `bounds`' text sits in the source, as `markSourceOffsets` writes it. */
+/** A span naming where `bounds`' text sits in the source, as `markSourceAndHighlights` writes it. */
 function sourceSpan(value: string, bounds: SourceBounds, bare: boolean): HastNode {
   const text: HastNode = { type: "text", value };
   if (bare) return text;
@@ -200,7 +200,7 @@ function highlightPassages(runs: Run[], source: string, highlights: Highlight[])
  * every run of their text was parsed from inside it; a code block's fences are left out of it.
  * Then it highlights `highlights` (see `highlightPassages`).
  */
-function markSourceOffsets(source: string, highlights: Highlight[]) {
+function markSourceAndHighlights(source: string, highlights: Highlight[]) {
   const runs: Run[] = [];
   const mark = (node: HastNode, parent?: HastNode): HastNode => {
     if (node.type !== "text") {
@@ -298,7 +298,7 @@ export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean
   return (
     <Markdown
       remarkPlugins={[linkTicketReferences(known, props.children)]}
-      rehypePlugins={props.sourceOffsets ? [markSourceOffsets(props.children, props.highlights ?? [])] : []}
+      rehypePlugins={props.sourceOffsets ? [markSourceAndHighlights(props.children, props.highlights ?? [])] : []}
       components={COMPONENTS}
     >
       {props.children}
