@@ -179,6 +179,18 @@ describe("A Ticket's live updates", () => {
     await agent.post("/api/tickets/CRONK-1/sub-tickets", { title: "Part" });
     expect(await stream.next()).toEqual(changed);
   });
+  it("push a Send back's Comment marked as one", async () => {
+    const { admin } = await delegatedSetup(1);
+    const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: inReview });
+    const stream = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
+    let pushed = await stream.next();
+    while (pushed && pushed.event !== "comment") pushed = await stream.next();
+    expect(pushed?.data.comment).toMatchObject({ body: "Add a test.", sendBack: true });
+  });
 });
 
 describe("A Document's live updates", () => {

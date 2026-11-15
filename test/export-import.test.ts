@@ -177,6 +177,9 @@ async function busyWorkspace() {
   const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
   expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
   await agent.delete("/api/agent-sessions/current");
+  // Ada sends it back once, then puts it In Review again herself.
+  await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
+  await admin.patch("/api/tickets/CRONK-1", { statusId: inReview.id });
 
   // Documents with Versions and Comments, in both page trees.
   cronk.clock.advance(60_000);
@@ -223,6 +226,8 @@ describe("importing an export", () => {
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
+    const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
+    expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
