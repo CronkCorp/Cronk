@@ -30,7 +30,7 @@ async function memberAgentSetup(visibility: "open" | "private") {
   const agent = await startSession(cronk, claude.secret);
   const stream = await agent.events("/api/agent-sessions/current/events");
   expect((await stream.next())?.event).toBe("ready");
-  return { admin, bobId, stream };
+  return { cronk, admin, bobId, claude, agent, stream };
 }
 
 describe("An Agent Session's event stream", () => {
@@ -182,12 +182,16 @@ describe("An Agent Session's event stream, on access and archive changes", () =>
     await admin.patch("/api/projects/SECRET", { visibility: "open" });
     expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
   });
-  it("tells the Agent of its Tickets when its Owner is reactivated", async () => {
-    const { stream, bobId, admin } = await memberAgentSetup("open");
+  it("ends with its Agent Session when the Owner is deactivated, and the next Session is offered the Tickets once they are reactivated", async () => {
+    const { cronk, stream, bobId, admin, claude, agent } = await memberAgentSetup("open");
     await admin.delete(`/api/projects/SECRET/members/${bobId}`);
     expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
+    // Deactivating the Owner ends their Agents' Sessions at once, as revoking a token does.
     await admin.patch(`/api/users/${bobId}`, { active: false });
     await admin.patch(`/api/users/${bobId}`, { active: true });
-    expect(await stream.next()).toEqual(readyEvent("SECRET-1"));
+    expect((await agent.get("/api/projects")).status).toBe(410);
+
+    const next = await cronk.client(claude.secret).post("/api/agent-sessions");
+    expect(next.body.welcome.readyTickets.map((t: { key: string }) => t.key)).toEqual(["SECRET-1"]);
   });
 });

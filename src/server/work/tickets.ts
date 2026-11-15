@@ -327,6 +327,8 @@ export interface TicketFilter {
   categories?: StatusCategory[];
   /** User ids; `null` matches unassigned Tickets. */
   assigneeIds?: (string | null)[];
+  /** Agent ids; `null` matches Tickets with no Delegate. */
+  delegateIds?: (string | null)[];
   priorities?: Priority[];
   labels?: string[];
 }
@@ -338,11 +340,14 @@ export async function listTickets(db: Queryable, projectId: string, filter: Tick
   const param = (value: unknown) => `$${params.push(value)}`;
   if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${param(filter.statusIds)}::uuid[])`);
   if (filter.categories?.length) conditions.push(`s.category = ANY(${param(filter.categories)}::text[])`);
-  if (filter.assigneeIds?.length) {
-    const ids = filter.assigneeIds.filter((id) => id !== null);
-    const unassigned = ids.length < filter.assigneeIds.length;
-    conditions.push(`(t.assignee_id = ANY(${param(ids)}::uuid[])${unassigned ? " OR t.assignee_id IS NULL" : ""})`);
-  }
+  /** Adds the condition that `column` holds one of `values`, where null means it is empty. */
+  const matchAnyOrNone = (column: string, values: (string | null)[]) => {
+    const ids = values.filter((id) => id !== null);
+    const orNone = ids.length < values.length;
+    conditions.push(`(${column} = ANY(${param(ids)}::uuid[])${orNone ? ` OR ${column} IS NULL` : ""})`);
+  };
+  if (filter.assigneeIds?.length) matchAnyOrNone("t.assignee_id", filter.assigneeIds);
+  if (filter.delegateIds?.length) matchAnyOrNone("t.delegate_id", filter.delegateIds);
   if (filter.priorities?.length) conditions.push(`t.priority = ANY(${param(filter.priorities)}::text[])`);
   if (filter.labels?.length) {
     conditions.push(

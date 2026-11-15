@@ -8,6 +8,7 @@ import type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  AgentWork,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -57,6 +58,7 @@ export type {
   AgentAccess,
   AgentSession,
   AgentToken,
+  AgentWork,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -102,6 +104,7 @@ export interface TicketFilter {
   status?: string;
   category?: StatusCategory;
   assignee?: string;
+  delegate?: string;
   priority?: Priority;
   label?: string;
 }
@@ -159,6 +162,9 @@ async function upload<T>(path: string, file: Blob): Promise<T> {
 /** Where the whole Workspace's export downloads from; it holds every Version. */
 export const workspaceExportUrl = "/api/export";
 
+/** Where one Project's export downloads from; it holds every Version. */
+export const projectExportUrl = (projectKey: string) => `/api/projects/${encodeURIComponent(projectKey)}/export`;
+
 export const api = {
   /** Imports an export of the Workspace or a Project; Admins only. */
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
@@ -201,6 +207,8 @@ export const api = {
     request<{ tokens: AgentToken[] }>("GET", `/api/agents/${encodeURIComponent(id)}/tokens`).then((r) => r.tokens),
   issueAgentToken: (id: string, readOnly: boolean) =>
     request<IssuedAgentToken>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
+  /** What the Agent did, newest first, as far as the signed-in User may read. */
+  agentWork: (id: string) => request<{ work: AgentWork[] }>("GET", `/api/agents/${encodeURIComponent(id)}/work`).then((r) => r.work),
   revokeAgentToken: (id: string, tokenId: string) =>
     request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`),
 

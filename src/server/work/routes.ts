@@ -91,6 +91,8 @@ interface TicketQuery {
   category?: StatusCategory[];
   /** User ids, or `none` for unassigned. */
   assignee?: string[];
+  /** Agent ids, or `none` for Tickets with no Delegate. */
+  delegate?: string[];
   priority?: Priority[];
   label?: string[];
 }
@@ -387,6 +389,7 @@ export function workRoutes(ctx: AppContext) {
               readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
             }
             moved = await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
+            if (endsClaim(target)) for (const ticket of moved) await clearClaim(tx, ticket.id);
           } else {
             const inUse = await countTicketsInStatus(tx, status.id);
             if (inUse > 0) {
@@ -417,6 +420,7 @@ export function workRoutes(ctx: AppContext) {
               status: { type: "array", items: { type: "string", format: "uuid" } },
               category: { type: "array", items: { type: "string", enum: STATUS_CATEGORIES } },
               assignee: { type: "array", items: { type: "string", anyOf: [{ format: "uuid" }, { const: "none" }] } },
+              delegate: { type: "array", items: { type: "string", anyOf: [{ format: "uuid" }, { const: "none" }] } },
               priority: { type: "array", items: { type: "string", enum: PRIORITIES } },
               label: { type: "array", items: { type: "string", maxLength: 50 } },
             },
@@ -436,6 +440,7 @@ export function workRoutes(ctx: AppContext) {
             statusIds: q.status,
             categories: q.category,
             assigneeIds: q.assignee?.map((id) => (id === "none" ? null : id)),
+            delegateIds: q.delegate?.map((id) => (id === "none" ? null : id)),
             priorities: q.priority,
             labels: q.label,
           }),
@@ -725,7 +730,8 @@ export function workRoutes(ctx: AppContext) {
           // Both parents list their Sub-Tickets.
           const parents = changes.parent === undefined ? [] : [changes.parent, ticket.parent && (await findTicketByKey(tx, actingUser(actor).workspaceId, ticket.parent.key))];
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
-          if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) await clearClaim(tx, ticket.id);
+          const finishes = changes.status !== undefined && endsClaim(changes.status);
+          if (finishes || (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id)) await clearClaim(tx, ticket.id);
           // A new Delegate or Status may make the Ticket Ready, and finishing it may unblock others.
           const blockedIds = changes.status ? await ticketsBlockedBy(tx, [ticket.id]) : [];
           const mayBecomeReady = [ticket.id, ...blockedIds];
@@ -779,6 +785,12 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
 
 /** The Status Categories an Agent may move a Ticket into; only Users complete, cancel or shelve work. */
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
+
+/**
+ * Whether moving a Ticket into `status` ends its Claim: a finished Ticket has no work left to Claim,
+ * and only Users finish work.
+ */
+const endsClaim = (status: Status) => FINISHED_CATEGORIES.includes(status.category);
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or

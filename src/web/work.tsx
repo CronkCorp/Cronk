@@ -8,6 +8,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
+  projectExportUrl,
+  type Agent,
   type AgentAccess,
   type Project,
   type Status,
@@ -131,7 +133,7 @@ export function projectViewOf(view: string | null): { view: ProjectView; section
 const showsTickets = (view: ProjectView) => view === "list" || view === "board";
 
 /** The filter fields a Project page keeps in its address, in the order the filter bar shows them. */
-const FILTER_FIELDS = ["status", "category", "assignee", "priority", "label"] as const;
+const FILTER_FIELDS = ["status", "category", "assignee", "delegate", "priority", "label"] as const;
 
 /** Reads a Project page's filters from its query string. */
 export function filterFrom(search: URLSearchParams): TicketFilter {
@@ -229,6 +231,8 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                   { label: "Documents", onSelect: () => navigate(`/projects/${p.key}/documents`) },
                   // Everyone who sees the Project may read its settings; only Write access changes them or archives it.
                   { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
+                  // Only an Admin may export; the archive downloads as an attachment.
+                  ...(props.me.role === "admin" ? [{ label: "Export Project", onSelect: () => window.location.assign(projectExportUrl(p.key)) }] : []),
                   ...(p.access === "write"
                     ? [{ label: archiveOrRestore(p).label, danger: !p.archived, onSelect: () => setConfirmingArchive(true) }]
                     : []),
@@ -261,6 +265,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
           )}
           {showsTickets(props.view) && (
             <FilterBar
+              me={props.me}
               projectKey={p.key}
               statuses={statuses}
               filter={props.filter}
@@ -404,9 +409,12 @@ function ViewSwitcher(props: { projectKey: string; view: ProjectView; filter: Ti
   );
 }
 
-function FilterBar(props: { projectKey: string; statuses: Status[]; filter: TicketFilter; onChange: (filter: TicketFilter) => void }) {
+function FilterBar(props: { me: User; projectKey: string; statuses: Status[]; filter: TicketFilter; onChange: (filter: TicketFilter) => void }) {
   const [users] = useLoad(api.users, []);
   const [labels] = useLoad(() => api.labels(props.projectKey), [props.projectKey]);
+  // An Admin sees every User's Agents; anyone else, their own.
+  const everyone = props.me.role === "admin";
+  const [agents] = useLoad(() => api.agents(everyone), [everyone]);
   const set = (field: keyof TicketFilter) => (value: string) => {
     const { [field]: _, ...rest } = props.filter;
     props.onChange(value ? { ...rest, [field]: value } : rest);
@@ -415,6 +423,14 @@ function FilterBar(props: { projectKey: string; statuses: Status[]; filter: Tick
   const labelList = loaded<string[]>(labels) ?? [];
   // Keep a filtered Label selectable even when no Ticket has it any more.
   const labelOptions = props.filter.label && !labelList.includes(props.filter.label) ? [props.filter.label, ...labelList] : labelList;
+  // A filtered Agent the User can't list stays selectable.
+  const agentOptions = (loaded<Agent[]>(agents) ?? []).map((a): [string, string] => [
+    a.id,
+    a.owner.id === props.me.id ? a.name : `${a.name} (${a.owner.name})`,
+  ]);
+  if (props.filter.delegate && props.filter.delegate !== "none" && !agentOptions.some(([id]) => id === props.filter.delegate)) {
+    agentOptions.unshift([props.filter.delegate, "Another User's Agent"]);
+  }
 
   return (
     <div className="filters" role="group" aria-label="Filters">
@@ -435,6 +451,12 @@ function FilterBar(props: { projectKey: string; statuses: Status[]; filter: Tick
         value={props.filter.assignee}
         onChange={set("assignee")}
         options={[["none", "Unassigned"], ...(loaded<User[]>(users) ?? []).map((u): [string, string] => [u.id, u.name])]}
+      />
+      <FilterSelect
+        name="Delegate"
+        value={props.filter.delegate}
+        onChange={set("delegate")}
+        options={[["none", "Not delegated"], ...agentOptions]}
       />
       <FilterSelect
         name="Priority"

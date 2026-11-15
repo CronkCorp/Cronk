@@ -196,6 +196,18 @@ describe("the tickets tool", () => {
     const listed = await callTool(mcp, "tickets", { action: "list", project: "CRONK", priority: ["high"], label: ["UI"] });
     expect(listed.body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
   });
+
+  it("filters the list by Delegate, so an Agent can find what is delegated to it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 3);
+    const adaId = (await admin.get("/api/me")).body.user.id;
+    const claude = await registerAgent(admin, "claude-laptop");
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: adaId, delegateId: claude.agentId });
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const listed = await callTool(mcp, "tickets", { action: "list", project: "CRONK", delegate: [claude.agentId] });
+    expect(listed.body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-3"]);
+  });
 });
 
 describe("the guidance tool", () => {

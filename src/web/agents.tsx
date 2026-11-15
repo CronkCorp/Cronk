@@ -3,10 +3,11 @@ import { LiveIndicator, useLiveState } from "./components/live.js";
 import { SilenceMeter } from "./components/meter.js";
 import { ConfirmDialog, Dialog } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Actor, agentActor, Avatar, SessionName } from "./components/actor.js";
-import { api, watchAgents, type Agent, type AgentAccess, type AgentToken, type User } from "./api.js";
+import { api, watchAgents, type Agent, type AgentAccess, type AgentToken, type AgentWork, type User } from "./api.js";
 import { Link } from "./router.js";
+import { ACTIVITY_NAMES, describeChange } from "./timeline.js";
 import { Field, Show, useAction, useLoad, useSubmit, type Loaded } from "./ui.js";
 
 /**
@@ -147,6 +148,7 @@ function AgentCard(props: { agent: Agent; onChanged: () => void }) {
         )}
       </div>
       <LiveSessions agent={a} />
+      <WorkLog agent={a} />
       <div className="agent-card-foot">
         <span className="grow"><TokenSummary tokens={tokens} /></span>
         <Button variant="ghost" onClick={() => setManaging(true)}>Manage tokens</Button>
@@ -244,6 +246,14 @@ function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open:
             <input className="copy grow" readOnly value={secret} aria-label="New token" onFocus={(e) => e.target.select()} />
             <Button variant="secondary" onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
           </div>
+          <p>Then add Cronk to your AI tool as a streamable-HTTP MCP server at <code>{mcpUrl()}</code>. For Claude Code, run:</p>
+          <input
+            className="copy"
+            readOnly
+            value={`claude mcp add --transport http cronk ${mcpUrl()} --header "Authorization: Bearer ${secret}"`}
+            aria-label="Command to connect Claude Code"
+            onFocus={(e) => e.target.select()}
+          />
         </div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
@@ -297,6 +307,73 @@ function LiveSessions(props: { agent: Agent }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Cronk's MCP address, where an Agent connects: this installation's own origin. */
+const mcpUrl = () => `${window.location.origin}/mcp`;
+
+/** What an Agent did across the Workspace, newest first, shown on request. */
+function WorkLog(props: { agent: Agent }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="work-log">
+      <Button variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? "Hide what it did" : "Show what it did"}
+      </Button>
+      {open && <WorkEntries agent={props.agent} />}
+    </div>
+  );
+}
+
+/** The entries of an Agent's work, loaded when shown. */
+function WorkEntries(props: { agent: Agent }) {
+  const [work] = useLoad(() => api.agentWork(props.agent.id), [props.agent.id]);
+  return (
+    <Show state={work}>
+      {(entries) =>
+        entries.length === 0 ? (
+          <p className="muted">It hasn't done anything yet.</p>
+        ) : (
+          <ol className="history" aria-label={`What ${props.agent.name} did`}>
+            {entries.map((entry, i) => (
+              <li key={i}>
+                <span className="muted"><RelativeTime at={entry.at} /></span>
+                {entry.session && <> <SessionName id={entry.session.id} /></>} {describeWork(entry)} <WorkPlace entry={entry} />
+              </li>
+            ))}
+          </ol>
+        )
+      }
+    </Show>
+  );
+}
+
+/** What one entry of an Agent's work was, as a phrase like "logged a Plan". */
+function describeWork(entry: AgentWork): ReactNode {
+  if (entry.change) return describeChange(entry.change);
+  if (entry.activity) return `logged ${entry.activity.blocking ? "a blocking question" : `a ${ACTIVITY_NAMES[entry.activity.kind]}`}`;
+  if (entry.comment) return "commented";
+  return entry.version!.number === 1 ? "wrote" : `saved Version ${entry.version!.number} of`;
+}
+
+/** Where an entry of an Agent's work happened: its Ticket, or the Document it was on. */
+function WorkPlace(props: { entry: AgentWork }) {
+  const { ticket, document, version } = props.entry;
+  // A saved Version is of its Document, even a Report, which also names its Ticket.
+  if (document && (version || !ticket)) {
+    return (
+      <>
+        {!version && "on "}
+        <Link to={`/documents/${document.id}`} className="link">{document.title}</Link>
+        {ticket && <span className="muted"> ({ticket.key})</span>}
+      </>
+    );
+  }
+  return (
+    <>
+      on <Link to={`/tickets/${ticket!.key}`} className="link"><span className="claim-key">{ticket!.key}</span> {ticket!.title}</Link>
+    </>
   );
 }
 

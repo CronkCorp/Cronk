@@ -354,6 +354,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .others-badge { font-size: 12px; font-weight: 600; }
 .tokens-dialog { display: flex; flex-direction: column; gap: 12px; }
 .token-list { list-style: none; margin: 0; padding: 0; }
+.work-log { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); }
 .token { display: flex; align-items: center; gap: 8px; }
 .secret { display: flex; flex-direction: column; gap: 8px; }
 .secret p { margin: 0; }

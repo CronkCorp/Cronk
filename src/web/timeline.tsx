@@ -14,7 +14,7 @@ import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
  * looking different. Replies sit under what they reply to.
  */
 
-const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
+export const ACTIVITY_NAMES: Record<ActivityKind, string> = { plan: "Plan", progress: "Progress", finding: "Finding", question: "Question", error: "Error" };
 
 /** What a Ticket's timeline holds: an Activity, a Report, a Comment that replies to nothing, or a Change. */
 type Entry =
@@ -286,7 +286,7 @@ const recordedActor = (actor: Comment["actor"]): ActorLike => (actor.kind === "u
 const RELATION_PHRASES: Record<RelationKind, string> = { blocks: "blocking", blocked_by: "blocked by", relates_to: "related to" };
 
 /** What a Change did, as the rest of a sentence after who made it. Users and Agents named in it show as Actors. */
-function describeChange(change: RecordedChange): ReactNode {
+export function describeChange(change: RecordedChange): ReactNode {
   switch (change.change) {
     case "created":
       return `created the Ticket in ${change.status.name}`;

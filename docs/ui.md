@@ -182,7 +182,8 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Head:** an avatar, the name, and a summary ("2 live Agent Sessions · Delegate on 3 Tickets"), with Rename and Remove.
   - **One row per live Agent Session:** Live, the Agent Session's name, the Ticket it has Claimed ("Working on CRONK-12 …") or "Connected, no Claim", when it connected, and a meter for the time until it would fall silent.
   - "Not connected" with when its last Agent Session ended, when none is live.
-  - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button.
+  - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button, together with Cronk's MCP address and a ready-made command to connect Claude Code.
+  - **"Show what it did"** below the Agent Sessions opens what the Agent did across the Workspace, newest first: its Changes, Activities, Comments and saved Versions, each with when, its Agent Session and a link to the Ticket or Document.
 - **Admins** also see "Everyone else's Agents" below, as rows of Agent, Owner and liveness, read-only.
 
 ## Live updates

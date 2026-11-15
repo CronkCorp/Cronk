@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, joinAs, startInstalledCronk } from "./harness.js";
+import { agentOf, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("Agents", () => {
   it("lets a User register, rename and remove their own Agents", async () => {
@@ -101,6 +101,26 @@ describe("Agents and their Owner", () => {
 
     await admin.patch(`/api/users/${bobId}`, { active: true });
     expect((await claude.get("/api/projects")).status).toBe(200);
+  });
+
+  it("lose their Agent Sessions and Claims when their Owner is deactivated, so a crashed laptop can't hold work", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await projectWithTickets(admin, "CRONK", 1);
+    const claude = await registerAgent(bob, "claude-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: claude.agentId });
+    const session = await startSession(cronk, claude.secret);
+    await session.post("/api/tickets/CRONK-1/claim");
+
+    await admin.patch(`/api/users/${bobId}`, { active: false });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    const listed = (await admin.get("/api/agents?all=true")).body.agents.find((a: { id: string }) => a.id === claude.agentId);
+    expect(listed.sessions).toEqual([]);
+
+    await admin.patch(`/api/users/${bobId}`, { active: true });
+    expect((await session.get("/api/projects")).status).toBe(410);
+    expect((await (await startSession(cronk, claude.secret)).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
   });
 
   it("can't manage Agents or do what only Admins can, even for an Admin", async () => {

@@ -143,6 +143,6 @@ describe("the OpenAPI description", () => {
     expect(query("/api/tickets/{key}", "get")).toEqual([]);
     expect(query("/api/projects", "post")).toEqual([]);
     expect(query("/api/projects", "get")).toEqual(["archived"]);
-    expect(query("/api/projects/{key}/tickets", "get")).toEqual(["status", "category", "assignee", "priority", "label"]);
+    expect(query("/api/projects/{key}/tickets", "get")).toEqual(["status", "category", "assignee", "delegate", "priority", "label"]);
   });
 });
