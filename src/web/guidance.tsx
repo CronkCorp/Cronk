@@ -1,3 +1,4 @@
+import { Actor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Guidance } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -55,7 +56,7 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
                 <ol className="history" aria-label="Versions">
                   {[...list].reverse().map((v) => (
                     <li key={v.version}>
-                      <span className="muted">Version {v.version}, {new Date(v.at).toLocaleString()}</span> <strong>{v.actor.name}</strong>
+                      <span className="muted">Version {v.version}, {new Date(v.at).toLocaleString()}</span> <Actor actor={v.actor} />
                     </li>
                   ))}
                 </ol>

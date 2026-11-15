@@ -148,7 +148,7 @@ function ReviewEntry(props: { item: Extract<InboxItem, { kind: "review" }>; onDo
         <span className="activity-kind">To review</span>
         <Link to={`/tickets/${ticket.key}`} className="link">{ticket.key} {ticket.title}</Link>
         <StatusPill status={ticket.status} />
-        {ticket.delegate && <span className="muted">by {ticket.delegate.name}</span>}
+        {ticket.delegate && <span className="muted">by <Actor actor={{ kind: "agent", name: ticket.delegate.name }} /></span>}
       </div>
       {reports.length > 0 ? (
         <ul className="history" aria-label={`Reports on ${ticket.key}`}>

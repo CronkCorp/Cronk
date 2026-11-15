@@ -293,7 +293,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                               <span className="key">{ticket.key}</span>
                               <span className="grow">{ticket.title}</span>
                               <LabelChips labels={ticket.labels} />
-                              {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
+                              {ticket.assignee && <span className="assignee"><Actor actor={{ kind: "user", name: ticket.assignee.name }} /></span>}
                               <StatusPill status={ticket.status} />
                             </Link>
                           </li>
@@ -738,7 +738,7 @@ function ReportsView(props: { projectKey: string }) {
                   <span className="grow">
                     {r.title} <span className="muted">on {r.ticketTitle}</span>
                   </span>
-                  <span className="muted">{r.agent.name}</span>
+                  <Actor actor={agentActor(r.agent, r.session)} owner={false} />
                   <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
                 </Link>
               </li>

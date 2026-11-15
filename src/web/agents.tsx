@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SessionName } from "./components/actor.js";
+import { Actor, SessionName } from "./components/actor.js";
 import { api, type Agent, type AgentAccess, type AgentSession, type User } from "./api.js";
 import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -91,7 +91,7 @@ function AgentRow(props: { agent: Agent; onChanged: () => void }) {
           </form>
         ) : (
           <>
-            <strong className="grow">{a.name}</strong>
+            <span className="grow"><Actor actor={{ kind: "agent", name: a.name }} /></span>
             <button className="link" onClick={() => setRenaming(true)}>Rename</button>
             <button className="link" disabled={remove.busy} onClick={() => void remove.run()}>Remove</button>
           </>
@@ -168,8 +168,7 @@ function OthersAgents(props: { me: User }) {
               {others.map((a) => (
                 <li key={a.id} className="agent" aria-label={a.name}>
                   <div className="row">
-                    <strong className="grow">{a.name}</strong>
-                    <span className="muted">owned by {a.owner.name}</span>
+                    <span className="grow"><Actor actor={{ kind: "agent", name: a.name, owner: a.owner }} /></span>
                   </div>
                   <div className="agent-tokens">
                     <LiveSessions agent={a} />

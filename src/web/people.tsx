@@ -1,3 +1,4 @@
+import { Actor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Access, type Invitation, type Member, type Project, type Role, type User } from "./api.js";
 import { AuthCard, Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
@@ -99,7 +100,7 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
   return (
     <li className="row">
       <span className="grow">
-        <strong>{u.name}</strong>
+        <Actor actor={{ kind: "user", name: u.name }} />
         {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>
         {!u.joined ? (
           <span className="badge">Imported, not signed in yet</span>
