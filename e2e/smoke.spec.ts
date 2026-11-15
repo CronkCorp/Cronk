@@ -381,7 +381,7 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Quoting");
   await page.getByRole("button", { name: "Create Document" }).click();
-  await page.getByLabel("Body (Markdown)").fill("> Quoted and\n> wrapped, a\\*b &amp; c.\n\n- Listed and\n  continued.\n\nSee x\\*y in CRONK-1.\n\nWrite &amp;amp;\n\nUnknown &foo; next to x\\*y.");
+  await page.getByLabel("Body (Markdown)").fill("> Quoted and\n> wrapped, a\\*b &amp; c.\n\n- Listed and\n  continued.\n\nSee x\\*y in CRONK-1.\n\nWrite &amp;amp;\n\nUnknown &foo; next to x\\*y.\n\nSome **bold a\\*b** text.");
   await page.getByRole("button", { name: "Save" }).click();
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("wrapped, a*b & c.");
@@ -436,6 +436,11 @@ test("comment on passages through soft-wrapped lines, escapes and entities", asy
   await select("p", "foo; next", "p", "foo; next");
   await page.getByRole("button", { name: "Comment on this passage" }).click();
   await expect(page.getByLabel("About the passage (optional)")).toHaveValue("foo; next");
+
+  // Selecting all of a bold run takes in its markup, even with an escape inside.
+  await select("strong", "bold", "strong", "a*b");
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**bold a\\*b**");
 });
 
 // Runs after the tests above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.

@@ -52,8 +52,13 @@ function linkTicketReferences(projectKeys: Set<string>, source: string) {
   return () => (tree: MdNode) => replaceReferenceText(tree, split);
 }
 
-/** The text a hast node shows. */
-const textOf = (node: HastNode): string => node.value ?? (node.children ?? []).map(textOf).join("");
+/** Whether every run of text a hast node shows was parsed from between `start` and `end` in the source. */
+const textWithin = (node: HastNode, start: number, end: number): boolean => {
+  if (node.type !== "text") return (node.children ?? []).every((child) => textWithin(child, start, end));
+  const from = node.position?.start.offset;
+  const to = node.position?.end.offset;
+  return from !== undefined && to !== undefined && start <= from && to <= end;
+};
 
 /** The hast nodes `markSourceOffsets` touches. */
 interface HastNode {
@@ -72,9 +77,9 @@ const INLINE_MARKUP = new Set(["strong", "em", "del", "code", "a"]);
  * A rehype plugin that wraps each run of text in a span naming where the text sits in the Markdown
  * source (`data-source-start`), when that is known for certain: each of its characters can be tied to
  * the stretch it was parsed from, skipping what Markdown dropped (`data-source-map`, as `encodeBounds`
- * writes it), or, for code, the text is found exactly once inside that stretch, as inside its backticks. Inline
- * elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
- * the Markdown there holds their text as shown; a code block's fences are left out of it.
+ * writes it), or, for code, the text is found exactly once inside that stretch, as inside its
+ * backticks. Inline elements name where their markup starts and ends (`data-markup-start`, `data-markup-end`), when
+ * every run of their text was parsed from inside it; a code block's fences are left out of it.
  */
 function markSourceOffsets(source: string) {
   const mark = (node: HastNode, parent?: HastNode): HastNode => {
@@ -82,7 +87,7 @@ function markSourceOffsets(source: string) {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       const inline = node.tagName && INLINE_MARKUP.has(node.tagName) && !(node.tagName === "code" && parent?.tagName === "pre");
-      if (inline && start !== undefined && end !== undefined && source.slice(start, end).includes(textOf(node))) {
+      if (inline && start !== undefined && end !== undefined && textWithin(node, start, end)) {
         node.properties = { ...node.properties, dataMarkupStart: start, dataMarkupEnd: end };
       }
       node.children = node.children?.map((child) => mark(child, node));
