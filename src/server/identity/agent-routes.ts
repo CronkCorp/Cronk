@@ -20,6 +20,7 @@ import {
 } from "./agents.js";
 import type { User } from "./users.js";
 import { inboxesChanged } from "../inbox/inbox.js";
+import { agentsTopic } from "../live/topics.js";
 import { claimsEnded } from "../coordination/ready.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
@@ -57,6 +58,30 @@ export function agentRoutes(ctx: AppContext) {
             sessions: sessions.get(a.agent.id)!.map((s) => ({ ...publicAgentSession(s), claims: readableClaims(s.id) })),
           })),
         };
+      },
+    );
+
+    app.get(
+      "/api/agents/events",
+      {
+        schema: {
+          response: {
+            200: {
+              description:
+                "A server-sent event stream for the signed-in User's own Agents, for as long as they stay signed in. It opens with a " +
+                "`ready` event, then sends a `changed` event, with empty data, when one of their Agent Sessions may have started, " +
+                "ended or fallen silent, Claimed or released a Ticket, or moved when it would fall silent; fetch the Agents again then. " +
+                "These are noticed every few seconds, not at once.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const canSee = async () => (await requireUser(ctx, request)).id === user.id;
+        ctx.live.stream(reply, agentsTopic(user.id), canSee);
       },
     );
 
