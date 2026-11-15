@@ -1,9 +1,9 @@
 import { Button } from "./components/button.js";
 import { ConfirmDialog, Menu } from "./components/overlays.js";
-import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
+import { Chip, PRIORITY_NAMES, PriorityTag, StatusDot } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
-import { Actor, agentActor, userActor } from "./components/actor.js";
+import { Actor, Avatar, agentActor, userActor } from "./components/actor.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
@@ -324,13 +324,13 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                       <ul className="rows" aria-label="Tickets">
                         {list.map((ticket) => (
                           <li key={ticket.key}>
-                            <Link to={`/tickets/${ticket.key}`} className="row">
-                              <PriorityTag priority={ticket.priority} />
+                            <Link to={`/tickets/${ticket.key}`} className="row ticket-row">
+                              <StatusDot status={ticket.status} />
                               <span className="key">{ticket.key}</span>
                               <span className="grow">{ticket.title}</span>
                               <LabelChips labels={ticket.labels} />
-                              {ticket.assignee && <span className="assignee"><Actor actor={userActor(ticket.assignee.name)} /></span>}
-                              <StatusPill status={ticket.status} />
+                              <PriorityTag priority={ticket.priority} />
+                              <TicketPeople ticket={ticket} />
                             </Link>
                           </li>
                         ))}
@@ -456,7 +456,10 @@ function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
                   <PriorityTag priority={ticket.priority} />
                 </span>
                 <span>{ticket.title}</span>
-                <LabelChips labels={ticket.labels} />
+                <span className="card-foot">
+                  <LabelChips labels={ticket.labels} />
+                  <TicketPeople ticket={ticket} />
+                </span>
               </Link>
             ))}
           </section>
@@ -636,6 +639,18 @@ function StatusRow(props: {
       )}
       {error && <p className="error row" role="alert">{error}</p>}
     </li>
+  );
+}
+
+/** Who has a Ticket, as avatars: its Delegate (an Agent, square and violet), then its Assignee. */
+function TicketPeople(props: { ticket: Ticket }) {
+  const { assignee, delegate } = props.ticket;
+  if (!assignee && !delegate) return null;
+  return (
+    <span className="people">
+      {delegate && <Avatar actor={agentActor(delegate)} label={`Delegate: ${delegate.name}`} />}
+      {assignee && <Avatar actor={userActor(assignee.name)} label={`Assignee: ${assignee.name}`} />}
+    </span>
   );
 }
 

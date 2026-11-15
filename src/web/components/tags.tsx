@@ -51,3 +51,8 @@ export function StatusPill(props: { status: Status }) {
     </span>
   );
 }
+
+/** A Status as its Category's dot alone, for dense rows: the name is in its tooltip and accessible label. */
+export function StatusDot(props: { status: Status }) {
+  return <span className={`dot ${props.status.category}`} role="img" aria-label={props.status.name} title={props.status.name} />;
+}

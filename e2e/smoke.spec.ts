@@ -1068,3 +1068,22 @@ async function signIn(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("navigation", { name: "Sidebar" }).getByRole("link", { name: /CRONK/ })).toBeVisible();
 }
+
+// Runs after the tests above, so Ada and CRONK exist.
+test("see a Ticket's Priority, Assignee and Delegate on the Project's list and board", async ({ page, request }) => {
+  await signIn(page);
+  const { ticket } = await delegatedTicket(page, request, "people-bot", "Shows who has it");
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { priority: "high" } });
+
+  await page.goto("/projects/CRONK");
+  const row = page.getByRole("list", { name: "Tickets" }).getByRole("link", { name: /Shows who has it/ });
+  await expect(row.getByText("High", { exact: true })).toBeVisible();
+  await expect(row.getByRole("img", { name: "Delegate: people-bot" })).toHaveClass(/agent/);
+  await expect(row.getByRole("img", { name: "Assignee: Ada" })).toHaveClass(/user/);
+
+  await page.getByRole("link", { name: "Board" }).click();
+  const card = page.getByRole("region", { name: "Backlog" }).getByRole("link", { name: /Shows who has it/ });
+  await expect(card.getByText("High", { exact: true })).toBeVisible();
+  await expect(card.getByRole("img", { name: "Delegate: people-bot" })).toHaveClass(/agent/);
+  await expect(card.getByRole("img", { name: "Assignee: Ada" })).toHaveClass(/user/);
+});
