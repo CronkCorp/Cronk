@@ -341,26 +341,29 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
   await page.getByRole("link", { name: "Inbox" }).click();
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
-  const inbox = page.getByRole("list", { name: "Inbox" });
-  const review = inbox.getByRole("listitem", { name: `Review ${ticket.key}` });
-  await expect(review.getByRole("list", { name: `Reports on ${ticket.key}` })).toContainText("What I found");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  const review = list.getByRole("list", { name: "To review" }).getByRole("link", { name: new RegExp(ticket.key) });
+  await expect(review).toContainText("Report: What I found");
+  await review.click();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
   await request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body: "Ship it **today**?", blocking: true } });
-  const question = inbox.getByRole("listitem", { name: `Question on ${ticket.key}` });
-  await expect(question).toContainText("Blocking question");
-  await expect(inbox.getByRole("listitem").first()).toContainText("Ship it today?");
-  await question.getByRole("button", { name: "Answer" }).click();
-  await question.getByLabel("Answer").fill("Yes.");
-  await question.getByRole("button", { name: "Post answer" }).click();
+  const question = list.getByRole("list", { name: "Blocking" }).getByRole("link", { name: /Ship it today\?/ });
+  await expect(question).toContainText(ticket.key);
+  await question.click();
+  await detail.getByLabel("Answer", { exact: true }).fill("Yes.");
+  await detail.getByRole("button", { name: "Post answer" }).click();
   await expect(question).toHaveCount(0);
   // The Ticket opens from the Inbox.
-  await review.getByRole("link", { name: new RegExp(ticket.key) }).click();
+  await review.click();
+  await detail.getByRole("link", { name: "Open Ticket" }).click();
   await expect(page.getByRole("heading", { name: "Filed and renamed by an Agent" })).toBeVisible();
   await page.goBack();
   // Ada sends the work back with what is left; it leaves her Inbox, and the Ticket shows why.
-  await review.getByRole("button", { name: "Send back" }).click();
-  await review.getByLabel("What is left to do").fill("Add a test.");
-  await review.getByRole("button", { name: "Send back" }).click();
-  await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
+  await detail.getByRole("button", { name: "Send back…" }).click();
+  await detail.getByLabel("What is left to do").fill("Add a test.");
+  await detail.getByRole("button", { name: "Send back", exact: true }).click();
+  await expect(review).toHaveCount(0);
   await page.goto(`/tickets/${ticket.key}`);
   const startedStatus = statuses.find((s: { category: string }) => s.category === "started").name;
   await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Status/ })).toContainText(startedStatus);
@@ -1150,15 +1153,193 @@ test("answer a blocking question in the timeline, where only Comments and questi
   await expect(comment.getByRole("list", { name: "Replies" })).toContainText("Agreed.");
 });
 
+// Runs after the tests above, so Ada exists. Each Inbox test works in a Project of its own, filtered to it.
+test("review a Ticket from the Inbox's detail pane: read its Report inline, send it back, then complete the next", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox reviews", key: "INR" } });
+  const first = await reviewWithReport(page, request, "review-bot-1", "Show Claim expiry", "INR", "It was the **cache**.");
+  const second = await reviewWithReport(page, request, "review-bot-2", "Fix stale-save merge", "INR", "Merge keeps **ATX** headings.");
+
+  await page.goto("/inbox?project=INR");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await expect(list.getByRole("heading", { name: "To review · 2" })).toBeVisible();
+  const reviews = list.getByRole("list", { name: "To review" });
+  await expect(reviews.getByRole("link")).toHaveCount(2);
+  // The first item is selected until the User picks another; picking one keeps it in the address alongside the filters.
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  await reviews.getByRole("link", { name: new RegExp(second.key) }).click();
+  await expect(page).toHaveURL(/project=INR/);
+  await expect(page).toHaveURL(new RegExp(`item=review-${second.key}`));
+  await expect(reviews.getByRole("link", { name: new RegExp(second.key) })).toHaveAttribute("aria-current", "true");
+  // The Report's full body is rendered inline, and the Ticket's Status is shown; a reload reopens the same item.
+  await page.reload();
+  await expect(detail.getByRole("strong").filter({ hasText: "ATX" })).toBeVisible();
+  await expect(detail).toContainText("In Review");
+  await expect(detail.getByRole("link", { name: "Open Ticket" })).toHaveAttribute("href", `/tickets/${second.key}`);
+
+  // S opens Send back, which needs a Comment saying what is left to do.
+  await page.locator("body").press("s");
+  await expect(detail.getByLabel("What is left to do")).toBeFocused();
+  await expect(detail.getByLabel("What is left to do")).toHaveValue("");
+  await expect(detail.getByRole("button", { name: "Send back", exact: true })).toBeDisabled();
+  await detail.getByLabel("What is left to do").fill("Add a test.");
+  await detail.getByRole("button", { name: "Send back", exact: true }).click();
+  // It leaves the Inbox, and the item before it is selected, as it was the last.
+  await expect(reviews.getByRole("link")).toHaveCount(1);
+  await expect(list.getByRole("heading", { name: "To review · 1" })).toBeVisible();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`item=review-${first.key}`));
+  await page.goto(`/tickets/${second.key}`);
+  await expect(page.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "Add a test." })).toContainText("Sent back");
+
+  // C completes the selected review; with nothing left, the Inbox is a calm empty state rather than an empty split.
+  await page.goBack();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
+  await page.locator("body").press("c");
+  await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
+  await expect(detail).toHaveCount(0);
+  await page.goto(`/tickets/${first.key}`);
+  await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Status/ })).toContainText("Done");
+});
+
+// Runs after the tests above, so Ada exists.
+test("answer a blocking question from the Inbox's detail pane, moving through the groups with the keyboard", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox questions", key: "INQ" } });
+  await reviewWithReport(page, request, "triage-bot-1", "Show Claim expiry", "INQ", "Done.");
+  const { ticket, agentCall } = await delegatedTicket(page, request, "triage-bot-2", "Rate-limit sign-in attempts", "INQ");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const ask = (body: string, blocking: boolean) => request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body, blocking } });
+  await ask("Keep the **casing** of the first use?", false);
+
+  await page.goto("/inbox?project=INQ");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await expect(list.getByRole("heading", { name: "Questions · 1" })).toBeVisible();
+  // A new blocking question arrives live, without a reload, in its own group at the top.
+  await ask("Per **email** or per IP?", true);
+  await expect(list.getByRole("heading")).toHaveText(["Blocking · 1", "Questions · 1", "To review · 1"]);
+  const blocking = list.getByRole("list", { name: "Blocking" }).getByRole("link");
+  await expect(blocking).toContainText("Per email or per IP?");
+  await expect(page.getByRole("group", { name: "Filters" }).getByRole("button", { name: "Everything 3" })).toBeVisible();
+
+  // J and K move through the list across the groups.
+  await blocking.click();
+  await expect(detail).toContainText("Blocking question");
+  await page.locator("body").press("j");
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await page.locator("body").press("j");
+  await expect(detail).toContainText("Done.");
+  await page.locator("body").press("k");
+  await page.locator("body").press("k");
+  await expect(detail.getByRole("strong").filter({ hasText: "email" })).toBeVisible();
+  await expect(detail).toContainText("triage-bot-2 is waiting");
+  await expect(detail).toContainText("The answer reaches triage-bot-2 as Waiting Work.");
+
+  // A focuses the answer box; the shortcuts type into it rather than moving the list.
+  await page.locator("body").press("a");
+  // Located by its placeholder, as a label's text grows with what is typed in the field inside it.
+  const answer = detail.getByPlaceholder("Answer triage-bot-2… (Markdown)");
+  await expect(answer).toBeFocused();
+  await expect(answer).toHaveValue("");
+  await answer.pressSequentially("just email");
+  await expect(answer).toHaveValue("just email");
+  await expect(blocking).toHaveAttribute("aria-current", "true");
+  await detail.getByRole("button", { name: "Post answer" }).click();
+  // The answered question leaves the Inbox, and the next item is selected.
+  await expect(list.getByRole("list", { name: "Blocking" })).toHaveCount(0);
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("list", { name: "Timeline" }).getByRole("list", { name: "Replies" })).toContainText("just email");
+
+  // On a phone the list and the detail stack: picking an item opens it full width, with a way back to the list.
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto("/inbox?project=INQ");
+  await expect(list).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await list.getByRole("link", { name: /casing/ }).click();
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await expect(list).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await detail.getByRole("link", { name: "Back to the list" }).click();
+  await expect(list).toBeVisible();
+});
+
+// Runs after the tests above, so Ada exists.
+test("see the selected item marked Resolved elsewhere once it is answered in another page", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox elsewhere", key: "INX" } });
+  const { ticket, agentCall } = await delegatedTicket(page, request, "elsewhere-bot", "Export Labels in frontmatter", "INX");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const ask = (body: string) => request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body } });
+  await ask("Lowercase them all?");
+  await ask("Keep the casing?");
+  await ask("Sort them too?");
+
+  await page.goto("/inbox?project=INX");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await list.getByRole("link", { name: /Keep the casing\?/ }).click();
+  await expect(detail).toContainText("Keep the casing?");
+
+  // Ada answers the same question on the Ticket page, in a second page.
+  const other = await page.context().newPage();
+  await other.goto(`/tickets/${ticket.key}`);
+  const asked = other.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "Keep the casing?" });
+  await asked.getByLabel("Answer", { exact: true }).fill("Keep it.");
+  await asked.getByRole("button", { name: "Post answer" }).click();
+  await expect(asked).toContainText("Answered");
+  await other.close();
+
+  // The list drops it, but the detail pane keeps it, marked and with its actions disabled, linking to the Ticket.
+  await expect(list.getByRole("link", { name: /Keep the casing\?/ })).toHaveCount(0);
+  await expect(list.getByRole("heading", { name: "Questions · 2" })).toBeVisible();
+  await expect(detail.getByRole("status")).toHaveText(/Resolved elsewhere/);
+  await expect(detail).toContainText("Keep the casing?");
+  await expect(detail.getByRole("button", { name: "Post answer" })).toBeDisabled();
+  await expect(detail.getByPlaceholder("Answer elsewhere-bot… (Markdown)")).toBeDisabled();
+  await expect(detail.getByRole("link", { name: "Open Ticket" })).toHaveAttribute("href", `/tickets/${ticket.key}`);
+  // J moves on to the item that followed it.
+  await page.locator("body").press("j");
+  await expect(detail).toContainText("Sort them too?");
+  await expect(detail.getByRole("status")).toHaveCount(0);
+  await expect(detail.getByRole("button", { name: "Post answer" })).toBeVisible();
+});
+
+/** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */
+async function reviewWithReport(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  agentName: string,
+  title: string,
+  project: string,
+  report: string,
+) {
+  const { ticket, agentCall } = await delegatedTicket(page, request, agentName, title, project);
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  expect((await request.post(`/api/tickets/${ticket.key}/reports`, { headers: agentCall, data: { title, body: report } })).status()).toBe(201);
+  const { statuses } = await (await request.get(`/api/projects/${project}`, { headers: agentCall })).json();
+  const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
+  expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
+  return ticket as { key: string; title: string };
+}
+
 /**
  * Registers an Agent of Ada's with a full token, starts an Agent Session for it, and files a Ticket assigned
  * to Ada and delegated to the Agent. Calls with `agentCall` act as that Agent Session.
  */
-async function delegatedTicket(page: import("@playwright/test").Page, request: import("@playwright/test").APIRequestContext, agentName: string, title: string) {
+async function delegatedTicket(
+  page: import("@playwright/test").Page,
+  request: import("@playwright/test").APIRequestContext,
+  agentName: string,
+  title: string,
+  project = "CRONK",
+) {
   const { user } = await (await page.request.get("/api/me")).json();
   const { agent } = await (await page.request.post("/api/agents", { data: { name: agentName } })).json();
   const { secret } = await (await page.request.post(`/api/agents/${agent.id}/tokens`, { data: { readOnly: false } })).json();
-  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title } })).json();
+  const { ticket } = await (await page.request.post(`/api/projects/${project}/tickets`, { data: { title } })).json();
   await page.request.patch(`/api/tickets/${ticket.key}`, { data: { assigneeId: user.id, delegateId: agent.id } });
   const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${secret}` } });
   const session = (await started.json()).session.id as string;

@@ -123,8 +123,11 @@ Follow-up: #110.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back.
-- **Acting on an item:** the next item is selected. It never jumps to the top of the list.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back. None of them fire while focus is in a text field. A line under the split names them.
+- **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
+- **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
+- **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
+- **Empty:** a calm empty state, not an empty split.
 - **Phone:** the list and the detail stack, and selecting an item opens the detail full width.
 
 ![Inbox on a phone](ui/phone-inbox.png)
