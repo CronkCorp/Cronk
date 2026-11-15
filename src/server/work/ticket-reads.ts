@@ -3,7 +3,7 @@ import { actingUser } from "../actor.js";
 import { HttpError } from "../context.js";
 import { findLiveClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
-import { readablePlaces, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
+import { canRead, readablePlaces, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
 import { listLinkedDocuments } from "../knowledge/documents.js";
 import { ref } from "../schemas.js";
 import { findProjectById, listAllProjects } from "./projects.js";
@@ -69,8 +69,23 @@ export async function visibleRelations(db: Queryable, actor: Actor, relations: R
   return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
 }
 
-/** A Ticket's history, leaving out Relation changes with Tickets of Projects `actor` can't see. */
+/**
+ * A Ticket's history, leaving out Relation changes with Tickets of Projects `actor` can't see, and
+ * Document links to Documents of places they can't read.
+ */
 export async function visibleHistory(db: Queryable, actor: Actor, changes: RecordedChange[]): Promise<RecordedChange[]> {
   const keys = await visibleProjectKeys(db, actor);
-  return changes.filter((c) => !(c.change === "relation added" || c.change === "relation removed") || keys.has(projectKeyOf(c.ticket.key)));
+  const workspaceReadable = await canRead(db, actor, null);
+  return changes.filter((c) => {
+    switch (c.change) {
+      case "relation added":
+      case "relation removed":
+        return keys.has(projectKeyOf(c.ticket.key));
+      case "document linked":
+      case "document unlinked":
+        return c.document.projectKey === null ? workspaceReadable : keys.has(c.document.projectKey);
+      default:
+        return true;
+    }
+  });
 }
