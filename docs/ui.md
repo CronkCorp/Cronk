@@ -187,7 +187,7 @@ Server-sent events (ADR 0012) keep open views current, and #94 adds topics for T
 
 - New entries appear in place (timeline entries at the end, Inbox items in their group), with a short `--accent` ring that fades over about 2s. The page never scrolls on its own unless the User is already at the end.
 - A changed field updates where it is shown, such as the side panel, a Ticket on the board or the Claim card. Nothing reloads the whole page or flashes empty while reloading.
-- An item the User is acting on is never removed under them. If it is resolved elsewhere, it shows "Answered by Grace Hopper" or "Completed by Ada" and stays until the User moves on.
+- An item the User is acting on is never removed under them. If it is resolved elsewhere, it stays visible as "Resolved elsewhere", with its actions disabled and a link to its Ticket, until the User moves on. It doesn't name who resolved it: the Inbox lists only open items, and the Ticket shows who (#106).
 - Every streaming view shows the Live indicator, and reconnects reload its lists (as `watchInbox` and `watchTicket` already do).
 
 ## Changing this document
