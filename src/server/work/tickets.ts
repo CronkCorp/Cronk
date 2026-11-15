@@ -1,4 +1,4 @@
-import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
+import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
@@ -272,7 +272,8 @@ export type { RecordedActor };
 
 export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
 
-export async function recordChange(db: Queryable, ticketId: string, actor: Actor, at: Date, change: TicketChange): Promise<void> {
+/** Records a change in the Ticket's history: by `actor` as it calls now, or as an import stored it. */
+export async function recordChange(db: Queryable, ticketId: string, actor: Actor | StoredActor, at: Date, change: TicketChange): Promise<void> {
   const { change: kind, ...data } = change;
   await db.query(
     `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)

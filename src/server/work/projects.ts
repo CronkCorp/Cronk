@@ -64,14 +64,8 @@ export async function insertProject(
   );
   if (!rows[0]) return undefined;
   const project = toProject(rows[0]);
-  for (const [position, status] of DEFAULT_STATUSES.entries()) {
-    await db.query("INSERT INTO statuses (project_id, name, category, position) VALUES ($1, $2, $3, $4)", [
-      project.id,
-      status.name,
-      status.category,
-      position,
-    ]);
-  }
+  // Each goes last in its Status Category, so they keep the order listed.
+  for (const status of DEFAULT_STATUSES) await insertStatus(db, project.id, status);
   return project;
 }
 

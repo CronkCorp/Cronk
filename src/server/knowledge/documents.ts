@@ -1,4 +1,4 @@
-import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
+import { actorColumns, toRecordedActor, type Actor, type StoredActor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
@@ -130,11 +130,36 @@ export async function insertDocument(
   return (await findDocument(db, input.tree.workspaceId, id))!;
 }
 
+/** A Document's row as written in full: by a Report, which isn't in the page tree, and by an import, which keeps its times. */
+export interface DocumentRowInput {
+  workspaceId: string;
+  projectId: string | null;
+  parentId: string | null;
+  position: number;
+  title: string;
+  body: string;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+  ticketId: string | null;
+  claimId: string | null;
+}
+
+/** Writes a Document's row as given and returns its id; callers record its Versions. Run inside a transaction. */
+export async function insertDocumentRow(db: Queryable, d: DocumentRowInput): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO documents (workspace_id, project_id, parent_id, position, title, body, version, created_at, updated_at, ticket_id, claim_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    [d.workspaceId, d.projectId, d.parentId, d.position, d.title, d.body, d.version, d.createdAt, d.updatedAt, d.ticketId, d.claimId],
+  );
+  return rows[0]!.id;
+}
+
 /** Records Version `number` of a Document. Run inside the transaction that creates or saves it. */
 export async function insertVersion(
   db: Queryable,
   documentId: string,
-  v: { number: number; title: string; body: string; actor: Actor; now: Date; restoredFrom: number | null },
+  v: { number: number; title: string; body: string; actor: Actor | StoredActor; now: Date; restoredFrom: number | null },
 ): Promise<void> {
   await db.query(
     `INSERT INTO document_versions (document_id, number, title, body, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, restored_from)

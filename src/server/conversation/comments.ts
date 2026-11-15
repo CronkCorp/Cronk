@@ -1,4 +1,4 @@
-import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
+import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 
 /**
@@ -91,7 +91,7 @@ const onTarget = (target: CommentTarget, param: string): [condition: string, id:
 export async function insertComment(
   db: Queryable,
   target: CommentTarget,
-  actor: Actor,
+  actor: Actor | StoredActor,
   input: {
     body: string;
     replyToCommentId: string | null;
