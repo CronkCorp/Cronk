@@ -260,6 +260,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         enum: [
           ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
           ...["relation added", "relation removed"],
+          ...["document linked", "document unlinked"],
         ],
       },
     }),
@@ -275,6 +276,14 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },
         ticket: ticketName,
+      }),
+      object({
+        change: { type: "string", enum: ["document linked", "document unlinked"] },
+        document: object({
+          id,
+          title: { type: "string" },
+          projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+        }),
       }),
     ],
   },

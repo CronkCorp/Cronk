@@ -1019,5 +1019,9 @@ function describe(change: RecordedChange): string {
       return `marked it as ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
     case "relation removed":
       return `removed that it is ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
+    case "document linked":
+      return `linked the Document “${change.document.title}”`;
+    case "document unlinked":
+      return `unlinked the Document “${change.document.title}”`;
   }
 }

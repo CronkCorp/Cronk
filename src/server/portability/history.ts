@@ -88,7 +88,11 @@ async function importedChange(change: TicketChange["change"], fields: Record<str
     } else {
       if (!isRecord(value)) refuse(`${at} must be a mapping${nullable ? " or null" : ""}`);
       if (holds === "ticket") recorded[field] = { key: text(value.key, `${at}.key`), title: text(value.title, `${at}.title`) };
-      else {
+      else if (holds === "document") {
+        const projectKey = value.projectKey === null || value.projectKey === undefined ? null : text(value.projectKey, `${at}.projectKey`);
+        const id = isUuid(value.id) ? value.id : refuse(`${at} has no id`);
+        recorded[field] = { id, title: text(value.title, `${at}.title`), projectKey };
+      } else {
         const foundBy = { user: value.email, agent: value.id, status: value.current }[holds];
         const id = (typeof foundBy === "string" ? await find[holds](foundBy) : undefined) ?? (isUuid(value.id) ? value.id : refuse(`${at} names no record here and has no id`));
         const named = { id, name: text(value.name, `${at}.name`) };

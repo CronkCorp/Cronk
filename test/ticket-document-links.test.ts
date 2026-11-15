@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk } from "./harness.js";
+import { delegatedSetup, startInstalledCronk } from "./harness.js";
 
 /** Each of a Ticket's Documents as its title and why it is listed. */
 const listed = (documents: { title: string; reason: string }[]) => documents.map((d) => `${d.title} (${d.reason})`);
@@ -21,5 +21,24 @@ describe("Linking a Document to a Ticket", () => {
     expect(unlinked.status).toBe(200);
     expect(listed(unlinked.body.documents)).toEqual(["Plan (mention)"]);
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`)).status).toBe(404);
+  });
+
+  it("is recorded in the Ticket's history with who linked or unlinked it, and in which Agent Session", async () => {
+    const { admin, claude, session } = await delegatedSetup(1);
+    const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan" })).body.document.id;
+    const agent = await session();
+
+    expect((await agent.post(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(201);
+    expect((await admin.delete(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(200);
+
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    expect(changes.slice(-2)).toMatchObject([
+      {
+        change: "document linked",
+        document: { id: plan, title: "Plan", projectKey: "CRONK" },
+        actor: { kind: "agent", id: claude.agentId, owner: { name: "Ada" }, session: { id: agent.sessionId } },
+      },
+      { change: "document unlinked", document: { id: plan, title: "Plan", projectKey: "CRONK" }, actor: { kind: "user", name: "Ada" } },
+    ]);
   });
 });

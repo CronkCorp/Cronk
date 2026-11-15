@@ -17,7 +17,7 @@ export type ActorRef = string | { agent: string; session: string | null };
  * names they had at the time, plus what an import finds them by: a `user` by its `email`, an `agent` by its id in
  * `people.md`, and a `status` by its `current` name in the Project, when it still has one.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "user" | "agent" | "status";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -35,6 +35,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   parent: fromTo("ticket", true),
   "relation added": relation,
   "relation removed": relation,
+  "document linked": { document: { holds: "document" } },
+  "document unlinked": { document: { holds: "document" } },
 };
 
 export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
