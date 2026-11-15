@@ -33,6 +33,10 @@ export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 export const WAITING_REASONS = ["answer", "mention", "comment"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
 
+/** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
+export const LINK_REASONS = ["report", "linked", "mention"] as const;
+export type LinkReason = (typeof LINK_REASONS)[number];
+
 /** How a Comment @mentions an Agent, for the API's and the MCP tools' descriptions. */
 export const MENTION_SYNTAX =
   "`@name` mentions the writer's own Agent of that name (for an Agent, its Owner's), or else every other Owner's Agent " +

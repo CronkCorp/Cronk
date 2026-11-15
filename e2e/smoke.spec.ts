@@ -310,11 +310,28 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await page.getByRole("button", { name: "New Document" }).click();
   await page.getByLabel("Title").fill("Onboarding");
   await page.getByRole("button", { name: "Create Document" }).click();
-  await page.getByLabel("Body (Markdown)").fill("Start with CRONK-1.");
+  // The toolbar formats the selected text, and the preview shows the Markdown as it will read.
+  const editor = page.getByLabel("Body (Markdown)");
+  await editor.fill("Start with CRONK-1.");
+  await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 5));
+  await page.getByRole("button", { name: "Bold" }).click();
+  await expect(editor).toHaveValue("**Start** with CRONK-1.");
+  await page.getByRole("button", { name: "Heading" }).click();
+  await expect(editor).toHaveValue("## **Start** with CRONK-1.");
+  await expect(page.getByRole("region", { name: "Preview" }).getByRole("heading", { name: "Start with CRONK-1." })).toBeVisible();
+  await page.getByRole("button", { name: "Heading" }).click();
+  await expect(editor).toHaveValue("**Start** with CRONK-1.");
+  const preview = page.getByRole("region", { name: "Preview" });
+  await expect(preview.locator("strong")).toHaveText("Start");
+  await expect(preview.getByRole("link", { name: "CRONK-1" })).toBeVisible();
   await page.getByRole("button", { name: "Save" }).click();
 
   const body = page.getByTestId("document-body");
   await expect(body).toContainText("Start with CRONK-1.");
+  await expect(body.locator("strong")).toHaveText("Start");
+  // What was saved is exactly the Markdown the editor showed.
+  const id = new URL(page.url()).pathname.split("/").pop()!;
+  expect((await (await page.request.get(`/api/documents/${id}`)).json()).document.body).toBe("**Start** with CRONK-1.");
   await expect(body.getByRole("link", { name: "CRONK-1" })).toHaveAttribute("href", "/tickets/CRONK-1");
 
   await page.getByRole("button", { name: "Edit" }).click();
@@ -330,16 +347,50 @@ test("write a Document, edit it, and restore an earlier Version", async ({ page 
   await expect(versions).toContainText("Version 4");
   await expect(versions).toContainText("restored Version 2");
 
+  // Selecting text in the Document offers to comment on it, quoting the Markdown the selection reads from.
+  await body.evaluate((el) => {
+    const range = document.createRange();
+    const reference = el.querySelector("a")!;
+    range.setStart(el.querySelector("strong")!, 0);
+    range.setEnd(reference, reference.childNodes.length);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  });
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  await expect(page.getByLabel("About the passage (optional)")).toHaveValue("**Start** with CRONK-1");
+  await expect(page.getByLabel("Comment", { exact: true })).toBeFocused();
   // A Comment anchored to a passage shows the passage it is about.
-  await page.getByLabel("About the passage (optional)").fill("CRONK-1");
   await page.getByLabel("Comment", { exact: true }).fill("Which Ticket is this?");
   await page.getByRole("button", { name: "Post Comment" }).click();
   const comments = page.getByRole("list", { name: "Comments" });
   await expect(comments).toContainText("Which Ticket is this?");
-  await expect(comments.locator("blockquote")).toHaveText("CRONK-1");
+  await expect(comments.locator("blockquote")).toHaveText("**Start** with CRONK-1");
 
   await page.getByRole("link", { name: "Documents", exact: true }).last().click();
   await expect(page.getByRole("list", { name: "Documents" })).toContainText("Onboarding");
+});
+
+// Runs after the test above, so CRONK-2 "Document sign-in" and the Document "Onboarding" exist.
+test("link a Document to a Ticket from the Ticket's page, then unlink it", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("link", { name: /CRONK/ }).click();
+  await page.getByRole("link", { name: /CRONK-2/ }).click();
+  await expect(page.getByRole("heading", { name: "Document sign-in" })).toBeVisible();
+
+  await page.getByLabel("Find a Document to link").fill("Onboarding");
+  await page.getByRole("button", { name: "Find" }).click();
+  await page.getByRole("list", { name: "Documents to link" }).getByRole("button", { name: "Link Onboarding" }).click();
+  const documents = page.getByRole("list", { name: "Documents" });
+  await expect(documents).toContainText("Onboarding");
+  await expect(documents).toContainText("Linked");
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada linked the Document “Onboarding”");
+
+  await documents.getByRole("button", { name: "Unlink Onboarding" }).click();
+  await expect(page.getByRole("list", { name: "Documents" })).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "History" })).toContainText("Ada unlinked the Document “Onboarding”");
 });
 
 // Runs after the test above, so CRONK holds Documents already.
@@ -412,6 +463,43 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
   const changes = page.getByRole("list", { name: /Changes from Version 2 to Version 6/ });
   await expect(changes).toContainText("- Install it.");
   await expect(changes).toContainText("+ Run it weekly.");
+});
+
+// Runs after the tests above, so CRONK exists.
+test("see the board, a Ticket and a Document follow changes made elsewhere", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(ada.email);
+  await page.getByLabel("Password").fill(ada.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("link", { name: /CRONK/ })).toBeVisible();
+
+  // Changes come through the API behind the page's back, as another User or an Agent would make them.
+  await page.goto("/projects/CRONK?view=board");
+  await expect(page.getByRole("region", { name: "Backlog" })).toBeVisible();
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Arrived live" } })).json();
+  await expect(page.getByRole("region", { name: "Backlog" })).toContainText("Arrived live");
+
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("heading", { name: "Arrived live" })).toBeVisible();
+  await page.request.patch(`/api/tickets/${ticket.key}`, { data: { title: "Renamed live" } });
+  await expect(page.getByRole("heading", { name: "Renamed live" })).toBeVisible();
+
+  const { document } = await (await page.request.post("/api/projects/CRONK/documents", { data: { title: "Live notes", body: "First." } })).json();
+  await page.goto(`/documents/${document.id}`);
+  await expect(page.getByTestId("document-body")).toContainText("First.");
+  await page.request.post(`/api/documents/${document.id}/comments`, { data: { body: "Seen from afar." } });
+  await expect(page.getByRole("list", { name: "Comments" })).toContainText("Seen from afar.");
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 1, body: "Second." } });
+  await expect(page.getByTestId("document-body")).toContainText("Second.");
+
+  // While editing, a newer Version is announced instead of replacing the draft.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.request.patch(`/api/documents/${document.id}`, { data: { baseVersion: 2, body: "Third." } });
+  const savedMeanwhile = page.getByRole("status");
+  await expect(savedMeanwhile).toContainText("Ada saved Version 3 while you were editing Version 2");
+  await savedMeanwhile.getByText("See what they changed").click();
+  await expect(savedMeanwhile).toContainText("+ Third.");
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("Second.");
 });
 
 // Runs after the tests above, so CRONK exists.

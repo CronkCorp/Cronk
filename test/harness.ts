@@ -207,6 +207,11 @@ export interface Cronk {
    */
   holdPushes(): HeldPushes;
   /**
+   * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does,
+   * and waits until each has run. Streams a test closed just before are given a moment to end first.
+   */
+  heartbeat(): Promise<void>;
+  /**
    * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
    * before it shipped, so the next `restart` applies it again over the data already there.
    */
@@ -260,7 +265,7 @@ export async function startCronk(): Promise<Cronk> {
 
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()) });
+  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -312,6 +317,10 @@ export async function startCronk(): Promise<Cronk> {
       const release = live.hold();
       onTestFinished(release);
       return { release };
+    },
+    heartbeat: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await live.heartbeat();
     },
     undoMigration: async (id, undo) => {
       const client = new pg.Client({ connectionString: databaseUrl });

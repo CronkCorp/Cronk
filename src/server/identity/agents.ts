@@ -1,5 +1,5 @@
 import type { AgentCredential } from "../actor.js";
-import { endAgentSessionsOfToken } from "../coordination/agent-sessions.js";
+import { endAgentSessionsOfToken, type ClaimHolders } from "../coordination/agent-sessions.js";
 import type { Queryable } from "../db/database.js";
 import { hashToken, newToken } from "./tokens.js";
 import { findUserById, toUser, type User, type UserRow } from "./users.js";
@@ -118,11 +118,15 @@ export async function listAgentTokens(db: Queryable, agent: Agent): Promise<Agen
   return rows.map(toAgentToken);
 }
 
-/** Revokes one of an Agent's tokens, ending the Agent Sessions it started; returns whether there was one. */
-export async function revokeAgentToken(db: Queryable, agent: Agent, tokenId: string, now: Date): Promise<boolean> {
-  await endAgentSessionsOfToken(db, tokenId, now);
+/**
+ * Revokes one of an Agent's tokens, ending the Agent Sessions it started; returns the Tickets
+ * whose Claims those held, or undefined if the Agent had no such token.
+ */
+export async function revokeAgentToken(db: Queryable, agent: Agent, tokenId: string, now: Date): Promise<ClaimHolders | undefined> {
+  // First, as deleting the token forgets which Sessions it started.
+  const ended = await endAgentSessionsOfToken(db, tokenId, now);
   const { rowCount } = await db.query("DELETE FROM agent_tokens WHERE agent_id = $1 AND id = $2", [agent.id, tokenId]);
-  return (rowCount ?? 0) > 0;
+  return rowCount ? ended : undefined;
 }
 
 /**

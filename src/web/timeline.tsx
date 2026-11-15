@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { api, sessionName, watchTicket, type Activity, type ActivityKind, type Comment, type NewComment, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
@@ -27,7 +27,7 @@ function latestById<T extends { id: string }>(items: T[]): T[] {
  * The Activities and Reports Agent Sessions wrote on a Ticket and its Comments, oldest first, kept up to
  * date as new ones arrive. Replies show under what they reply to; a reply to a question answers it.
  */
-export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) {
+export function TicketTimeline(props: { ticketKey: string; canWrite: boolean; onTicketChanged?: () => void }) {
   const [loaded, reload] = useLoad(
     async () => {
       const [activities, reports, comments] = await Promise.all([
@@ -43,6 +43,9 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
   const [arrivedActivities, setArrivedActivities] = useState<Activity[]>([]);
   const [arrivedReports, setArrivedReports] = useState<Report[]>([]);
   const [arrivedComments, setArrivedComments] = useState<Comment[]>([]);
+  // The latest handler, so the stream, opened once per Ticket, never calls an outdated one.
+  const onTicketChanged = useRef(props.onTicketChanged);
+  onTicketChanged.current = props.onTicketChanged;
   useEffect(() => {
     setArrivedActivities([]);
     setArrivedReports([]);
@@ -50,8 +53,12 @@ export function TicketTimeline(props: { ticketKey: string; canWrite: boolean }) 
     return watchTicket(props.ticketKey, {
       // Load the lists again once watching, and on every reconnect, so nothing posted before the stream was
       // (back) in place is missed. Arrivals are kept meanwhile, so nothing shown disappears while it loads.
-      ready: reload,
+      ready: () => {
+        reload();
+        onTicketChanged.current?.();
+      },
       on: {
+        changed: () => onTicketChanged.current?.(),
         activity: ({ activity }) => setArrivedActivities((list) => [...list, activity]),
         report: ({ report }) => setArrivedReports((list) => [...list, report]),
         comment: ({ comment }) => setArrivedComments((list) => [...list, comment]),
@@ -216,6 +223,7 @@ function CommentForm(props: {
   post: (input: NewComment) => Promise<Comment>;
   onPosted: (comment: Comment) => void;
   onCancel?: () => void;
+  inputRef?: Ref<HTMLTextAreaElement>;
 }) {
   const [body, setBody] = useState("");
   const send = useSubmit(
@@ -227,7 +235,7 @@ function CommentForm(props: {
   );
   return (
     <form className="comment-form" onSubmit={send.submit}>
-      <TextArea label={props.label} value={body} onChange={setBody} rows={3} placeholder='Markdown; @name, @owner/name or @"name with spaces" mentions an Agent' />
+      <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} placeholder='Markdown; @name, @owner/name or @"name with spaces" mentions an Agent' />
       {send.error && <p className="error" role="alert">{send.error}</p>}
       <div className="actions">
         <button type="submit" disabled={send.busy || !body.trim()}>{props.submitLabel}</button>
@@ -237,13 +245,24 @@ function CommentForm(props: {
   );
 }
 
-/** A Document's Comments, oldest first, each reply under the Comment it replies to; a new one may anchor to a passage. */
-export function DocumentComments(props: { documentId: string; canWrite: boolean }) {
-  const [comments, reload] = useLoad(() => api.documentComments(props.documentId), [props.documentId]);
-  const [passage, setPassage] = useState("");
+/**
+ * A Document's Comments, oldest first, each reply under the Comment it replies to. A new one may
+ * anchor to a passage, typed here or picked by selecting it in the Document. They are loaded again
+ * whenever `generation` changes, as when a new one arrives.
+ */
+export function DocumentComments(props: {
+  documentId: string;
+  canWrite: boolean;
+  generation?: number;
+  passage: string;
+  onPassageChange: (passage: string) => void;
+  commentRef?: Ref<HTMLTextAreaElement>;
+}) {
+  const [comments, reload] = useLoad(() => api.documentComments(props.documentId), [props.documentId, props.generation]);
+  const { passage } = props;
   const post = (input: NewComment) => api.postDocumentComment(props.documentId, { ...input, ...(passage.trim() && { anchor: { passage } }) });
   const posted = () => {
-    setPassage("");
+    props.onPassageChange("");
     reload();
   };
   return (
@@ -260,8 +279,8 @@ export function DocumentComments(props: { documentId: string; canWrite: boolean 
           </ol>
           {props.canWrite && (
             <>
-              <TextArea label="About the passage (optional)" value={passage} onChange={setPassage} rows={2} placeholder="Quote the text exactly" />
-              <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={posted} />
+              <TextArea label="About the passage (optional)" value={passage} onChange={props.onPassageChange} rows={2} placeholder="Quote the text exactly" />
+              <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={posted} inputRef={props.commentRef} />
             </>
           )}
         </>

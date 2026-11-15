@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
@@ -6,6 +6,7 @@ import {
   type Priority,
   type Project,
   type RecordedChange,
+  type SearchResult,
   type RelationKind,
   type Status,
   type StatusCategory,
@@ -16,6 +17,7 @@ import {
   type TicketRef,
   type User,
   sessionName,
+  watchProject,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { GuidanceSection } from "./guidance.js";
@@ -150,6 +152,23 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
   const filterKey = JSON.stringify(filter);
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
+  // The list and board follow the Project's changes; a change to its Statuses reloads the Project, which holds them.
+  useEffect(
+    () =>
+      watchProject(props.projectKey, {
+        ready: () => {
+          reloadProject();
+          reloadTickets();
+        },
+        on: {
+          changed: ({ ticket }) => {
+            if (ticket === null) reloadProject();
+            reloadTickets();
+          },
+        },
+      }),
+    [props.projectKey],
+  );
   const [creating, setCreating] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
   const agentAccess = useAction(
@@ -678,9 +697,10 @@ function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
         </>
       )}
       <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
-      <MentionedIn detail={props.detail} />
+      <TicketDocuments detail={props.detail} readOnly={!canWrite} onChanged={changed} />
       <h2>Timeline</h2>
-      <TicketTimeline ticketKey={t.key} canWrite={canWrite} />
+      {/* Its stream also tells of changes to the Ticket itself: its fields, Claim and History are loaded again. */}
+      <TicketTimeline ticketKey={t.key} canWrite={canWrite} onTicketChanged={changed} />
       <h2>History</h2>
       <Show state={history}>
         {(changes) => (
@@ -925,24 +945,89 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean; onCha
   );
 }
 
-/** The Documents, other Tickets' Reports included, that mention the Ticket's key; its own Reports show in its timeline. */
-function MentionedIn(props: { detail: TicketDetail }) {
-  const mentions = props.detail.documents.filter((d) => d.ticketKey !== props.detail.ticket.key);
-  if (mentions.length === 0) return null;
+/**
+ * The Documents linked to the Ticket and those that mention its key, other Tickets' Reports included; its own Reports
+ * show in its timeline. With Write, Documents found by search can be linked, and linked ones unlinked.
+ */
+/** Where a Document belongs, as a list of them says: the Ticket a Report is on, its Project, or the Workspace. */
+const whereDocumentIs = (d: { ticketKey: string | null; projectKey: string | null }) =>
+  d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace");
+
+function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean; onChanged: () => void }) {
+  const t = props.detail.ticket;
+  const documents = props.detail.documents.filter((d) => d.reason !== "report");
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<SearchResult[]>();
+  const search = useAction(
+    () => api.search(query.trim()),
+    (results) =>
+      // Its own Reports are listed already, in its timeline.
+      setFound(
+        results.filter(
+          (r) => (r.kind === "document" || r.kind === "report") && r.ticketKey !== t.key && !props.detail.documents.some((d) => d.id === r.documentId),
+        ),
+      ),
+  );
+  const link = useAction((documentId: string) => api.linkDocument(t.key, documentId), () => {
+    setQuery("");
+    setFound(undefined);
+    props.onChanged();
+  });
+  const unlink = useAction((documentId: string) => api.unlinkDocument(t.key, documentId), props.onChanged);
+  const error = search.error ?? link.error ?? unlink.error;
+  if (props.readOnly && documents.length === 0) return null;
   return (
-    <>
-      <h2>Mentioned in</h2>
-      <ul className="rows" aria-label="Mentioned in">
-        {mentions.map((d) => (
-          <li key={d.id} className="row">
-            <Link to={`/documents/${d.id}`} className="row-link">
-              <span className="grow">{d.title}</span>
-              <span className="muted">{d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace")}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </>
+    <section>
+      <h2>Documents</h2>
+      {documents.length > 0 && (
+        <ul className="rows" aria-label="Documents">
+          {documents.map((d) => (
+            <li key={d.id} className="row">
+              <Link to={`/documents/${d.id}`} className="row-link">
+                <span className="grow">{d.title}</span>
+                <span className="muted">{whereDocumentIs(d)}</span>
+                <span className="badge">{d.reason === "linked" ? "Linked" : "Mentions it"}</span>
+              </Link>
+              {d.reason === "linked" && !props.readOnly && (
+                <button className="link" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
+                  Unlink
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!props.readOnly && (
+        <form
+          className="inline-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void search.run();
+          }}
+        >
+          <input aria-label="Find a Document to link" placeholder="Find a Document by its words" value={query} onChange={(e) => setQuery(e.target.value)} required />
+          <button type="submit" className="secondary" disabled={search.busy}>Find</button>
+        </form>
+      )}
+      {found && (
+        found.length === 0 ? (
+          <p className="muted">No Documents found to link.</p>
+        ) : (
+          <ul className="rows" aria-label="Documents to link">
+            {found.map((r) => (
+              <li key={r.documentId} className="row">
+                <span className="grow">{r.title}</span>
+                <span className="muted">{whereDocumentIs(r)}</span>
+                <button className="link" aria-label={`Link ${r.title}`} disabled={link.busy} onClick={() => void link.run(r.documentId!)}>
+                  Link
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
   );
 }
 
@@ -1019,5 +1104,9 @@ function describe(change: RecordedChange): string {
       return `marked it as ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
     case "relation removed":
       return `removed that it is ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
+    case "document linked":
+      return `linked the Document “${change.document.title}”`;
+    case "document unlinked":
+      return `unlinked the Document “${change.document.title}”`;
   }
 }

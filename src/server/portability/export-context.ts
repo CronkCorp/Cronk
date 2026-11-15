@@ -41,6 +41,9 @@ export class ExportContext {
   readonly usedSessions = new Set<string>();
   /** Users' emails by id. */
   readonly emailOf: Map<string, string>;
+  /** The path of each Document and Report written so far, by id. */
+  readonly documentPaths = new Map<string, string>();
+  private readonly pending: (() => void)[] = [];
 
   private constructor(
     readonly db: Queryable,
@@ -62,6 +65,16 @@ export class ExportContext {
   /** Writes the file at `path`: `data` as frontmatter, then `body`. */
   add(path: string, data: Record<string, unknown>, body = ""): void {
     this.folder.set(path, writeFrontmatter(data, body));
+  }
+
+  /** Writes a file once every Document is written, by `write`, so it can name Documents by path. */
+  afterDocuments(write: () => void): void {
+    this.pending.push(write);
+  }
+
+  /** Writes the files waiting for every Document to be written. */
+  writePending(): void {
+    for (const write of this.pending.splice(0)) write();
   }
 
   /** The email of User `id`, or null for none. */
