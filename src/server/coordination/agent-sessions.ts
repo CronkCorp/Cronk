@@ -22,12 +22,17 @@ interface AgentSessionRow {
   silence_threshold_seconds: number;
 }
 
+/** When a Session was last heard from, and when it ends if it stays silent from then on. */
+export const silenceWindow = (row: { last_seen_at: Date; silence_threshold_seconds: number }) => ({
+  lastSeenAt: row.last_seen_at,
+  endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+});
+
 const toAgentSession = (row: AgentSessionRow): AgentSession => ({
   id: row.id,
   agentId: row.agent_id,
   startedAt: row.started_at,
-  lastSeenAt: row.last_seen_at,
-  endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+  ...silenceWindow(row),
 });
 
 /** The shape of an Agent Session the API returns. */
