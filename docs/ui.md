@@ -2,7 +2,7 @@
 
 How Cronk's web UI looks and behaves. Read this before changing anything under `src/web/`. Vocabulary follows `GLOSSARY.md`; the UI holds no rules (ADR 0010, `docs/testing.md`), so everything here is about presentation.
 
-The direction was chosen in #98, from prototypes of each screen. The screenshots in `docs/ui/` are those prototypes, not the shipped app. They show where each screen is heading, and the follow-up issues filed from #98 bring the existing screens in line. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main.
+The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 for the tokens, fonts and components, then #105 to #110 for the screens. Until then, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main.
 
 ## Principles
 
@@ -21,19 +21,19 @@ The direction was chosen in #98, from prototypes of each screen. The screenshots
 - **Sidebar, top to bottom:**
   - The Workspace name and mark.
   - Search, which `/` focuses.
-  - Inbox, Triage, Documents and Agents. Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
+  - Inbox, Documents and Agents, plus Triage once it exists (Phase 2). Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
   - **Projects**, each listed by key and name. Archived Projects are left out.
   - **Workspace**: Guidance, plus Users and Settings for Admins.
   - The signed-in User and their role, which opens the sign-out menu.
 - **Active item:** `--accent-soft` background with `--accent` text. There is exactly one active item, and a Ticket or Document marks its Project or Documents.
-- **Below 760px** the sidebar becomes a wrapping strip with the four main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
+- **Below 760px** the sidebar becomes a wrapping strip with the main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
 - **Page head:** breadcrumbs (13px, muted), then a row holding the `h1`, the view switcher and the actions. The primary action comes last. Destructive actions such as Archive and Delete go in a "…" menu, never next to the primary action.
 - **Project views:** List, Board and Reports are a segmented control in the page head. Statuses, Guidance and Access move into the Project's settings.
-- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`.
+- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page.
 
-## Tokens
+## Design tokens
 
-All colours are CSS custom properties on `:root`, defined in `src/web/styles.css`. Components use only tokens, never literal colours. The dark values apply under `prefers-color-scheme: dark`.
+All colours are CSS custom properties on `:root` in `src/web/styles.css` (the values below arrive with #104). Components use only tokens, never literal colours. The dark values apply under `prefers-color-scheme: dark`.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
@@ -53,7 +53,7 @@ All colours are CSS custom properties on `:root`, defined in `src/web/styles.css
 | `--ok` / `-soft` | `#2c7a42` / `#dcefe1` | `#6cc284` / `#1c3324` | Live, Findings, Completed, added diff lines |
 | `--info` / `-soft` | `#2a65ad` / `#dde9f7` | `#74a8ea` / `#1b2b40` | In Review, Progress, information banners |
 
-The Status Categories use their own dot colours: Backlog is a dashed muted ring, Unstarted a muted ring, Started a half-filled `--warn` dot, In Review a ringed `--info` dot, Completed a filled `--ok` dot, and Canceled a `--danger` dot with a stroke. A Status always shows its dot and its name, never the colour alone.
+The Status Categories use their own dot colours: Backlog is a dashed muted ring, Unstarted a muted ring, Started a half-filled `--warn` dot, In Review a ringed `--info` dot, Completed a filled `--ok` dot, and Canceled a `--danger` dot with a stroke. A Status shows its dot and its name. Dense rows and board columns may show the dot alone, with the name in its tooltip and accessible label.
 
 | Tokens | Values |
 |---|---|
@@ -68,21 +68,21 @@ The Status Categories use their own dot colours: Backlog is a dashed muted ring,
 
 ## Typography
 
-- **Faces:** IBM Plex Sans for UI and prose, and IBM Plex Mono for Ticket keys, Agent Sessions, code and Markdown sources. They are bundled from npm (`@fontsource/ibm-plex-sans`, `@fontsource/ibm-plex-mono`) and served by Cronk itself. Never load fonts from a CDN, since installations may be offline. The fallbacks are `system-ui` and `ui-monospace`.
+- **Faces:** IBM Plex Sans for UI and prose, and IBM Plex Mono for Ticket keys, Agent Sessions, code and Markdown sources. They are bundled from npm (`@fontsource/ibm-plex-sans`, `@fontsource/ibm-plex-mono`, added by #104) and served by Cronk itself. Never load fonts from a CDN, since installations may be offline. The fallbacks are `system-ui` and `ui-monospace`.
 - **Scale:** 24/600 (Ticket and Document titles), 20/600 (`h1`), 16/600 (`h2`), 14/600 (`h3`), 14/400 (body), 13 (meta and controls), 12 (small meta, chips, keys), and 11/600 uppercase with 0.06em letter-spacing (kind labels and nav group labels).
 - **Line height:** 1.5 for UI and 1.65 for Document bodies. Document text is 15px with a 720px measure.
 
 ## Component conventions
 
-The app keeps its own small component set in `src/web/`, styled with the tokens in plain CSS. Accessibility-heavy primitives come from Radix UI's headless packages (`@radix-ui/react-popover`, `-dropdown-menu`, `-dialog`, `-tabs`), styled by our classes. Cronk uses no styled component library and no Tailwind. A new component goes in that set before a second screen copies it.
+The app keeps its own small component set in `src/web/`, styled with the tokens in plain CSS. Accessibility-heavy primitives come from Radix UI's headless packages (`@radix-ui/react-popover`, `-dropdown-menu`, `-dialog`, `-tabs`, added by #104), styled by our classes. Cronk uses no styled component library and no Tailwind. A new component goes in that set before a second screen copies it.
 
 - **Actor** (`<Actor>`): avatar plus name. A User is round. An Agent is square, violet, and followed by "for <Owner>" where the Owner isn't obvious. Never write "Ada (session d152, for Ada)" as prose.
-- **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper computes it everywhere.
+- **Agent Session:** shown in the mono face as a readable two-word name derived from its id (`brisk-otter`), with the full id in the tooltip. One helper computes it everywhere, replacing `sessionName` in `src/web/api.ts` (#104).
 - **Status** (`<StatusPill>`): dot and name. **Priority:** a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
 - **Label:** a neutral chip on `--surface-2`.
 - **Kind label:** 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
 - **Buttons:**
-  - Primary is filled `--accent`, one per form or action bar, placed first.
+  - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head.
   - Secondary is `--surface` with a border.
   - Ghost is text in `--accent`, for Reply, Rename and the like.
   - Danger is filled `--danger`, and only inside a confirming dialog.
@@ -91,7 +91,8 @@ The app keeps its own small component set in `src/web/`, styled with the tokens 
 - **Forms:** the label sits above the field, in 12px `--muted`. Inputs have a `--surface` background and a 1px border, and show the `--accent` focus ring. Markdown inputs use the mono face. Each error sits under its form in `--danger` with `role="alert"`.
 - **Pickers:** Ticket fields are edited in place. Clicking the value opens a Radix popover list with type-to-filter. Bare `<select>` rows are not used for this.
 - **Times:**
-  - Relative under a day ("12 min ago").
+  - Relative under an hour ("12 min ago").
+  - Then clock time for today ("10:18") and "yesterday".
   - Then day and time ("14 Nov 09:52"), with the year only when it differs from the current one.
   - The exact time is always in `title`.
   - A timeline shows clock times with a separator for each day.
@@ -99,6 +100,16 @@ The app keeps its own small component set in `src/web/`, styled with the tokens 
 - **Live indicator:** a green dot with "Live" on views that are streaming. It turns into a muted "Reconnecting…" while the stream is away.
 
 ## Screens
+
+### Project
+
+The Project page is shown in `docs/ui/frame.png`.
+
+- **Page head:** the title, a List / Board / Reports segmented control, and New Ticket as the only primary action. Access, Agent Access, Statuses, Guidance and Archive live in the Project's settings, behind a "…" menu.
+- **List rows:** Status dot, key, title, Priority tag, and the Delegate's and Assignee's avatars.
+- **Board:** uses the full main-column width. Completed and Canceled columns collapse to their count by default, so a 1280px screen shows every Status without sideways scrolling.
+
+Follow-up: #110.
 
 ### Inbox
 
@@ -123,15 +134,15 @@ The app keeps its own small component set in `src/web/`, styled with the tokens 
 - **Main column:** the title, the description, then one **timeline** and the Comment box at the end.
 - **Side panel (280px, sticky):**
   - Status, Priority, Assignee, Delegate and Labels, each edited in place.
-  - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Session stays silent. It is hidden when the Ticket is not Claimed.
+  - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. It is hidden when the Ticket is not Claimed.
   - Parent, Sub-Tickets, Relations and Mentioned in.
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
-  - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as plain text. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
+  - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
   - **Comment:** the body in a bordered bubble, with replies indented under it. A send-back Comment is labelled `SENT BACK`.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
   - **Field change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review".
-- **Reply:** only Comments and questions offer Reply. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
+- **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
 
 ![Ticket, dark](ui/ticket-dark.png)
 
@@ -165,9 +176,9 @@ The app keeps its own small component set in `src/web/`, styled with the tokens 
 - **Order:** "Register an Agent" is a button in the page head that opens a dialog. It isn't a form at the top of the page.
 - **Cards:** one per Agent.
   - **Head:** an avatar, the name, and a summary ("2 live Agent Sessions · Delegate on 3 Tickets"), with Rename and Remove.
-  - **One row per live Agent Session:** Live, the Session's name, the Ticket it has Claimed ("Working on CRONK-12 …") or "Connected, no Claim", when it connected, and a meter for the time until it would fall silent.
+  - **One row per live Agent Session:** Live, the Agent Session's name, the Ticket it has Claimed ("Working on CRONK-12 …") or "Connected, no Claim", when it connected, and a meter for the time until it would fall silent.
   - "Not connected" with when its last Agent Session ended, when none is live.
-  - **Footer:** the tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button.
+  - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button.
 - **Admins** also see "Everyone else's Agents" below, as rows of Agent, Owner and liveness, read-only.
 
 ## Live updates
@@ -175,7 +186,7 @@ The app keeps its own small component set in `src/web/`, styled with the tokens 
 Server-sent events (ADR 0012) keep open views current, and #94 adds topics for Ticket fields, boards and Documents. Every screen treats them the same way:
 
 - New entries appear in place (timeline entries at the end, Inbox items in their group), with a short `--accent` ring that fades over about 2s. The page never scrolls on its own unless the User is already at the end.
-- A changed field updates where it is shown, such as the side panel, a board card or the Claim card. Nothing reloads the whole page or flashes empty while reloading.
+- A changed field updates where it is shown, such as the side panel, a Ticket on the board or the Claim card. Nothing reloads the whole page or flashes empty while reloading.
 - An item the User is acting on is never removed under them. If it is resolved elsewhere, it shows "Answered by Grace Hopper" or "Completed by Ada" and stays until the User moves on.
 - Every streaming view shows the Live indicator, and reconnects reload its lists (as `watchInbox` and `watchTicket` already do).
 
