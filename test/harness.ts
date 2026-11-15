@@ -10,9 +10,17 @@ import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js"
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-/** Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed. */
+/**
+ * Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed.
+ * No timer runs their streams' heartbeats, which would refresh Agent Sessions at whatever the fake clock reads
+ * whenever real time lets it fire; tests run them with `Cronk.heartbeat`.
+ */
 class HoldableLiveUpdates extends LiveUpdates {
   private holding: [string, LiveEvent][] | null = null;
+
+  constructor() {
+    super({ heartbeatMs: null });
+  }
 
   override publish(topic: string, event: LiveEvent): void {
     if (this.holding) this.holding.push([topic, event]);
@@ -207,8 +215,8 @@ export interface Cronk {
    */
   holdPushes(): HeldPushes;
   /**
-   * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does,
-   * and waits until each has run. Streams a test closed just before are given a moment to end first.
+   * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does
+   * outside tests (no timer runs it in them), and waits until each has run. Streams a test closed just before are given a moment to end first.
    */
   heartbeat(): Promise<void>;
   /**
