@@ -128,3 +128,24 @@ describe("Workspace Document access", () => {
     expect((await admin.get(`/api/documents/${id}`)).body.document.version).toBe(1);
   });
 });
+
+describe("Deleting a Document", () => {
+  it("is refused to Agents with Write, in a Project or the Workspace, and allowed to Users", async () => {
+    const { cronk, admin, id, unchanged } = await projectDocument();
+    const handbook: string = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "v1" })).body.document.id;
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    for (const doc of [id, handbook]) {
+      const refused = await claude.delete(`/api/documents/${doc}?baseVersion=1`);
+      expect(refused.status).toBe(403);
+      expect(refused.body.error).toMatch(/only a User may delete/);
+      expect((await admin.get(`/api/documents/${doc}`)).status).toBe(200);
+    }
+    await unchanged();
+
+    for (const doc of [id, handbook]) {
+      expect((await admin.delete(`/api/documents/${doc}?baseVersion=1`)).status).toBe(204);
+      expect((await admin.get(`/api/documents/${doc}`)).status).toBe(404);
+    }
+  });
+});

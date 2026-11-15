@@ -121,7 +121,7 @@ _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's
 ### Knowledge
 
 **Document**:
-A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown.
+A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown. Only a User may delete one.
 _Avoid_: Page, doc, wiki page, note
 
 **Page tree**:
