@@ -15,3 +15,5 @@ A test exercises external behaviour only. It calls the HTTP API (or the MCP prot
 Do not add lower-level unit seams for rules; test them through the API. New phases add tests at these same seams. Integrations with external systems (Git hosts, webhooks, email) are tested by feeding the API the events those systems send and asserting on the resulting state, without calling the real services.
 
 Concurrency and database faults are staged through the harness, not by reaching into tables: `terminateConnections` and `interruptQueriesOn` simulate a database blip, `holdRow` holds a row as an updating transaction would, so a request that writes a row referencing it stops mid-transaction until released, and `holdTable` locks a whole table, so every query on it, reads too, waits until released. The test still acts and asserts only through the API.
+
+Upgrades of an existing installation are staged the same way: `undoMigration` undoes one migration and forgets it was applied, so the next `restart` applies it again over data the test created through the API. Use it to test a migration that fills new tables from existing data.

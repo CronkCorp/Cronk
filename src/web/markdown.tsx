@@ -2,6 +2,7 @@ import Markdown from "react-markdown";
 import { api } from "./api.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
+import { replaceReferenceText, TICKET_REFERENCE } from "../shared/ticket-references.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
 interface MdNode {
@@ -11,11 +12,6 @@ interface MdNode {
   children?: MdNode[];
 }
 
-/** A Ticket key such as `CRONK-12`, as it appears in prose. */
-const TICKET_REFERENCE = /\b([A-Z][A-Z0-9]{1,9})-([1-9][0-9]{0,8})\b/g;
-
-/** Nodes whose text must stay as written: existing links and their kin. */
-const LEAVE_ALONE = new Set(["link", "linkReference", "definition"]);
 
 /**
  * A remark plugin that turns references to Tickets of known Projects into links
@@ -36,15 +32,7 @@ function linkTicketReferences(projectKeys: Set<string>) {
     if (last < text.length) parts.push({ type: "text", value: text.slice(last) });
     return parts;
   };
-  const visit = (node: MdNode) => {
-    if (!node.children || LEAVE_ALONE.has(node.type)) return;
-    node.children = node.children.flatMap((child) => {
-      if (child.type === "text") return split(child.value ?? "");
-      visit(child);
-      return [child];
-    });
-  };
-  return () => visit;
+  return () => (tree: MdNode) => replaceReferenceText(tree, split);
 }
 
 /** Keys of every Project, archived ones included, loaded once per page load. */

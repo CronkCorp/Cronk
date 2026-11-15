@@ -180,6 +180,11 @@ export interface Cronk {
   holdRow(table: string, id: string): Promise<HeldLock>;
   /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
   holdTable(table: string): Promise<HeldLock>;
+  /**
+   * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
+   * before it shipped, so the next `restart` applies it again over the data already there.
+   */
+  undoMigration(id: string, undo: string): Promise<void>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
 }
@@ -270,6 +275,16 @@ export async function startCronk(): Promise<Cronk> {
     },
     holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
     holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
+    undoMigration: async (id, undo) => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        await client.query(undo);
+        await client.query("DELETE FROM schema_migrations WHERE id = $1", [id]);
+      } finally {
+        await client.end();
+      }
+    },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };
   /** Takes a lock with `sql` in a transaction it keeps open until released. */
