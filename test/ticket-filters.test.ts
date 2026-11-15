@@ -45,6 +45,22 @@ describe("Filtering a Project's Tickets", () => {
     expect(await listed(admin, "label=ui")).toEqual(["CRONK-1", "CRONK-3"]);
   });
 
+  it("narrows by Delegate, or to Tickets no Agent is delegated", async () => {
+    const { admin } = await startInstalledCronk();
+    const { ada } = await seed(admin);
+    const laptop = (await admin.post("/api/agents", { name: "claude-laptop" })).body.agent;
+    const desktop = (await admin.post("/api/agents", { name: "claude-desktop" })).body.agent;
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: laptop.id });
+    await admin.patch("/api/tickets/CRONK-3", { delegateId: desktop.id });
+    await admin.patch("/api/tickets/WEB-1", { delegateId: laptop.id });
+
+    expect(await listed(admin, `delegate=${laptop.id}`)).toEqual(["CRONK-1"]);
+    expect(await listed(admin, `delegate=${laptop.id}&delegate=${desktop.id}`)).toEqual(["CRONK-1", "CRONK-3"]);
+    expect(await listed(admin, "delegate=none")).toEqual(["CRONK-2", "CRONK-4"]);
+    expect(await listed(admin, `delegate=${desktop.id}&assignee=${ada.id}`)).toEqual(["CRONK-3"]);
+    expect((await admin.get("/api/projects/CRONK/tickets?delegate=someone")).status).toBe(400);
+  });
+
   it("matches any of several values for one field, and all of the fields given", async () => {
     const { admin } = await startInstalledCronk();
     const { ada } = await seed(admin);

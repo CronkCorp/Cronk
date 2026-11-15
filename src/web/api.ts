@@ -103,6 +103,7 @@ export interface TicketFilter {
   status?: string;
   category?: StatusCategory;
   assignee?: string;
+  delegate?: string;
   priority?: Priority;
   label?: string;
 }
