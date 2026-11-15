@@ -64,6 +64,7 @@ export async function migrate(db: Database, migrations: Migration[] = allMigrati
     for (const m of migrations) {
       if (applied.has(m.id)) continue;
       await tx.query(m.sql);
+      await m.backfill?.(tx);
       await tx.query("INSERT INTO schema_migrations (id) VALUES ($1)", [m.id]);
     }
   });

@@ -1,4 +1,4 @@
-import type { AgentActor } from "../actor.js";
+import { actorColumns, type AgentActor, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import type { ActivityKind } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
@@ -59,20 +59,24 @@ const toActivity = (row: ActivityRow): Activity => ({
   answer: row.answer_comment_id === null ? null : { commentId: row.answer_comment_id, at: row.answer_at! },
 });
 
-/** Records an Activity the Agent Session `agent.session` wrote on the Ticket. Callers check it holds the Claim. */
+/** An Agent writing in an Agent Session, as an Activity records it. */
+export type ActivityActor = (AgentActor & { session: { id: string } }) | (StoredActor & { kind: "agent"; agentId: string; sessionId: string });
+
+/** Records an Activity the Agent Session of `agent` wrote on the Ticket. Callers check it holds the Claim. */
 export async function insertActivity(
   db: Queryable,
   ticketId: string,
-  agent: AgentActor & { session: { id: string } },
+  agent: ActivityActor,
   input: { kind: ActivityKind; body: string; blocking: boolean },
   at: Date,
 ): Promise<Activity> {
+  const [, userId, agentId, sessionId] = actorColumns(agent);
   const { rows } = await db.query<ActivityRow>(
     `WITH inserted AS (
        INSERT INTO activities (ticket_id, kind, body, blocking, at, actor_user_id, actor_agent_id, actor_session_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *)
      ${selectFrom("inserted")}`,
-    [ticketId, input.kind, input.body, input.blocking, at, agent.owner.id, agent.agent.id, agent.session.id],
+    [ticketId, input.kind, input.body, input.blocking, at, userId, agentId, sessionId],
   );
   return toActivity(rows[0]!);
 }

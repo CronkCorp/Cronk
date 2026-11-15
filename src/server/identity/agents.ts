@@ -37,11 +37,17 @@ export const publicAgent = (agent: Agent, owner: User) => ({
   createdAt: agent.createdAt,
 });
 
-/** Registers an Agent for `owner`. Throws a unique violation if they already have one by that name. */
-export async function insertAgent(db: Queryable, input: { owner: User; name: string; now: Date }): Promise<Agent> {
+/**
+ * Registers an Agent for `owner`. Throws a unique violation if they already have one by that name.
+ * An import passes `removedAt` for an Agent that was already removed where it was exported.
+ */
+export async function insertAgent(
+  db: Queryable,
+  input: { owner: Pick<User, "id" | "workspaceId">; name: string; now: Date; removedAt?: Date | null },
+): Promise<Agent> {
   const { rows } = await db.query<AgentRow>(
-    "INSERT INTO agents (workspace_id, owner_id, name, created_at) VALUES ($1, $2, $3, $4) RETURNING *",
-    [input.owner.workspaceId, input.owner.id, input.name, input.now],
+    "INSERT INTO agents (workspace_id, owner_id, name, created_at, removed_at) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+    [input.owner.workspaceId, input.owner.id, input.name, input.now, input.removedAt ?? null],
   );
   return toAgent(rows[0]!);
 }

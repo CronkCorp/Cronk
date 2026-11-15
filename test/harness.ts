@@ -206,6 +206,11 @@ export interface Cronk {
    * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
    */
   holdPushes(): HeldPushes;
+  /**
+   * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
+   * before it shipped, so the next `restart` applies it again over the data already there.
+   */
+  undoMigration(id: string, undo: string): Promise<void>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
 }
@@ -307,6 +312,16 @@ export async function startCronk(): Promise<Cronk> {
       const release = live.hold();
       onTestFinished(release);
       return { release };
+    },
+    undoMigration: async (id, undo) => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        await client.query(undo);
+        await client.query("DELETE FROM schema_migrations WHERE id = $1", [id]);
+      } finally {
+        await client.end();
+      }
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
   };

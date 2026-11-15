@@ -1,7 +1,8 @@
-import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow } from "../actor.js";
+import { actorColumns, toRecordedActor, type Actor, type StoredActor, type RecordedActor, type RecordedActorRow } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
+import { recordTicketMentions } from "./ticket-mentions.js";
 
 /**
  * Documents: Markdown (ADR 0003) belonging to a Project or the Workspace, arranged
@@ -127,14 +128,42 @@ export async function insertDocument(
   );
   const id = rows[0]!.id;
   await insertVersion(db, id, { number: 1, title: input.title, body: input.body, actor: input.actor, now: input.now, restoredFrom: null });
+  await recordTicketMentions(db, id, input);
   return (await findDocument(db, input.tree.workspaceId, id))!;
+}
+
+/** A Document's row as written in full: by a Report, which isn't in the page tree, and by an import, which keeps its times. */
+export interface DocumentRowInput {
+  workspaceId: string;
+  projectId: string | null;
+  parentId: string | null;
+  position: number;
+  title: string;
+  body: string;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+  ticketId: string | null;
+  claimId: string | null;
+}
+
+/** Writes a Document's row as given, with the Tickets its title and body mention, and returns its id; callers record its Versions. Run inside a transaction. */
+export async function insertDocumentRow(db: Queryable, d: DocumentRowInput): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO documents (workspace_id, project_id, parent_id, position, title, body, version, created_at, updated_at, ticket_id, claim_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    [d.workspaceId, d.projectId, d.parentId, d.position, d.title, d.body, d.version, d.createdAt, d.updatedAt, d.ticketId, d.claimId],
+  );
+  const id = rows[0]!.id;
+  await recordTicketMentions(db, id, d);
+  return id;
 }
 
 /** Records Version `number` of a Document. Run inside the transaction that creates or saves it. */
 export async function insertVersion(
   db: Queryable,
   documentId: string,
-  v: { number: number; title: string; body: string; actor: Actor; now: Date; restoredFrom: number | null },
+  v: { number: number; title: string; body: string; actor: Actor | StoredActor; now: Date; restoredFrom: number | null },
 ): Promise<void> {
   await db.query(
     `INSERT INTO document_versions (document_id, number, title, body, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, restored_from)
@@ -224,6 +253,7 @@ export async function saveVersion(
     number,
     save.now,
   ]);
+  await recordTicketMentions(db, document.id, save);
   return { ...document, title: save.title, body: save.body, version: number, updatedAt: save.now };
 }
 
@@ -310,10 +340,9 @@ export async function listLinkedDocuments(
   const select = `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt"
                   FROM (${SELECT_DOCUMENTS}) d`;
   const reports = await db.query<LinkedDocument>(`${select} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
-  // The key is letters, digits and one hyphen, so it reads literally in a regular expression; \m and \M keep CRONK-3 from matching CRONK-30.
   const mentions = await db.query<LinkedDocument>(
-    `${select}
-     WHERE d.ticket_id IS DISTINCT FROM $1 AND (d.title || ' ' || d.body) ~ ('\\m' || $2 || '\\M')
+    `${select} JOIN document_ticket_mentions m ON m.document_id = d.id AND m.ticket_key = $2
+     WHERE d.ticket_id IS DISTINCT FROM $1
        AND ${documentReadableSql("d", "$3::uuid[]", "$4::uuid")}
      ORDER BY d.updated_at DESC, d.id LIMIT ${MENTIONS_LIMIT}`,
     [ticket.id, ticket.key, readable.projectIds, readable.workspaceId],

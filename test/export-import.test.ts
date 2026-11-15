@@ -361,6 +361,36 @@ describe("an export taken apart and archived again", () => {
   });
 });
 
+describe("an export edited by hand", () => {
+  it("is refused when it says what Cronk can't hold, naming the file", async () => {
+    const before = await busyWorkspace();
+    const files = await untarGz((await before.admin.download("/api/export")).body);
+    const edited = async (path: string, edit: (data: any) => void, rename?: string) => {
+      const { data, body } = markdown(files[path]);
+      edit(data);
+      const copy = { ...files };
+      delete copy[path];
+      copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
+      return tarGz(copy);
+    };
+    const { admin } = await startInstalledCronk("Elsewhere");
+
+    const answeredPlan = await admin.upload("/api/import", await edited("projects/CRONK/tickets/CRONK-1.activities/1.md", (d) => (d.answer = 1)));
+    expect(answeredPlan.status).toBe(400);
+    expect(answeredPlan.body.error).toMatch(/CRONK-1\.activities\/1\.md answer is only for a question/);
+
+    const gap = await admin.upload("/api/import", await edited("guidance.versions/2.md", () => {}, "guidance.versions/3.md"));
+    expect(gap.status).toBe(400);
+    expect(gap.body.error).toMatch(/guidance\.versions\/3\.md must follow Version 2/);
+
+    const twice = await admin.upload("/api/import", await edited("projects/CRONK/project.md", (d) => d.members.push(d.members[0])));
+    expect(twice.status).toBe(400);
+    expect(twice.body.error).toMatch(/project\.md lists .* as a member twice/);
+
+    expect((await admin.get("/api/projects")).body.projects).toEqual([]);
+  });
+});
+
 describe("a User an import brought in", () => {
   /** A fresh installation holding an import of a Workspace where Grace was assigned CRONK-1. */
   async function importedGrace() {

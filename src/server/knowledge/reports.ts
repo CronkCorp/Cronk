@@ -1,7 +1,7 @@
 import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { ticketKeySql, type Ticket } from "../work/tickets.js";
-import { findDocument, insertVersion, type Document } from "./documents.js";
+import { findDocument, insertDocumentRow, insertVersion, type Document } from "./documents.js";
 
 /**
  * Reports: Documents of findings an Agent Session writes on a Ticket while holding its Claim.
@@ -70,12 +70,19 @@ export async function insertReport(
   input: { ticket: Ticket; claimId: string; agent: AgentActor; title: string; body: string; now: Date },
 ): Promise<Document> {
   const workspaceId = actingUser(input.agent).workspaceId;
-  const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO documents (workspace_id, project_id, parent_id, position, title, body, version, created_at, updated_at, ticket_id, claim_id)
-     VALUES ($1, $2, NULL, 0, $3, $4, 1, $5, $5, $6, $7) RETURNING id`,
-    [workspaceId, input.ticket.projectId, input.title, input.body, input.now, input.ticket.id, input.claimId],
-  );
-  const id = rows[0]!.id;
+  const id = await insertDocumentRow(db, {
+    workspaceId,
+    projectId: input.ticket.projectId,
+    parentId: null,
+    position: 0,
+    title: input.title,
+    body: input.body,
+    version: 1,
+    createdAt: input.now,
+    updatedAt: input.now,
+    ticketId: input.ticket.id,
+    claimId: input.claimId,
+  });
   await insertVersion(db, id, { number: 1, title: input.title, body: input.body, actor: input.agent, now: input.now, restoredFrom: null });
   return (await findDocument(db, workspaceId, id))!;
 }

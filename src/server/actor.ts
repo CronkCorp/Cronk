@@ -30,8 +30,20 @@ export type RecordedActor =
   | { kind: "user"; id: string; name: string }
   | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
 
+/**
+ * An Actor as a history row stores it, by id: the acting User (an Agent's Owner), and the Agent and
+ * Agent Session if an Agent acted. An import records history this way, for Actors not calling now.
+ */
+export interface StoredActor {
+  kind: Actor["kind"];
+  userId: string;
+  agentId: string | null;
+  sessionId: string | null;
+}
+
 /** The values a history row stores for its Actor: `actor_kind`, `actor_user_id` (the Owner, for an Agent), `actor_agent_id`, `actor_session_id`. */
-export function actorColumns(actor: Actor): [kind: Actor["kind"], userId: string, agentId: string | null, sessionId: string | null] {
+export function actorColumns(actor: Actor | StoredActor): [kind: Actor["kind"], userId: string, agentId: string | null, sessionId: string | null] {
+  if ("userId" in actor) return [actor.kind, actor.userId, actor.agentId, actor.sessionId];
   const agent = actor.kind === "agent" ? actor : undefined;
   return [actor.kind, actingUser(actor).id, agent?.agent.id ?? null, agent?.session?.id ?? null];
 }

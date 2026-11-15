@@ -62,12 +62,21 @@ export async function addRelation(db: Queryable, workspaceId: string, input: Rel
     await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
     if (await wouldCycle(db, row.from, row.to)) return false;
   }
+  if (await storeRelation(db, row)) await recordBothSides(db, "relation added", input);
+  return true;
+}
+
+/**
+ * Stores a relation between two Tickets by id, without checks or history, as an import does;
+ * relating is stored once, lower id first. Returns whether it wasn't stored already.
+ */
+export async function storeRelation(db: Queryable, row: { kind: "blocks" | "relates_to"; from: string; to: string }): Promise<boolean> {
+  const [from, to] = row.kind === "relates_to" && row.to < row.from ? [row.to, row.from] : [row.from, row.to];
   const { rowCount } = await db.query(
     `INSERT INTO ticket_relations (kind, from_ticket_id, to_ticket_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-    [row.kind, row.from, row.to],
+    [row.kind, from, to],
   );
-  if (rowCount !== 0) await recordBothSides(db, "relation added", input);
-  return true;
+  return rowCount !== 0;
 }
 
 /** Removes a relation, recording it in both Tickets' history. Returns false if there was no such relation. Run inside a transaction. */
