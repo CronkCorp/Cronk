@@ -5,6 +5,7 @@ import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { inboxesChanged } from "../inbox/inbox.js";
+import { documentTopic } from "../live/topics.js";
 import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findTicketByKey } from "../work/tickets.js";
 import { documentFor } from "./document-reads.js";
@@ -194,6 +195,34 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
     );
 
+    app.get<{ Params: { id: string } }>(
+      "/api/documents/:id/events",
+      {
+        schema: {
+          params: documentParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of the Document's changes as they happen, for as long as the caller can see it; it ends " +
+                "once the Document is deleted. It opens with a `ready` event; each new Comment arrives as a `comment` event whose data " +
+                "is `{ comment }`, a Comment as JSON, and each new Version, saved or restored, as a `version` event whose data is " +
+                "`{ version }`, its number.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const document = await documentFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await documentFor(ctx.db, actor, document.id, "read"));
+        };
+        ctx.live.stream(reply, documentTopic(document.id), canSee);
+      },
+    );
+
     app.patch<{ Params: { id: string }; Body: { baseVersion: number; title?: string; body?: string } }>(
       "/api/documents/:id",
       {
@@ -227,6 +256,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
         inboxesChanged(ctx.live, [assignee]);
+        if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document };
       },
     );
@@ -282,6 +312,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
         inboxesChanged(ctx.live, [assignee]);
+        if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document };
       },
     );
@@ -376,15 +407,17 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const assignee = await transaction(ctx.db, async (tx) => {
+        const { id, assignee } = await transaction(ctx.db, async (tx) => {
           const document = await lockForDelete(tx, actor, request.params.id);
           await requireCurrent(tx, document, request.query.baseVersion, "delete");
           if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
             throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
           }
-          return reportAssignee(tx, actor, document);
+          return { id: document.id, assignee: await reportAssignee(tx, actor, document) };
         });
         inboxesChanged(ctx.live, [assignee]);
+        // Its watchers, no longer able to see it, stop watching.
+        ctx.live.publish(documentTopic(id), { event: "deleted", data: {} });
         return reply.code(204).send();
       },
     );
@@ -446,11 +479,16 @@ export function knowledgeRoutes(ctx: AppContext) {
           return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
         inboxesChanged(ctx.live, [assignee]);
+        if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document };
       },
     );
   };
 }
+
+/** Tells the Document's watchers of its new Version. Call once it is committed. */
+const versionSaved = (ctx: AppContext, document: Document) =>
+  ctx.live.publish(documentTopic(document.id), { event: "version", data: { version: document.version } });
 
 /** The page tree of a Project in the Actor's Workspace, or the Workspace's own with a null `projectId`. */
 const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId });

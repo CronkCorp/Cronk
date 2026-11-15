@@ -260,7 +260,7 @@ export async function startCronk(): Promise<Cronk> {
 
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()) });
+  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),

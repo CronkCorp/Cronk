@@ -26,7 +26,7 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
   lines.push("", "## Your Ready Tickets", "");
   if (welcome.readyTickets.length === 0) lines.push("None right now.");
   else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.", "");
-  for (const t of welcome.readyTickets) lines.push(`- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`);
+  for (const t of welcome.readyTickets) lines.push(readyLine(t));
   lines.push("", "## Work waiting for you", "");
   if (welcome.waitingWork.length === 0) lines.push("Nothing new since your last Agent Session.");
   else lines.push("Comments that concern you, posted since your last Agent Session, oldest first. Read the whole conversation with the `comments` tool.", "");
@@ -50,4 +50,9 @@ export function waitingLines({ reason, comment, ticket, document }: WaitingWork)
   const who = comment.actor.kind === "agent" ? `the Agent ${comment.actor.name}` : comment.actor.name;
   const quoted = comment.body.trim().split("\n").map((line) => `  > ${line}`);
   return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quoted];
+}
+
+/** One Ready Ticket as a welcome line: its key, title, Status and any Priority. */
+export function readyLine(t: Welcome["readyTickets"][number]): string {
+  return `- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`;
 }

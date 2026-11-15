@@ -96,8 +96,16 @@ export class LiveUpdates {
    * an event whose change committed before `catchUp` read its id, but that is published only
    * after `ready` is written, is then above `ready`'s id too, as long as its position was
    * `expect`ed before its change committed.
+   *
+   * `admits` picks the events published on `topic` that this stream sends; it sends all of them by default.
    */
-  stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>, catchUp?: () => Promise<CatchUp>): void {
+  stream(
+    reply: FastifyReply,
+    topic: string,
+    canSee: () => Promise<boolean>,
+    catchUp?: () => Promise<CatchUp>,
+    admits: (event: LiveEvent) => boolean = () => true,
+  ): void {
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
@@ -129,7 +137,11 @@ export class LiveUpdates {
     const fresh = (event: LiveEvent) => event.id === undefined || !sent.has(event.id);
     // While catching up, live events wait here instead, to be sent before `ready`.
     let held: LiveEvent[] | null = catchUp ? [] : null;
-    const unsubscribe = this.subscribe(topic, (event) => (held ? held.push(event) : checked(() => fresh(event) && write(event))));
+    const unsubscribe = this.subscribe(topic, (event) => {
+      if (!admits(event)) return;
+      if (held) held.push(event);
+      else checked(() => fresh(event) && write(event));
+    });
     const heartbeat = setInterval(() => checked(() => res.write(": keep-alive\n\n")), HEARTBEAT_MS).unref();
     this.streams.add(end);
     res.on("close", end);

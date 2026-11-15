@@ -9,3 +9,5 @@ A stream checks access when it opens, again before every event it sends and on i
 - Running several Cronk server processes behind one address would need the publishing moved to something they share, such as Postgres `LISTEN`/`NOTIFY`; the routes and streams would not change.
 - Each watcher costs an access check per event, which is fine for one server's watchers but would want batching if a topic had very many.
 - Other live views (the Inbox, boards) add a topic and publish to it; they reuse the same stream and access re-check.
+- Projects (`project:<id>`, for the list and board) and Documents (`document:<id>`) have topics of their own. A Claim lapsing marks no call, so the server looks for lapsed Claims every few seconds to publish them.
+- The Agent stream also tells a live Session when a Ticket becomes Ready for its Agent (`ticketReady`). These events carry no id and are not replayed on reopening: the next welcome lists Ready Tickets anyway.
