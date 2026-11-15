@@ -446,3 +446,12 @@ a.link:hover { text-decoration: underline; }
 .inbox-detail .comment-form { margin-top: 0; }
 .inbox-detail .actions { flex-wrap: wrap; align-items: center; }
 .inbox-keys { margin: 8px 0 0; font-size: 12px; }
+.inbox-back { display: none; }
+@media (max-width: 759px) {
+  .inbox-split { flex-direction: column; min-height: 0; }
+  .inbox-list { width: auto; border-right: 0; }
+  .inbox-detail { padding: 16px; }
+  .inbox-back { display: inline-block; margin-bottom: 12px; font-size: 13px; }
+  .inbox-split.picked .inbox-list { display: none; }
+  .inbox-split:not(.picked) .inbox-detail { display: none; }
+}

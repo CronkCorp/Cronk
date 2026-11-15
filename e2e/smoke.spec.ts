@@ -1030,8 +1030,10 @@ test("review a Ticket from the Inbox's detail pane: read its Report inline, send
   await expect(detail).toContainText("In Review");
   await expect(detail.getByRole("link", { name: "Open Ticket" })).toHaveAttribute("href", `/tickets/${second.key}`);
 
-  // Send back needs a Comment saying what is left to do.
-  await detail.getByRole("button", { name: "Send back…" }).click();
+  // S opens Send back, which needs a Comment saying what is left to do.
+  await page.locator("body").press("s");
+  await expect(detail.getByLabel("What is left to do")).toBeFocused();
+  await expect(detail.getByLabel("What is left to do")).toHaveValue("");
   await expect(detail.getByRole("button", { name: "Send back", exact: true })).toBeDisabled();
   await detail.getByLabel("What is left to do").fill("Add a test.");
   await detail.getByRole("button", { name: "Send back", exact: true }).click();
@@ -1051,6 +1053,69 @@ test("review a Ticket from the Inbox's detail pane: read its Report inline, send
   await expect(detail).toHaveCount(0);
   await page.goto(`/tickets/${first.key}`);
   await expect(page.getByRole("complementary", { name: "Ticket fields" }).getByRole("button", { name: /^Status/ })).toContainText("Done");
+});
+
+// Runs after the tests above, so Ada exists.
+test("answer a blocking question from the Inbox's detail pane, moving through the groups with the keyboard", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox questions", key: "INQ" } });
+  await reviewWithReport(page, request, "triage-bot-1", "Show Claim expiry", "INQ", "Done.");
+  const { ticket, agentCall } = await delegatedTicket(page, request, "triage-bot-2", "Rate-limit sign-in attempts", "INQ");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const ask = (body: string, blocking: boolean) => request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body, blocking } });
+  await ask("Keep the **casing** of the first use?", false);
+
+  await page.goto("/inbox?project=INQ");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await expect(list.getByRole("heading", { name: "Questions · 1" })).toBeVisible();
+  // A new blocking question arrives live, without a reload, in its own group at the top.
+  await ask("Per **email** or per IP?", true);
+  await expect(list.getByRole("heading")).toHaveText(["Blocking · 1", "Questions · 1", "To review · 1"]);
+  const blocking = list.getByRole("list", { name: "Blocking" }).getByRole("link");
+  await expect(blocking).toContainText("Per email or per IP?");
+  await expect(page.getByRole("group", { name: "Filters" }).getByRole("button", { name: "Everything 3" })).toBeVisible();
+
+  // J and K move through the list across the groups.
+  await blocking.click();
+  await expect(detail).toContainText("Blocking question");
+  await page.locator("body").press("j");
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await page.locator("body").press("j");
+  await expect(detail).toContainText("Done.");
+  await page.locator("body").press("k");
+  await page.locator("body").press("k");
+  await expect(detail.getByRole("strong").filter({ hasText: "email" })).toBeVisible();
+  await expect(detail).toContainText("triage-bot-2 is waiting");
+  await expect(detail).toContainText("The answer reaches triage-bot-2 as Waiting Work.");
+
+  // A focuses the answer box; the shortcuts type into it rather than moving the list.
+  await page.locator("body").press("a");
+  // Located by its placeholder, as a label's text grows with what is typed in the field inside it.
+  const answer = detail.getByPlaceholder("Answer triage-bot-2… (Markdown)");
+  await expect(answer).toBeFocused();
+  await expect(answer).toHaveValue("");
+  await answer.pressSequentially("just email");
+  await expect(answer).toHaveValue("just email");
+  await expect(blocking).toHaveAttribute("aria-current", "true");
+  await detail.getByRole("button", { name: "Post answer" }).click();
+  // The answered question leaves the Inbox, and the next item is selected.
+  await expect(list.getByRole("list", { name: "Blocking" })).toHaveCount(0);
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await page.goto(`/tickets/${ticket.key}`);
+  await expect(page.getByRole("list", { name: "Timeline" }).getByRole("list", { name: "Replies" })).toContainText("just email");
+
+  // On a phone the list and the detail stack: picking an item opens it full width, with a way back to the list.
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto("/inbox?project=INQ");
+  await expect(list).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await list.getByRole("link", { name: /casing/ }).click();
+  await expect(detail.getByRole("strong").filter({ hasText: "casing" })).toBeVisible();
+  await expect(list).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await detail.getByRole("link", { name: "Back to the list" }).click();
+  await expect(list).toBeVisible();
 });
 
 /** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */

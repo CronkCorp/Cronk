@@ -3,7 +3,7 @@ import { Chip, KindLabel, StatusPill, type Kind } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
-import { useEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
@@ -132,7 +132,17 @@ function FilterChip(props: { pressed: boolean; children: string; onClick?: () =>
 
 /** The actions the selected item offers the keyboard, registered by its detail pane. */
 interface DetailKeys {
+  answer?: () => void;
   complete?: () => void;
+  sendBack?: () => void;
+}
+
+/** Hands the detail pane's keyboard actions to the page while the pane is shown, and takes them back when it goes. */
+function useDetailKeys(keys: { current: DetailKeys }, actions: DetailKeys) {
+  useEffect(() => {
+    keys.current = actions;
+    return () => void (keys.current = {});
+  });
 }
 
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
@@ -145,6 +155,13 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
   const keys = useRef<DetailKeys>({});
   const select = (item: InboxItem | undefined) => navigate(inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) }), { replace: true });
 
+  // The latest list, for the keyboard handler registered once below.
+  const move = useRef<(step: 1 | -1) => void>(() => {});
+  move.current = (step) => {
+    const next = ordered[index + step];
+    if (next) select(next);
+  };
+
   /** After acting on `item`, select the one after it, or the one before when it was the last. */
   const actedOn = (item: InboxItem) => {
     const at = ordered.findIndex((other) => itemId(other) === itemId(item));
@@ -156,10 +173,11 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return;
       const key = event.key.toLowerCase();
-      if (key === "c" && keys.current.complete) {
-        event.preventDefault();
-        keys.current.complete();
-      }
+      const run = key === "j" ? () => move.current(1) : key === "k" ? () => move.current(-1) : { a: keys.current.answer, c: keys.current.complete, s: keys.current.sendBack }[key];
+      if (!run) return;
+      // Kept from the field a shortcut focuses, so A and S don't type their own letter into it.
+      event.preventDefault();
+      run();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -175,7 +193,7 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
   }
 
   return (
-    <div className="inbox-split">
+    <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
       <section className="inbox-list" aria-label="Inbox items">
         {GROUPS.map((group) => {
           const held = ordered.filter(group.holds);
@@ -195,9 +213,12 @@ function Triage(props: { items: InboxItem[]; address: InboxAddress; onChanged: (
         })}
       </section>
       <section className="inbox-detail" aria-label="Selected item">
+        <Link to={inboxPath({ filter: props.address.filter })} className="link inbox-back">
+          Back to the list
+        </Link>
         {selected &&
           (selected.kind === "question" ? (
-            <QuestionDetail key={itemId(selected)} item={selected} onDone={() => actedOn(selected)} />
+            <QuestionDetail key={itemId(selected)} item={selected} keys={keys} onDone={() => actedOn(selected)} />
           ) : (
             <ReviewDetail key={itemId(selected)} item={selected} keys={keys} onDone={() => actedOn(selected)} />
           ))}
@@ -253,8 +274,10 @@ function DetailHead(props: { item: InboxItem; label: string; kind: Kind }) {
 }
 
 /** A question in full: the Agent, its Agent Session, the question, and an answer box. */
-function QuestionDetail(props: { item: QuestionItem; onDone: () => void; answerRef?: Ref<HTMLTextAreaElement> }) {
+function QuestionDetail(props: { item: QuestionItem; keys: { current: DetailKeys }; onDone: () => void }) {
   const { question, ticket } = props.item;
+  const answerBox = useRef<HTMLTextAreaElement>(null);
+  useDetailKeys(props.keys, { answer: () => answerBox.current?.focus() });
   return (
     <div className="inbox-detail-body">
       <DetailHead item={props.item} kind={question.blocking ? "blocking" : "question"} label={question.blocking ? "Blocking question" : "Question"} />
@@ -271,7 +294,7 @@ function QuestionDetail(props: { item: QuestionItem; onDone: () => void; answerR
         submitLabel="Post answer"
         placeholder={`Answer ${question.agent.name}… (Markdown)`}
         hint={`The answer reaches ${question.agent.name} as Waiting Work.`}
-        inputRef={props.answerRef}
+        inputRef={answerBox}
         post={(input) => api.postTicketComment(ticket.key, { ...input, replyToActivityId: question.id })}
         onPosted={props.onDone}
       />
@@ -295,8 +318,12 @@ function ReviewDetail(props: { item: ReviewItem; keys: { current: DetailKeys }; 
   const runComplete = () => {
     if (!complete.busy) void complete.run();
   };
-  props.keys.current = { complete: runComplete };
-  useEffect(() => () => void (props.keys.current = {}), []);
+  const commentBox = useRef<HTMLTextAreaElement>(null);
+  // Opening the Send back box puts the cursor in it, whether from the button or from S.
+  useEffect(() => {
+    if (sendingBack) commentBox.current?.focus();
+  }, [sendingBack]);
+  useDetailKeys(props.keys, { complete: runComplete, sendBack: () => (sendingBack ? commentBox.current?.focus() : setSendingBack(true)) });
 
   return (
     <div className="inbox-detail-body">
@@ -321,7 +348,7 @@ function ReviewDetail(props: { item: ReviewItem; keys: { current: DetailKeys }; 
             void sendBack.run();
           }}
         >
-          <TextArea label="What is left to do" value={comment} onChange={setComment} rows={3} />
+          <TextArea label="What is left to do" value={comment} onChange={setComment} rows={3} inputRef={commentBox} />
           <div className="actions">
             <Button type="submit" disabled={sendBack.busy || !comment.trim()}>Send back</Button>
             <Button type="button" variant="secondary" onClick={() => setSendingBack(false)}>Cancel</Button>
