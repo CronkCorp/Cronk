@@ -10,11 +10,13 @@ export interface User {
   role: Role;
   /** False once an Admin has deactivated the User. */
   active: boolean;
+  /** False for a User an import brought in who hasn't accepted an invitation, so has no password yet. */
+  joined: boolean;
 }
 
 /** The shape of a User the API returns. */
 export function publicUser(user: User) {
-  return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active };
+  return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active, joined: user.joined };
 }
 
 export interface UserRow {
@@ -27,6 +29,12 @@ export interface UserRow {
   deactivated_at: Date | null;
 }
 
+/**
+ * The password hash of a User who has none yet, as an import creates them. No password matches it,
+ * so they can't sign in until they accept an invitation.
+ */
+export const NO_PASSWORD = "!";
+
 export function toUser(row: UserRow): User {
   return {
     id: row.id,
@@ -35,6 +43,7 @@ export function toUser(row: UserRow): User {
     name: row.name,
     role: row.role,
     active: row.deactivated_at === null,
+    joined: row.password_hash !== NO_PASSWORD,
   };
 }
 
@@ -60,6 +69,38 @@ export async function findUserByEmail(db: Queryable, email: string): Promise<{ u
   const { rows } = await db.query<UserRow>("SELECT * FROM users WHERE lower(email) = lower($1)", [email]);
   const row = rows[0];
   return row && { user: toUser(row), passwordHash: row.password_hash };
+}
+
+/** Adds a User who has no password yet, deactivated, as an import brings them in. */
+export async function insertUserWithoutPassword(
+  db: Queryable,
+  input: { workspaceId: string; email: string; name: string; role: Role; now: Date },
+): Promise<User> {
+  const { rows } = await db.query<UserRow>(
+    `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING *`,
+    [input.workspaceId, input.email, input.name, NO_PASSWORD, input.role, input.now],
+  );
+  return toUser(rows[0]!);
+}
+
+/**
+ * Gives a User who has no password yet (one an import brought in) the name, password and role
+ * from an accepted invitation, and reactivates them, keeping their id. As in `updateUser`, an
+ * Admin's Project listings are dropped. Returns undefined if the email has no User without a password.
+ */
+export async function claimUserWithoutPassword(
+  db: Queryable,
+  input: { workspaceId: string; email: string; name: string; passwordHash: string; role: Role },
+): Promise<User | undefined> {
+  const { rows } = await db.query<UserRow>(
+    `UPDATE users SET name = $3, password_hash = $4, role = $5, deactivated_at = NULL
+     WHERE workspace_id = $1 AND lower(email) = lower($2) AND password_hash = $6 RETURNING *`,
+    [input.workspaceId, input.email, input.name, input.passwordHash, input.role, NO_PASSWORD],
+  );
+  if (!rows[0]) return undefined;
+  if (input.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [rows[0].id]);
+  return toUser(rows[0]);
 }
 
 export async function findUserById(db: Queryable, id: string): Promise<User | undefined> {

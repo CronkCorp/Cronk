@@ -97,7 +97,16 @@ export function conversationRoutes(ctx: AppContext) {
       return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at) };
     };
 
-    /** Tells each Agent the Comment now waits for, through its live Agent Sessions. Call once committed. */
+    /**
+     * Tells each Agent the Comment now waits for, through its live Agent Sessions. Call once committed.
+     *
+     * Posts for the same Agent commit in position order (`markWaiting`), but their pushes aren't
+     * serialized: in theory a later post's event could be pushed before an earlier one's, and a
+     * stream dropped between the two, reopened from the later id, would skip the earlier work
+     * (its welcome still lists it). Accepted: the earlier post pushes as soon as its COMMIT
+     * answers, without touching the database again, while the later one, which waited on that
+     * COMMIT, still has round trips to make before it can push.
+     */
     const pushWaiting = (posted: Posted, on: Omit<WaitingWork, "reason" | "comment">) => {
       for (const { agentId, reason, seq } of posted.waiting) {
         ctx.live.publish(agentTopic(agentId), waitingEvent(seq, { reason, comment: publicComment(posted.comment), ...on }));

@@ -135,7 +135,7 @@ _Avoid_: ADR (in the product), RFC, ruling
 ### Actors
 
 **User**:
-A human who signs in to Cronk.
+A human who signs in to Cronk. A User an import brought in hasn't **joined** yet: they have no password until an Admin invites them and they accept.
 _Avoid_: Person, human account
 
 **Admin**:

@@ -15,6 +15,7 @@ import {
   roleSchema,
   userIdParam,
 } from "../schemas.js";
+import { inboxesChanged } from "../inbox/inbox.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -27,7 +28,7 @@ import {
   publicInvitation,
 } from "./invitations.js";
 import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
+import { claimUserWithoutPassword, countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -153,7 +154,11 @@ export function identityRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "invite Users");
         const inviteeEmail = request.body.email.trim();
-        if (await findUserByEmail(ctx.db, inviteeEmail)) throw new HttpError(409, `${inviteeEmail} is already a User`);
+        // A User an import brought in to this Workspace hasn't joined yet; an invitation is how they do.
+        const existing = (await findUserByEmail(ctx.db, inviteeEmail))?.user;
+        if (existing && (existing.joined || existing.workspaceId !== user.workspaceId)) {
+          throw new HttpError(409, `${inviteeEmail} is already a User`);
+        }
         const { invitation, token } = await createInvitation(ctx.db, {
           workspaceId: user.workspaceId,
           email: inviteeEmail,
@@ -246,15 +251,11 @@ export function identityRoutes(ctx: AppContext) {
           const invitation = await findInvitationByToken(tx, request.params.token, now, { forUpdate: true });
           if (!invitation) throw new HttpError(404, INVITATION_GONE);
           await deleteInvitation(tx, invitation.workspaceId, invitation.id);
+          const details = { workspaceId: invitation.workspaceId, email: invitation.email, name: request.body.name.trim(), passwordHash, role: invitation.role };
+          const claimed = await claimUserWithoutPassword(tx, details);
+          if (claimed) return claimed;
           try {
-            return await insertUser(tx, {
-              workspaceId: invitation.workspaceId,
-              email: invitation.email,
-              name: request.body.name.trim(),
-              passwordHash,
-              role: invitation.role,
-              now,
-            });
+            return await insertUser(tx, { ...details, now });
           } catch (err) {
             // Someone with this email became a User after the invitation was sent.
             if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new HttpError(409, `${invitation.email} is already a User`);
@@ -301,6 +302,8 @@ export function identityRoutes(ctx: AppContext) {
         );
         if (updated === "last admin") throw new HttpError(409, "The Workspace needs at least one active Admin");
         if (!updated) throw new HttpError(404, "No such User");
+        // A new role can show or hide private Projects, and so the items in them.
+        if (request.body.role !== undefined) inboxesChanged(ctx.live, [updated.id]);
         return { user: publicUser(updated) };
       },
     );
