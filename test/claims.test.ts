@@ -87,6 +87,22 @@ describe("A Claim", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
   });
 
+  it("ends when a User completes or cancels its Ticket, so the Agent Session can't keep working on it", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
+    const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
+    const agent = await session();
+
+    for (const [key, category] of [["CRONK-1", "completed"], ["CRONK-2", "canceled"]] as const) {
+      await agent.post(`/api/tickets/${key}/claim`);
+      await admin.patch(`/api/tickets/${key}`, { statusId: inCategory(category) });
+
+      expect((await admin.get(`/api/tickets/${key}`)).body.claim).toBeNull();
+      expect((await agent.patch(`/api/tickets/${key}`, { statusId: inCategory("started") })).status).toBe(409);
+      expect((await agent.post(`/api/tickets/${key}/activities`, { kind: "progress", body: "Still going" })).status).toBe(409);
+    }
+  });
+
   it("has its silence threshold set only by Admins", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     const bob = await joinAs(cronk, admin, "bob@example.com");
