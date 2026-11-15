@@ -159,7 +159,7 @@ a.link:hover { text-decoration: underline; }
 .activity-body > :first-child { margin-top: 4px; }
 .activity-body > :last-child { margin-bottom: 0; }
 /* Comments are conversation, set apart from an Agent's Activities: no kind colour, a tinted background. */
-.comment { background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; }
+li.comment { background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; }
 .comment-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; }
 .comment-body > :first-child { margin-top: 4px; }
 .comment-body > :last-child { margin-bottom: 0; }
@@ -272,7 +272,7 @@ a.link:hover { text-decoration: underline; }
 .document-body .markdown > * { max-width: 720px; }
 .comment-margin { display: flex; flex-direction: column; gap: 8px; }
 .margin-cards { gap: 8px; }
-.margin-card { background: var(--surface); border: 1px solid var(--border); border-style: solid; }
+li.margin-card { background: var(--surface); border: 1px solid var(--border); border-style: solid; }
 .margin-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .margin-card:focus-visible { outline: none; }
 .comment-margin .whole-document { align-self: stretch; }
