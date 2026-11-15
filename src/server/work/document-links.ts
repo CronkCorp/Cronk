@@ -18,7 +18,7 @@ export interface DocumentLinkChange {
 
 /** Links a Document to a Ticket, recording it in the Ticket's history unless it was linked already. Run inside a transaction. */
 export async function linkDocument(db: Queryable, input: DocumentLinkChange): Promise<void> {
-  if (await storeDocumentLink(db, input.ticket.id, input.document.id)) await record(db, "document linked", input);
+  if (await storeDocumentLink(db, input.ticket.id, input.document.id)) await recordLinkChange(db, "document linked", input);
 }
 
 /** Unlinks a Document from a Ticket, recording it in the Ticket's history. Returns false if it wasn't linked. Run inside a transaction. */
@@ -28,7 +28,7 @@ export async function unlinkDocument(db: Queryable, input: DocumentLinkChange): 
     input.document.id,
   ]);
   if (rowCount === 0) return false;
-  await record(db, "document unlinked", input);
+  await recordLinkChange(db, "document unlinked", input);
   return true;
 }
 
@@ -41,6 +41,6 @@ export async function storeDocumentLink(db: Queryable, ticketId: string, documen
   return rowCount !== 0;
 }
 
-async function record(db: Queryable, change: "document linked" | "document unlinked", { ticket, document, actor, now }: DocumentLinkChange): Promise<void> {
+async function recordLinkChange(db: Queryable, change: "document linked" | "document unlinked", { ticket, document, actor, now }: DocumentLinkChange): Promise<void> {
   await recordChange(db, ticket.id, actor, now, { change, document: { id: document.id, title: document.title, projectKey: document.projectKey } });
 }

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -381,7 +381,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       updatedAt: timestamp,
       reason: {
         type: "string",
-        enum: ["report", "linked", "mention"],
+        enum: LINK_REASONS,
         description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
       },
     }),

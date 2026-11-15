@@ -3,6 +3,7 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
 import { recordTicketMentions } from "./ticket-mentions.js";
+import type { LinkReason } from "../../shared/values.js";
 
 /**
  * Documents: Markdown (ADR 0003) belonging to a Project or the Workspace, arranged
@@ -310,9 +311,6 @@ export async function deleteDocument(db: Queryable, tree: Tree, document: Docume
   await db.query("DELETE FROM documents WHERE id = $1", [document.id]);
   return true;
 }
-
-/** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
-export type LinkReason = "report" | "linked" | "mention";
 
 /** A Document as a Ticket lists it among its linked Documents, without its body; read it by its id. */
 export interface LinkedDocument {
