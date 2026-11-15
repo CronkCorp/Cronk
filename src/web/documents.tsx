@@ -1,6 +1,7 @@
 import { ConfirmDialog, Popover } from "./components/overlays.js";
 import { Button, buttonClass } from "./components/button.js";
 import { Chip } from "./components/tags.js";
+import { Banner } from "./components/banner.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
@@ -17,7 +18,7 @@ import {
 import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
-import { CronkMarkdown, type Highlight } from "./markdown.js";
+import { CronkMarkdown, highlightIds, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { useSelectedPassage, type SelectedPassage } from "./selected-passage.js";
 import { MarkdownEditor } from "./markdown-editor.js";
@@ -206,7 +207,7 @@ function usePlacedHighlights(root: RefObject<HTMLElement | null>): string[] {
   useLayoutEffect(() => {
     const ids: string[] = [];
     root.current?.querySelectorAll<HTMLElement>("mark.highlight").forEach((mark) => {
-      for (const id of (mark.dataset.highlights ?? "").split(" ")) if (id && !ids.includes(id)) ids.push(id);
+      for (const id of highlightIds(mark)) if (!ids.includes(id)) ids.push(id);
     });
     setPlaced((before) => (before.join(" ") === ids.join(" ") ? before : ids));
   });
@@ -265,14 +266,20 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
     [loadedComments],
   );
   const placed = usePlacedHighlights(bodyAt);
-  const [active, setActive] = useState<string>();
+  // The Comments whose passage and card are highlighted: those hovered, else those focused.
+  const [hovered, setHovered] = useState<string[]>([]);
+  const [focused, setFocused] = useState<string[]>([]);
+  const active = hovered.length > 0 ? hovered : focused;
   useEffect(() => {
-    bodyAt.current?.querySelectorAll<HTMLElement>("mark.highlight").forEach((mark) => {
-      mark.classList.toggle("active", active !== undefined && (mark.dataset.highlights ?? "").split(" ").includes(active));
+    bodyAt.current?.querySelectorAll("mark.highlight").forEach((mark) => {
+      mark.classList.toggle("active", highlightIds(mark).some((id) => active.includes(id)));
     });
   });
-  /** The passage a highlight in the body under an event belongs to, if any. */
-  const highlightAt = (target: EventTarget) => (target as Element).closest?.("mark.highlight")?.getAttribute("data-highlights")?.split(" ")[0];
+  /** The Comments a highlight in the body under an event belongs to, if any. */
+  const highlightAt = (target: EventTarget) => {
+    const mark = (target as Element).closest?.("mark.highlight");
+    return mark ? highlightIds(mark) : [];
+  };
   // The passage a new Comment anchors to, and where it was selected, while its popover is open.
   const [composing, setComposing] = useState<SelectedPassage>();
   const [passage, setPassage] = useState("");
@@ -345,10 +352,10 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
           <div className="document-read">
             <div
               className="selectable document-body"
-              onMouseOver={(e) => setActive(highlightAt(e.target))}
-              onMouseLeave={() => setActive(undefined)}
-              onFocus={(e) => setActive(highlightAt(e.target))}
-              onBlur={() => setActive(undefined)}
+              onMouseOver={(e) => setHovered(highlightAt(e.target))}
+              onMouseLeave={() => setHovered([])}
+              onFocus={(e) => setFocused(highlightAt(e.target))}
+              onBlur={() => setFocused([])}
             >
               <div className="markdown" data-testid="document-body" ref={bodyAt}>
                 <DocumentBody body={d.body} highlights={highlights} />
@@ -401,7 +408,8 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                   placed={placed}
                   bodyRef={bodyAt}
                   active={active}
-                  onActive={setActive}
+                  onHover={(id) => setHovered(id ? [id] : [])}
+                  onFocus={(id) => setFocused(id ? [id] : [])}
                   canWrite={canWrite}
                   onPosted={reloadComments}
                 />
@@ -480,7 +488,7 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
   const { id, version: started } = props.document;
   const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
   return (
-    <div className="banner warn" role="status">
+    <Banner tone="warn" role="status">
       <Show state={versions}>
         {([base, theirs]) => (
           <>
@@ -497,7 +505,7 @@ function SavedMeanwhile(props: { document: Document; version: number }) {
           </>
         )}
       </Show>
-    </div>
+    </Banner>
   );
 }
 

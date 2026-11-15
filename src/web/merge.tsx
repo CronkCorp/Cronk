@@ -1,5 +1,6 @@
 import { Button } from "./components/button.js";
 import { Chip } from "./components/tags.js";
+import { Banner } from "./components/banner.js";
 import { Actor, type ActorLike } from "./components/actor.js";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
@@ -24,11 +25,13 @@ export interface SavedText {
  */
 export type MergeStage = "conflict" | "merged" | "resolved" | "behind";
 
-/** What the banner advises at each stage; `choices` counts the parts that need a choice. */
-function stageAdvice(stage: MergeStage, choices: number): string {
+/** What the banner advises at each stage; `choices` counts the parts that need a choice, and `clean` whether others merged cleanly. */
+function stageAdvice(stage: MergeStage, choices: number, clean: boolean): string {
   switch (stage) {
-    case "conflict":
-      return `${choices} ${choices === 1 ? "section needs" : "sections need"} your choice; the rest merged cleanly. Choose or combine below, then save.`;
+    case "conflict": {
+      const need = `${choices} ${choices === 1 ? "section needs" : "sections need"} your choice`;
+      return `${need}${clean ? "; the rest merged cleanly" : ""}. Choose or combine below, then save.`;
+    }
     case "merged":
       return "Their changes touched other sections and are merged into yours below; check them and save again.";
     case "resolved":
@@ -43,18 +46,18 @@ function stageAdvice(stage: MergeStage, choices: number): string {
  * `base`, and what to do next. Outside a conflict, their changes follow, folded; while one is
  * settled, `ResolveMerge` shows them instead.
  */
-export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs: SavedText; stage: MergeStage; choices: number }) {
+export function StaleSaveNotice(props: { by: ActorLike; base: SavedText; theirs: SavedText; stage: MergeStage; choices: number; clean: boolean }) {
   const { base, theirs } = props;
   return (
     <>
-      <div className="banner info" role="alert">
+      <Banner tone="info" role="alert">
         <p>
           <strong>
             <Actor actor={props.by} /> saved Version {theirs.number} while you were editing, so your save was not made.
           </strong>{" "}
-          {stageAdvice(props.stage, props.choices)}
+          {stageAdvice(props.stage, props.choices, props.clean)}
         </p>
-      </div>
+      </Banner>
       {props.stage !== "conflict" && (
         <details className="folded-diff">
           <summary>Their changes (Version {base.number} to {theirs.number})</summary>
@@ -177,9 +180,11 @@ export function useStaleSave<D extends Draft, T>(options: {
     theirs: other.theirs,
     stage: resolving ? "conflict" : other.wentBack ? "behind" : other.conflicted ? "resolved" : "merged",
     choices: resolving ? conflictCount(resolving.merge) : 0,
+    clean: resolving ? resolving.merge.sections.some((s) => !s.conflict) : true,
   };
   /** Drops the draft for their Version, while someone else's save is in the way; not while saving. */
   const discardMine = other && { onClick: () => takeTheirs(other.theirs), disabled: busy };
+  const onDiscardMine = discardMine?.onClick;
   const resolve: Parameters<typeof ResolveMerge>[0] | undefined = resolving &&
     other && {
       merge: resolving.merge,
@@ -191,7 +196,7 @@ export function useStaleSave<D extends Draft, T>(options: {
         setResolving(undefined);
       },
       onBack: backToDraft,
-      onDiscardMine: () => takeTheirs(other.theirs),
+      onDiscardMine: onDiscardMine!,
     };
 
   return { draft, setDraft, save, busy, error, notice, resolve, discardMine };
@@ -261,7 +266,6 @@ export function ResolveMerge(props: {
   const [kept, setKept] = useState<string[]>(initial);
   const keep = (i: number, text: string) => setKept(kept.map((k, at) => (at === i ? text : k)));
   const sectionName = (s: MergedSection) => s.heading ?? (m.sections.length === 1 ? "The whole text" : "Before the first heading");
-  const clean = m.sections.filter((s) => !s.conflict).length;
   // Mine with every clean section merged in: what merging cleanly changed in the User's draft.
   const cleanlyMerged = initial.join("");
   return (
@@ -282,7 +286,7 @@ export function ResolveMerge(props: {
       )}
       {cleanlyMerged !== props.mine && (
         <details className="folded-diff" aria-label="Merged cleanly">
-          <summary>Merged cleanly ({clean} {clean === 1 ? "section" : "sections"})</summary>
+          <summary>Merged cleanly: their changes to other sections</summary>
           <VersionDiff before={{ body: props.mine }} after={{ body: cleanlyMerged }} label="Changes merged cleanly into yours" />
         </details>
       )}

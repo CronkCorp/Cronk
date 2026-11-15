@@ -161,10 +161,11 @@ function ReportItem(props: { report: Report }) {
   );
 }
 
-/** How a Comment is shown as a card in a Document's margin: highlighted with its passage, and told when it is hovered or focused. */
+/** How a Comment is shown as a card in a Document's margin: highlighted with its passage, and telling when it is hovered or focused. */
 interface Card {
   active: boolean;
-  onActive: (active: boolean) => void;
+  onHover: (on: boolean) => void;
+  onFocus: (on: boolean) => void;
 }
 
 function CommentItem(props: { comment: Comment; card?: Card } & Thread) {
@@ -178,11 +179,11 @@ function CommentItem(props: { comment: Comment; card?: Card } & Thread) {
       {...(card && {
         "data-comment-id": c.id,
         tabIndex: 0,
-        onMouseEnter: () => card.onActive(true),
-        onMouseLeave: () => card.onActive(false),
-        onFocus: () => card.onActive(true),
+        onMouseEnter: () => card.onHover(true),
+        onMouseLeave: () => card.onHover(false),
+        onFocus: () => card.onFocus(true),
         onBlur: (e: FocusEvent<HTMLLIElement>) => {
-          if (!e.currentTarget.contains(e.relatedTarget)) card.onActive(false);
+          if (!e.currentTarget.contains(e.relatedTarget)) card.onFocus(false);
         },
       })}
     >
@@ -262,17 +263,14 @@ function CommentForm(props: {
   );
 }
 
-/** Whether the Comments sit in a margin beside the Document's body, as on wide screens, rather than under it. */
-const WIDE = "(min-width: 900px)";
-
 /**
- * Moves each card in `margin` marked `data-aligned` down to the passage it is about in `body`, but never
- * up into the card above it. On narrow screens, where the margin sits under the body, cards stay in flow.
+ * Moves each card in `margin` down to the passage it is about in `body`, but never up into the card
+ * above it. Only while the margin sits beside the body: on narrow screens it sits under it, and cards stay in flow.
  */
 function alignCards(margin: HTMLElement, body: HTMLElement) {
   const cards = [...margin.querySelectorAll<HTMLElement>(".margin-card")];
   for (const card of cards) card.style.marginTop = "";
-  if (!window.matchMedia(WIDE).matches) return;
+  if (margin.getBoundingClientRect().left < body.getBoundingClientRect().right) return;
   for (const card of cards) {
     const id = card.dataset.commentId;
     const passage = id && body.querySelector(`mark[data-highlights~="${CSS.escape(id)}"]`);
@@ -287,24 +285,25 @@ function alignCards(margin: HTMLElement, body: HTMLElement) {
  * (`placed`, in the order they appear there) come first, each aligned with its passage; then the
  * rest, oldest first: Comments on the whole Document, passages the page can't place, and passages
  * no longer in the Document. "Comment on the whole Document" ends the margin. Hovering or focusing
- * a card makes it `active`, as hovering its passage does.
+ * a card is reported through `onHover` and `onFocus`; `active` names the Comments to highlight.
  */
 export function DocumentMargin(props: {
   documentId: string;
   comments: Comment[];
   placed: string[];
   bodyRef: RefObject<HTMLElement | null>;
-  active: string | undefined;
-  onActive: (id: string | undefined) => void;
+  active: string[];
+  onHover: (id: string | undefined) => void;
+  onFocus: (id: string | undefined) => void;
   canWrite: boolean;
   onPosted: () => void;
 }) {
   const marginAt = useRef<HTMLDivElement>(null);
   const [writing, setWriting] = useState(false);
   const all = props.comments;
-  const top = all.filter((c) => !c.replyToCommentId);
-  const byId = new Map(top.map((c) => [c.id, c]));
-  const ordered = [...props.placed.flatMap((id) => byId.get(id) ?? []), ...top.filter((c) => !props.placed.includes(c.id))];
+  const threads = all.filter((c) => !c.replyToCommentId);
+  const byId = new Map(threads.map((c) => [c.id, c]));
+  const ordered = [...props.placed.flatMap((id) => byId.get(id) ?? []), ...threads.filter((c) => !props.placed.includes(c.id))];
   const post = (input: NewComment) => api.postDocumentComment(props.documentId, input);
 
   useLayoutEffect(() => {
@@ -316,17 +315,14 @@ export function DocumentMargin(props: {
     const resized = new ResizeObserver(align);
     resized.observe(body);
     margin.querySelectorAll(".margin-card").forEach((card) => resized.observe(card));
-    const wide = window.matchMedia(WIDE);
-    wide.addEventListener("change", align);
     void document.fonts?.ready.then(align);
     return () => {
       resized.disconnect();
-      wide.removeEventListener("change", align);
     };
   });
 
   let cards: ReactNode;
-  if (top.length === 0) cards = <li className="muted">No Comments yet.</li>;
+  if (threads.length === 0) cards = <li className="muted">No Comments yet.</li>;
   else
     cards = ordered.map((c) => (
       <CommentItem
@@ -336,7 +332,11 @@ export function DocumentMargin(props: {
         canWrite={props.canWrite}
         post={post}
         onPosted={props.onPosted}
-        card={{ active: props.active === c.id, onActive: (on) => props.onActive(on ? c.id : undefined) }}
+        card={{
+          active: props.active.includes(c.id),
+          onHover: (on) => props.onHover(on ? c.id : undefined),
+          onFocus: (on) => props.onFocus(on ? c.id : undefined),
+        }}
       />
     ));
   return (

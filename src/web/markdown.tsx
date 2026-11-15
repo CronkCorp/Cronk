@@ -79,12 +79,16 @@ export interface Highlight {
   passage: string;
 }
 
+/** The ids of the passages a highlight `mark` belongs to, as `CronkMarkdown` names them. */
+export const highlightIds = (mark: Element): string[] => (mark.getAttribute("data-highlights") ?? "").split(" ").filter(Boolean);
+
 /**
  * A run of rendered text as `markSourceOffsets` found it: where in the source each of its characters
  * sits, with the span it was wrapped in, or `unmapped` when that is not known for certain (with the
  * stretch it was parsed from, when known).
  */
 type Run =
+  /** `bare` marks whitespace between inline elements, which gets no source span of its own. */
   | { kind: "mapped"; value: string; bounds: SourceBounds; wrapper: HastNode; bare: boolean }
   | { kind: "unmapped"; from?: number; to?: number };
 
@@ -119,6 +123,12 @@ function place(runs: Run[], from: number, to: number): Map<Run, [number, number]
     lastAt = at;
   });
   if (covered.size === 0 || unknown.some((at) => at < 0 || (firstAt < at && at < lastAt))) return undefined;
+  // Text of unknown origin right next to the highlight may hold the rest of the passage, unless what is highlighted reaches its ends.
+  const first = runs[firstAt] as Extract<Run, { kind: "mapped" }>;
+  const last = runs[lastAt] as Extract<Run, { kind: "mapped" }>;
+  const reachesStart = first.bounds.starts[covered.get(first)![0]] === from;
+  const reachesEnd = last.bounds.ends[covered.get(last)![1]] === to;
+  if ((!reachesStart && unknown.includes(firstAt - 1)) || (!reachesEnd && unknown.includes(lastAt + 1))) return undefined;
   return covered;
 }
 
@@ -234,8 +244,9 @@ function markSourceOffsets(source: string, highlights: Highlight[]) {
       return node;
     }
     const offsets = Array.from({ length: value.length + 1 }, (_, k) => start + at + k);
-    const wrapper = sourceSpan(value, { starts: offsets, ends: [...offsets] }, false);
-    runs.push({ kind: "mapped", value, bounds: { starts: offsets, ends: [...offsets] }, wrapper, bare: false });
+    const codeBounds = { starts: offsets, ends: offsets };
+    const wrapper = sourceSpan(value, codeBounds, false);
+    runs.push({ kind: "mapped", value, bounds: codeBounds, wrapper, bare: false });
     return wrapper;
   };
   return () => (tree: HastNode) => {
