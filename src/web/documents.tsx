@@ -10,6 +10,7 @@ import {
 } from "./api.js";
 import { ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentComments } from "./timeline.js";
+import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
@@ -78,11 +79,16 @@ export function DocumentsPage(props: { projectKey?: string }) {
   const canWrite = useCanWrite(props.projectKey);
   const [creating, setCreating] = useState(false);
   const [importError, setImportError] = useState<string>();
-  const importFolder = async (file: File | undefined) => {
-    if (!file) return;
+  /** Imports an archive, or packs a picked folder into one first; either way the input is cleared so the same pick works again. */
+  const importFrom = async (input: HTMLInputElement, pack: (files: File[]) => Promise<Blob | undefined>) => {
+    const files = [...(input.files ?? [])];
+    input.value = "";
+    if (files.length === 0) return;
     setImportError(undefined);
     try {
-      await api.importDocuments(props.projectKey, file);
+      const archive = await pack(files);
+      if (!archive) return setImportError("That folder holds no Markdown files (.md or .markdown) to import");
+      await api.importDocuments(props.projectKey, archive);
       reload();
     } catch (err) {
       setImportError(messageOf(err));
@@ -98,9 +104,20 @@ export function DocumentsPage(props: { projectKey?: string }) {
         {canWrite && !creating && (
           <div className="actions">
             <button onClick={() => setCreating(true)}>New Document</button>
-            <label className="button secondary" title="A .tar.gz of a folder of Markdown files; the folders become the page tree">
+            <label className="button secondary" title="A folder of Markdown files; its folders become the page tree">
               Import Markdown folder…
-              <input type="file" accept=".gz,.tgz,.tar" hidden onChange={(e) => void importFolder(e.target.files?.[0])} />
+              <input
+                type="file"
+                hidden
+                ref={(input) => {
+                  if (input) input.webkitdirectory = true;
+                }}
+                onChange={(e) => void importFrom(e.target, packMarkdownFolder)}
+              />
+            </label>
+            <label className="button secondary" title="A .zip, .tar.gz or .tar of a folder of Markdown files; its folders become the page tree">
+              Import archive…
+              <input type="file" accept=".zip,.gz,.tgz,.tar" hidden onChange={(e) => void importFrom(e.target, async ([file]) => file)} />
             </label>
           </div>
         )}
