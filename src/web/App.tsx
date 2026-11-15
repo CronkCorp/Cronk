@@ -1,14 +1,18 @@
+import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
-import { inboxFilterFrom, InboxPage } from "./inbox.js";
+import { inboxAddressFrom, InboxPage } from "./inbox.js";
 import { AcceptInvitationPage, UsersPage } from "./people.js";
-import { SearchBox, SearchPage, searchFilterFrom } from "./search.js";
+import { SearchPage, searchFilterFrom } from "./search.js";
+import { Sidebar } from "./frame.js";
+import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
-import { filterFrom, ProjectPage, ProjectsPage, TicketPage, type ProjectView } from "./work.js";
+import { filterFrom, ProjectPage, ProjectsPage, projectViewOf } from "./work.js";
+import { TicketPage } from "./ticket.js";
 
 type State =
   | { kind: "loading" }
@@ -54,7 +58,7 @@ export function App() {
       return (
         <AuthCard title="Cronk is unavailable" intro="It could not be reached. Try again in a moment.">
           <p className="error" role="alert">{state.message}</p>
-          <button onClick={() => location.reload()}>Try again</button>
+          <Button onClick={() => location.reload()}>Try again</Button>
         </AuthCard>
       );
     case "setup":
@@ -83,7 +87,7 @@ function SetupPage(props: { onDone: (user: User) => void }) {
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Create Admin account</button>
+        <Button type="submit" disabled={busy}>Create Admin account</Button>
       </form>
     </AuthCard>
   );
@@ -99,16 +103,16 @@ function SignInPage(props: { onDone: (user: User) => void }) {
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
         {error && <p className="error" role="alert">{error}</p>}
-        <button type="submit" disabled={busy}>Sign in</button>
+        <Button type="submit" disabled={busy}>Sign in</Button>
       </form>
     </AuthCard>
   );
 }
 
+/** The signed-in frame: the sidebar, and the page for the current address in the main column. */
 function Shell(props: { user: User; onSignedOut: () => void }) {
   const [workspace, setWorkspace] = useState<Workspace>();
   const [loadError, setLoadError] = useState<string>();
-  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     api.workspace().then(setWorkspace, (err) => setLoadError(messageOf(err)));
@@ -118,85 +122,75 @@ function Shell(props: { user: User; onSignedOut: () => void }) {
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <Link to="/" className="workspace-name">
-          <span data-testid="workspace-name">{workspace?.name}</span>
-        </Link>
-        <div className="topbar-right">
-          <SearchBox />
-          <Link to="/inbox" className="link">Inbox</Link>
-          <Link to="/documents" className="link">Documents</Link>
-          <Link to="/guidance" className="link">Guidance</Link>
-          <Link to="/agents" className="link">Agents</Link>
-          {props.user.role === "admin" && (
-            <>
-              <Link to="/users" className="link">Users</Link>
-              <button className="link" onClick={() => setRenaming(true)}>Workspace settings</button>
-            </>
-          )}
-          <span className="muted">{props.user.name}</span>
-          <button className="link" onClick={signOut}>Sign out</button>
+      <Sidebar me={props.user} workspace={workspace} onSignOut={() => void signOut()} />
+      <main className="main">
+        <div className="content">
+          {loadError && <p className="error" role="alert">{loadError}</p>}
+          <Page me={props.user} workspace={workspace} onWorkspaceChange={setWorkspace} />
         </div>
-      </header>
-      <main className="content">
-        {loadError && <p className="error" role="alert">{loadError}</p>}
-        {renaming && workspace !== undefined ? (
-          <WorkspaceSettings
-            current={workspace}
-            onDone={(updated) => {
-              setWorkspace(updated);
-              setRenaming(false);
-            }}
-            onCancel={() => setRenaming(false)}
-          />
-        ) : (
-          <Page me={props.user} />
-        )}
       </main>
     </div>
   );
 }
 
 /** The page for the current address. */
-function Page(props: { me: User }) {
+function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceChange: (workspace: Workspace) => void }) {
   const { path, search } = useLocation();
-  if (path === "/users" && props.me.role === "admin") return <UsersPage me={props.me} />;
-  if (path === "/agents") return <AgentsPage me={props.me} />;
-  if (path === "/search") return <SearchPage filter={searchFilterFrom(search)} />;
-  if (path === "/inbox") return <InboxPage filter={inboxFilterFrom(search)} />;
-  if (path === "/documents") return <DocumentsPage />;
-  const projectDocuments = /^\/projects\/([^/]+)\/documents$/.exec(path);
-  if (projectDocuments) return <DocumentsPage projectKey={decodeURIComponent(projectDocuments[1]!)} />;
-  const documentMatch = /^\/documents\/([^/]+)$/.exec(path);
-  if (documentMatch) return <DocumentPage id={decodeURIComponent(documentMatch[1]!)} edit={search.get("edit") === "1"} />;
-  if (path === "/guidance") return <WorkspaceGuidancePage me={props.me} />;
-  const project = /^\/projects\/([^/]+)$/.exec(path);
-  if (project) {
-    return (
-      <ProjectPage
-        projectKey={decodeURIComponent(project[1]!)}
-        view={projectView(search.get("view"))}
-        filter={filterFrom(search)}
-        me={props.me}
-      />
-    );
+  const admin = props.me.role === "admin";
+  const route = routeOf(path);
+  switch (route.page) {
+    case "users":
+      if (admin) return <UsersPage me={props.me} />;
+      break;
+    case "settings":
+      if (!admin) break;
+      return props.workspace === undefined ? null : (
+        <WorkspaceSettings current={props.workspace} onDone={props.onWorkspaceChange} onCancel={() => navigate("/")} />
+      );
+    case "agents":
+      return <AgentsPage me={props.me} />;
+    case "search":
+      return <SearchPage filter={searchFilterFrom(search)} />;
+    case "inbox":
+      return <InboxPage address={inboxAddressFrom(search)} />;
+    case "documents":
+      return <DocumentsPage />;
+    case "projectDocuments":
+      return <DocumentsPage projectKey={route.key} />;
+    case "document":
+      return <DocumentPage id={route.id} edit={search.get("edit") === "1"} />;
+    case "guidance":
+      return <WorkspaceGuidancePage me={props.me} />;
+    case "project":
+      // Keyed by Project, so state kept while on the page, such as opened board columns, starts afresh in another.
+      return <ProjectPage key={route.key} projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;
+    case "ticket":
+      return <TicketPage ticketKey={route.key} />;
+    case "projects":
+      return <ProjectsPage archived={route.archived} />;
   }
-  const ticket = /^\/tickets\/([^/]+)$/.exec(path);
-  if (ticket) return <TicketPage ticketKey={decodeURIComponent(ticket[1]!)} />;
-  return <ProjectsPage archived={path === "/archived"} />;
+  return <ProjectsPage archived={false} />;
 }
 
+/** The Admin's Workspace settings, at `/settings`. Saving keeps the page open and tells the frame the new name. */
 function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Workspace) => void; onCancel: () => void }) {
+  const [saved, setSaved] = useState(false);
   const [name, setName] = useState(props.current.name);
   const [agentAccess, setAgentAccess] = useState<AgentAccess>(props.current.agentAccess);
   const [silenceMinutes, setSilenceMinutes] = useState(String(props.current.silenceThresholdSeconds / 60));
   const { submit, error, busy } = useSubmit(
-    () => api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) }),
-    props.onDone,
+    () => {
+      setSaved(false);
+      return api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) });
+    },
+    (workspace) => {
+      setSaved(true);
+      props.onDone(workspace);
+    },
   );
   return (
     <section className="panel">
-      <h2>Workspace settings</h2>
+      <h1>Workspace settings</h1>
       <form onSubmit={submit}>
         <Field label="Workspace name" value={name} onChange={setName} />
         <AgentAccessSelect value={agentAccess} onChange={setAgentAccess} />
@@ -205,8 +199,9 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <p className="muted hint">How long an Agent Session may stay silent before it ends and its Claims lapse, from 1 minute to 1 day.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Save</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Save</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+          {saved && <span className="muted" role="status">Saved.</span>}
         </div>
       </form>
       <h2>Export and import</h2>
@@ -214,7 +209,7 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         Everything in the Workspace as Markdown files with frontmatter, in a .tar.gz archive. Import one into a fresh installation to move Cronk.
       </p>
       <div className="actions">
-        <a className="button secondary" href={workspaceExportUrl} download>Download export</a>
+        <a className={buttonClass("secondary")} href={workspaceExportUrl} download>Download export</a>
         <ImportExport />
       </div>
     </section>
@@ -239,7 +234,7 @@ function ImportExport() {
   };
   return (
     <>
-      <label className="button secondary">
+      <label className={buttonClass("secondary")}>
         Import export…
         <input type="file" accept=".gz,.tgz,.tar" hidden onChange={(e) => void pick(e.target.files?.[0])} />
       </label>
@@ -247,10 +242,6 @@ function ImportExport() {
       {error && <p className="error" role="alert">{error}</p>}
     </>
   );
-}
-
-function projectView(view: string | null): ProjectView {
-  return view === "board" || view === "statuses" || view === "reports" || view === "guidance" ? view : "list";
 }
 
 function WorkspaceGuidancePage(props: { me: User }) {

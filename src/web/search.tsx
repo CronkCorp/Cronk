@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { Chip } from "./components/tags.js";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { SEARCH_KINDS } from "../shared/values.js";
 import { api, type SearchKind, type SearchResult } from "./api.js";
 import { Link, navigate } from "./router.js";
@@ -27,16 +28,31 @@ export const searchFilterFrom = (search: URLSearchParams): SearchFilter => {
   };
 };
 
-/** The search box in the top bar; searching opens the search page. */
+/** Whether a key press lands in something the User types into, where `/` must stay a character. */
+const typingIn = (target: EventTarget | null) =>
+  target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
+/** The search box in the sidebar, which `/` focuses; searching opens the search page. */
 export function SearchBox() {
   const [q, setQ] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || typingIn(e.target)) return;
+      e.preventDefault();
+      input.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (q.trim()) navigate(searchPath({ q: q.trim() }));
   };
   return (
     <form role="search" className="search-box" onSubmit={submit}>
-      <input type="search" aria-label="Search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input ref={input} type="search" aria-label="Search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
+      <kbd className="search-key" aria-hidden="true">/</kbd>
     </form>
   );
 }
@@ -74,7 +90,7 @@ export function SearchPage(props: { filter: SearchFilter }) {
                 <li key={i} className="row">
                   <Link to={resultPath(r)} className="row-link search-result">
                     <div className="search-result-head">
-                      <span className="badge">{KIND_NAMES[r.kind]}</span>
+                      <Chip>{KIND_NAMES[r.kind]}</Chip>
                       {r.ticketKey && <span className="key">{r.ticketKey}</span>}
                       <span className="grow">{r.kind === "comment" ? `On ${r.title}` : r.title}</span>
                       <span className="muted">{r.projectKey ?? "Workspace"}</span>

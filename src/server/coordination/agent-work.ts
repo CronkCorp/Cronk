@@ -53,7 +53,11 @@ const SELECTS = [
    WHERE c.actor_agent_id = $1 AND t.project_id = ANY($2)
      -- A relation names another Ticket, which may lie in a Project the reader can't see.
      AND (c.change NOT IN ('relation added', 'relation removed') OR EXISTS (
-       SELECT 1 FROM projects rp WHERE rp.id = ANY($2) AND rp.key = regexp_replace(c.data->'ticket'->>'key', '-[0-9]+$', '')))`,
+       SELECT 1 FROM projects rp WHERE rp.id = ANY($2) AND rp.key = regexp_replace(c.data->'ticket'->>'key', '-[0-9]+$', '')))
+     -- So may a linked Document; null projectKey means a Workspace Document.
+     AND (c.change NOT IN ('document linked', 'document unlinked') OR
+       CASE WHEN c.data->'document'->>'projectKey' IS NULL THEN $3::uuid IS NOT NULL
+            ELSE EXISTS (SELECT 1 FROM projects dp WHERE dp.id = ANY($2) AND dp.key = c.data->'document'->>'projectKey') END)`,
   `SELECT 'activity', a.at, a.actor_session_id, p.key, ${ticketKeySql("p", "t")}, t.title, NULL::uuid, NULL,
      jsonb_build_object('id', a.id, 'kind', a.kind, 'body', a.body, 'blocking', a.blocking), a.seq
    FROM activities a JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id
@@ -103,10 +107,16 @@ export async function listAgentWork(
       projectKey: row.project_key,
       ticket: row.ticket_key === null ? null : { key: row.ticket_key, title: row.ticket_title! },
       document: row.document_id === null ? null : { id: row.document_id, title: row.document_title! },
-      change: row.kind === "change" ? ({ at: row.at, actor: by, ...row.data } as RecordedChange) : null,
+      change: row.kind === "change" ? toChange(row, by) : null,
       activity: row.kind === "activity" ? (row.data as AgentWorkEntry["activity"]) : null,
       comment: row.kind === "comment" ? (row.data as AgentWorkEntry["comment"]) : null,
       version: row.kind === "version" ? (row.data as AgentWorkEntry["version"]) : null,
     };
   });
+}
+
+/** A change row as a Ticket's history shows it: a status change always says whether it was a Send back. */
+function toChange(row: WorkRow, actor: RecordedActor): RecordedChange {
+  const { change, ...data } = row.data as { change: string };
+  return { at: row.at, actor, change, ...data, ...(change === "status" && { sentBack: (data as { sentBack?: boolean }).sentBack === true }) } as RecordedChange;
 }

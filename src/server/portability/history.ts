@@ -16,23 +16,30 @@ export async function exportHistory(ctx: ExportContext, base: string, ticketId: 
     "SELECT * FROM ticket_changes WHERE ticket_id = $1 ORDER BY id",
     [ticketId],
   );
-  ctx.add(`${base}.history.md`, {
-    changes: changes.map((c) => ({ at: iso(c.at), by: ctx.actor(c), change: c.change, ...changeToExport(c.change, c.data, ctx.emailOf, statusNow) })),
-  });
+  // Once every Document is written, so a linked Document can be named by its path.
+  ctx.afterDocuments(() =>
+    ctx.add(`${base}.history.md`, {
+      changes: changes.map((c) => ({ at: iso(c.at), by: ctx.actor(c), change: c.change, ...changeToExport(c.change, c.data, ctx, statusNow) })),
+    }),
+  );
 }
 
-/** A Ticket change's fields as the export writes them (see `CHANGE_FIELDS`): a User with their `email`, a Status with its `current` name. */
+/**
+ * A Ticket change's fields as the export writes them (see `CHANGE_FIELDS`): a User with their `email`, a Status with
+ * its `current` name, and a Document with its `path` when the export holds it.
+ */
 function changeToExport(
   change: TicketChange["change"],
   data: Record<string, unknown>,
-  emailOf: Map<string, string>,
+  ctx: ExportContext,
   statusNow: Map<string, string>,
 ): Record<string, unknown> {
   const written = { ...data };
   for (const [field, { holds }] of Object.entries(CHANGE_FIELDS[change])) {
     const ref = data[field];
     if (!isRecord(ref)) continue;
-    if (holds === "user") written[field] = { ...ref, email: emailOf.get(String(ref.id)) };
+    if (holds === "user") written[field] = { ...ref, email: ctx.emailOf.get(String(ref.id)) };
+    if (holds === "document") written[field] = { ...ref, path: ctx.documentPaths.get(String(ref.id)) };
     if (holds === "status") written[field] = { ...ref, current: statusNow.get(String(ref.id)) };
   }
   return written;
@@ -44,6 +51,8 @@ interface Finders {
   user: Finder;
   agent: Finder;
   status: Finder;
+  /** A Document or Report this import brought in, by the path of its file. */
+  document: (path: string) => string | undefined;
 }
 
 /**
@@ -55,6 +64,7 @@ export async function importHistory(ctx: ImportContext, file: File, ticketId: st
     user: (email) => ctx.findUser(email),
     agent: async (id) => ctx.agentIds.get(id)?.id,
     status: async (name) => statusIds.get(name.toLowerCase()),
+    document: (path) => ctx.documentIds.get(path),
   };
   for (const [i, entry] of list(file, "changes").entries()) {
     const where = `${file.path} changes[${i}]`;
@@ -77,7 +87,11 @@ async function importedChange(change: TicketChange["change"], fields: Record<str
   for (const [field, { holds, nullable }] of Object.entries(CHANGE_FIELDS[change])) {
     const value = fields[field];
     const at = `${where}.${field}`;
-    if (nullable && value === null) recorded[field] = null;
+    if (holds === "flag") {
+      // A flag is left out when false.
+      if (value !== undefined && typeof value !== "boolean") refuse(`${at} must be true or false`);
+      if (value === true) recorded[field] = true;
+    } else if (nullable && value === null) recorded[field] = null;
     else if (holds === "title") recorded[field] = text(value, at);
     else if (holds === "text") recorded[field] = typeof value === "string" ? value : refuse(`${at} must be text`);
     else if (holds === "priority") recorded[field] = oneOf(value, PRIORITIES, at);
@@ -88,7 +102,12 @@ async function importedChange(change: TicketChange["change"], fields: Record<str
     } else {
       if (!isRecord(value)) refuse(`${at} must be a mapping${nullable ? " or null" : ""}`);
       if (holds === "ticket") recorded[field] = { key: text(value.key, `${at}.key`), title: text(value.title, `${at}.title`) };
-      else {
+      else if (holds === "document") {
+        const projectKey = value.projectKey === null || value.projectKey === undefined ? null : text(value.projectKey, `${at}.projectKey`);
+        const imported = typeof value.path === "string" ? find.document(value.path) : undefined;
+        const id = imported ?? (isUuid(value.id) ? value.id : refuse(`${at} names no Document here and has no id`));
+        recorded[field] = { id, title: text(value.title, `${at}.title`), projectKey };
+      } else {
         const foundBy = { user: value.email, agent: value.id, status: value.current }[holds];
         const id = (typeof foundBy === "string" ? await find[holds](foundBy) : undefined) ?? (isUuid(value.id) ? value.id : refuse(`${at} names no record here and has no id`));
         const named = { id, name: text(value.name, `${at}.name`) };

@@ -407,4 +407,27 @@ export const migrations: Migration[] = [
     `,
     backfill: backfillTicketMentions,
   },
+  {
+    id: "0016_ticket_document_links",
+    sql: `
+      -- A Document a User or Agent linked to a Ticket from the Ticket's side (work/document-links.ts),
+      -- listed among the Ticket's Documents beside its Reports and the Documents that mention it.
+      -- Who linked it, and when, is in the Ticket's history; seq keeps the links in the order made.
+      CREATE TABLE ticket_document_links (
+        ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        seq bigserial NOT NULL,
+        PRIMARY KEY (ticket_id, document_id)
+      );
+      CREATE INDEX ticket_document_links_document ON ticket_document_links (document_id);
+    `,
+  },
+  {
+    id: "0017_send_back_comments",
+    sql: `
+      -- The Comment a User sent a Ticket back from review with (the send-back route), so the Ticket's
+      -- timeline can label it without pairing it with the Status Change by time.
+      ALTER TABLE comments ADD COLUMN send_back boolean NOT NULL DEFAULT false CHECK (NOT send_back OR ticket_id IS NOT NULL);
+    `,
+  },
 ];

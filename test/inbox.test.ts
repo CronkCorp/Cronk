@@ -139,10 +139,30 @@ describe("Sending a Ticket back", () => {
     expect(sent.status).toBe(200);
     expect(sent.body.ticket.status.id).toBe(await statusIn(admin, "started"));
     expect(sent.body.comment).toMatchObject({ body: "Please add a test.", actor: { kind: "user", name: "Ada" } });
-    expect((await admin.get("/api/tickets/CRONK-1/comments")).body.comments).toMatchObject([{ body: "Please add a test." }]);
+    expect((await admin.get("/api/tickets/CRONK-1/comments")).body.comments).toMatchObject([{ body: "Please add a test.", sendBack: true }]);
     expect(await inboxLines(admin)).toEqual([]);
     expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toMatchObject([
       { reason: "comment", comment: { body: "Please add a test." }, ticket: { key: "CRONK-1" } },
+    ]);
+  });
+
+  it("marks only its own Comment as a Send back's", async () => {
+    const { admin } = await delegatedSetup();
+    await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") });
+    const ordinary = await admin.post("/api/tickets/CRONK-1/comments", { body: "Looking now." });
+    expect(ordinary.body.comment.sendBack).toBe(false);
+    const sent = await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
+    expect(sent.body.comment.sendBack).toBe(true);
+    const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
+    expect(comments.map((c: { body: string; sendBack: boolean }) => [c.body, c.sendBack])).toEqual([
+      ["Looking now.", false],
+      ["Add a test.", true],
+    ]);
+    // Its move back is marked in the history too; an ordinary move isn't.
+    const moves = (await admin.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { change: string }) => c.change === "status");
+    expect(moves.map((c: { to: { category: string }; sentBack: boolean }) => [c.to.category, c.sentBack])).toEqual([
+      ["in_review", false],
+      ["started", true],
     ]);
   });
 

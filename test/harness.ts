@@ -10,9 +10,17 @@ import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js"
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-/** Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed. */
+/**
+ * Live updates whose publishes tests can hold back, as if the server were slow to push them after their change committed.
+ * No timer runs their streams' heartbeats, which would refresh Agent Sessions at whatever the fake clock reads
+ * whenever real time lets it fire; tests run them with `Cronk.heartbeat`.
+ */
 class HoldableLiveUpdates extends LiveUpdates {
   private holding: [string, LiveEvent][] | null = null;
+
+  constructor() {
+    super({ heartbeatMs: null });
+  }
 
   override publish(topic: string, event: LiveEvent): void {
     if (this.holding) this.holding.push([topic, event]);
@@ -141,6 +149,8 @@ export class EventStream {
   private buffer = "";
   private readonly reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   private readonly decoder = new TextDecoder();
+  /** A read still waiting when `next` last gave up, which the next call waits on instead of losing what it brings. */
+  private reading: Promise<ReadableStreamReadResult<Uint8Array>> | undefined;
 
   constructor(
     res: globalThis.Response,
@@ -150,7 +160,10 @@ export class EventStream {
     this.reader = res.ok ? res.body!.getReader() : undefined;
   }
 
-  /** The next event, skipping comments; null once the server ends the stream. Fails if none comes within `timeoutMs`. */
+  /**
+   * The next event, skipping comments; null once the server ends the stream. Fails if none comes within `timeoutMs`,
+   * in which case a later call still gets the event that comes after.
+   */
   async next(timeoutMs = 5_000): Promise<ServerEvent | null> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -166,10 +179,12 @@ export class EventStream {
         return { event: field("event") ?? "message", data: data === undefined ? undefined : JSON.parse(data), ...(id !== undefined && { id }) };
       }
       if (!this.reader) return null;
+      this.reading ??= this.reader.read().catch(() => ({ done: true as const, value: undefined }));
       const read = await Promise.race([
-        this.reader.read().catch(() => ({ done: true as const, value: undefined })),
+        this.reading,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("No server-sent event came in time")), Math.max(0, deadline - Date.now()))),
       ]);
+      this.reading = undefined;
       if (read.done) return null;
       this.buffer += this.decoder.decode(read.value, { stream: true });
     }
@@ -206,6 +221,12 @@ export interface Cronk {
    * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
    */
   holdPushes(): HeldPushes;
+  /**
+   * Runs the heartbeat of every live-update stream still open now, as its 25-second timer does
+   * outside tests (no timer runs it in them), and waits until each has run. Streams a test closed
+   * just before are given a moment to end first.
+   */
+  heartbeat(): Promise<void>;
   /**
    * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
    * before it shipped, so the next `restart` applies it again over the data already there.
@@ -260,7 +281,7 @@ export async function startCronk(): Promise<Cronk> {
 
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()) });
+  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -312,6 +333,10 @@ export async function startCronk(): Promise<Cronk> {
       const release = live.hold();
       onTestFinished(release);
       return { release };
+    },
+    heartbeat: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await live.heartbeat();
     },
     undoMigration: async (id, undo) => {
       const client = new pg.Client({ connectionString: databaseUrl });
@@ -431,6 +456,8 @@ export interface McpConnection {
 /**
  * Connects a real MCP client to Cronk's MCP endpoint with `token`; closed when the test ends.
  * With `listening`, also waits until the client has opened the stream it hears notifications on.
+ * Without it, the client never opens that stream (its GET is answered 405, as by a server that
+ * offers none), so its Agent Session stays silent between its requests whatever heartbeats run.
  */
 export async function connectMcp(cronk: Cronk, token: string, opts: { listening?: boolean } = {}): Promise<McpConnection> {
   let listening!: () => void;
@@ -438,6 +465,7 @@ export async function connectMcp(cronk: Cronk, token: string, opts: { listening?
   const transport = new StreamableHTTPClientTransport(new URL("/mcp", await cronk.url()), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
     fetch: async (url, init) => {
+      if (init?.method === "GET" && !opts.listening) return new globalThis.Response(null, { status: 405 });
       const res = await fetch(url, init);
       if (init?.method === "GET" && res.ok) listening();
       return res;

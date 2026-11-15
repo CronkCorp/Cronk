@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -183,8 +183,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         items: ref("AgentSession"),
         description: "Its live Agent Sessions, oldest first; only the Agents list has it.",
       },
+      lastSessionEndedAt: {
+        ...nullable(timestamp),
+        description:
+          "When its last Agent Session that is no longer live ended or fell silent, or null if it has had none; only the Agents list has it.",
+      },
+      delegateTicketCount: {
+        type: "integer",
+        description: "How many unfinished Tickets it is Delegate on in Projects the caller can read; only the Agents list has it.",
+      },
     },
-    ["sessions"],
+    ["sessions", "lastSessionEndedAt", "delegateTicketCount"],
   ),
   AgentSession: {
     description: "One continuous connection of an Agent, from connect to disconnect.",
@@ -193,7 +202,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       startedAt: timestamp,
       lastSeenAt: timestamp,
       endsIfSilentAt: { ...timestamp, description: "When the Session ends if it stays silent until then." },
-    }),
+      claims: {
+        type: "array",
+        description:
+          "The Tickets it holds the live Claims on, in key order, leaving out those in Projects the caller can't read; only the Agents list has it.",
+        items: object({ ticketKey: { type: "string" }, title: { type: "string" } }),
+      },
+    }, ["claims"]),
   },
   AgentToken: {
     description: "A token an Agent calls the API with. A read-only token is refused every write.",
@@ -205,6 +220,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       agent: named,
       session: object({ id }),
       claimedAt: timestamp,
+      lastSeenAt: { ...timestamp, description: "When the Claim's Agent Session was last heard from." },
       endsIfSilentAt: { ...timestamp, description: "When the Claim lapses if its Agent Session stays silent until then." },
     }),
   },
@@ -261,13 +277,19 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         enum: [
           ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
           ...["relation added", "relation removed"],
+          ...["document linked", "document unlinked"],
         ],
       },
     }),
     anyOf: [
       object({ change: { const: "created" }, title: { type: "string" }, description: { type: "string" }, status: ref("Status") }),
       ...(["title", "description"] as const).map((c) => object({ change: { const: c }, from: { type: "string" }, to: { type: "string" } })),
-      object({ change: { const: "status" }, from: ref("Status"), to: ref("Status") }),
+      object({
+        change: { const: "status" },
+        from: ref("Status"),
+        to: ref("Status"),
+        sentBack: { type: "boolean", description: "True for the move back to a Started Status a User made sending the Ticket back from review." },
+      }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
       ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
@@ -276,6 +298,14 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },
         ticket: ticketName,
+      }),
+      object({
+        change: { type: "string", enum: ["document linked", "document unlinked"] },
+        document: object({
+          id,
+          title: { type: "string" },
+          projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
+        }),
       }),
     ],
   },
@@ -314,6 +344,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The passage of its Document it is anchored to; null when it isn't anchored.",
       },
       body: { type: "string", description: "Markdown." },
+      sendBack: { type: "boolean", description: "True for the Comment a User sent its Ticket back from review with." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },
     }),
@@ -362,7 +393,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   LinkedDocument: {
-    description: "A Document linked to a Ticket: one of its Reports, or a Document that mentions its key. Read it as a Document by its id.",
+    description:
+      "A Document linked to a Ticket: one of its Reports, a Document linked to it from the Ticket's side, or a Document that mentions its key. Read it as a Document by its id.",
     ...object({
       id,
       title: { type: "string" },
@@ -370,6 +402,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket a Report is on; null for any other Document." },
       version: { type: "integer", description: "The number of its current Version." },
       updatedAt: timestamp,
+      reason: {
+        type: "string",
+        enum: LINK_REASONS,
+        description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
+      },
     }),
   },
   DocumentTreeEntry: {

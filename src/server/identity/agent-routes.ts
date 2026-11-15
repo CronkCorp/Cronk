@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
-import { endAgentSessionsOf, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
+import { endAgentSessionsOf, lastAgentSessionEnds, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
 import { listAgentWork } from "../coordination/agent-work.js";
 import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
+import { readablePlaces, requireAdmin } from "./access.js";
 import { userActor } from "../actor.js";
-import { requireAdmin } from "./access.js";
+import { countDelegatedTickets, listClaimsOfSessions } from "../coordination/claims.js";
 import {
   findAgent,
   insertAgent,
@@ -20,6 +21,8 @@ import {
 } from "./agents.js";
 import { findUserById, type User } from "./users.js";
 import { inboxesChanged } from "../inbox/inbox.js";
+import { agentsTopic } from "../live/topics.js";
+import { claimsEnded } from "../coordination/ready.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
 const agentParams = pathParams({ id: agentId });
@@ -44,10 +47,50 @@ export function agentRoutes(ctx: AppContext) {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");
         const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id);
-        const sessions = await liveAgentSessions(ctx.db, agents.map((a) => a.agent.id), ctx.clock.now());
+        const agentIds = agents.map((a) => a.agent.id);
+        const now = ctx.clock.now();
+        const sessions = await liveAgentSessions(ctx.db, agentIds, now);
+        const lastEnded = await lastAgentSessionEnds(ctx.db, agentIds, now);
+        const claims = await listClaimsOfSessions(ctx.db, [...sessions.values()].flat().map((s) => s.id));
+        const delegated = await countDelegatedTickets(ctx.db, agentIds);
+        // Tickets the caller can't read are left out of Claims and counts, as they are everywhere else.
+        const readable = new Set((await readablePlaces(ctx.db, userActor(user))).projectIds);
+        const readableClaims = (sessionId: string) =>
+          claims.get(sessionId)!.flatMap((c) => (readable.has(c.projectId) ? [{ ticketKey: c.ticketKey, title: c.title }] : []));
+        const readableCount = (agentId: string) =>
+          [...delegated.get(agentId)!].reduce((sum, [projectId, count]) => sum + (readable.has(projectId) ? count : 0), 0);
         return {
-          agents: agents.map((a) => ({ ...publicAgent(a.agent, a.owner), sessions: sessions.get(a.agent.id)!.map(publicAgentSession) })),
+          agents: agents.map((a) => ({
+            ...publicAgent(a.agent, a.owner),
+            sessions: sessions.get(a.agent.id)!.map((s) => ({ ...publicAgentSession(s), claims: readableClaims(s.id) })),
+            lastSessionEndedAt: lastEnded.get(a.agent.id) ?? null,
+            delegateTicketCount: readableCount(a.agent.id),
+          })),
         };
+      },
+    );
+
+    app.get(
+      "/api/agents/events",
+      {
+        schema: {
+          response: {
+            200: {
+              description:
+                "A server-sent event stream for the signed-in User's own Agents, for as long as they stay signed in. It opens with a " +
+                "`ready` event, then sends a `changed` event, with empty data, when one of their Agent Sessions may have started, " +
+                "ended or fallen silent, Claimed or released a Ticket, or moved when it would fall silent; fetch the Agents again then. " +
+                "These are noticed every few seconds, not at once.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const canSee = async () => (await requireUser(ctx, request)).id === user.id;
+        ctx.live.stream(reply, agentsTopic(user.id), canSee);
       },
     );
 
@@ -97,12 +140,14 @@ export function agentRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
-        await transaction(ctx.db, async (tx) => {
+        const { ticketIds } = await transaction(ctx.db, async (tx) => {
           const agent = await ownAgent(ctx, user, request.params.id);
           const now = ctx.clock.now();
           await removeAgent(tx, agent, now);
-          await endAgentSessionsOf(tx, agent.id, now);
+          return endAgentSessionsOf(tx, agent.id, now);
         });
+        // The Agent is gone, so nothing is Ready for it, but their Claims ended.
+        await claimsEnded(ctx, ticketIds);
         // Its open questions leave its Owner's Inbox.
         inboxesChanged(ctx.live, [user.id]);
         return reply.code(204).send();
@@ -196,7 +241,10 @@ export function agentRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const agent = await ownAgent(ctx, user, request.params.id);
-        if (!(await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now()))) throw new HttpError(404, "No such token");
+        const ended = await revokeAgentToken(ctx.db, agent, request.params.tokenId, ctx.clock.now());
+        if (!ended) throw new HttpError(404, "No such token");
+        // The Agent's other tokens may pick them up.
+        await claimsEnded(ctx, ended.ticketIds);
         return reply.code(204).send();
       },
     );

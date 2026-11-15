@@ -20,7 +20,8 @@ describe("exporting a Project", () => {
     await admin.patch("/api/tickets/CRONK-2", { parentKey: "CRONK-1" });
     await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
     await admin.post("/api/tickets/CRONK-1/comments", { body: "Starting." });
-    await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "# Plan\n\nShip." });
+    const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "# Plan\n\nShip." })).body.document;
+    await admin.post(`/api/tickets/CRONK-1/documents/${plan.id}`);
 
     const res = await admin.download("/api/projects/CRONK/export");
     expect(res.status).toBe(200);
@@ -36,6 +37,8 @@ describe("exporting a Project", () => {
     });
     const ticket = markdown(files["projects/CRONK/tickets/CRONK-1.md"]);
     expect(ticket.data).toMatchObject({ title: "Build it", status: "Backlog", priority: "high", labels: ["core"], assignee: "ada@example.com", blocks: ["CRONK-2"] });
+    // Linked Documents are named by the path of their file.
+    expect(ticket.data.documents).toEqual(["projects/CRONK/documents/1-plan.md"]);
     expect(ticket.body).toBe("All of it.");
     expect(markdown(files["projects/CRONK/tickets/CRONK-2.md"]).data).toMatchObject({ parent: "CRONK-1", blockedBy: ["CRONK-1"] });
     expect(markdown(files["projects/CRONK/tickets/CRONK-1.comments/1.md"])).toEqual({
@@ -49,6 +52,9 @@ describe("exporting a Project", () => {
     expect(history[0]).toMatchObject({ by: "ada@example.com", change: "created", title: "Build it", status: { name: "Backlog", current: "Backlog" } });
     expect(history).toContainEqual(expect.objectContaining({ change: "assignee", from: null, to: { id: ada.id, name: "Ada", email: "ada@example.com" } }));
     expect(history).toContainEqual(expect.objectContaining({ change: "relation added", kind: "blocks", ticket: { key: "CRONK-2", title: "Test it" } }));
+    expect(history).toContainEqual(
+      expect.objectContaining({ change: "document linked", document: { id: plan.id, title: "Plan", projectKey: "CRONK", path: "projects/CRONK/documents/1-plan.md" } }),
+    );
     expect(markdown(files["projects/CRONK/tickets/CRONK-2.history.md"]).data.changes).toContainEqual(
       expect.objectContaining({ change: "parent", from: null, to: { key: "CRONK-1", title: "Build it" } }),
     );
@@ -171,6 +177,9 @@ async function busyWorkspace() {
   const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
   expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
   await agent.delete("/api/agent-sessions/current");
+  // Ada sends it back once, then puts it In Review again herself.
+  await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
+  await admin.patch("/api/tickets/CRONK-1", { statusId: inReview.id });
 
   // Documents with Versions and Comments, in both page trees.
   cronk.clock.advance(60_000);
@@ -190,6 +199,17 @@ async function busyWorkspace() {
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
   await admin.post("/api/projects/OLD/tickets", { title: "Legacy" });
   await admin.post("/api/tickets/OLD-1/relations", { kind: "relates_to", ticketKey: "CRONK-1" });
+  const legacy = (await admin.post("/api/projects/OLD/documents", { title: "Legacy notes" })).body.document;
+
+  // Documents linked to Tickets: a Workspace Document, one nested in a page tree, another Project's, and another Ticket's Report.
+  const handbook = (await admin.get("/api/workspace/documents")).body.documents.find((d: { title: string }) => d.title === "Handbook");
+  const docker = (await admin.get("/api/projects/CRONK/documents")).body.documents.find((d: { title: string }) => d.title === "Setup / Docker");
+  await admin.post(`/api/tickets/OLD-1/documents/${handbook.id}`);
+  await admin.post(`/api/tickets/CRONK-3/documents/${docker.id}`);
+  await admin.post(`/api/tickets/CRONK-3/documents/${legacy.id}`);
+  await admin.post(`/api/tickets/CRONK-2/documents/${report.id}`);
+  await admin.post(`/api/tickets/CRONK-2/documents/${guide.id}`);
+  await admin.delete(`/api/tickets/CRONK-2/documents/${guide.id}`);
   await admin.patch("/api/projects/OLD", { archived: true });
   const gone = (await admin.post("/api/agents", { name: "old-bot" })).body.agent;
   await admin.delete(`/api/agents/${gone.id}`);
@@ -206,6 +226,10 @@ describe("importing an export", () => {
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
+    const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
+    expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
+    const moves = (await admin.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
+    expect(moves.map((c: { to: { name: string } }) => c.to.name)).toEqual(["In Progress"]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
@@ -237,6 +261,9 @@ describe("importing a Project export", () => {
     expect(ticket).toMatchObject({ title: "Ticket 1", status: { category: "in_review" }, delegate: { id: laptop.id } });
     // The relation to OLD-1 is left out: OLD isn't in the export.
     expect((await admin.get("/api/tickets/CRONK-1")).body.relations).toMatchObject({ blocks: [{ key: "CRONK-3" }], relatesTo: [] });
+    // So is the link to OLD's Document; the one to CRONK's own stays.
+    const linked = (await admin.get("/api/tickets/CRONK-3")).body.documents;
+    expect(linked.map((d: { title: string; reason: string }) => [d.title, d.reason])).toEqual([["Setup / Docker", "linked"]]);
     expect((await grace.get("/api/projects/CRONK/members")).status).toBe(200);
     // Tickets go on numbering where they left off.
     expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-4");
@@ -257,6 +284,8 @@ describe("importing a Project export", () => {
     expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: helper.agentId })).status).toBe(200);
     expect((await admin.patch("/api/tickets/CRONK-1", { delegateId: null })).status).toBe(200);
     await admin.post("/api/tickets/CRONK-1/relations", { kind: "relates_to", ticketKey: "OTHER-1" });
+    const notes = (await admin.post("/api/projects/OTHER/documents", { title: "Other notes" })).body.document;
+    await admin.post(`/api/tickets/CRONK-1/documents/${notes.id}`);
     const exported = await admin.download("/api/projects/CRONK/export");
     expect(markdown((await untarGz(exported.body))["people.md"]).data.users.map((u: { email: string }) => u.email)).toEqual(["ada@example.com"]);
 
@@ -270,6 +299,9 @@ describe("importing a Project export", () => {
     expect(changes).toContainEqual(expect.objectContaining({ change: "assignee", from: { id: bobId, name: "Bob" }, to: { id: expect.any(String), name: "Ada" } }));
     expect(changes).toContainEqual(expect.objectContaining({ change: "delegate", from: { id: helper.agentId, name: "helper" }, to: null }));
     expect(changes).toContainEqual(expect.objectContaining({ change: "relation added", kind: "relates_to", ticket: { key: "OTHER-1", title: "Elsewhere" } }));
+    expect(changes).toContainEqual(
+      expect.objectContaining({ change: "document linked", document: { id: notes.id, title: "Other notes", projectKey: "OTHER" } }),
+    );
     expect((await elsewhere.admin.get("/api/users")).body.users).toHaveLength(1);
   });
 
@@ -382,6 +414,10 @@ describe("an export edited by hand", () => {
     const gap = await admin.upload("/api/import", await edited("guidance.versions/2.md", () => {}, "guidance.versions/3.md"));
     expect(gap.status).toBe(400);
     expect(gap.body.error).toMatch(/guidance\.versions\/3\.md must follow Version 2/);
+
+    const unknown = await admin.upload("/api/import", await edited("projects/CRONK/tickets/CRONK-3.md", (d) => d.documents.push("documents/9-gone.md")));
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.error).toMatch(/CRONK-3\.md documents names documents\/9-gone\.md, which isn't a Document or Report in the export/);
 
     const twice = await admin.upload("/api/import", await edited("projects/CRONK/project.md", (d) => d.members.push(d.members[0])));
     expect(twice.status).toBe(400);

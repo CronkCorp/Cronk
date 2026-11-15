@@ -2,8 +2,8 @@ import type { AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
-import type { AgentRef, Ticket } from "../work/tickets.js";
-import { isLiveAt, WITH_WORKSPACE } from "./agent-sessions.js";
+import { ticketKeySql, type AgentRef, type Ticket } from "../work/tickets.js";
+import { isLiveAt, silenceWindow, WITH_WORKSPACE } from "./agent-sessions.js";
 
 /**
  * An Agent Session's exclusive, temporary hold on a Ticket. A Ticket stores at most one
@@ -15,6 +15,8 @@ export interface Claim {
   agent: AgentRef;
   session: { id: string };
   claimedAt: Date;
+  /** When its Agent Session was last heard from: its last call, or its open stream's last heartbeat. */
+  lastSeenAt: Date;
   /** When the Claim lapses if its Agent Session stays silent until then. */
   endsIfSilentAt: Date;
 }
@@ -53,7 +55,7 @@ async function findLiveClaimWithId(db: Queryable, ticketId: string, now: Date): 
         agent: { id: row.agent_id, name: row.agent_name },
         session: { id: row.session_id },
         claimedAt: row.claimed_at,
-        endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+        ...silenceWindow(row),
       },
     }
   );
@@ -69,6 +71,70 @@ export async function setClaim(db: Queryable, ticketId: string, sessionId: strin
     `UPDATE tickets SET claim_session_id = $2, claimed_at = $3, claim_id = gen_random_uuid() WHERE id = $1 AND claim_session_id IS DISTINCT FROM $2`,
     [ticketId, sessionId, now],
   );
+}
+
+/** The Claims live at `now`, as a map from Ticket id to the id of the Agent Session holding it. */
+export async function listLiveClaims(db: Queryable, now: Date): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; session_id: string }>(
+    `SELECT t.id, s.id AS session_id FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id ${WITH_WORKSPACE} WHERE ${isLiveAt("$1")}`,
+    [now],
+  );
+  return new Map(rows.map((r) => [r.id, r.session_id]));
+}
+
+/** A Ticket an Agent Session holds the Claim on, as the Agents list shows it. */
+export interface ClaimedTicket {
+  ticketKey: string;
+  title: string;
+  projectId: string;
+}
+
+/**
+ * The Tickets each of these Agent Sessions holds the Claim on, in key order. Pass only live Sessions:
+ * a Claim is live exactly while its Session is.
+ */
+export async function listClaimsOfSessions(db: Queryable, sessionIds: string[]): Promise<Map<string, ClaimedTicket[]>> {
+  const { rows } = await db.query<{ session_id: string; ticket_key: string; title: string; project_id: string }>(
+    `SELECT t.claim_session_id AS session_id, ${ticketKeySql("p", "t")} AS ticket_key, t.title, t.project_id
+     FROM tickets t JOIN projects p ON p.id = t.project_id
+     WHERE t.claim_session_id = ANY($1::uuid[]) ORDER BY p.key, t.number`,
+    [sessionIds],
+  );
+  const bySession = new Map<string, ClaimedTicket[]>(sessionIds.map((id) => [id, []]));
+  for (const row of rows) bySession.get(row.session_id)!.push({ ticketKey: row.ticket_key, title: row.title, projectId: row.project_id });
+  return bySession;
+}
+
+/**
+ * How many unfinished Tickets each of these Agents is Delegate on, per Agent and then per Project, so
+ * callers can leave out the Projects they can't read.
+ */
+export async function countDelegatedTickets(db: Queryable, agentIds: string[]): Promise<Map<string, Map<string, number>>> {
+  const { rows } = await db.query<{ delegate_id: string; project_id: string; count: number }>(
+    `SELECT t.delegate_id, t.project_id, count(*)::int AS count FROM tickets t JOIN statuses s ON s.id = t.status_id
+     WHERE t.delegate_id = ANY($1::uuid[]) AND s.category NOT IN ${FINISHED} GROUP BY t.delegate_id, t.project_id`,
+    [agentIds],
+  );
+  const byAgent = new Map<string, Map<string, number>>(agentIds.map((id) => [id, new Map()]));
+  for (const row of rows) byAgent.get(row.delegate_id)!.set(row.project_id, row.count);
+  return byAgent;
+}
+
+/**
+ * The Tickets whose Claims lapsed since the last look, at `since`, when `claims` (Ticket id to
+ * Agent Session id) were live: the Ticket still names the Session, which nobody ended, and it
+ * is no longer live at `now`, having been live at `since` or having lapsed after it. Claims
+ * released, or whose Session was ended, are left out, as is any taken by another Session since.
+ */
+export async function findLapsedClaims(db: Queryable, claims: Map<string, string>, since: Date, now: Date): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT t.id FROM tickets t JOIN agent_sessions s ON s.id = t.claim_session_id ${WITH_WORKSPACE}
+     WHERE s.ended_at IS NULL AND NOT (${isLiveAt("$4")})
+       AND (s.last_seen_at > $3::timestamptz - make_interval(secs => w.silence_threshold_seconds)
+            OR (t.id, s.id) IN (SELECT * FROM unnest($1::uuid[], $2::uuid[])))`,
+    [[...claims.keys()], [...claims.values()], since, now],
+  );
+  return rows.map((r) => r.id);
 }
 
 /** Drops the Ticket's Claim, as when it is released or its Delegate changes. */
@@ -90,8 +156,11 @@ const FINISHED = `(${FINISHED_CATEGORIES.map((c) => `'${c}'`).join(", ")})`;
  * unfinished Ticket, and without a live Claim.
  */
 const isReady = (agentParam: string, projectsParam: string, nowParam: string) => `
-  t.delegate_id = ${agentParam} AND t.project_id = ANY(${projectsParam}::uuid[])
-  AND s.category NOT IN ${FINISHED}
+  t.delegate_id = ${agentParam} AND t.project_id = ANY(${projectsParam}::uuid[]) AND ${hasNothingInTheWay(nowParam)}`;
+
+/** SQL condition: nothing keeps the Ticket `t`, in the Status `s`, from being worked on: it isn't finished, blocked or Claimed. */
+const hasNothingInTheWay = (nowParam: string) => `
+  s.category NOT IN ${FINISHED}
   AND NOT EXISTS (
     SELECT 1 FROM ticket_relations r JOIN tickets b ON b.id = r.from_ticket_id JOIN statuses bs ON bs.id = b.status_id
     WHERE r.kind = 'blocks' AND r.to_ticket_id = t.id AND bs.category NOT IN ${FINISHED})
@@ -115,6 +184,24 @@ export async function listReadyTicketIds(db: Queryable, scope: ReadyScope, now: 
     [scope.agentId, scope.projectIds, now, limit ?? null],
   );
   return rows.map((r) => r.id);
+}
+
+/**
+ * Those of these Tickets that have a Delegate and nothing in their way (unfinished, unblocked,
+ * unclaimed at `now`), each with its Delegate, Project and Workspace: whether one is Ready for its
+ * Delegate then rests only on the Delegate's access to the Project.
+ */
+export async function findDelegatedTicketsInTheClear(
+  db: Queryable,
+  ticketIds: string[],
+  now: Date,
+): Promise<{ ticketId: string; delegateId: string; projectId: string; workspaceId: string }[]> {
+  const { rows } = await db.query<{ id: string; delegate_id: string; project_id: string; workspace_id: string }>(
+    `SELECT t.id, t.delegate_id, t.project_id, p.workspace_id FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id
+     WHERE t.id = ANY($1::uuid[]) AND t.delegate_id IS NOT NULL AND ${hasNothingInTheWay("$2")}`,
+    [ticketIds, now],
+  );
+  return rows.map((r) => ({ ticketId: r.id, delegateId: r.delegate_id, projectId: r.project_id, workspaceId: r.workspace_id }));
 }
 
 /**

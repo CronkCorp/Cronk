@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 
 export const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -36,17 +36,34 @@ export type Loaded<T> = { kind: "loading" } | { kind: "failed"; message: string 
 export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): [Loaded<T>, () => void, (value: T) => void] {
   const [state, setState] = useState<Loaded<T>>({ kind: "loading" });
   const [generation, setGeneration] = useState(0);
+  // The deps the shown value was loaded for.
+  const loadedFor = useRef<unknown[]>(undefined);
   useEffect(() => {
     let current = true;
+    const sameDeps = loadedFor.current !== undefined && loadedFor.current.length === deps.length && loadedFor.current.every((d, i) => Object.is(d, deps[i]));
     load().then(
-      (value) => current && setState({ kind: "loaded", value }),
-      (err) => current && setState({ kind: "failed", message: messageOf(err) }),
+      (value) => {
+        if (!current) return;
+        loadedFor.current = deps;
+        setState({ kind: "loaded", value });
+      },
+      // A failed reload of the same thing keeps what was loaded, so a live view doesn't swap its list for an error on a blip;
+      // the next reload tries again.
+      (err) => current && setState((was) => (sameDeps && was.kind === "loaded" ? was : { kind: "failed", message: messageOf(err) })),
     );
     return () => {
       current = false;
     };
   }, [...deps, generation]);
   return [state, () => setGeneration((g) => g + 1), (value) => setState({ kind: "loaded", value })];
+}
+
+/** Two loads as one, loaded once both are. */
+export function both<A, B>(a: Loaded<A>, b: Loaded<B>): Loaded<[A, B]> {
+  if (a.kind === "failed") return a;
+  if (b.kind === "failed") return b;
+  if (a.kind === "loading" || b.kind === "loading") return { kind: "loading" };
+  return { kind: "loaded", value: [a.value, b.value] };
 }
 
 /** Shows a load's error, nothing while loading, or its content. */
@@ -82,11 +99,20 @@ export function Field(props: {
   );
 }
 
-export function TextArea(props: { label: string; value: string; onChange: (v: string) => void; rows?: number; placeholder?: string; disabled?: boolean }) {
+export function TextArea(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  placeholder?: string;
+  disabled?: boolean;
+  inputRef?: Ref<HTMLTextAreaElement>;
+}) {
   return (
     <label className="field">
       <span>{props.label}</span>
       <textarea
+        ref={props.inputRef}
         disabled={props.disabled}
         value={props.value}
         rows={props.rows ?? 6}

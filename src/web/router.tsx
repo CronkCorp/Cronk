@@ -1,11 +1,13 @@
 /** A minimal client-side router over the History API; the server answers every page path with the app shell. */
 
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useState, type AnchorHTMLAttributes, type MouseEvent } from "react";
 
 const listeners = new Set<() => void>();
 
-export function navigate(to: string): void {
-  history.pushState(null, "", to);
+/** Goes to `to`; `replace` swaps the current history entry instead of adding one, as moving through a list does. */
+export function navigate(to: string, options: { replace?: boolean } = {}): void {
+  if (options.replace) history.replaceState(null, "", to);
+  else history.pushState(null, "", to);
   for (const listener of listeners) listener();
 }
 
@@ -25,15 +27,17 @@ export function useLocation(): { path: string; search: URLSearchParams } {
   return current;
 }
 
-export function Link(props: { to: string; className?: string; children: ReactNode }) {
+/** A link that changes the address without reloading the page; other attributes, such as `aria-current`, pass through. */
+export function Link(props: { to: string } & Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick">) {
+  const { to, children, ...rest } = props;
   const onClick = (event: MouseEvent) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    navigate(props.to);
+    navigate(to);
   };
   return (
-    <a href={props.to} className={props.className} onClick={onClick}>
-      {props.children}
+    <a {...rest} href={to} onClick={onClick}>
+      {children}
     </a>
   );
 }

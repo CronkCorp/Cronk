@@ -3,7 +3,7 @@ import type { Queryable } from "../db/database.js";
 /**
  * One continuous connection of an Agent, from connect to disconnect. It is live until it is
  * ended or stays silent longer than the Workspace's silence threshold; every call made in it
- * refreshes it.
+ * refreshes it, as does its open stream of waiting work, on each heartbeat.
  */
 export interface AgentSession {
   id: string;
@@ -22,12 +22,17 @@ interface AgentSessionRow {
   silence_threshold_seconds: number;
 }
 
+/** When a Session was last heard from, and when it ends if it stays silent from then on. */
+export const silenceWindow = (row: { last_seen_at: Date; silence_threshold_seconds: number }) => ({
+  lastSeenAt: row.last_seen_at,
+  endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+});
+
 const toAgentSession = (row: AgentSessionRow): AgentSession => ({
   id: row.id,
   agentId: row.agent_id,
   startedAt: row.started_at,
-  lastSeenAt: row.last_seen_at,
-  endsIfSilentAt: new Date(row.last_seen_at.getTime() + row.silence_threshold_seconds * 1000),
+  ...silenceWindow(row),
 });
 
 /** The shape of an Agent Session the API returns. */
@@ -86,19 +91,37 @@ export async function findLiveAgentSession(db: Queryable, agentId: string, id: s
   return rows[0] && toAgentSession(rows[0]);
 }
 
+/** Ends the Sessions `column` picks, and returns the Tickets whose live Claims they held. */
+async function endSessions(db: Queryable, column: "id" | "token_id" | "agent_id", value: string, now: Date): Promise<ClaimHolders> {
+  const { rows } = await db.query<{ id: string }>(
+    `WITH ended AS (
+       UPDATE agent_sessions s SET ended_at = $2 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
+       WHERE a.id = s.agent_id AND s.${column} = $1 AND s.ended_at IS NULL
+       RETURNING s.id, s.last_seen_at > $2::timestamptz - make_interval(secs => w.silence_threshold_seconds) AS was_live)
+     SELECT t.id FROM tickets t JOIN ended ON ended.id = t.claim_session_id WHERE ended.was_live`,
+    [value, now],
+  );
+  return { ticketIds: rows.map((r) => r.id) };
+}
+
+/** What ending Agent Sessions changed: the Tickets whose live Claims they held, which no longer have one. */
+export interface ClaimHolders {
+  ticketIds: string[];
+}
+
 /** Ends a Session now. */
-export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE id = $1 AND ended_at IS NULL", [id, now]);
+export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "id", id, now);
 }
 
 /** Ends every Session a token started, as when it is revoked. */
-export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE token_id = $1 AND ended_at IS NULL", [tokenId, now]);
+export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "token_id", tokenId, now);
 }
 
 /** Ends every Session of an Agent, as when it is removed. */
-export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<void> {
-  await db.query("UPDATE agent_sessions SET ended_at = $2 WHERE agent_id = $1 AND ended_at IS NULL", [agentId, now]);
+export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "agent_id", agentId, now);
 }
 
 /** Ends every Session of every Agent `ownerId` owns, as when the Owner is deactivated. */
@@ -119,4 +142,56 @@ export async function liveAgentSessions(db: Queryable, agentIds: string[], now: 
   const byAgent = new Map<string, AgentSession[]>(agentIds.map((id) => [id, []]));
   for (const row of rows) byAgent.get(row.agent_id)!.push(toAgentSession(row));
   return byAgent;
+}
+
+/**
+ * When each of these Agents' last Session that is no longer live ended: when it was ended, or when it
+ * fell silent if that came first. Agents with no such Session are left out.
+ */
+export async function lastAgentSessionEnds(db: Queryable, agentIds: string[], now: Date): Promise<Map<string, Date>> {
+  const { rows } = await db.query<{ agent_id: string; ended: Date }>(
+    `SELECT s.agent_id, max(LEAST(s.ended_at, s.last_seen_at + make_interval(secs => w.silence_threshold_seconds))) AS ended
+     FROM agent_sessions s ${WITH_WORKSPACE} WHERE s.agent_id = ANY($1::uuid[]) AND NOT (${isLiveAt("$2")}) GROUP BY s.agent_id`,
+    [agentIds, now],
+  );
+  return new Map(rows.map((r) => [r.agent_id, r.ended]));
+}
+
+/** What the Agents page shows of a live Session, to notice when it changes: its Agent's Owner, when it would fall silent, and its Claims. */
+export interface SessionLook {
+  ownerId: string;
+  endsIfSilentAt: number;
+  /** The ids of the Tickets it holds the Claims on, in order. */
+  claims: string;
+}
+
+/** Every live Session at `now`, by id, as the Agents page shows it (see `SessionLook`). */
+export async function lookAtLiveAgentSessions(db: Queryable, now: Date): Promise<Map<string, SessionLook>> {
+  const { rows } = await db.query<{ id: string; owner_id: string; last_seen_at: Date; silence_threshold_seconds: number; claims: string }>(
+    `SELECT s.id, a.owner_id, s.last_seen_at, w.silence_threshold_seconds,
+            COALESCE(string_agg(t.id::text, ',' ORDER BY t.id), '') AS claims
+     FROM agent_sessions s ${WITH_WORKSPACE} LEFT JOIN tickets t ON t.claim_session_id = s.id
+     WHERE ${isLiveAt("$1")} GROUP BY s.id, a.owner_id, w.silence_threshold_seconds`,
+    [now],
+  );
+  return new Map(
+    rows.map((r) => [
+      r.id,
+      { ownerId: r.owner_id, endsIfSilentAt: r.last_seen_at.getTime() + r.silence_threshold_seconds * 1000, claims: r.claims },
+    ]),
+  );
+}
+
+/**
+ * The Owners whose live Sessions differ between two looks: one started, ended or fell silent,
+ * gained or lost a Claim, or would fall silent at another time.
+ */
+export function ownersWithChangedSessions(before: Map<string, SessionLook>, after: Map<string, SessionLook>): Set<string> {
+  const owners = new Set<string>();
+  for (const [id, was] of before) {
+    const is = after.get(id);
+    if (!is || is.endsIfSilentAt !== was.endsIfSilentAt || is.claims !== was.claims) owners.add(was.ownerId);
+  }
+  for (const [id, is] of after) if (!before.has(id)) owners.add(is.ownerId);
+  return owners;
 }

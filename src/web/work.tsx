@@ -1,33 +1,31 @@
-import { useState, type FormEvent } from "react";
+import { Button } from "./components/button.js";
+import { ConfirmDialog, Menu } from "./components/overlays.js";
+import { Chip, PRIORITY_NAMES, PriorityTag, StatusDot } from "./components/tags.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
+import { Actor, Avatar, agentActor, userActor } from "./components/actor.js";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AgentAccessSelect } from "./agents.js";
 import {
   api,
   projectExportUrl,
   type Agent,
   type AgentAccess,
-  type Priority,
   type Project,
-  type RecordedChange,
-  type RelationKind,
   type Status,
   type StatusCategory,
   type Ticket,
-  type TicketChanges,
-  type TicketDetail,
   type TicketFilter,
-  type TicketRef,
   type User,
-  sessionName,
+  watchProject,
 } from "./api.js";
 import { PRIORITIES, STATUS_CATEGORIES } from "../shared/values.js";
 import { GuidanceSection } from "./guidance.js";
-import { TicketTimeline } from "./timeline.js";
-import { CronkMarkdown, forgetProjectKeys } from "./markdown.js";
+import { forgetProjectKeys } from "./markdown.js";
 import { ProjectAccessPanel } from "./people.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
-const PRIORITY_NAMES: Record<Priority, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low", none: "No Priority" };
 
 const CATEGORY_NAMES: Record<StatusCategory, string> = {
   backlog: "Backlog",
@@ -38,7 +36,6 @@ const CATEGORY_NAMES: Record<StatusCategory, string> = {
   canceled: "Canceled",
 };
 
-const RELATION_NAMES: Record<RelationKind, string> = { blocks: "Blocks", blocked_by: "Blocked by", relates_to: "Relates to" };
 
 /** The Workspace's Projects: active ones by default, or the archived ones. */
 export function ProjectsPage(props: { archived: boolean }) {
@@ -55,7 +52,7 @@ export function ProjectsPage(props: { archived: boolean }) {
           ) : (
             <>
               <Link to="/archived" className="link">Archived Projects</Link>
-              {!creating && <button onClick={() => setCreating(true)}>New Project</button>}
+              {!creating && <Button onClick={() => setCreating(true)}>New Project</Button>}
             </>
           )}
         </div>
@@ -83,8 +80,8 @@ export function ProjectsPage(props: { archived: boolean }) {
                   <Link to={`/projects/${project.key}`} className="row">
                     <span className="key">{project.key}</span>
                     <span className="grow">{project.name}</span>
-                    {project.visibility === "private" && <span className="badge">Private</span>}
-                    {project.access === "read" && <span className="badge">Read only</span>}
+                    {project.visibility === "private" && <Chip>Private</Chip>}
+                    {project.access === "read" && <Chip>Read only</Chip>}
                   </Link>
                 </li>
               ))}
@@ -109,15 +106,28 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
         <p className="muted hint">Tickets are numbered from it, like {key || "CRONK"}-1. It can't be changed later.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Create Project</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Create Project</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
   );
 }
 
-export type ProjectView = "list" | "board" | "statuses" | "reports" | "guidance";
+export type ProjectView = "list" | "board" | "reports" | "settings";
+
+/** The sections of a Project's settings, in the order the settings view shows them. */
+export type SettingsSection = "access" | "agent-access" | "statuses" | "guidance";
+
+/**
+ * The view a Project page's `view` parameter asks for, and the settings section it lands on. Statuses and
+ * Guidance were views of their own, so their old addresses open the settings at their section.
+ */
+export function projectViewOf(view: string | null): { view: ProjectView; section?: SettingsSection } {
+  if (view === "board" || view === "reports" || view === "settings") return { view };
+  if (view === "statuses" || view === "guidance") return { view: "settings", section: view };
+  return { view: "list" };
+}
 
 /** Whether a view shows the Project's Tickets, and so takes a filter: the list and the board do. */
 const showsTickets = (view: ProjectView) => view === "list" || view === "board";
@@ -145,15 +155,36 @@ function projectPath(projectKey: string, view: ProjectView, filter: TicketFilter
 
 /**
  * One Project's Tickets, as a list or as a board grouped by Status, narrowed by the
- * filters in its address; or its Statuses to tailor, counting all its Tickets.
+ * filters in its address; its Reports; or its settings.
  */
-export function ProjectPage(props: { projectKey: string; view: ProjectView; filter: TicketFilter; me: User }) {
+export function ProjectPage(props: { projectKey: string; view: ProjectView; section?: SettingsSection; filter: TicketFilter; me: User }) {
   const filter = showsTickets(props.view) ? props.filter : {};
   const filterKey = JSON.stringify(filter);
   const [project, reloadProject, setProject] = useLoad(() => api.project(props.projectKey), [props.projectKey]);
   const [tickets, reloadTickets] = useLoad(() => api.tickets(props.projectKey, filter), [props.projectKey, filterKey]);
+  // The list and board follow the Project's changes; a change to its Statuses reloads the Project, which holds them.
+  const [live, onLive] = useLiveState();
+  useEffect(
+    () =>
+      watchProject(props.projectKey, {
+        onLive,
+        ready: () => {
+          reloadProject();
+          reloadTickets();
+        },
+        on: {
+          changed: ({ ticket }) => {
+            if (ticket === null) reloadProject();
+            reloadTickets();
+          },
+        },
+      }),
+    [props.projectKey],
+  );
   const [creating, setCreating] = useState(false);
-  const [showAccess, setShowAccess] = useState(false);
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+  // The board's collapsed columns the User opened; kept while they stay on the page, never stored.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const agentAccess = useAction(
     async (access: AgentAccess) => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
@@ -174,42 +205,54 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
     <Show state={project}>
       {({ project: p, statuses }) => (
         <section>
-          <div className="page-head">
-            <div>
-              <div className="muted"><Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> / {p.key}</div>
-              <h1>
-                {p.name} {p.archived && <span className="badge">Archived</span>}{" "}
-                {p.visibility === "private" && <span className="badge">Private</span>}{" "}
-                {p.access === "read" && <span className="badge">Read only</span>}
-              </h1>
-            </div>
-            <div className="actions">
-              {p.access === "write" && (
-                <AgentAccessSelect value={p.agentAccess} disabled={agentAccess.busy} onChange={(a) => void agentAccess.run(a)} />
-              )}
-              {props.me.role === "admin" && (
-                <>
-                  <button className="secondary" onClick={() => setShowAccess(!showAccess)}>Access</button>
-                  <a className="button secondary" href={projectExportUrl(p.key)} download>Export</a>
-                </>
-              )}
-              {p.access === "write" && (
-                <>
-                  <button className="secondary" onClick={() => archive.submit()} disabled={archive.busy}>
-                    {p.archived ? "Restore Project" : "Archive Project"}
-                  </button>
-                  {!creating && <button onClick={() => setCreating(true)}>New Ticket</button>}
-                </>
-              )}
-            </div>
+          <div className="muted crumbs">
+            <Link to={p.archived ? "/archived" : "/"} className="link">Projects</Link> /{" "}
+            {props.view === "settings" ? (
+              <>
+                <Link to={projectPath(p.key, "list", {})} className="link">{p.key}</Link> / Settings
+              </>
+            ) : (
+              p.key
+            )}
           </div>
-          {(archive.error ?? agentAccess.error) && <p className="error" role="alert">{archive.error ?? agentAccess.error}</p>}
-          {showAccess && (
-            <ProjectAccessPanel
-              project={p}
-              onProjectChanged={(updated) => setProject({ project: updated, statuses })}
+          <div className="page-head" data-testid="page-head">
+            <h1>
+              {p.name} {p.archived && <Chip>Archived</Chip>}{" "}
+              {p.visibility === "private" && <Chip>Private</Chip>}{" "}
+              {p.access === "read" && <Chip>Read only</Chip>}
+            </h1>
+            <div className="actions">
+              <LiveIndicator state={live} />
+              <ViewSwitcher projectKey={p.key} view={props.view} filter={props.filter} />
+              <Menu
+                label="Project actions"
+                trigger={<Button variant="secondary" aria-label="Project actions">…</Button>}
+                items={[
+                  { label: "Documents", onSelect: () => navigate(`/projects/${p.key}/documents`) },
+                  // Everyone who sees the Project may read its settings; only Write access changes them or archives it.
+                  { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
+                  // Only an Admin may export; the archive downloads as an attachment.
+                  ...(props.me.role === "admin" ? [{ label: "Export Project", onSelect: () => window.location.assign(projectExportUrl(p.key)) }] : []),
+                  ...(p.access === "write"
+                    ? [{ label: archiveOrRestore(p).label, danger: !p.archived, onSelect: () => setConfirmingArchive(true) }]
+                    : []),
+                ]}
+              />
+              {p.access === "write" && !creating && <Button onClick={() => setCreating(true)}>New Ticket</Button>}
+            </div>
+            <ConfirmDialog
+              open={confirmingArchive}
+              onOpenChange={setConfirmingArchive}
+              title={`${archiveOrRestore(p).verb} ${p.name}?`}
+              description={archiveOrRestore(p).description}
+              confirmLabel={archiveOrRestore(p).label}
+              busy={archive.busy}
+              onConfirm={() => {
+                void archive.submit().finally(() => setConfirmingArchive(false));
+              }}
             />
-          )}
+          </div>
+          {archive.error && <p className="error" role="alert">{archive.error}</p>}
           {creating && (
             <NewTicket
               projectKey={p.key}
@@ -218,21 +261,6 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                 setCreating(false);
                 reloadTickets();
               }}
-            />
-          )}
-          <nav className="tabs" aria-label="View">
-            <Link to={projectPath(p.key, "list", props.filter)} className={props.view === "list" ? "tab active" : "tab"}>List</Link>
-            <Link to={projectPath(p.key, "board", props.filter)} className={props.view === "board" ? "tab active" : "tab"}>Board</Link>
-            <Link to={projectPath(p.key, "statuses", {})} className={props.view === "statuses" ? "tab active" : "tab"}>Statuses</Link>
-            <Link to={`/projects/${p.key}/documents`} className="tab">Documents</Link>
-            <Link to={projectPath(p.key, "reports", {})} className={props.view === "reports" ? "tab active" : "tab"}>Reports</Link>
-            <Link to={projectPath(p.key, "guidance", {})} className={props.view === "guidance" ? "tab active" : "tab"}>Guidance</Link>
-          </nav>
-          {props.view === "guidance" && (
-            <GuidanceSection
-              projectKey={p.key}
-              canEdit={p.access === "write"}
-              intro="Standing instructions for Agents working in this Project, on top of the Workspace Guidance. Every Agent Session gets them when it connects."
             />
           )}
           {showsTickets(props.view) && (
@@ -245,20 +273,49 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
             />
           )}
           {props.view === "reports" && <ReportsView projectKey={p.key} />}
-          {props.view !== "guidance" && props.view !== "reports" && (
+          {props.view !== "reports" && (
             <Show state={tickets}>
               {(list) =>
-                props.view === "statuses" ? (
-                  <StatusesView
-                    projectKey={p.key}
-                    statuses={statuses}
-                    tickets={list}
-                    canChange={p.access === "write"}
-                    onChanged={() => {
-                      reloadProject();
-                      reloadTickets();
-                    }}
-                  />
+                props.view === "settings" ? (
+                  <div className="settings">
+                    {props.me.role === "admin" && (
+                      <SettingsPart id="access" title="Access" landOn={props.section}>
+                        <ProjectAccessPanel project={p} onProjectChanged={(updated) => setProject({ project: updated, statuses })} />
+                      </SettingsPart>
+                    )}
+                    <SettingsPart id="agent-access" title="Agent Access" landOn={props.section}>
+                      <div className="panel wide">
+                        <p className="muted">The most Agents may do in this Project. An Agent never gets more than its Owner has.</p>
+                        <AgentAccessSelect
+                          value={p.agentAccess}
+                          disabled={p.access !== "write" || agentAccess.busy}
+                          onChange={(a) => void agentAccess.run(a)}
+                        />
+                        {agentAccess.error && <p className="error" role="alert">{agentAccess.error}</p>}
+                      </div>
+                    </SettingsPart>
+                    <SettingsPart id="statuses" title="Statuses" landOn={props.section}>
+                      <StatusesView
+                        projectKey={p.key}
+                        statuses={statuses}
+                        tickets={list}
+                        canChange={p.access === "write"}
+                        onChanged={() => {
+                          reloadProject();
+                          reloadTickets();
+                        }}
+                      />
+                    </SettingsPart>
+                    <SettingsPart id="guidance" title="Guidance" landOn={props.section}>
+                      <div className="panel wide">
+                        <GuidanceSection
+                          projectKey={p.key}
+                          canEdit={p.access === "write"}
+                          intro="Standing instructions for Agents working in this Project, on top of the Workspace Guidance. Every Agent Session gets them when it connects."
+                        />
+                      </div>
+                    </SettingsPart>
+                  </div>
                 ) : (
                   <>
                     {list.length === 0 && filtered && (
@@ -268,20 +325,31 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
                       </div>
                     )}
                     {props.view === "board" ? (
-                      <Board statuses={statuses} tickets={list} />
+                      <Board
+                        statuses={statuses}
+                        tickets={list}
+                        expanded={expanded}
+                        onToggle={(id) =>
+                          setExpanded((now) => {
+                            const next = new Set(now);
+                            if (!next.delete(id)) next.add(id);
+                            return next;
+                          })
+                        }
+                      />
                     ) : list.length === 0 ? (
                       !filtered && <div className="empty"><h2>No Tickets yet</h2></div>
                     ) : (
                       <ul className="rows" aria-label="Tickets">
                         {list.map((ticket) => (
                           <li key={ticket.key}>
-                            <Link to={`/tickets/${ticket.key}`} className="row">
-                              <PriorityIcon priority={ticket.priority} />
+                            <Link to={`/tickets/${ticket.key}`} className="row ticket-row">
+                              <StatusDot status={ticket.status} />
                               <span className="key">{ticket.key}</span>
                               <span className="grow">{ticket.title}</span>
                               <LabelChips labels={ticket.labels} />
-                              {ticket.assignee && <span className="muted assignee">{ticket.assignee.name}</span>}
-                              <StatusPill status={ticket.status} />
+                              <PriorityTag priority={ticket.priority} />
+                              <TicketPeople ticket={ticket} />
                             </Link>
                           </li>
                         ))}
@@ -295,6 +363,49 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; filt
         </section>
       )}
     </Show>
+  );
+}
+
+/** What the … menu's Archive and Restore items, and the dialog confirming them, say. */
+const ARCHIVE = {
+  verb: "Archive",
+  label: "Archive Project",
+  description: "It leaves the sidebar and the Projects page, and moves to Archived Projects. It can be restored.",
+};
+const RESTORE = { verb: "Restore", label: "Restore Project", description: "It comes back to the sidebar and the Projects page." };
+const archiveOrRestore = (project: Project) => (project.archived ? RESTORE : ARCHIVE);
+
+/** One section of a Project's settings, which scrolls into view when the address asks to land on it. */
+function SettingsPart(props: { id: SettingsSection; title: string; landOn: SettingsSection | undefined; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const landing = props.landOn === props.id;
+  useEffect(() => {
+    if (landing) ref.current?.scrollIntoView({ block: "start" });
+  }, [landing]);
+  return (
+    <section ref={ref} className="settings-section" aria-label={props.title}>
+      <h2>{props.title}</h2>
+      {props.children}
+    </section>
+  );
+}
+
+/** List, Board and Reports as a segmented control; List and Board keep the filter between them. */
+function ViewSwitcher(props: { projectKey: string; view: ProjectView; filter: TicketFilter }) {
+  const views: [ProjectView, string][] = [["list", "List"], ["board", "Board"], ["reports", "Reports"]];
+  return (
+    <nav className="segmented" aria-label="View">
+      {views.map(([view, name]) => (
+        <Link
+          key={view}
+          to={projectPath(props.projectKey, view, props.filter)}
+          className={props.view === view ? "segment active" : "segment"}
+          {...(props.view === view ? { "aria-current": "page" as const } : {})}
+        >
+          {name}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -372,27 +483,60 @@ export function FilterSelect(props: { name: string; value: string | undefined; o
   );
 }
 
-function Board(props: { statuses: Status[]; tickets: Ticket[] }) {
+/** The Status Categories whose columns start collapsed to their count, so the open work fits the screen. */
+const COLLAPSED_CATEGORIES: ReadonlySet<StatusCategory> = new Set(["completed", "canceled"]);
+
+/**
+ * The Tickets in one column per Status, filling the main column. Completed and Canceled columns start collapsed
+ * to their dot and count; `expanded` holds the ones the User opened, for as long as they stay on the page.
+ */
+function Board(props: { statuses: Status[]; tickets: Ticket[]; expanded: ReadonlySet<string>; onToggle: (statusId: string) => void }) {
   return (
-    <div className="board">
+    <div className="board" role="group" aria-label="Board">
       {props.statuses.map((status) => {
         const inStatus = props.tickets.filter((t) => t.status.id === status.id);
+        const collapsible = COLLAPSED_CATEGORIES.has(status.category);
+        const open = !collapsible || props.expanded.has(status.id);
+        const count = `${inStatus.length} ${inStatus.length === 1 ? "Ticket" : "Tickets"}`;
+        const head = (
+          <>
+            <span className={`dot ${status.category}`} aria-hidden="true" />
+            {open && <span className="column-name">{status.name}</span>}
+            <span className="muted">{inStatus.length}</span>
+          </>
+        );
         return (
-          <section key={status.id} className="column" aria-label={status.name}>
+          <section key={status.id} className={open ? "column" : "column collapsed"} aria-label={status.name}>
             <h3 className="column-head">
-              <span className={`dot ${status.category}`} />
-              {status.name} <span className="muted">{inStatus.length}</span>
+              {collapsible ? (
+                <button
+                  type="button"
+                  className="column-toggle"
+                  aria-expanded={open}
+                  aria-label={`${status.name}, ${count}`}
+                  title={open ? `Collapse ${status.name}` : `${status.name}: ${count}`}
+                  onClick={() => props.onToggle(status.id)}
+                >
+                  {head}
+                </button>
+              ) : (
+                head
+              )}
             </h3>
-            {inStatus.map((ticket) => (
-              <Link key={ticket.key} to={`/tickets/${ticket.key}`} className="card">
-                <span className="card-head">
-                  <span className="key">{ticket.key}</span>
-                  <PriorityIcon priority={ticket.priority} />
-                </span>
-                <span>{ticket.title}</span>
-                <LabelChips labels={ticket.labels} />
-              </Link>
-            ))}
+            {open &&
+              inStatus.map((ticket) => (
+                <Link key={ticket.key} to={`/tickets/${ticket.key}`} className="card">
+                  <span className="card-head">
+                    <span className="key">{ticket.key}</span>
+                    <PriorityTag priority={ticket.priority} />
+                  </span>
+                  <span>{ticket.title}</span>
+                  <span className="card-foot">
+                    <LabelChips labels={ticket.labels} />
+                    <TicketPeople ticket={ticket} />
+                  </span>
+                </Link>
+              ))}
           </section>
         );
       })}
@@ -437,10 +581,10 @@ function StatusCategorySection(props: {
   );
   return (
     <section className="panel wide status-category" aria-label={props.label}>
-      <h2 className="column-head">
+      <h3 className="column-head">
         <span className={`dot ${props.category}`} />
         {props.label}
-      </h2>
+      </h3>
       <ul className="rows">
         {props.inCategory.map((status, position) => (
           <StatusRow
@@ -455,7 +599,7 @@ function StatusCategorySection(props: {
       {props.canChange && (
         <form className="add-status" onSubmit={add.submit}>
           <input aria-label={`New ${props.label} Status`} placeholder="New Status" value={name} required onChange={(e) => setName(e.target.value)} />
-          <button type="submit" disabled={add.busy}>Add</button>
+          <Button type="submit" disabled={add.busy}>Add</Button>
         </form>
       )}
       {add.error && <p className="error" role="alert">{add.error}</p>}
@@ -507,8 +651,8 @@ function StatusRow(props: {
           }}
         >
           <input aria-label={`Name of ${s.name}`} className="grow" value={name} required onChange={(e) => setName(e.target.value)} />
-          <button type="submit" disabled={update.busy}>Save</button>
-          <button type="button" className="secondary" onClick={() => setMode("view")}>Cancel</button>
+          <Button type="submit" disabled={update.busy}>Save</Button>
+          <Button type="button" variant="secondary" onClick={() => setMode("view")}>Cancel</Button>
         </form>
       ) : (
         <div className="row">
@@ -516,24 +660,24 @@ function StatusRow(props: {
           <span className="muted">{props.ticketCount} {props.ticketCount === 1 ? "Ticket" : "Tickets"}</span>
           {props.canChange && (
             <>
-              <button
-                className="link"
+              <Button
+                variant="ghost"
                 aria-label={`Move ${s.name} up`}
                 disabled={props.position === 0 || update.busy}
                 onClick={() => void update.run({ position: props.position - 1 })}
               >
                 ↑
-              </button>
-              <button
-                className="link"
+              </Button>
+              <Button
+                variant="ghost"
                 aria-label={`Move ${s.name} down`}
                 disabled={props.position === props.inCategory.length - 1 || update.busy}
                 onClick={() => void update.run({ position: props.position + 1 })}
               >
                 ↓
-              </button>
-              <button
-                className="link"
+              </Button>
+              <Button
+                variant="ghost"
                 aria-label={`Rename ${s.name}`}
                 onClick={() => {
                   setName(s.name);
@@ -541,10 +685,10 @@ function StatusRow(props: {
                 }}
               >
                 Rename
-              </button>
+              </Button>
               {/* A Status Category keeps at least one Status, so its last can't be removed. */}
               {props.inCategory.length > 1 && (
-                <button className="link" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</button>
+                <Button variant="ghost" aria-label={`Remove ${s.name}`} onClick={() => setMode("remove")}>Remove</Button>
               )}
             </>
           )}
@@ -564,8 +708,8 @@ function StatusRow(props: {
           ) : (
             <span className="grow muted">No Tickets are in {s.name}.</span>
           )}
-          <button disabled={remove.busy} onClick={() => void remove.run()}>Remove Status</button>
-          <button className="secondary" onClick={() => setMode("view")}>Cancel</button>
+          <Button disabled={remove.busy} onClick={() => void remove.run()}>Remove Status</Button>
+          <Button variant="secondary" onClick={() => setMode("view")}>Cancel</Button>
         </div>
       )}
       {error && <p className="error row" role="alert">{error}</p>}
@@ -573,20 +717,14 @@ function StatusRow(props: {
   );
 }
 
-export function StatusPill(props: { status: Status }) {
+/** Who has a Ticket, as avatars: its Delegate (an Agent, square and violet), then its Assignee. */
+function TicketPeople(props: { ticket: Ticket }) {
+  const { assignee, delegate } = props.ticket;
+  if (!assignee && !delegate) return null;
   return (
-    <span className="status-pill">
-      <span className={`dot ${props.status.category}`} />
-      {props.status.name}
-    </span>
-  );
-}
-
-function PriorityIcon(props: { priority: Priority }) {
-  if (props.priority === "none") return null;
-  return (
-    <span className={`priority ${props.priority}`} title={`Priority: ${PRIORITY_NAMES[props.priority]}`}>
-      {PRIORITY_NAMES[props.priority]}
+    <span className="people">
+      {delegate && <Avatar actor={agentActor(delegate)} label={`Delegate: ${delegate.name}`} />}
+      {assignee && <Avatar actor={userActor(assignee.name)} label={`Assignee: ${assignee.name}`} />}
     </span>
   );
 }
@@ -596,7 +734,7 @@ function LabelChips(props: { labels: string[] }) {
   return (
     <span className="chips">
       {props.labels.map((label) => (
-        <span key={label} className="chip">{label}</span>
+        <Chip key={label}>{label}</Chip>
       ))}
     </span>
   );
@@ -614,116 +752,11 @@ function NewTicket(props: { projectKey: string; onDone: (ticket: Ticket) => void
         <TextArea label="Description (Markdown)" value={description} onChange={setDescription} />
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Create Ticket</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Create Ticket</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
-  );
-}
-
-/** One Ticket: its description, fields, the Tickets around it, and its history. */
-export function TicketPage(props: { ticketKey: string }) {
-  const [detail, reload] = useLoad(() => api.ticket(props.ticketKey), [props.ticketKey]);
-  return <Show state={detail}>{(d) => <TicketView detail={d} onChanged={reload} />}</Show>;
-}
-
-function TicketView(props: { detail: TicketDetail; onChanged: () => void }) {
-  const t = props.detail.ticket;
-  const [project] = useLoad(() => api.project(t.projectKey), [t.projectKey]);
-  const [history, reloadHistory] = useLoad(() => api.ticketHistory(t.key), [t.key]);
-  const [editing, setEditing] = useState(false);
-  const archived = project.kind === "loaded" && project.value.project.archived;
-  const canWrite = project.kind === "loaded" && project.value.project.access === "write";
-
-  const changed = () => {
-    props.onChanged();
-    reloadHistory();
-  };
-  const update = useAction((changes: TicketChanges) => api.updateTicket(t.key, changes), changed);
-
-  return (
-    <article className="ticket">
-      <div className="muted">
-        <Link to={archived ? "/archived" : "/"} className="link">Projects</Link> /{" "}
-        <Link to={`/projects/${t.projectKey}`} className="link">{t.projectKey}</Link> / {t.key}
-      </div>
-      {editing ? (
-        <EditTicket
-          ticket={t}
-          onCancel={() => setEditing(false)}
-          onDone={() => {
-            setEditing(false);
-            changed();
-          }}
-        />
-      ) : (
-        <>
-          <div className="page-head">
-            <h1>{t.title}</h1>
-            {canWrite && <button className="secondary" onClick={() => setEditing(true)}>Edit</button>}
-          </div>
-          <div className="ticket-fields">
-            <Show state={project}>
-              {({ statuses }) => (
-                <Picker
-                  label="Status"
-                  value={t.status.id}
-                  disabled={update.busy || !canWrite}
-                  options={statuses.map((s) => [s.id, s.name])}
-                  onChange={(statusId) => void update.run({ statusId })}
-                />
-              )}
-            </Show>
-            <Picker
-              label="Priority"
-              value={t.priority}
-              disabled={update.busy || !canWrite}
-              options={PRIORITIES.map((p) => [p, PRIORITY_NAMES[p]])}
-              onChange={(priority) => void update.run({ priority: priority as Priority })}
-            />
-            <AssigneePicker ticket={t} disabled={update.busy || !canWrite} onChange={(assigneeId) => void update.run({ assigneeId })} />
-            <DelegatePicker ticket={t} disabled={update.busy || !canWrite} onChange={(delegateId) => void update.run({ delegateId })} />
-          </div>
-          <ClaimLine claim={props.detail.claim} />
-          {update.error && <p className="error" role="alert">{update.error}</p>}
-          <LabelEditor ticket={t} busy={update.busy} readOnly={!canWrite} onChange={(labels) => void update.run({ labels })} />
-          <div className="markdown" data-testid="ticket-description">
-            {t.description.trim() ? <CronkMarkdown>{t.description}</CronkMarkdown> : <p className="muted">No description.</p>}
-          </div>
-        </>
-      )}
-      <ParentEditor ticket={t} readOnly={!canWrite} onChanged={changed} />
-      {props.detail.subTickets.length > 0 && (
-        <>
-          <h2>Sub-Tickets</h2>
-          <TicketRefList name="Sub-Tickets" refs={props.detail.subTickets} />
-        </>
-      )}
-      <RelationsEditor detail={props.detail} readOnly={!canWrite} onChanged={changed} />
-      <MentionedIn detail={props.detail} />
-      <h2>Timeline</h2>
-      <TicketTimeline ticketKey={t.key} canWrite={canWrite} />
-      <h2>History</h2>
-      <Show state={history}>
-        {(changes) => (
-          <ol className="history" aria-label="History">
-            {changes.map((change, i) => (
-              <li key={i}>
-                <span className="muted">{new Date(change.at).toLocaleString()}</span> <strong>{change.actor.name}</strong>
-                {change.actor.kind === "agent" && (
-                  <span className="muted">
-                    {" "}
-                    ({change.actor.session ? `${sessionName(change.actor.session.id)}, for` : "Agent of"} {change.actor.owner.name})
-                  </span>
-                )}{" "}
-                {describeChange(change)}
-              </li>
-            ))}
-          </ol>
-        )}
-      </Show>
-    </article>
   );
 }
 
@@ -747,8 +780,8 @@ function ReportsView(props: { projectKey: string }) {
                   <span className="grow">
                     {r.title} <span className="muted">on {r.ticketTitle}</span>
                   </span>
-                  <span className="muted">{r.agent.name}</span>
-                  <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                  <Actor actor={agentActor(r.agent, r.session)} owner={false} />
+                  <RelativeTime at={r.createdAt} />
                 </Link>
               </li>
             ))}
@@ -757,290 +790,4 @@ function ReportsView(props: { projectKey: string }) {
       }
     </Show>
   );
-}
-
-function Picker(props: { label: string; value: string; disabled: boolean; options: [string, string][]; onChange: (value: string) => void }) {
-  return (
-    <label className="field inline">
-      <span>{props.label}</span>
-      <select value={props.value} disabled={props.disabled} onChange={(e) => props.onChange(e.target.value)}>
-        {props.options.map(([value, name]) => (
-          <option key={value} value={value}>{name}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function AssigneePicker(props: { ticket: Ticket; disabled: boolean; onChange: (assigneeId: string | null) => void }) {
-  const [users] = useLoad(api.users, []);
-  const known = users.kind === "loaded" ? users.value : [];
-  const assignee = props.ticket.assignee;
-  // Show the current Assignee even before the User list arrives.
-  const options: [string, string][] = [
-    ["", "Unassigned"],
-    ...(assignee && !known.some((u) => u.id === assignee.id) ? [[assignee.id, assignee.name] as [string, string]] : []),
-    ...known.filter((u) => u.active).map((u): [string, string] => [u.id, u.name]),
-  ];
-  return (
-    <Picker label="Assignee" value={assignee?.id ?? ""} disabled={props.disabled} options={options} onChange={(id) => props.onChange(id || null)} />
-  );
-}
-
-/** Picks the Delegate among the Assignee's own Agents; the API refuses anyone else's. */
-function DelegatePicker(props: { ticket: Ticket; disabled: boolean; onChange: (delegateId: string | null) => void }) {
-  const [agents] = useLoad(() => api.agents(), []);
-  const { assignee, delegate } = props.ticket;
-  // Only the signed-in User's own Agents are listed to them, so this offers Agents only on their own Tickets.
-  const own = agents.kind === "loaded" ? agents.value.filter((a) => a.owner.id === assignee?.id) : [];
-  const options: [string, string][] = [
-    ["", "Not delegated"],
-    ...(delegate && !own.some((a) => a.id === delegate.id) ? [[delegate.id, delegate.name] as [string, string]] : []),
-    ...own.map((a): [string, string] => [a.id, a.name]),
-  ];
-  return (
-    <Picker
-      label="Delegate"
-      value={delegate?.id ?? ""}
-      disabled={props.disabled || !assignee}
-      options={options}
-      onChange={(id) => props.onChange(id || null)}
-    />
-  );
-}
-
-/** Which Agent Session holds the Ticket's Claim, if any, and until when it lasts without a call. */
-function ClaimLine(props: { claim: TicketDetail["claim"] }) {
-  const { claim } = props;
-  return (
-    <p className="muted claim" data-testid="ticket-claim">
-      {claim
-        ? `Claimed by ${claim.agent.name} (${sessionName(claim.session.id)}) since ${new Date(claim.claimedAt).toLocaleString()}; ` +
-          `lapses if silent until ${new Date(claim.endsIfSilentAt).toLocaleTimeString()}`
-        : "Not Claimed"}
-    </p>
-  );
-}
-
-function LabelEditor(props: { ticket: Ticket; busy: boolean; readOnly: boolean; onChange: (labels: string[]) => void }) {
-  const [adding, setAdding] = useState("");
-  const labels = props.ticket.labels;
-  const add = (event: FormEvent) => {
-    event.preventDefault();
-    if (!adding.trim()) return;
-    props.onChange([...labels, adding]);
-    setAdding("");
-  };
-  return (
-    <div className="labels">
-      {labels.length > 0 && (
-        <ul className="chips" aria-label="Labels">
-          {labels.map((label) => (
-            <li key={label} className="chip">
-              {label}
-              {!props.readOnly && (
-                <button
-                  type="button"
-                  className="chip-remove"
-                  aria-label={`Remove ${label}`}
-                  disabled={props.busy}
-                  onClick={() => props.onChange(labels.filter((l) => l !== label))}
-                >
-                  ×
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {!props.readOnly && (
-        <form onSubmit={add} className="inline-form">
-          <input aria-label="Add Label" placeholder="Add Label" value={adding} onChange={(e) => setAdding(e.target.value)} />
-        </form>
-      )}
-    </div>
-  );
-}
-
-function ParentEditor(props: { ticket: Ticket; readOnly: boolean; onChanged: () => void }) {
-  const [key, setKey] = useState("");
-  const set = useAction((parentKey: string | null) => api.updateTicket(props.ticket.key, { parentKey }), () => {
-    setKey("");
-    props.onChanged();
-  });
-  const parent = props.ticket.parent;
-  return (
-    <section className="parent">
-      {parent && (
-        <p data-testid="ticket-parent">
-          Sub-Ticket of{" "}
-          <Link to={`/tickets/${parent.key}`} className="link">{parent.key} {parent.title}</Link>{" "}
-          {!props.readOnly && <button className="link" onClick={() => void set.run(null)} disabled={set.busy}>Clear</button>}
-        </p>
-      )}
-      {!props.readOnly && (
-        <form
-          className="inline-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void set.run(key.trim());
-          }}
-        >
-          <input aria-label="Parent" placeholder="Parent Ticket, e.g. CRONK-1" value={key} onChange={(e) => setKey(e.target.value)} required />
-          <button type="submit" className="secondary" disabled={set.busy}>Set parent</button>
-        </form>
-      )}
-      {set.error && <p className="error" role="alert">{set.error}</p>}
-    </section>
-  );
-}
-
-function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean; onChanged: () => void }) {
-  const t = props.detail.ticket;
-  const [kind, setKind] = useState<RelationKind>("blocks");
-  const [other, setOther] = useState("");
-  const add = useAction(() => api.addRelation(t.key, kind, other.trim()), () => {
-    setOther("");
-    props.onChanged();
-  });
-  const remove = useAction((kind: RelationKind, otherKey: string) => api.removeRelation(t.key, kind, otherKey), props.onChanged);
-  const lists: [RelationKind, TicketRef[]][] = [
-    ["blocks", props.detail.relations.blocks],
-    ["blocked_by", props.detail.relations.blockedBy],
-    ["relates_to", props.detail.relations.relatesTo],
-  ];
-  return (
-    <section>
-      <h2>Relations</h2>
-      {lists.map(
-        ([listKind, refs]) =>
-          refs.length > 0 && (
-            <div key={listKind} className="relation-group">
-              <h3>{RELATION_NAMES[listKind]}</h3>
-              <TicketRefList
-                name={RELATION_NAMES[listKind]}
-                refs={refs}
-                onRemove={props.readOnly ? undefined : (ref) => void remove.run(listKind, ref.key)}
-                busy={remove.busy}
-              />
-            </div>
-          ),
-      )}
-      {!props.readOnly && (
-        <form
-          className="inline-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void add.run();
-          }}
-        >
-          <select aria-label="Relation" value={kind} onChange={(e) => setKind(e.target.value as RelationKind)}>
-            {Object.entries(RELATION_NAMES).map(([value, name]) => (
-              <option key={value} value={value}>{name}</option>
-            ))}
-          </select>
-          <input aria-label="Related Ticket" placeholder="e.g. CRONK-1" value={other} onChange={(e) => setOther(e.target.value)} required />
-          <button type="submit" className="secondary" disabled={add.busy}>Add relation</button>
-        </form>
-      )}
-      {(add.error ?? remove.error) && <p className="error" role="alert">{add.error ?? remove.error}</p>}
-    </section>
-  );
-}
-
-/** The Documents, other Tickets' Reports included, that mention the Ticket's key; its own Reports show in its timeline. */
-function MentionedIn(props: { detail: TicketDetail }) {
-  const mentions = props.detail.documents.filter((d) => d.ticketKey !== props.detail.ticket.key);
-  if (mentions.length === 0) return null;
-  return (
-    <>
-      <h2>Mentioned in</h2>
-      <ul className="rows" aria-label="Mentioned in">
-        {mentions.map((d) => (
-          <li key={d.id} className="row">
-            <Link to={`/documents/${d.id}`} className="row-link">
-              <span className="grow">{d.title}</span>
-              <span className="muted">{d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace")}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-function TicketRefList(props: { name: string; refs: TicketRef[]; onRemove?: (ref: TicketRef) => void; busy?: boolean }) {
-  return (
-    <ul className="rows" aria-label={props.name}>
-      {props.refs.map((ref) => (
-        <li key={ref.key} className="row">
-          <Link to={`/tickets/${ref.key}`} className="row-link">
-            <span className="key">{ref.key}</span>
-            <span className="grow">{ref.title}</span>
-            <StatusPill status={ref.status} />
-          </Link>
-          {props.onRemove && (
-            <button className="link" aria-label={`Remove ${ref.key}`} disabled={props.busy} onClick={() => props.onRemove!(ref)}>
-              Remove
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function EditTicket(props: { ticket: Ticket; onDone: (ticket: Ticket) => void; onCancel: () => void }) {
-  const [title, setTitle] = useState(props.ticket.title);
-  const [description, setDescription] = useState(props.ticket.description);
-  const { submit, error, busy } = useSubmit(() => api.updateTicket(props.ticket.key, { title, description }), props.onDone);
-  return (
-    <section className="panel wide">
-      <form onSubmit={submit}>
-        <Field label="Title" value={title} onChange={setTitle} />
-        <TextArea label="Description (Markdown)" value={description} onChange={setDescription} rows={12} />
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="actions">
-          <button type="submit" disabled={busy}>Save</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
-        </div>
-      </form>
-    </section>
-  );
-}
-
-const RELATION_PHRASES: Record<RelationKind, string> = { blocks: "blocking", blocked_by: "blocked by", relates_to: "related to" };
-
-export function describeChange(change: RecordedChange): string {
-  switch (change.change) {
-    case "created":
-      return `created the Ticket in ${change.status.name}`;
-    case "title":
-      return `renamed it from “${change.from}” to “${change.to}”`;
-    case "description":
-      return "edited the description";
-    case "status":
-      return `moved it from ${change.from.name} to ${change.to.name}`;
-    case "priority":
-      return change.to === "none" ? "cleared the Priority" : `set the Priority to ${PRIORITY_NAMES[change.to]}`;
-    case "labels": {
-      const added = change.to.filter((l) => !change.from.includes(l));
-      const removed = change.from.filter((l) => !change.to.includes(l));
-      const parts = [
-        ...(added.length ? [`added ${added.length > 1 ? "Labels" : "the Label"} ${added.join(", ")}`] : []),
-        ...(removed.length ? [`removed ${removed.length > 1 ? "Labels" : "the Label"} ${removed.join(", ")}`] : []),
-      ];
-      return parts.length ? parts.join(" and ") : "reordered the Labels";
-    }
-    case "assignee":
-      return change.to ? `assigned it to ${change.to.name}` : "unassigned it";
-    case "delegate":
-      return change.to ? `delegated it to ${change.to.name}` : `took it back from ${change.from!.name}`;
-    case "parent":
-      return change.to ? `made it a Sub-Ticket of ${change.to.key}` : `took it out of ${change.from!.key}`;
-    case "relation added":
-      return `marked it as ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
-    case "relation removed":
-      return `removed that it is ${RELATION_PHRASES[change.kind]} ${change.ticket.key}`;
-  }
 }

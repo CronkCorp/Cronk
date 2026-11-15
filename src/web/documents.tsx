@@ -1,19 +1,28 @@
-import { useState, type ReactNode } from "react";
+import { ConfirmDialog, Popover } from "./components/overlays.js";
+import { Button, buttonClass } from "./components/button.js";
+import { Chip } from "./components/tags.js";
+import { Banner } from "./components/banner.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { RelativeTime } from "./components/time.js";
+import { Actor } from "./components/actor.js";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   api,
-  sessionName,
   staleVersionOf,
+  type Comment,
   type Document,
   type DocumentTreeEntry,
-  type RecordedActor,
   type Version,
+  watchDocument,
 } from "./api.js";
-import { ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
-import { DocumentComments } from "./timeline.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
+import { DocumentMargin, PassageCommentForm } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
-import { CronkMarkdown } from "./markdown.js";
+import { CronkMarkdown, highlightIds, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
-import { Field, Show, TextArea, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
+import { useSelectedPassage, type SelectedPassage } from "./selected-passage.js";
+import { MarkdownEditor } from "./markdown-editor.js";
+import { Field, Show, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
 
 /** The address of a page tree: a Project's, or the Workspace's without a Project key. */
 const treeAddress = (projectKey: string | null | undefined) => (projectKey ? `/projects/${projectKey}/documents` : "/documents");
@@ -26,7 +35,7 @@ const explainStale = (reload: () => void, doing: string) => (err: unknown): neve
   const current = staleVersionOf(err);
   if (!current) throw err;
   reload();
-  throw new Error(`${actorName(current.actor)} saved Version ${current.number} meanwhile; check it before ${doing}`);
+  throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
 
 /** Whether the signed-in User may change Documents in a Project's tree, or the Workspace's (every User may). */
@@ -103,8 +112,8 @@ export function DocumentsPage(props: { projectKey?: string }) {
         </div>
         {canWrite && !creating && (
           <div className="actions">
-            <button onClick={() => setCreating(true)}>New Document</button>
-            <label className="button secondary" title="A folder of Markdown files; its folders become the page tree">
+            <Button onClick={() => setCreating(true)}>New Document</Button>
+            <label className={buttonClass("secondary")} title="A folder of Markdown files; its folders become the page tree">
               Import Markdown folder…
               <input
                 type="file"
@@ -115,7 +124,7 @@ export function DocumentsPage(props: { projectKey?: string }) {
                 onChange={(e) => void importFrom(e.target, packMarkdownFolder)}
               />
             </label>
-            <label className="button secondary" title="A .zip, .tar.gz or .tar of a folder of Markdown files; its folders become the page tree">
+            <label className={buttonClass("secondary")} title="A .zip, .tar.gz or .tar of a folder of Markdown files; its folders become the page tree">
               Import archive…
               <input type="file" accept=".zip,.gz,.tgz,.tar" hidden onChange={(e) => void importFrom(e.target, async ([file]) => file)} />
             </label>
@@ -158,8 +167,8 @@ function NewDocument(props: { projectKey: string | undefined; parentId?: string;
         <Field label="Title" value={title} onChange={setTitle} />
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Create Document</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Create Document</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
@@ -178,19 +187,113 @@ export function DocumentPage(props: { id: string; edit: boolean }) {
 
 type Panel = "none" | "edit" | "move" | "versions" | "new";
 
+const NO_COMMENTS: Comment[] = [];
+
+/**
+ * A Document's body, rendered again only when it or its highlighted passages change, so hovering a
+ * Comment doesn't rebuild it.
+ */
+const DocumentBody = memo(function DocumentBody(props: { body: string; highlights: Highlight[] }) {
+  return props.body.trim() ? (
+    <CronkMarkdown sourceOffsets highlights={props.highlights}>{props.body}</CronkMarkdown>
+  ) : (
+    <p className="muted">This Document is empty.</p>
+  );
+});
+
+/** The ids of the passages highlighted inside `root`, in the order they first appear, read again after every render. */
+function usePlacedHighlights(root: RefObject<HTMLElement | null>): string[] {
+  const [placed, setPlaced] = useState<string[]>([]);
+  useLayoutEffect(() => {
+    const ids: string[] = [];
+    root.current?.querySelectorAll<HTMLElement>("mark.highlight").forEach((mark) => {
+      for (const id of highlightIds(mark)) if (!ids.includes(id)) ids.push(id);
+    });
+    setPlaced((before) => (before.join(" ") === ids.join(" ") ? before : ids));
+  });
+  return placed;
+}
+
 function DocumentView(props: { document: Document; startEditing: boolean; onChanged: (d: Document) => void; onReload: () => void }) {
   const d = props.document;
   const canWrite = useCanWrite(d.projectKey);
   const [panel, setPanel] = useState<Panel>(props.startEditing ? "edit" : "none");
+  // The newest Version anyone saved, as the Document's stream tells it, and how often its Comments changed.
+  const [latest, setLatest] = useState(d.version);
+  const [commentsGeneration, setCommentsGeneration] = useState(0);
+  const [live, onLive] = useLiveState();
+  useEffect(
+    () =>
+      watchDocument(d.id, {
+        onLive,
+        // On (re)connecting, catch up on what was saved and posted meanwhile.
+        ready: () => {
+          setCommentsGeneration((g) => g + 1);
+          api.document(d.id).then((current) => setLatest((v) => Math.max(v, current.version)), () => {});
+        },
+        on: {
+          comment: () => setCommentsGeneration((g) => g + 1),
+          version: ({ version }) => setLatest((v) => Math.max(v, version)),
+        },
+      }),
+    [d.id],
+  );
+  // Someone else's Version is shown at once, unless it would pull the Document out from under an edit.
+  const newer = latest > d.version ? latest : undefined;
+  useEffect(() => {
+    if (newer !== undefined && panel !== "edit") props.onReload();
+  }, [newer, panel]);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const remove = useAction(
     async () => {
-      if (!confirm(`Delete ${d.title} and all its Versions?`)) return false;
-      await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
-      return true;
+      try {
+        await api.deleteDocument(d.id, d.version).catch(explainStale(props.onReload, "deleting"));
+      } finally {
+        setConfirmingDelete(false);
+      }
     },
-    (deleted) => deleted && navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
+    () => navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
   );
   const toggle = (p: Panel) => setPanel(panel === p ? "none" : p);
+  const bodyAt = useRef<HTMLDivElement>(null);
+  const commentAt = useRef<HTMLTextAreaElement>(null);
+  const selected = useSelectedPassage(bodyAt, d.body);
+  // Loaded again after a save, so whether each anchor is still in the Document is asked again.
+  const [comments, reloadComments] = useLoad(() => api.documentComments(d.id), [d.id, d.version, commentsGeneration]);
+  const loadedComments = comments.kind === "loaded" ? comments.value : NO_COMMENTS;
+  const highlights = useMemo(
+    () => loadedComments.flatMap((c) => (c.anchor?.inCurrentVersion && !c.replyToCommentId ? [{ id: c.id, passage: c.anchor.passage }] : [])),
+    [loadedComments],
+  );
+  const placed = usePlacedHighlights(bodyAt);
+  // The Comments whose passage and card are highlighted: those hovered, else those focused.
+  const [hovered, setHovered] = useState<string[]>([]);
+  const [focused, setFocused] = useState<string[]>([]);
+  const active = hovered.length > 0 ? hovered : focused;
+  useEffect(() => {
+    bodyAt.current?.querySelectorAll("mark.highlight").forEach((mark) => {
+      mark.classList.toggle("active", highlightIds(mark).some((id) => active.includes(id)));
+    });
+  });
+  /** The Comments a highlight in the body under an event belongs to, if any. */
+  const highlightAt = (target: EventTarget) => {
+    const mark = (target as Element).closest?.("mark.highlight");
+    return mark ? highlightIds(mark) : [];
+  };
+  // The passage a new Comment anchors to, and where it was selected, while its popover is open.
+  const [composing, setComposing] = useState<SelectedPassage>();
+  const [passage, setPassage] = useState("");
+  // Selecting anything else in the body closes the popover, to offer to comment on the new selection, if it can be.
+  useEffect(() => {
+    const reselected = () => {
+      const selection = getSelection();
+      if (selection && !selection.isCollapsed && bodyAt.current?.contains(selection.anchorNode)) setComposing(undefined);
+    };
+    document.addEventListener("selectionchange", reselected);
+    return () => document.removeEventListener("selectionchange", reselected);
+  }, []);
+  useEffect(() => setComposing(undefined), [d.version]);
+  const offer = composing ?? selected;
 
   return (
     <article className="document">
@@ -198,6 +301,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
       {panel === "edit" ? (
         <EditDocument
           document={d}
+          newerVersion={newer}
           onCancel={() => setPanel("none")}
           onSaved={(saved) => {
             props.onChanged(saved);
@@ -208,21 +312,31 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
         <>
           <div className="page-head">
             <h1>
-              {d.title} {d.ticketKey && <span className="badge">Report on {d.ticketKey}</span>}
+              {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>}
             </h1>
             <div className="actions">
+              <LiveIndicator state={live} />
               <span className="muted">Version {d.version}</span>
-              <button className="secondary" onClick={() => toggle("versions")}>Versions</button>
+              <Button variant="secondary" onClick={() => toggle("versions")}>Versions</Button>
               {canWrite && (
                 <>
                   {!d.ticketKey && (
                     <>
-                      <button className="secondary" onClick={() => toggle("move")}>Move</button>
-                      <button className="secondary" onClick={() => toggle("new")}>New Document under this one</button>
+                      <Button variant="secondary" onClick={() => toggle("move")}>Move</Button>
+                      <Button variant="secondary" onClick={() => toggle("new")}>New Document under this one</Button>
                     </>
                   )}
-                  <button className="secondary" onClick={() => void remove.run()} disabled={remove.busy}>Delete</button>
-                  <button onClick={() => setPanel("edit")}>Edit</button>
+                  <Button variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={remove.busy}>Delete</Button>
+                  <ConfirmDialog
+                    open={confirmingDelete}
+                    onOpenChange={setConfirmingDelete}
+                    title={`Delete ${d.title}?`}
+                    description="This deletes the Document and all its Versions."
+                    confirmLabel="Delete"
+                    busy={remove.busy}
+                    onConfirm={() => void remove.run()}
+                  />
+                  <Button onClick={() => setPanel("edit")}>Edit</Button>
                 </>
               )}
             </div>
@@ -240,12 +354,73 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
             />
           )}
           {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} onOutdated={props.onReload} />}
-          <div className="markdown" data-testid="document-body">
-            {d.body.trim() ? <CronkMarkdown>{d.body}</CronkMarkdown> : <p className="muted">This Document is empty.</p>}
+          <div className="document-read">
+            <div
+              className="selectable document-body"
+              onMouseOver={(e) => setHovered(highlightAt(e.target))}
+              onMouseLeave={() => setHovered([])}
+              onFocus={(e) => setFocused(highlightAt(e.target))}
+              onBlur={() => setFocused([])}
+            >
+              <div className="markdown" data-testid="document-body" ref={bodyAt}>
+                <DocumentBody body={d.body} highlights={highlights} />
+              </div>
+              {canWrite && offer && (
+                <Popover
+                  open={composing !== undefined}
+                  onOpenChange={(open) => {
+                    if (!open) return setComposing(undefined);
+                    if (!selected) return;
+                    setPassage(selected.passage);
+                    setComposing(selected);
+                    getSelection()?.removeAllRanges();
+                  }}
+                  label="Comment on this passage"
+                  onOpenAutoFocus={(e) => {
+                    e.preventDefault();
+                    commentAt.current?.focus();
+                  }}
+                  trigger={
+                    <Button
+                      type="button"
+                      className="comment-on-selection"
+                      style={{ top: offer.top, left: offer.left }}
+                      // Pressing the button would otherwise clear the selection before it is read.
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      Comment on this passage
+                    </Button>
+                  }
+                >
+                  <PassageCommentForm
+                    documentId={d.id}
+                    passage={passage}
+                    onPassageChange={setPassage}
+                    commentRef={commentAt}
+                    onPosted={() => {
+                      setComposing(undefined);
+                      reloadComments();
+                    }}
+                  />
+                </Popover>
+              )}
+            </div>
+            <Show state={comments}>
+              {(all) => (
+                <DocumentMargin
+                  documentId={d.id}
+                  comments={all}
+                  placed={placed}
+                  bodyRef={bodyAt}
+                  active={active}
+                  onHover={(id) => setHovered(id ? [id] : [])}
+                  onFocus={(id) => setFocused(id ? [id] : [])}
+                  canWrite={canWrite}
+                  onPosted={reloadComments}
+                />
+              )}
+            </Show>
           </div>
-          <h2>Comments</h2>
-          {/* Keyed by Version, so whether each anchor is still in the Document is asked again after a save. */}
-          <DocumentComments key={d.version} documentId={d.id} canWrite={canWrite} />
         </>
       )}
     </article>
@@ -257,9 +432,9 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
  * someone saved since, it is refused, and the editor shows their edit and merges it into this one
  * section by section. Sections both changed differently wait for the User to choose or combine.
  */
-function EditDocument(props: { document: Document; onSaved: (d: Document) => void; onCancel: () => void }) {
+function EditDocument(props: { document: Document; newerVersion: number | undefined; onSaved: (d: Document) => void; onCancel: () => void }) {
   const id = props.document.id;
-  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+  const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
     draft: { title: props.document.title, text: props.document.body },
     baseVersion: props.document.version,
     save: (d, baseVersion) => api.saveDocument(id, { baseVersion, title: d.title, body: d.text }),
@@ -268,7 +443,7 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
       return {
         base: started,
         theirs: merge.onto,
-        by: actorName(merge.onto.actor),
+        by: merge.onto.actor,
         merge,
         merged: merge.conflicts === 0 ? { title: merge.title!, text: merge.body! } : null,
       };
@@ -277,23 +452,65 @@ function EditDocument(props: { document: Document; onSaved: (d: Document) => voi
   });
 
   return (
-    <section className="panel wide">
+    <>
+      <div className="page-head">
+        <h1>{props.document.title}</h1>
+      </div>
+      {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile document={props.document} version={props.newerVersion} />}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
       ) : (
-        <form onSubmit={save}>
-          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
-          <TextArea label="Body (Markdown)" value={draft.text} onChange={(text) => setDraft((d) => ({ ...d, text }))} rows={18} disabled={busy} />
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="actions">
-            <button type="submit" disabled={busy}>Save</button>
-            <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
-          </div>
-        </form>
+        <section className="panel wide">
+          <form onSubmit={save}>
+            {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+            <Field label="Title" value={draft.title} onChange={(title) => setDraft((d) => ({ ...d, title }))} disabled={busy} />
+            <MarkdownEditor
+              label="Body (Markdown)"
+              value={draft.text}
+              onChange={(text) => setDraft((d) => ({ ...d, text }))}
+              disabled={busy}
+              projectKey={props.document.projectKey}
+            />
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={busy}>Save</Button>
+              <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+              {discardMine && <DiscardMine {...discardMine} />}
+            </div>
+          </form>
+        </section>
       )}
-    </section>
+    </>
+  );
+}
+
+/**
+ * Warns, while a Document is being edited, that someone saved a newer Version meanwhile: who,
+ * and what they changed since the Version the edit started from. Saving then merges it in.
+ */
+function SavedMeanwhile(props: { document: Document; version: number }) {
+  const { id, version: started } = props.document;
+  const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
+  return (
+    <Banner tone="warn" role="status">
+      <Show state={versions}>
+        {([base, theirs]) => (
+          <>
+            <p>
+              <strong>
+                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
+              </strong>{" "}
+              Saving merges their changes into yours.
+            </p>
+            <details>
+              <summary>See what they changed</summary>
+              <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+            </details>
+          </>
+        )}
+      </Show>
+    </Banner>
   );
 }
 
@@ -329,8 +546,8 @@ function MoveDocument(props: { document: Document; onMoved: (d: Document) => voi
         </Show>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button type="submit" disabled={busy}>Move</button>
-          <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
+          <Button type="submit" disabled={busy}>Move</Button>
+          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
         </div>
       </form>
     </section>
@@ -373,13 +590,13 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
             {list.map((v) => (
               <li key={v.number} className="version">
                 <span className="grow">
-                  <strong>Version {v.number}</strong> <span className="muted">{new Date(v.at).toLocaleString()}</span> {actorName(v.actor)}
+                  <strong>Version {v.number}</strong> <RelativeTime at={v.at} /> <Actor actor={v.actor} />
                   {v.restoredFrom !== null && <span className="muted"> (restored Version {v.restoredFrom})</span>}
-                  {v.number === d.version && <span className="badge">Current</span>}
+                  {v.number === d.version && <Chip>Current</Chip>}
                 </span>
-                <button className="link" onClick={() => void view.run(v.number)} disabled={view.busy}>View</button>
+                <Button variant="ghost" onClick={() => void view.run(v.number)} disabled={view.busy}>View</Button>
                 {props.canWrite && v.number !== d.version && (
-                  <button className="link" onClick={() => void restore.run(v.number)} disabled={restore.busy}>Restore</button>
+                  <Button variant="ghost" onClick={() => void restore.run(v.number)} disabled={restore.busy}>Restore</Button>
                 )}
               </li>
             ))}
@@ -431,13 +648,7 @@ function CompareVersions(props: { current: number; busy: boolean; onCompare: (fr
     >
       {pick("Compare", from, setFrom)}
       {pick("with", to, setTo)}
-      <button type="submit" className="secondary" disabled={props.busy}>Compare</button>
+      <Button type="submit" variant="secondary" disabled={props.busy}>Compare</Button>
     </form>
   );
-}
-
-/** Who saved a Version, as the UI names them. */
-function actorName(actor: RecordedActor): string {
-  if (actor.kind === "user") return actor.name;
-  return `${actor.name} (${actor.session ? `${sessionName(actor.session.id)}, for` : "Agent of"} ${actor.owner.name})`;
 }

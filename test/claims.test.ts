@@ -62,7 +62,11 @@ describe("A Claim", () => {
     cronk.clock.advance(4 * 60_000);
     await first.get("/api/projects");
     cronk.clock.advance(4 * 60_000);
-    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:09:00.000Z" });
+    // Last heard at 09:04, so it lapses the five-minute silence threshold later.
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({
+      lastSeenAt: "2026-01-01T09:04:00.000Z",
+      endsIfSilentAt: "2026-01-01T09:09:00.000Z",
+    });
     const second = await session();
     expect((await second.post("/api/tickets/CRONK-1/claim")).status).toBe(409);
 
@@ -71,6 +75,29 @@ describe("A Claim", () => {
     expect(lapsed.claim).toBeNull();
     expect(lapsed.ticket.delegate).toEqual({ id: claude.agentId, name: "claude-laptop" });
     expect((await second.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  });
+
+  it("is kept alive while its Agent Session's events stream is open, and lapses after the silence threshold once it closes", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    const stream = await first.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    // 12 minutes pass, each four of them ending in the stream's heartbeat.
+    for (let i = 0; i < 3; i++) {
+      cronk.clock.advance(4 * 60_000);
+      await cronk.heartbeat();
+    }
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:17:00.000Z" });
+
+    stream.close();
+    cronk.clock.advance(4 * 60_000);
+    await cronk.heartbeat();
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toMatchObject({ endsIfSilentAt: "2026-01-01T09:17:00.000Z" });
+    cronk.clock.advance(60_000);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    expect((await first.get("/api/agent-sessions/current")).status).toBe(410);
   });
 
   it("lapses after the silence threshold the Admin sets for the Workspace", async () => {

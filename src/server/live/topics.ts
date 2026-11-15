@@ -8,3 +8,12 @@ export const inboxTopic = (userId: string) => `inbox:${userId}`;
 
 /** The topic of the work starting to wait for one Agent, which each of its live Agent Sessions may watch. */
 export const agentTopic = (agentId: string) => `agent:${agentId}`;
+
+/** The topic of changes to one User's Agents' live Agent Sessions, which their Agents page watches. */
+export const agentsTopic = (ownerId: string) => `agents:${ownerId}`;
+
+/** The topic of changes to one Project's Tickets, which its list and board watch. */
+export const projectTopic = (projectId: string) => `project:${projectId}`;
+
+/** The topic of one Document's changes: its new Comments and Versions. */
+export const documentTopic = (documentId: string) => `document:${documentId}`;

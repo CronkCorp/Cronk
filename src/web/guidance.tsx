@@ -1,7 +1,10 @@
+import { Button } from "./components/button.js";
+import { RelativeTime } from "./components/time.js";
+import { Actor, userActor } from "./components/actor.js";
 import { useState } from "react";
 import { api, type Guidance } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
-import { ResolveMerge, StaleSaveNotice, useStaleSave, type SavedText } from "./merge.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, type SavedText } from "./merge.js";
 import { Show, TextArea, useLoad } from "./ui.js";
 
 /**
@@ -41,7 +44,7 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
               </div>
               {props.canEdit && (
                 <div className="actions">
-                  <button onClick={() => setEditing(true)}>Edit Guidance</button>
+                  <Button onClick={() => setEditing(true)}>Edit Guidance</Button>
                 </div>
               )}
             </>
@@ -55,7 +58,7 @@ export function GuidanceSection(props: { projectKey?: string; canEdit: boolean; 
                 <ol className="history" aria-label="Versions">
                   {[...list].reverse().map((v) => (
                     <li key={v.version}>
-                      <span className="muted">Version {v.version}, {new Date(v.at).toLocaleString()}</span> <strong>{v.actor.name}</strong>
+                      <span className="muted">Version {v.version}, <RelativeTime at={v.at} /></span> <Actor actor={v.actor} />
                     </li>
                   ))}
                 </ol>
@@ -80,7 +83,7 @@ function GuidanceEditor(props: {
   onDone: (guidance: Guidance) => void;
   onCancel: () => void;
 }) {
-  const { draft, setDraft, save, busy, error, notice, resolve } = useStaleSave({
+  const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
     draft: { text: props.current.markdown },
     baseVersion: props.current.version,
     save: (d, baseVersion) => api.saveGuidance(props.projectKey, { markdown: d.text, baseVersion }),
@@ -94,7 +97,7 @@ function GuidanceEditor(props: {
       return {
         base: at(baseVersion),
         theirs: { number: merge.onto.version, body: merge.onto.markdown },
-        by: versions.find((v) => v.version === merge.onto.version)?.actor.name ?? "Someone",
+        by: versions.find((v) => v.version === merge.onto.version)?.actor ?? userActor("Someone"),
         merge,
         merged: merge.conflicts === 0 ? { text: merge.markdown! } : null,
       };
@@ -103,21 +106,24 @@ function GuidanceEditor(props: {
   });
 
   return (
-    <section className="panel wide">
+    <>
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
       ) : (
-        <form onSubmit={save}>
-          {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
-          <TextArea label="Guidance (Markdown)" value={draft.text} onChange={(text) => setDraft({ text })} rows={14} disabled={busy} />
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="actions">
-            <button type="submit" disabled={busy}>Save</button>
-            <button type="button" className="secondary" onClick={props.onCancel}>Cancel</button>
-          </div>
-        </form>
+        <section className="panel wide">
+          <form onSubmit={save}>
+            {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+            <TextArea label="Guidance (Markdown)" value={draft.text} onChange={(text) => setDraft({ text })} rows={14} disabled={busy} />
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={busy}>Save</Button>
+              <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+              {discardMine && <DiscardMine {...discardMine} />}
+            </div>
+          </form>
+        </section>
       )}
-    </section>
+    </>
   );
 }

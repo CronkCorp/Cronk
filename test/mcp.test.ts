@@ -61,11 +61,45 @@ describe("the MCP endpoint", () => {
     cronk.clock.advance(4 * 60_000);
     await mcp.client.ping();
     cronk.clock.advance(4 * 60_000);
+    // A heartbeat now, as a timer firing late would run, doesn't refresh it: connectMcp's client
+    // isn't listening, so it holds no stream for the heartbeat to refresh the Session through.
+    await cronk.heartbeat();
     expect(await liveSessions()).toEqual([mcp.transport.sessionId]);
 
     cronk.clock.advance(60_000);
     expect(await liveSessions()).toEqual([]);
     await expect(mcp.client.ping()).rejects.toMatchObject({ code: 404, message: expect.stringContaining("Agent Session has ended") });
+  });
+
+  it("keeps the Agent Session of a client listening for notifications alive while it stays idle past the silence threshold", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    // 12 minutes pass, each four of them ending in the stream's heartbeat.
+    for (let i = 0; i < 3; i++) {
+      cronk.clock.advance(4 * 60_000);
+      await cronk.heartbeat();
+    }
+
+    const logged = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "progress", body: "Still here." });
+    expect(logged).toMatchObject({ isError: false, body: { activity: { session: { id: mcp.transport.sessionId } } } });
+  });
+
+  it("ends the Agent Session of a client that stops listening without disconnecting, as on a crash, after the silence threshold", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const liveSessions = async () => (await admin.get("/api/agents")).body.agents[0].sessions.map((s: { id: string }) => s.id);
+
+    const sessionId = mcp.transport.sessionId;
+    await mcp.client.close();
+    await cronk.heartbeat();
+    cronk.clock.advance(4 * 60_000);
+    await cronk.heartbeat();
+    expect(await liveSessions()).toEqual([sessionId]);
+    cronk.clock.advance(60_000);
+    expect(await liveSessions()).toEqual([]);
   });
 
   it("refuses unknown tokens, and a token as soon as it is revoked", async () => {
@@ -492,5 +526,22 @@ describe("work waiting for an Agent over MCP", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     expect(notifications.map((n) => n.data.waiting.comment.body)).toEqual(["Before."]);
+  });
+});
+
+describe("a Ticket becoming Ready over MCP", () => {
+  it("is pushed to a connected Agent Session as a notice", async () => {
+    const { cronk, admin, claude } = await delegatedSetup(2);
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    const mcp = await connectMcp(cronk, claude.secret, { listening: true });
+    const notified = new Promise<unknown>((resolve) => mcp.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => resolve(n.params)));
+
+    await admin.delete("/api/tickets/CRONK-1/relations/blocks/CRONK-2");
+
+    expect(await notified).toMatchObject({
+      level: "notice",
+      logger: "cronk",
+      data: { message: expect.stringMatching(/CRONK-2: Ticket 2[\s\S]*`claim`/), ticketReady: { key: "CRONK-2", title: "Ticket 2" } },
+    });
   });
 });

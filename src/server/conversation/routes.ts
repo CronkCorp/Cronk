@@ -9,7 +9,8 @@ import { answer, documentIdParam, errors, holding, listing, pathParams, ref, tic
 import { documentFor } from "../knowledge/document-reads.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
-import { agentTopic, ticketTopic } from "../live/topics.js";
+import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
+import { ticketsChanged } from "../work/ticket-changes.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
@@ -24,6 +25,8 @@ interface NewComment {
   replyToCommentId?: string;
   replyToActivityId?: string;
   anchor?: { passage: string };
+  /** Set only by the send-back route, never from a request body. */
+  sendBack?: boolean;
 }
 
 const id = { type: "string", format: "uuid" } as const;
@@ -91,7 +94,7 @@ export function conversationRoutes(ctx: AppContext) {
         throw new HttpError(400, `Version ${document!.version} of the Document doesn't hold that passage; quote it exactly`);
       }
       const anchor = input.anchor ? { passage: input.anchor.passage, version: document!.version } : null;
-      const comment = await insertComment(tx, target, actor, { body: input.body, replyToCommentId, replyToActivityId, anchor }, ctx.clock.now());
+      const comment = await insertComment(tx, target, actor, { body: input.body, replyToCommentId, replyToActivityId, anchor, sendBack: input.sendBack }, ctx.clock.now());
       // A User answers a question by replying to it; the first such reply is its answer.
       const answered = activity && actor.kind === "user" && (await markAnswered(tx, activity, comment.id)) ? await findActivity(tx, activity.ticketId, activity.id) : undefined;
       const asker = answered ? { agentId: answered.agent.id } : null;
@@ -199,14 +202,15 @@ export function conversationRoutes(ctx: AppContext) {
             // Locked so it can't be removed before the move commits.
             const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
             if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
-            const moved = await updateTicket(tx, ticket, { status }, actor, ctx.clock.now());
+            const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment }) };
+            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
           },
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
             inboxesChanged(ctx.live, [ticket.assignee?.id]);
+            ticketsChanged(ctx.live, [ticket]);
           },
         );
         return { ticket, comment: publicComment(posted.comment) };
@@ -244,7 +248,10 @@ export function conversationRoutes(ctx: AppContext) {
             const place = { projectId: document.projectId, delegateId: null };
             return { document, posted: await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document) };
           },
-          ({ document, posted }) => pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } }),
+          ({ document, posted }) => {
+            ctx.live.publish(documentTopic(document.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
+            pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } });
+          },
         );
         return reply.code(201).send({ comment: publicComment(posted.comment) });
       },

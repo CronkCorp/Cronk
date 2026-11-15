@@ -15,9 +15,9 @@ export type ActorRef = string | { agent: string; session: string | null };
 /**
  * What a field of a Ticket change holds in `<KEY>.history.md`. Records are written as Cronk recorded them, with the
  * names they had at the time, plus what an import finds them by: a `user` by its `email`, an `agent` by its id in
- * `people.md`, and a `status` by its `current` name in the Project, when it still has one.
+ * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "user" | "agent" | "status";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -27,7 +27,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   created: { title: { holds: "title" }, description: { holds: "text" }, status: { holds: "status" } },
   title: fromTo("title"),
   description: fromTo("text"),
-  status: fromTo("status"),
+  // `sentBack` is written only for a Send back's move.
+  status: { ...fromTo("status"), sentBack: { holds: "flag" } },
   priority: fromTo("priority"),
   labels: fromTo("labels"),
   assignee: fromTo("user", true),
@@ -35,6 +36,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   parent: fromTo("ticket", true),
   "relation added": relation,
   "relation removed": relation,
+  "document linked": { document: { holds: "document" } },
+  "document unlinked": { document: { holds: "document" } },
 };
 
 export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -61,11 +64,12 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
 - \`projects/<KEY>/project.md\`: a Project's settings, Statuses and members; beside it its \`guidance.md\`, \`documents/\` and \`tickets/\`.
 - \`documents/\`: the page tree. Each Document is \`<n>-<title>.md\`, numbered in tree order, with the Documents under it in a
   folder of the same name. \`<name>.versions/\` holds its Versions when the export includes them, \`<name>.comments/\` its Comments.
-- \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key. Beside it,
+- \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key, and \`documents\` lists the
+  Documents and Reports linked to it by the path of their file, in the order they were linked. Beside it,
   \`<KEY>.activities/\`, \`<KEY>.comments/\` and \`<KEY>.reports/\` hold its Activities, Comments and Reports, each numbered from 1
   in the order they were written; replies and answers name them by that number. \`<KEY>.history.md\` holds its history, oldest
   first, with the names recorded at the time; a User in it also has their \`email\`, a Status its \`current\` name if it is
-  still in the Project, and an Agent its id from \`people.md\`.
+  still in the Project, an Agent its id from \`people.md\`, and a Document the \`path\` of its file if the export holds it.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
 already in the installation an export is imported into come in deactivated, since they have no password there; an Admin

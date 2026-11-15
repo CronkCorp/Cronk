@@ -19,7 +19,7 @@ describe("What an Agent did", () => {
     await admin.post("/api/tickets/CRONK-1/comments", { body: "Thanks" });
 
     const res = await admin.get(`/api/agents/${claude.agentId}/work`);
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     const ticket = { key: "CRONK-1", title: "Ticket 1" };
     const inSession = { id: agent.sessionId };
     expect(res.body.work).toMatchObject([
@@ -51,15 +51,20 @@ describe("What an Agent did, as each User may see it", () => {
     }
     cronk.clock.advance(1000);
     await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" });
+    const secretPlan = (await admin.post("/api/projects/SECRET/documents", { title: "Secret plan" })).body.document.id;
+    cronk.clock.advance(1000);
+    expect((await agent.post(`/api/tickets/CRONK-1/documents/${secretPlan}`)).status).toBe(201);
 
     const seen = async (who: Client) =>
-      (await who.get(`/api/agents/${claude.agentId}/work`)).body.work.map((w: { ticket: { key: string } | null; document: { title: string } | null }) =>
-        w.ticket?.key ?? w.document?.title,
+      (await who.get(`/api/agents/${claude.agentId}/work`)).body.work.map(
+        (w: { kind: string; ticket: { key: string } | null; document: { title: string } | null }) => `${w.kind} ${w.ticket?.key ?? w.document?.title}`,
       );
-    expect(await seen(bob)).toEqual(["Handbook", "SECRET-1", "CRONK-1"]);
+    const everything = ["change CRONK-1", "version Handbook", "activity SECRET-1", "activity CRONK-1"];
+    expect(await seen(bob)).toEqual(everything);
+    // Losing sight of SECRET hides its Ticket, and the link from CRONK-1 to its Document.
     await admin.delete(`/api/projects/SECRET/members/${bobId}`);
-    expect(await seen(bob)).toEqual(["Handbook", "CRONK-1"]);
-    expect(await seen(admin)).toEqual(["Handbook", "SECRET-1", "CRONK-1"]);
+    expect(await seen(bob)).toEqual(["version Handbook", "activity CRONK-1"]);
+    expect(await seen(admin)).toEqual(everything);
 
     expect((await carol.get(`/api/agents/${claude.agentId}/work`)).status).toBe(404);
     expect((await agent.get(`/api/agents/${claude.agentId}/work`)).status).toBe(403);

@@ -20,7 +20,7 @@ export interface CatchUp {
 
 type Listener = (event: LiveEvent) => void;
 
-/** How often an open stream re-checks access and sends a comment, so proxies and browsers keep it open. */
+/** How often an open stream re-checks access and sends a comment, so proxies and browsers keep it open, unless told otherwise. */
 const HEARTBEAT_MS = 25_000;
 
 /**
@@ -33,8 +33,20 @@ const HEARTBEAT_MS = 25_000;
 export class LiveUpdates {
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly streams = new Set<() => void>();
+  /** Each open stream's heartbeat, resolving once it has run. */
+  private readonly heartbeats = new Set<() => Promise<void>>();
   /** Per topic, the positions of events whose change committed (or is about to) but that aren't published yet. */
   private readonly pending = new Map<string, Set<bigint>>();
+  /** How often each open stream's heartbeat runs on its own, or `null` if it runs only through `heartbeat`. */
+  private readonly heartbeatMs: number | null;
+
+  /**
+   * `heartbeatMs` is how often each open stream's heartbeat runs on its own, every 25 seconds by
+   * default. With `null` no timer runs it, only `heartbeat`, as for tests that move a fake clock.
+   */
+  constructor(opts: { heartbeatMs?: number | null } = {}) {
+    this.heartbeatMs = opts.heartbeatMs === undefined ? HEARTBEAT_MS : opts.heartbeatMs;
+  }
 
   /**
    * Tells everyone watching `topic` about `event`. Publishing an event with a position that was
@@ -96,8 +108,16 @@ export class LiveUpdates {
    * an event whose change committed before `catchUp` read its id, but that is published only
    * after `ready` is written, is then above `ready`'s id too, as long as its position was
    * `expect`ed before its change committed.
+   *
+   * `admits` picks the events published on `topic` that this stream sends; it sends all of them by default.
    */
-  stream(reply: FastifyReply, topic: string, canSee: () => Promise<boolean>, catchUp?: () => Promise<CatchUp>): void {
+  stream(
+    reply: FastifyReply,
+    topic: string,
+    canSee: () => Promise<boolean>,
+    catchUp?: () => Promise<CatchUp>,
+    admits: (event: LiveEvent) => boolean = () => true,
+  ): void {
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
@@ -110,8 +130,9 @@ export class LiveUpdates {
       if (!open) return;
       open = false;
       unsubscribe();
-      clearInterval(heartbeat);
+      clearInterval(beating);
       this.streams.delete(end);
+      this.heartbeats.delete(beat);
       res.end();
     };
     // Whether the stream is still open and the caller may still see the topic; it may have closed during the check.
@@ -129,9 +150,18 @@ export class LiveUpdates {
     const fresh = (event: LiveEvent) => event.id === undefined || !sent.has(event.id);
     // While catching up, live events wait here instead, to be sent before `ready`.
     let held: LiveEvent[] | null = catchUp ? [] : null;
-    const unsubscribe = this.subscribe(topic, (event) => (held ? held.push(event) : checked(() => fresh(event) && write(event))));
-    const heartbeat = setInterval(() => checked(() => res.write(": keep-alive\n\n")), HEARTBEAT_MS).unref();
+    const unsubscribe = this.subscribe(topic, (event) => {
+      if (!admits(event)) return;
+      if (held) held.push(event);
+      else checked(() => fresh(event) && write(event));
+    });
+    const beat = () => {
+      checked(() => res.write(": keep-alive\n\n"));
+      return queue;
+    };
+    const beating = this.heartbeatMs === null ? undefined : setInterval(beat, this.heartbeatMs).unref();
     this.streams.add(end);
+    this.heartbeats.add(beat);
     res.on("close", end);
     if (!catchUp) {
       write({ event: "ready", data: {} });
@@ -163,6 +193,11 @@ export class LiveUpdates {
         end();
       }
     })();
+  }
+
+  /** Runs every open stream's heartbeat now, as its timer does (if it has one), and resolves once each has run. */
+  async heartbeat(): Promise<void> {
+    await Promise.all([...this.heartbeats].map((beat) => beat()));
   }
 
   /** Ends every open stream, as when the server stops. */

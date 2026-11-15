@@ -44,6 +44,7 @@ import {
 } from "./projects.js";
 import {
   findTicketByKey,
+  findTicketsByIds,
   insertTicket,
   listHistory,
   listLabels,
@@ -63,6 +64,9 @@ import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
 import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
+import { projectTopic } from "../live/topics.js";
+import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
+import { readyNow, tellReadyAfter, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
 
 const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as const;
 
@@ -193,7 +197,11 @@ export function workRoutes(ctx: AppContext) {
           ...(visibility !== undefined && { visibility }),
           ...(agentAccess !== undefined && { agentAccess }),
         };
-        const updated = await updateProject(ctx.db, project.id, changes, ctx.clock.now());
+        // Unarchiving, opening, or raising Agent Access can make the Project's delegated Tickets Ready.
+        const opensUp = archived === false || visibility === "open" || agentAccess === "write";
+        const updated = await tellReadyAfter(ctx, opensUp ? { projectId: project.id } : undefined, (tx) =>
+          updateProject(tx, project.id, changes, ctx.clock.now()),
+        );
         if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
         return { project: { ...updated, access } };
       },
@@ -247,7 +255,9 @@ export function workRoutes(ctx: AppContext) {
         const member = await findUserById(ctx.db, request.params.userId);
         if (!member || member.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(404, "No such User");
         if (member.role === "admin") throw new HttpError(400, "Admins have Write access in every Project");
-        await setMembership(ctx.db, project.id, member.id, request.body.access);
+        // Write for the Owner can make Tickets delegated to their Agents here Ready.
+        const affected = request.body.access === "write" ? { projectId: project.id, ownerId: member.id } : undefined;
+        await tellReadyAfter(ctx, affected, (tx) => setMembership(tx, project.id, member.id, request.body.access));
         inboxesChanged(ctx.live, [member.id]);
         return { member: { user: publicUser(member), access: request.body.access } };
       },
@@ -265,7 +275,9 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         requireAdmin(actor, "change who is in a Project");
-        await removeMembership(ctx.db, project.id, request.params.userId);
+        // In an open Project, no longer being listed with Read gives Write, which can make Tickets Ready.
+        const affected = project.visibility === "open" ? { projectId: project.id, ownerId: request.params.userId } : undefined;
+        await tellReadyAfter(ctx, affected, (tx) => removeMembership(tx, project.id, request.params.userId));
         inboxesChanged(ctx.live, [request.params.userId]);
         return reply.code(204).send();
       },
@@ -291,12 +303,13 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const name = request.body.name.trim();
-        const status = await transaction(ctx.db, async (tx) => {
+        const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           await lockProject(tx, project.id);
-          return insertStatus(tx, project.id, { name, category: request.body.category });
+          return { projectId: project.id, status: await insertStatus(tx, project.id, { name, category: request.body.category }) };
         });
         if (!status) throw statusNameTaken(name);
+        statusesChanged(ctx.live, projectId);
         return reply.code(201).send({ status });
       },
     );
@@ -318,7 +331,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const name = request.body.name?.trim();
-        const status = await transaction(ctx.db, async (tx) => {
+        const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           await lockProject(tx, project.id);
           let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
@@ -331,8 +344,9 @@ export function workRoutes(ctx: AppContext) {
           if (position !== undefined && !(await moveStatus(tx, project.id, status, position))) {
             throw new HttpError(400, `${status.name} can't move to position ${position}: its Status Category isn't that long`);
           }
-          return status;
+          return { projectId: project.id, status };
         });
+        statusesChanged(ctx.live, projectId);
         if (name !== undefined) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { statusId: status.id }));
         return { status };
       },
@@ -351,7 +365,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { moveTo } = request.query;
-        const moved = await transaction(ctx.db, async (tx) => {
+        const { projectId, moved, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
@@ -365,7 +379,15 @@ export function workRoutes(ctx: AppContext) {
             throw new HttpError(400, "Tickets can only move to another Status of this Project");
           }
           let moved: Ticket[] = [];
+          let mayBecomeReady: string[] = [];
+          let readyBefore = new Map<string, string>();
           if (target) {
+            // Moving Tickets into or out of finished work may make them, or the Tickets they block, Ready.
+            if (FINISHED_CATEGORIES.includes(status.category) !== FINISHED_CATEGORIES.includes(target.category)) {
+              const ids = (await listTickets(tx, project.id, { statusIds: [status.id] })).map((t) => t.id);
+              mayBecomeReady = [...ids, ...(await ticketsBlockedBy(tx, ids))];
+              readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
+            }
             moved = await moveTicketsBetweenStatuses(tx, status, target, actor, ctx.clock.now());
             if (endsClaim(target)) for (const ticket of moved) await clearClaim(tx, ticket.id);
           } else {
@@ -375,8 +397,12 @@ export function workRoutes(ctx: AppContext) {
             }
           }
           await deleteStatus(tx, status.id);
-          return moved;
+          return { projectId: project.id, moved, mayBecomeReady, readyBefore };
         });
+        statusesChanged(ctx.live, projectId);
+        // Moved Tickets, and those they block, which show their Status and may now be unblocked.
+        ticketsChanged(ctx.live, [...moved, ...(await findTicketsByIds(ctx.db, mayBecomeReady))]);
+        await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         // Moved Tickets may have entered or left an In Review Status.
         inboxesChanged(ctx.live, moved.map((t) => t.assignee?.id));
         return reply.code(204).send();
@@ -419,6 +445,34 @@ export function workRoutes(ctx: AppContext) {
             labels: q.label,
           }),
         };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/events",
+      {
+        schema: {
+          params: projectParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of changes to the Project's Tickets as they happen, for as long as the caller can see the " +
+                "Project. It opens with a `ready` event; whenever one of its Tickets is created or changes (its fields, its Sub-Tickets, " +
+                "its relations, its linked Documents, its Claim being taken, released or lapsing) a `changed` event arrives whose data is `{ ticket }`, the " +
+                "Ticket's key, and a `changed` event with `{ ticket: null }` when its Statuses change.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = await projectFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await projectFor(ctx.db, actor, project.key, "read"));
+        };
+        ctx.live.stream(reply, projectTopic(project.id), canSee);
       },
     );
 
@@ -476,6 +530,7 @@ export function workRoutes(ctx: AppContext) {
             now: ctx.clock.now(),
           });
         });
+        ticketsChanged(ctx.live, [ticket]);
         return reply.code(201).send({ ticket });
       },
     );
@@ -503,7 +558,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const now = ctx.clock.now();
-        const ticket = await transaction(ctx.db, async (tx) => {
+        const { parent, ticket } = await transaction(ctx.db, async (tx) => {
           // The Project first, as creating Tickets and removing Statuses lock it, then the parent.
           await lockProject(tx, (await ticketFor(tx, actor, request.params.key, "write")).projectId);
           const parent = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
@@ -518,8 +573,11 @@ export function workRoutes(ctx: AppContext) {
             actor,
             now,
           });
-          return updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now);
+          return { parent, ticket: await updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now) };
         });
+        // The parent lists its Sub-Tickets.
+        ticketsChanged(ctx.live, [ticket, parent]);
+        await tellNewlyReady(ctx, [ticket.id], new Map());
         return reply.code(201).send({ ticket });
       },
     );
@@ -564,7 +622,7 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const relations = await transaction(ctx.db, async (tx) => {
+        const { ends, relations } = await transaction(ctx.db, async (tx) => {
           const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey);
           const added = await addRelation(tx, actingUser(actor).workspaceId, {
             ticket,
@@ -576,8 +634,9 @@ export function workRoutes(ctx: AppContext) {
           if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
           }
-          return visibleRelations(tx, actor, await listRelations(tx, ticket.id));
+          return { ends: [ticket, other], relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
         });
+        ticketsChanged(ctx.live, ends);
         return reply.code(201).send({ relations });
       },
     );
@@ -603,12 +662,16 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const relations = await transaction(ctx.db, async (tx) => {
+        const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
           const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey);
+          // Removing a blocking relation may unblock either end.
+          const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
           if (!removed) throw new HttpError(404, "No such relation");
-          return visibleRelations(tx, actor, await listRelations(tx, ticket.id));
+          return { ends: [ticket, other], readyBefore, relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
         });
+        ticketsChanged(ctx.live, ends);
+        await tellNewlyReady(ctx, ends.map((t) => t.id), readyBefore);
         return { relations };
       },
     );
@@ -641,7 +704,7 @@ export function workRoutes(ctx: AppContext) {
         if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
           throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
         }
-        const { before, ticket } = await transaction(ctx.db, async (tx) => {
+        const { before, ticket, parents, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
@@ -664,13 +727,25 @@ export function workRoutes(ctx: AppContext) {
             changes.delegate = null;
           }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
+          // Both parents list their Sub-Tickets.
+          const parents = changes.parent === undefined ? [] : [changes.parent, ticket.parent && (await findTicketByKey(tx, actingUser(actor).workspaceId, ticket.parent.key))];
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
           const finishes = changes.status !== undefined && endsClaim(changes.status);
           if (finishes || (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id)) await clearClaim(tx, ticket.id);
-          return { before: ticket, ticket: await updateTicket(tx, ticket, changes, actor, ctx.clock.now()) };
+          // A new Delegate or Status may make the Ticket Ready, and finishing it may unblock others.
+          const blockedIds = changes.status ? await ticketsBlockedBy(tx, [ticket.id]) : [];
+          const mayBecomeReady = [ticket.id, ...blockedIds];
+          const readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
+          const updated = await updateTicket(tx, ticket, changes, actor, ctx.clock.now());
+          return { before: ticket, ticket: updated, parents, blockedIds, mayBecomeReady, readyBefore };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
-        if (ticket !== before) inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
+        if (ticket !== before) {
+          inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
+          // The Tickets it blocks show its Status, and may now be unblocked.
+          ticketsChanged(ctx.live, [ticket, ...parents, ...(await findTicketsByIds(ctx.db, blockedIds))]);
+          await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
+        }
         return { ticket };
       },
     );
@@ -682,7 +757,7 @@ export function workRoutes(ctx: AppContext) {
           params: ticketParams,
           response: {
             200: answer(
-              "The Ticket's history, oldest first, leaving out relations to Tickets the caller can't see",
+              "The Ticket's history, oldest first, leaving out relations to Tickets and links to Documents the caller can't see",
               listing("changes", ref("RecordedChange")),
             ),
             ...errors(401, 404, 410),

@@ -24,6 +24,13 @@ export interface TicketName {
   title: string;
 }
 
+/** A Document as a Ticket's history names it, with the Project it belongs to (null for a Workspace Document). */
+export interface DocumentName {
+  id: string;
+  title: string;
+  projectKey: string | null;
+}
+
 /** Another Ticket, as a Ticket lists it among its Sub-Tickets or relations. */
 export interface TicketRef {
   key: string;
@@ -179,6 +186,8 @@ export interface TicketEdit {
   title?: string;
   description?: string;
   status?: Status;
+  /** Marks the move to `status` as a Send back's (the send-back route); history records it as `sentBack`. */
+  sendBack?: boolean;
   priority?: Priority;
   labels?: string[];
   /** A User of the Ticket's Workspace, or null to leave it unassigned. */
@@ -206,7 +215,7 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     columns.push(["description", changes.description]);
   }
   if (changes.status !== undefined && changes.status.id !== ticket.status.id) {
-    recorded.push({ change: "status", from: ticket.status, to: changes.status });
+    recorded.push({ change: "status", from: ticket.status, to: changes.status, ...(changes.sendBack && { sentBack: true }) });
     columns.push(["status_id", changes.status.id]);
   }
   if (changes.priority !== undefined && changes.priority !== ticket.priority) {
@@ -260,13 +269,14 @@ export type TicketChange =
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
-  | { change: "status"; from: Status; to: Status }
+  | { change: "status"; from: Status; to: Status; /** Stored only when true; history reads give it always. */ sentBack?: boolean }
   | { change: "priority"; from: Priority; to: Priority }
   | { change: "labels"; from: string[]; to: string[] }
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
   | { change: "delegate"; from: AgentRef | null; to: AgentRef | null }
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
-  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName };
+  | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
+  | { change: "document linked" | "document unlinked"; document: DocumentName };
 
 export type { RecordedActor };
 
@@ -296,7 +306,16 @@ export async function listHistory(db: Queryable, ticketId: string): Promise<Reco
      WHERE c.ticket_id = $1 ORDER BY c.id`,
     [ticketId],
   );
-  return rows.map((row) => ({ at: row.at, actor: toRecordedActor(row), change: row.change, ...row.data }) as RecordedChange);
+  return rows.map(
+    (row) =>
+      ({
+        at: row.at,
+        actor: toRecordedActor(row),
+        change: row.change,
+        ...row.data,
+        ...(row.change === "status" && { sentBack: (row.data as { sentBack?: boolean }).sentBack === true }),
+      }) as RecordedChange,
+  );
 }
 
 /**
