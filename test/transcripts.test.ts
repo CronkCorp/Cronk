@@ -113,6 +113,93 @@ describe("Uploading a Transcript", () => {
   });
 });
 
+/** Sample secrets of each kind Cronk scrubs, made up but shaped like the real thing, with what each becomes. */
+const SECRETS = {
+  github: "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+  githubPat: "github_pat_" + "11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRS",
+  gitlab: "glpat-" + "aB3dE5fG7hI9jK1lM3nO",
+  anthropic: "sk-ant-api03-" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv",
+  openai: "sk-proj-" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv",
+  aws: "AKIA" + "IOSFODNN7EXAMPLE",
+  slack: "xoxb-" + "1234567890-0987654321-AbCdEfGhIjKlMnOp",
+  stripe: "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc",
+  google: "AIza" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+  npm: "npm_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+  jwt: "eyJhbGciOiJIUzI1NiJ9" + ".eyJzdWIiOiIxMjM0NTY3ODkwIn0" + ".dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+};
+
+/** A chat in which the Agent saw, and repeated, secrets of every kind, as well as an Agent token of Cronk's own. */
+const leakyChat = (cronkToken: string, sessionId: string) =>
+  chat("Fix CRONK-1", sessionId) +
+  "\n## User\n\nHere are the keys:\n\n" +
+  Object.values(SECRETS).map((secret) => `- ${secret}\n`).join("") +
+  `- Cronk: ${cronkToken}\n\n` +
+  "```sh\ncurl -H \"Authorization: Bearer abc.def-123\" -H 'authorization: Basic dXNlcjpwYXNz' $CRONK/api/me\n```\n\n" +
+  "```json\n{ \"Authorization\": \"token s3cr3t-v4lue\" }\n```\n\n" +
+  "```\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\nAAAAMwAAAAtzc2gtZWQyNTUxOQ\n-----END OPENSSH PRIVATE KEY-----\n```\n";
+
+describe("Scrubbing secrets on upload", () => {
+  it("replaces every known secret pattern before the text is stored, so no reader sees one", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", leakyChat(claude.secret, agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+
+    for (const secret of [...Object.values(SECRETS), claude.secret, "abc.def-123", "dXNlcjpwYXNz", "s3cr3t-v4lue", "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ"]) {
+      expect(read.markdown).not.toContain(secret);
+      expect(uploaded.body.transcript.markdown).not.toContain(secret);
+    }
+    // What each was stays readable, and so do the Agent Session ids that link it.
+    expect(read.markdown).toContain("- [scrubbed: GitHub token]\n");
+    expect(read.markdown).toContain("- [scrubbed: AWS access key]\n");
+    expect(read.markdown).toContain("- Cronk: [scrubbed: token]\n");
+    expect(read.markdown).toContain(`curl -H "Authorization: Bearer [scrubbed]" -H 'authorization: Basic [scrubbed]' $CRONK/api/me`);
+    expect(read.markdown).toContain('{ "Authorization": "token [scrubbed]" }');
+    expect(read.markdown).toContain("```\n[scrubbed: private key]\n```");
+    expect(read.markdown).toContain(chat("Fix CRONK-1", agent.sessionId));
+    expect(read.sessions).toEqual([{ id: agent.sessionId }]);
+  });
+
+  it("scrubs the same text the same way every time, so a re-upload still continues the stored text", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    const hook = cronk.client(claude.secret);
+    const before = leakyChat(claude.secret, agent.sessionId);
+    const id = (await upload(hook, "chat-1", before)).body.transcript.id;
+    const first = (await admin.get(`/api/transcripts/${id}`)).body.transcript.markdown;
+
+    const after = `${before}\n## Assistant\n\nRotate ${SECRETS.github} now.\n`;
+    expect((await upload(hook, "chat-1", after)).status).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.earlier).toEqual([]);
+    expect(read.markdown).toBe(`${first}\n## Assistant\n\nRotate [scrubbed: GitHub token] now.\n`);
+  });
+
+  it("counts the scrubbed text against the Workspace's limit", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    await admin.patch("/api/workspace", { transcriptMaxBytes: 1024 });
+    // Over the limit as sent: refused before anything is read, even though the scrubbed text would fit.
+    const key = "-----BEGIN RSA PRIVATE KEY-----\n" + "A".repeat(2000) + "\n-----END RSA PRIVATE KEY-----\n";
+    expect((await upload(cronk.client(claude.secret), "chat-1", chat("Hi", agent.sessionId) + key)).status).toBe(413);
+    const small = chat("Hi", agent.sessionId) + "-----BEGIN RSA PRIVATE KEY-----\n" + "A".repeat(500) + "\n-----END RSA PRIVATE KEY-----\n";
+    const kept = await upload(cronk.client(claude.secret), "chat-1", small);
+    expect(kept.status).toBe(200);
+    // A rewrite keeps both texts, which only fit together because the keys in them are scrubbed.
+    const rewrite = chat("Again", agent.sessionId) + "-----BEGIN RSA PRIVATE KEY-----\n" + "B".repeat(500) + "\n-----END RSA PRIVATE KEY-----\n";
+    expect((await upload(cronk.client(claude.secret), "chat-1", rewrite)).status).toBe(200);
+    expect((await admin.get(`/api/transcripts/${kept.body.transcript.id}`)).body.transcript.earlier).toHaveLength(1);
+  });
+});
+
 describe("Uploading the same chat again", () => {
   it("replaces the text when the new one continues it, and adds the Sessions it names", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup(2);

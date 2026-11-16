@@ -1,0 +1,56 @@
+/**
+ * Scrubbing a Transcript's text on upload (ADR 0013): every known secret pattern is replaced before the text is stored, so the
+ * originals never are. Best-effort: it catches the shapes below, not every secret a chat may hold.
+ *
+ * Scrubbing must be deterministic and leave its own replacements alone (scrubbing scrubbed text changes nothing), since a re-upload
+ * is matched against the stored text by whether it continues it. No pattern matches an Agent Session id (a UUID), though the
+ * route scans for those in the text as uploaded anyway.
+ */
+
+/** Characters a token runs on with, so a match next to one is part of a longer word. */
+const TOKEN_CHAR = "A-Za-z0-9_-";
+
+/** A token of `body`, not part of a longer one. */
+const token = (body: string) => new RegExp(`(?<![${TOKEN_CHAR}])(?:${body})(?![${TOKEN_CHAR}])`, "g");
+
+/** Provider tokens by their published prefixes and shapes, each replaced with what it was. */
+const PROVIDER_TOKENS: [RegExp, string][] = [
+  [token("gh[pousr]_[A-Za-z0-9]{36,}"), "GitHub token"],
+  [token("github_pat_[A-Za-z0-9_]{22,}"), "GitHub token"],
+  [token("glpat-[A-Za-z0-9_-]{20,}"), "GitLab token"],
+  [token("sk-ant-[A-Za-z0-9_-]{20,}"), "Anthropic key"],
+  [token("sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}"), "OpenAI key"],
+  [token("(?:AKIA|ASIA)[A-Z0-9]{16}"), "AWS access key"],
+  [token("xox[abposr]-[A-Za-z0-9-]{10,}"), "Slack token"],
+  [token("(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"), "Stripe key"],
+  [token("AIza[A-Za-z0-9_-]{35}"), "Google API key"],
+  [token("npm_[A-Za-z0-9]{36}"), "npm token"],
+  [token("eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"), "JWT"],
+];
+
+/** A private key block, PEM or PGP, through its end line, or to the end of the text when it has none (yet). */
+const PRIVATE_KEY = /-----BEGIN ((?:[A-Z0-9]+ )*)PRIVATE KEY( BLOCK)?-----[\s\S]*?(?:-----END \1PRIVATE KEY\2-----|$)/g;
+
+/**
+ * The credentials of an `Authorization` header, as written in a request, a curl command or JSON, after its scheme if it has one.
+ * Shell variables (`$TOKEN`) are left, as they aren't secrets, and so is what scrubbing already replaced.
+ */
+const AUTHORIZATION = /\b((?:proxy-)?authorization["']?\s*[:=]\s*["']?\s*)((?:bearer|basic|token|digest)\s+)?(?![[$])[^\s"'\\,;]+/gi;
+
+/** A bearer credential outside an `Authorization` header. */
+const BEARER = /\b(bearer\s+)(?![[$])[A-Za-z0-9._~+/-]{16,}=*/gi;
+
+/**
+ * An Agent token, sign-in or link token of Cronk's own: 32 random bytes as base64url, 43 characters with no prefix. Matched as a
+ * 43-character word mixing digits, capitals and small letters, which a word or identifier of that length rarely does.
+ */
+const CRONK_TOKEN = token(`[${TOKEN_CHAR}]{43}`);
+const looksRandom = (word: string) => /[0-9]/.test(word) && /[A-Z]/.test(word) && /[a-z]/.test(word);
+
+/** `markdown` with every known secret pattern replaced by a note of what it was. */
+export function scrubSecrets(markdown: string): string {
+  let text = markdown.replace(PRIVATE_KEY, "[scrubbed: private key]");
+  text = text.replace(AUTHORIZATION, "$1$2[scrubbed]").replace(BEARER, "$1[scrubbed]");
+  for (const [pattern, kind] of PROVIDER_TOKENS) text = text.replace(pattern, `[scrubbed: ${kind}]`);
+  return text.replace(CRONK_TOKEN, (word) => (looksRandom(word) ? "[scrubbed: token]" : word));
+}

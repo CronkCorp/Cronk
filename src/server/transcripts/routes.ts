@@ -18,6 +18,7 @@ import {
   sizeOf,
   storeTranscript,
 } from "./transcripts.js";
+import { scrubSecrets } from "./scrub.js";
 
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
@@ -71,7 +72,9 @@ export function transcriptRoutes(ctx: AppContext) {
           // One upload of a chat at a time, so neither loses the other's text or Sessions.
           await lockUntilCommit(tx, `transcript:${actor.agent.id}:${chatId}`);
           const existing = await findForUpdate(tx, actor.agent.id, chatId);
-          const upload = afterUpload(existing, markdown, await sessionsNamedIn(tx, { id: actor.agent.id, workspaceId }, markdown));
+          // Sessions are found in the text as sent; only the scrubbed text is kept.
+          const named = await sessionsNamedIn(tx, { id: actor.agent.id, workspaceId }, markdown);
+          const upload = afterUpload(existing, scrubSecrets(markdown), named);
           const size = sizeOf(upload);
           if (size > limit) throw tooBig(size, limit);
           if (!(await changedAnything(tx, upload.sessionIds))) {
