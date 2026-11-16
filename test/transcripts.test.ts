@@ -211,3 +211,37 @@ describe("Deleting a Transcript", () => {
   });
 });
 
+
+describe("The Transcript size limit", () => {
+  it("is 10 MB unless an Admin changes it, counting every text the Transcript keeps", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    expect((await admin.get("/api/workspace")).body.transcriptMaxBytes).toBe(10 * 1024 * 1024);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "One" });
+    const hook = cronk.client(claude.secret);
+
+    const changed = await admin.patch("/api/workspace", { transcriptMaxBytes: 2000 });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body.transcriptMaxBytes).toBe(2000);
+
+    const big = chat("x".repeat(2000), agent.sessionId);
+    const refused = await upload(hook, "chat-1", big);
+    expect(refused.status).toBe(413);
+    expect(refused.body.error).toMatch(/2000/);
+
+    // 1200 bytes fit; a rewrite of as many more doesn't, since the old text is kept beside it.
+    const first = chat("a".repeat(1100), agent.sessionId);
+    expect((await upload(hook, "chat-1", first)).status).toBe(201);
+    expect((await upload(hook, "chat-1", chat("b".repeat(1100), agent.sessionId))).status).toBe(413);
+    expect((await upload(hook, "chat-1", first + "c".repeat(500))).status).toBe(200);
+  });
+
+  it("is set by Admins only, within bounds", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.patch("/api/workspace", { transcriptMaxBytes: 5000 })).status).toBe(403);
+    expect((await admin.patch("/api/workspace", { transcriptMaxBytes: 0 })).status).toBe(400);
+    expect((await admin.patch("/api/workspace", { transcriptMaxBytes: 101 * 1024 * 1024 })).status).toBe(400);
+  });
+});

@@ -3,6 +3,7 @@ import { actingUser } from "../actor.js";
 import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
 import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.js";
+import { MAX_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
 
 export function workspaceRoutes(ctx: AppContext) {
@@ -17,7 +18,7 @@ export function workspaceRoutes(ctx: AppContext) {
       },
     );
 
-    app.patch<{ Body: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number } }>(
+    app.patch<{ Body: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; transcriptMaxBytes?: number } }>(
       "/api/workspace",
       {
         schema: {
@@ -33,6 +34,12 @@ export function workspaceRoutes(ctx: AppContext) {
                 maximum: 86_400,
                 description: "How long an Agent Session may stay silent before it ends and its Claims lapse: one minute to one day.",
               },
+              transcriptMaxBytes: {
+                type: "integer",
+                minimum: 1024,
+                maximum: MAX_TRANSCRIPT_BYTES,
+                description: "The most a Transcript may hold, all its texts together, in bytes: 1 KB to 100 MB; 10 MB unless changed.",
+              },
             },
           },
           response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403, 410) },
@@ -41,11 +48,12 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change the Workspace");
-        const { name, agentAccess, silenceThresholdSeconds } = request.body;
+        const { name, agentAccess, silenceThresholdSeconds, transcriptMaxBytes } = request.body;
         const workspace = await updateWorkspace(ctx.db, user.workspaceId, {
           ...(name !== undefined && { name: name.trim() }),
           ...(agentAccess !== undefined && { agentAccess }),
           ...(silenceThresholdSeconds !== undefined && { silenceThresholdSeconds }),
+          ...(transcriptMaxBytes !== undefined && { transcriptMaxBytes }),
         });
         return publicWorkspace(workspace);
       },

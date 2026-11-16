@@ -10,6 +10,9 @@ import { ticketKeySql } from "../work/tickets.js";
  * keep the old text as well when they don't, and only ever add Sessions.
  */
 
+/** The largest Transcript limit a Workspace may set, and so the largest upload read at all: 100 MB. */
+export const MAX_TRANSCRIPT_BYTES = 100 * 1024 * 1024;
+
 /** A Transcript as the API returns it to someone who may read it. */
 export interface Transcript {
   id: string;

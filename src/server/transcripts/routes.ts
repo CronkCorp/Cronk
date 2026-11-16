@@ -8,6 +8,7 @@ import {
   changedAnything,
   findForUpdate,
   findTranscript,
+  MAX_TRANSCRIPT_BYTES,
   readTranscript,
   deleteTranscript,
   sessionsNamedIn,
@@ -17,9 +18,6 @@ import {
 
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
-
-/** The largest Transcript limit a Workspace may set, and so the largest upload read at all. */
-export const MAX_TRANSCRIPT_BYTES = 100 * 1024 * 1024;
 
 const transcriptParams = pathParams({ id: { type: "string", format: "uuid", description: "The Transcript's id." } });
 
