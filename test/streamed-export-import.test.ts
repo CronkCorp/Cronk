@@ -1,12 +1,15 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { gunzipSync, gzipSync } from "node:zlib";
+import tar from "tar-stream";
+import { parse, stringify } from "yaml";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { startInstalledCronk, type Client } from "./harness.js";
+import { ARTIFACT_HOST, registerAgent, startInstalledCronk, startSession, tarGz, type Client } from "./harness.js";
 
 /**
  * Exports and imports streamed, so Workspaces whose files add up to more than fits in memory round-trip (#209).
@@ -109,5 +112,141 @@ describe("a Workspace export holding more than 200 MB of Attachments", () => {
       expect(await sha256(file)).toBe(await sha256(generated(a.seed, a.size)));
     }
     expect((await elsewhere.get("/api/workspace/storage")).body.attachments).toEqual({ files: 3, bytes: sizes.reduce((a, b) => a + b) });
+  });
+});
+
+/** Bytes of every value, so a file that isn't text, or is mangled as text, shows. */
+const binary = (n: number) => Buffer.from(Array.from({ length: n }, (_, i) => (i * 7) % 256));
+
+/**
+ * A Workspace with Attachments on a Ticket, a Document, a Report and a Comment, and a Project Artifact at two Versions
+ * holding a picture and a Markdown file; answers how to read each file back, by what it is.
+ */
+async function workspaceWithFiles() {
+  const { cronk, admin } = await startInstalledCronk();
+  await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+  await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+  const files: { name: string; read: string; bytes: Buffer }[] = [];
+  const attachTo = async (client: Client, path: string, name: string, bytes: Buffer) => {
+    const res = await client.upload(`${path}/attachments?name=${name}`, bytes, "application/octet-stream");
+    expect(res.status).toBe(201);
+    files.push({ name, read: `/api/attachments/${res.body.attachment.id}/file`, bytes });
+  };
+  await attachTo(admin, "/api/tickets/CRONK-1", "trace.bin", binary(3000));
+  const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide" })).body.document;
+  await attachTo(admin, `/api/documents/${guide.id}`, "notes.md", Buffer.from("# Notes\n\nKept as written.\n"));
+  const comment = (await admin.post(`/api/documents/${guide.id}/comments`, { body: "Here." })).body.comment;
+  await attachTo(admin, `/api/comments/${comment.id}`, "map.png", binary(500));
+
+  const ada = (await admin.get("/api/me")).body.user;
+  const { secret } = await registerAgent(admin, "claude-laptop");
+  await admin.patch("/api/tickets/CRONK-1", { delegateId: (await admin.get("/api/agents")).body.agents[0].id, assigneeId: ada.id });
+  const agent = await startSession(cronk, secret);
+  expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
+  await attachTo(agent, `/api/documents/${report.id}`, "profile.bin", binary(1234));
+
+  const { artifact } = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<p>v1</p>" }))).body;
+  await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "<p>v2</p>", "img/chart.png": "\u0089PNG\u0000\u00ff", "README.md": "# Limits\n" }));
+  return { admin, files, artifact };
+}
+
+/** The file at `path` of the latest Version of Artifact `id`, as `client`'s installation serves it. */
+async function artifactFile(client: Client, id: string, path: string): Promise<Buffer> {
+  const { artifact } = (await client.get(`/api/artifacts/${id}`)).body;
+  const res = await client.download(`${new URL(artifact.frameUrl).pathname}${path}`, { host: ARTIFACT_HOST });
+  expect(res.status, path).toBe(200);
+  return res.body;
+}
+
+describe("an export's Attachments and Artifact files", () => {
+  it("round-trip through the streamed export and import: Document, Report and Comment Attachments and every Artifact Version's files", async () => {
+    const { admin, files, artifact } = await workspaceWithFiles();
+    const exported = await admin.download("/api/export");
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    const imported = await elsewhere.upload("/api/import", exported.body);
+    expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+
+    for (const file of files) {
+      const res = await elsewhere.download(file.read);
+      expect(res.status, file.name).toBe(200);
+      expect(res.body.equals(file.bytes), file.name).toBe(true);
+    }
+    const moved = (await elsewhere.get(`/api/artifacts/${artifact.id}`)).body.artifact;
+    expect(moved.versions.map((v: { number: number }) => v.number)).toEqual([2, 1]);
+    for (const path of ["index.html", "img/chart.png", "README.md"]) {
+      expect((await artifactFile(elsewhere, artifact.id, path)).equals(await artifactFile(admin, artifact.id, path)), path).toBe(true);
+    }
+    expect((await artifactFile(elsewhere, artifact.id, "README.md")).toString()).toBe("# Limits\n");
+    expect((await elsewhere.get("/api/workspace/storage")).body).toEqual((await admin.get("/api/workspace/storage")).body);
+  });
+});
+
+/** The files of a gzipped tar archive, path to bytes, in order. */
+async function untarFiles(archive: Buffer): Promise<Map<string, Buffer>> {
+  const extract = tar.extract();
+  const files = new Map<string, Buffer>();
+  const done = (async () => {
+    for await (const entry of extract) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of entry) chunks.push(Buffer.from(chunk as Uint8Array));
+      files.set(entry.header.name, Buffer.concat(chunks));
+    }
+  })();
+  extract.end(gunzipSync(archive));
+  await done;
+  return files;
+}
+
+/** A tar archive of `files`, gzipped unless `plain`. */
+async function tarFiles(files: Map<string, Buffer | string>, { plain = false } = {}): Promise<Buffer> {
+  const pack = tar.pack();
+  for (const [name, contents] of files) pack.entry({ name }, contents);
+  pack.finalize();
+  const chunks: Buffer[] = [];
+  for await (const chunk of pack) chunks.push(Buffer.from(chunk as Uint8Array));
+  return plain ? Buffer.concat(chunks) : gzipSync(Buffer.concat(chunks));
+}
+
+/** `file`, a Markdown file with frontmatter, with its frontmatter changed by `edit`. */
+function editFrontmatter(file: Buffer, edit: (data: any) => void): string {
+  const match = /^---\n([\s\S]*?\n)?---\n/.exec(file.toString())!;
+  const data = parse(match[1] ?? "");
+  edit(data);
+  return `---\n${stringify(data)}---\n${file.toString().slice(match[0].length)}`;
+}
+
+/** An installation keeping its files in a directory the test can look into, and the files there. */
+async function installationWithFilesIn(name: string) {
+  const dir = await mkdtemp(join(tmpdir(), "cronk-files-"));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  const { admin } = await startInstalledCronk(name, { storage: { kind: "disk", dir } });
+  const stored = async () => (await readdir(dir, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
+  return { admin, stored };
+}
+
+describe("an import that fails partway", () => {
+  it("leaves no Attachments, Artifacts or files behind, and the same export imports afterwards", async () => {
+    const { admin } = await workspaceWithFiles();
+    const exported = (await admin.download("/api/export")).body;
+    // Ticket Attachments are imported after Documents', and Artifacts after Tickets, so files have been stored by the time this one is missed.
+    const files = await untarFiles(exported);
+    const index = "projects/CRONK/tickets/CRONK-1.attachments/index.md";
+    const edited = new Map<string, Buffer | string>(files);
+    edited.set(index, editFrontmatter(files.get(index)!, (data) => (data.attachments[0].file = "9-missing.bin")));
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    const res = await elsewhere.admin.upload("/api/import", await tarFiles(edited));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("projects/CRONK/tickets/CRONK-1.attachments/9-missing.bin");
+
+    expect(await elsewhere.stored()).toEqual([]);
+    expect((await elsewhere.admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 0, bytes: 0 }, artifacts: { files: 0, bytes: 0 } });
+    expect((await elsewhere.admin.get("/api/projects/CRONK")).status).toBe(404);
+
+    expect((await elsewhere.admin.upload("/api/import", exported)).status).toBe(201);
+    expect((await elsewhere.admin.get("/api/workspace/storage")).body).toEqual((await admin.get("/api/workspace/storage")).body);
+    expect(await elsewhere.stored()).toHaveLength(4 + 4);
   });
 });
