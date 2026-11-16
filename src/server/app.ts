@@ -27,7 +27,8 @@ import { transcriptRoutes } from "./transcripts/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
 import { refuseWritesFromOtherSites } from "./identity/same-site.js";
 import { attachmentRoutes } from "./files/attachment-routes.js";
-import { LocalDiskStore } from "./files/store.js";
+import { createFileStore, type StorageConfig } from "./files/storage.js";
+import { cachedSerializers } from "./serializers.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -44,8 +45,8 @@ export interface AppConfig {
   publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;
-  /** Directory the files of Attachments are stored in, on local disk. */
-  filesDir: string;
+  /** Where the files of Attachments are stored: a directory on local disk, or a bucket of an S3-compatible store. */
+  storage: StorageConfig;
 }
 
 /**
@@ -63,6 +64,7 @@ export async function buildApp(opts: {
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
+    schemaController: { compilersFactory: { buildSerializer: cachedSerializers } },
     // Refuse fields a route doesn't declare (its schema's `additionalProperties: false`) instead of
     // silently dropping them, so a caller never hears that a change worked when nothing changed.
     // `allErrors` so an unknown field is named even when a required one is missing too: a misspelt field is both.
@@ -80,7 +82,7 @@ export async function buildApp(opts: {
     clock: opts.clock,
     cookieSecure: opts.config.cookieSecure,
     live: opts.live ?? new LiveUpdates(),
-    files: new LocalDiskStore(opts.config.filesDir),
+    files: createFileStore(opts.config.storage),
   };
 
   // Open live-update streams would otherwise keep the server from closing.
@@ -88,7 +90,7 @@ export async function buildApp(opts: {
   const stopWatchingLapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
   app.addHook("onClose", async () => {
     stopWatchingLapses();
-    await db.end();
+    await Promise.all([db.end(), ctx.files.close()]);
   });
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
   // so a new route can't forget to. The web shell and the OpenAPI document take any query string.

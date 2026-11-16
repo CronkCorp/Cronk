@@ -186,6 +186,10 @@ _Avoid_: Bot, AI user, integration
 One continuous connection of an Agent, from connect until it disconnects or stays silent longer than the silence threshold, or its token, Agent or Owner is revoked, removed or deactivated. Every call in it, and the heartbeat of its open stream of Waiting Work, keeps it going; once ended it never resumes. An Agent changes things only within an Agent Session. Many Agent Sessions of the same Agent may run at once.
 _Avoid_: Run, instance, conversation
 
+**Agent Record**:
+Everything an Agent did across the Workspace, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved. Its Owner sees what they can read now; an Admin sees all of it. Gone once the Agent is removed, though what it did stays on the Tickets and Documents it was on.
+_Avoid_: Work (reserved for Waiting Work), history, activity log, feed
+
 **Transcript**:
 The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did.
 _Avoid_: Chat log, conversation, chat history, session log
