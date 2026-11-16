@@ -69,7 +69,7 @@ describe("A Discovered Ticket's source", () => {
 });
 
 describe("An Agent's own Discovered Ticket", () => {
-  it("is the Agent's to edit, attach to and relate without a Claim, from any of its Agent Sessions, until a User delegates it", async () => {
+  it("is the Agent's to edit, attach files to and link Documents to without a Claim, from any of its Agent Sessions, until a User delegates it", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const filer = await session();
     await filer.post("/api/projects/CRONK/tickets", { title: "Found" });
@@ -79,7 +79,8 @@ describe("An Agent's own Discovered Ticket", () => {
     expect((await later.patch("/api/tickets/CRONK-2", { title: "Found: stale cache", description: "Details.", priority: "high", labels: ["bug"] })).status).toBe(200);
     expect((await later.upload("/api/tickets/CRONK-2/attachments?name=log.txt", Buffer.from("trace"), "text/plain")).status).toBe(201);
     expect((await later.post(`/api/tickets/CRONK-2/documents/${plan}`)).status).toBe(201);
-    expect((await later.post("/api/tickets/CRONK-2/relations", { kind: "relates_to", ticketKey: "CRONK-1" })).status).toBe(201);
+    // Relations still need the Claim: an Agent adds blocks from its Discovered Ticket as #167 describes.
+    expect((await later.post("/api/tickets/CRONK-2/relations", { kind: "relates_to", ticketKey: "CRONK-1" })).status).toBe(409);
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket).toMatchObject({ title: "Found: stale cache", priority: "high", labels: ["bug"] });
 
     // Another Agent, even of the same Owner, needs the Claim as for any Ticket.
@@ -91,6 +92,19 @@ describe("An Agent's own Discovered Ticket", () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe("Claim CRONK-2 in your Agent Session before editing it: it isn't Claimed");
     expect((await later.upload("/api/tickets/CRONK-2/attachments?name=more.txt", Buffer.from("x"), "text/plain")).status).toBe(409);
+    // Taking the Delegation away again doesn't hand the Ticket back to the Agent.
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: null });
+    expect((await later.patch("/api/tickets/CRONK-2", { title: "Again" })).status).toBe(409);
+  });
+
+  it("is no longer the Agent's to edit once a User cancels it", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "canceled") });
+
+    expect((await agent.patch("/api/tickets/CRONK-2", { title: "Still found" })).status).toBe(409);
   });
 
   it("can't be worked on until a User delegates it: Claiming and moving it are refused, saying why", async () => {

@@ -155,6 +155,12 @@ export const isAwaitingDecision = (ticket: Ticket): boolean =>
 export const isAwaitingDecisionSql = (t: string, s: string) =>
   `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog')`;
 
+/** Whether a User ever delegated the Ticket, as its history records. */
+export async function wasEverDelegated(db: Queryable, ticketId: string): Promise<boolean> {
+  const { rowCount } = await db.query("SELECT 1 FROM ticket_changes WHERE ticket_id = $1 AND change = 'delegate' LIMIT 1", [ticketId]);
+  return rowCount !== 0;
+}
+
 /** Records a User's Keep in Backlog of a Discovered Ticket, which settles it; returns the Ticket as kept. */
 export async function keepDiscovery(db: Queryable, ticket: Ticket, now: Date): Promise<Ticket> {
   await db.query("UPDATE tickets SET discovery_kept = true, updated_at = $2 WHERE id = $1", [ticket.id, now]);

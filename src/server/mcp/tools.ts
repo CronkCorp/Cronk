@@ -216,7 +216,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
       edit: {
         description:
-          "change the title, description, priority, labels or parent of a Ticket you hold the Claim on, or of your own Discovered Ticket no User has delegated yet; fields left out stay as they are",
+          "change the title, description, priority, labels or parent of a Ticket you hold the Claim on, or of your own Discovered Ticket no User has delegated or finished yet; fields left out stay as they are",
         writes: true,
         run: (api, a) => {
           const key = required(a.key, "a key", "edit");
@@ -232,7 +232,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
       relate: {
         description:
-          "add a Relation from a Ticket you hold the Claim on, or your own undelegated Discovered Ticket, to another: it blocks, is blocked_by or relates_to the other",
+          "add a Relation from a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "relate"))}/relations`, {
@@ -241,7 +241,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           }),
       },
       unrelate: {
-        description: "remove a Relation from a Ticket you hold the Claim on, or your own undelegated Discovered Ticket",
+        description: "remove a Relation from a Ticket you hold the Claim on",
         writes: true,
         run: (api, a) => {
           const key = required(a.key, "a key", "unrelate");

@@ -2,7 +2,7 @@ import type { AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, PRIORITIES, WORKABLE_CATEGORIES } from "../../shared/values.js";
-import { ticketKeySql, type AgentRef, type Ticket } from "../work/tickets.js";
+import { ticketKeySql, wasEverDelegated, type AgentRef, type Ticket } from "../work/tickets.js";
 import { isLiveAt, silenceWindow, WITH_WORKSPACE } from "./agent-sessions.js";
 
 /**
@@ -262,19 +262,23 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
 }
 
 /**
- * Whether the Agent filed `ticket` as a Discovered Ticket that no User has delegated yet: the Agent may then
- * change it without a Claim, from any of its Agent Sessions, though not work on it.
+ * Whether the Agent filed `ticket` as a Discovered Ticket that no User has delegated or finished yet, nor finished: the Agent
+ * may then change it without a Claim, from any of its Agent Sessions, though not work on it. Once delegated, it stays
+ * the Delegate's to work on under a Claim, even if the Delegation is later taken away.
  */
-export const isOwnUndelegatedDiscovery = (agent: AgentActor, ticket: Ticket): boolean =>
-  ticket.discovered?.agent.id === agent.agent.id && ticket.delegate === null;
+async function isOwnDiscoveryAwaitingDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
+  if (ticket.discovered?.agent.id !== agent.agent.id || ticket.delegate !== null) return false;
+  if (FINISHED_CATEGORIES.includes(ticket.status.category)) return false;
+  return !(await wasEverDelegated(db, ticket.id));
+}
 
 /**
- * Refuses an Agent's change to a Ticket (its fields, Relations, linked Documents or Attachments) as
- * `requireClaimHolder` does, unless it is the Agent's own undelegated Discovered Ticket. Pass a Ticket
+ * Refuses an Agent's change to a Ticket's fields, linked Documents or Attachments as `requireClaimHolder`
+ * does, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet. Pass a Ticket
  * locked with `forUpdate`, so the Claim or Delegation can't change before the change commits.
  */
 export async function requireAgentMayChange(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
-  if (isOwnUndelegatedDiscovery(agent, ticket)) return;
+  if (await isOwnDiscoveryAwaitingDelegation(db, agent, ticket)) return;
   await requireClaimHolder(db, agent, ticket, now, refusedAction);
 }
 
