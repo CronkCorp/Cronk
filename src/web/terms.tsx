@@ -267,8 +267,8 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
     },
   );
   const protect = useAction((value: boolean) => api.protectTerm(t.id, value), props.onChanged);
-  // The Term as its place's stream last found it, shown once the User isn't editing, so nothing changes under an edit;
-  // and whether it was deleted elsewhere.
+  // The Term as its place's stream last found it, shown once the User isn't editing, so nothing changes under an edit,
+  // unless it is older than what is shown (such as the User's own save meanwhile); and whether it was deleted elsewhere.
   const [fresh, setFresh] = useState<Term>();
   const [deleted, setDeleted] = useState(false);
   const [live, onLive] = useLiveState();
@@ -282,32 +282,8 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
   useEffect(() => {
     if (!fresh || editing) return;
     setFresh(undefined);
-    props.onChanged(fresh);
+    if (fresh.version >= t.version) props.onChanged(fresh);
   }, [fresh, editing]);
-  if (deleted) {
-    return (
-      <section className="term-page">
-        <div className="page-head">
-          <div>
-            <Crumbs projectKey={t.projectKey} />
-            <h1>{t.name}</h1>
-          </div>
-        </div>
-        <Banner tone="warn" role="status">
-          <p>
-            This Term was deleted elsewhere, with all its Versions.{" "}
-            <Link to={termsAddress(t.projectKey)} className="link">Back to {placeName(t.projectKey)} Terms</Link>
-          </p>
-        </Banner>
-        <section className="panel wide term-detail">
-          <div className="markdown term-definition">
-            <CronkMarkdown>{t.definition}</CronkMarkdown>
-          </div>
-          <Avoid words={t.avoid} />
-        </section>
-      </section>
-    );
-  }
   return (
     <section className="term-page">
       <div className="page-head">
@@ -319,7 +295,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
         </div>
         <div className="actions">
           <LiveIndicator state={live} />
-          {canWrite && !editing && (
+          {canWrite && !editing && !deleted && (
             <>
               <Menu
                 label="More"
@@ -345,7 +321,16 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
       </div>
       {remove.error && <p className="error" role="alert">{remove.error}</p>}
       {protect.error && <p className="error" role="alert">{protect.error}</p>}
-      <OverrideBanner term={t} />
+      {deleted ? (
+        <Banner tone="warn" role="status">
+          <p>
+            This Term was deleted elsewhere, with all its Versions.{" "}
+            <Link to={termsAddress(t.projectKey)} className="link">Back to {placeName(t.projectKey)} Terms</Link>
+          </p>
+        </Banner>
+      ) : (
+        <OverrideBanner term={t} />
+      )}
       {editing ? (
         <section className="panel wide">
           <h2>Edit {t.name}</h2>
