@@ -312,7 +312,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           const replaced = replaceSection(current.body, request.body.heading, request.body.body);
           if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
           const saved = await saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
-          const avoidedWords = await avoidedWordsIn(tx, actor, current.projectId, [{ field: "body", text: request.body.body, markdown: true }]);
+          const avoidedWords = await avoidedWordsIn(tx, actor, current.projectId, titleAndBody({ body: request.body.body }));
           return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
         inboxesChanged(ctx.live, [assignee]);

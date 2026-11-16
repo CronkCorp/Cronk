@@ -7,7 +7,7 @@ import { updateTicket } from "../work/tickets.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
-import { avoidedWordsIn, type SavedText } from "../knowledge/avoided-words.js";
+import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
@@ -154,7 +154,7 @@ export function conversationRoutes(ctx: AppContext) {
             const ticket = await ticketFor(tx, actor, request.params.key, "write");
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
             const posted = await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body);
-            return { ticket, posted, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, commentText(request.body)) };
+            return { ticket, posted, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody({ body: request.body.body })) };
           },
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
@@ -252,7 +252,7 @@ export function conversationRoutes(ctx: AppContext) {
             const document = await documentFor(tx, actor, request.params.id, "write");
             const place = { projectId: document.projectId, delegateId: null };
             const posted = await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document);
-            return { document, posted, avoidedWords: await avoidedWordsIn(tx, actor, document.projectId, commentText(request.body)) };
+            return { document, posted, avoidedWords: await avoidedWordsIn(tx, actor, document.projectId, titleAndBody({ body: request.body.body })) };
           },
           ({ document, posted }) => {
             ctx.live.publish(documentTopic(document.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
@@ -278,6 +278,3 @@ export function conversationRoutes(ctx: AppContext) {
     );
   };
 }
-
-/** The text a Comment's post wrote. */
-const commentText = (input: { body: string }): SavedText[] => [{ field: "body", text: input.body, markdown: true }];

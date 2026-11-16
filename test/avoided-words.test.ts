@@ -63,6 +63,17 @@ describe("words a Term says to avoid", () => {
     ]);
   });
 
+  it("are read through emphasis and links, as the words show once rendered", async () => {
+    const { agent } = await claimedWithTerms();
+
+    const commented = await agent.post("/api/tickets/CRONK-1/comments", { body: "A work *item*, an *issu*e and a [link to an issue](https://example.com/issue), all re**issue**d." });
+    expect(commented.body.avoidedWords.map((w: any) => [w.word, w.column])).toEqual([
+      ["work *item", 3],
+      ["issu*e", 20],
+      ["issue", 45],
+    ]);
+  });
+
   it("are those of the Terms that apply where the text is saved: a Project Term replaces the Workspace Term of the same name", async () => {
     const { admin, agent, ticketTerm } = await claimedWithTerms();
     const projectTicket = (await admin.post("/api/projects/CRONK/terms", { name: "ticket", definition: "A card on the board.", avoid: ["card"] })).body.term;
@@ -108,5 +119,16 @@ describe("the hint", () => {
     const created = await admin.post("/api/projects/CRONK/tickets", { title: "An issue" });
     expect(created.status).toBe(201);
     expect(created.body.avoidedWords).toEqual(hint("title", 4));
+  });
+});
+
+describe("replacing a section", () => {
+  it("lists the avoided words of the new section, placed in the body sent", async () => {
+    const { admin, agent } = await claimedWithTerms();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "# Guide\n\n## Setup\n\nOld." })).body.document;
+
+    const replaced = await agent.post(`/api/documents/${doc.id}/replace-section`, { baseVersion: 1, heading: "Setup", body: "Open an\nissue." });
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.avoidedWords.map((w: any) => [w.field, w.word, w.line, w.column])).toEqual([["body", "issue", 2, 1]]);
   });
 });

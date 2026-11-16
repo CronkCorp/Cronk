@@ -516,8 +516,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     ...object({
       field: { type: "string", description: "The request field it was written in, such as `title`, `body` or `description`." },
       word: { type: "string", description: "The word or phrase as written." },
-      line: { type: "integer", minimum: 1, description: "The line of the field it starts on, counting from 1." },
-      column: { type: "integer", minimum: 1, description: "The column of that line it starts at, counting from 1." },
+      line: { type: "integer", minimum: 1, description: "The line it starts on in the field as sent, counting from 1." },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "The column of that line it starts at, counting from 1 in UTF-16 code units, as JavaScript strings index text.",
+      },
       term: { ...named, description: "The Term to use instead, as it applies where the text was saved." },
     }),
   },

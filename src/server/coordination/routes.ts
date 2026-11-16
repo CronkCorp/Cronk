@@ -253,7 +253,7 @@ export function coordinationRoutes(ctx: AppContext) {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           await requireClaimHolder(tx, actor, ticket, now, "logging Activities on it");
           const activity = await insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
-          return { activity, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, [{ field: "body", text: body, markdown: true }]) };
+          return { activity, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody({ body })) };
         });
         ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
         if (kind === "question") inboxesChanged(ctx.live, [actor.owner.id]);

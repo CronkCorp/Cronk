@@ -17,7 +17,7 @@ import {
   ticketKeyParam,
   userIdParam,
 } from "../schemas.js";
-import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
+import { avoidedWordsIn, titleAndDescription } from "../knowledge/avoided-words.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
 import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
@@ -539,7 +539,7 @@ export function workRoutes(ctx: AppContext) {
             actor: actor,
             now: ctx.clock.now(),
           });
-          return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, ticketTexts(request.body)) };
+          return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
         ticketsChanged(ctx.live, [ticket]);
         return reply.code(201).send({ ticket, avoidedWords });
@@ -585,7 +585,7 @@ export function workRoutes(ctx: AppContext) {
             now,
           });
           const ticket = await updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now);
-          return { parent, ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, ticketTexts(request.body)) };
+          return { parent, ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
         // The parent lists its Sub-Tickets.
         ticketsChanged(ctx.live, [ticket, parent]);
@@ -763,7 +763,7 @@ export function workRoutes(ctx: AppContext) {
           const mayBecomeReady = [ticket.id, ...blockedIds];
           const readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
           const updated = await updateTicket(tx, ticket, changes, actor, ctx.clock.now());
-          const avoidedWords = await avoidedWordsIn(tx, actor, ticket.projectId, ticketTexts({ title, description }));
+          const avoidedWords = await avoidedWordsIn(tx, actor, ticket.projectId, titleAndDescription({ title, description }));
           return { before: ticket, ticket: updated, parents, blockedIds, mayBecomeReady, readyBefore, avoidedWords };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
@@ -888,6 +888,3 @@ function statusOr404(statuses: Status[], statusId: string): Status {
 }
 
 const statusNameTaken = (name: string) => new HttpError(409, `Another Status is already named ${name}`);
-
-/** The texts a save of a Ticket's title and description wrote, leaving out those the request didn't send. */
-const ticketTexts = (input: { title?: string | undefined; description?: string | undefined }) => titleAndBody({ title: input.title, body: input.description }, "description");

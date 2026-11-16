@@ -49,18 +49,33 @@ function avoidPattern(avoid: string): RegExp | null {
   return new RegExp(String.raw`(?<!${WORD})${phrase}(?!${WORD})`, "giu");
 }
 
-/** The source ranges of a Markdown text's prose: its text nodes, outside code, quotes and HTML. */
-function proseRanges(markdown: string): [number, number][] {
-  const ranges: [number, number][] = [];
-  const walk = (node: Nodes) => {
-    if (NOT_PROSE.has(node.type)) return;
-    if (node.type === "text" && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
-      ranges.push([node.position.start.offset, node.position.end.offset]);
-    }
-    if ("children" in node) for (const child of node.children) walk(child);
+/** Markdown nodes that run on as one line of text, so a word may span their children, as `work *item*` does. */
+const INLINE = new Set(["paragraph", "heading", "tableCell", "emphasis", "strong", "delete", "link", "linkReference"]);
+
+/**
+ * The prose of a text as rendered, each character with its offset in the source: a Markdown text's
+ * text nodes outside code, quotes and HTML, run together within a paragraph or heading so markup
+ * splits no word, with a line break between blocks and in place of anything else; a plain text as is.
+ */
+function proseOf({ text, markdown }: SavedText): { prose: string; offsets: number[] } {
+  if (!markdown) return { prose: text, offsets: Array.from({ length: text.length + 1 }, (_, i) => i) };
+  let prose = "";
+  const offsets: number[] = [];
+  const add = (chars: string, offset: (i: number) => number) => {
+    for (let i = 0; i < chars.length; i++) offsets.push(offset(i));
+    prose += chars;
   };
-  walk(fromMarkdown(markdown));
-  return ranges;
+  const walk = (node: Nodes) => {
+    const at = node.position?.start.offset ?? 0;
+    if (node.type === "text") return add(text.slice(at, node.position?.end.offset ?? at), (i) => at + i);
+    if (NOT_PROSE.has(node.type) || !("children" in node)) return add("\n", () => at);
+    const inline = INLINE.has(node.type);
+    if (!inline) add("\n", () => at);
+    for (const child of node.children) walk(child);
+    if (!inline) add("\n", () => node.position?.end.offset ?? at);
+  };
+  walk(fromMarkdown(text));
+  return { prose, offsets: offsets.concat(text.length) };
 }
 
 /** Line and column, each from 1, of `offset` in `text`. */
@@ -71,7 +86,7 @@ function lineAndColumn(text: string, offset: number): { line: number; column: nu
 }
 
 /** The avoided words of `terms` in `texts`, field by field in the order given, then by where they start. */
-export function findAvoidedWords(terms: StoredTerm[], texts: SavedText[]): AvoidedWord[] {
+function findAvoidedWords(terms: StoredTerm[], texts: SavedText[]): AvoidedWord[] {
   const patterns = terms.flatMap((term) =>
     term.avoid.flatMap((avoid) => {
       const pattern = avoidPattern(avoid);
@@ -79,15 +94,14 @@ export function findAvoidedWords(terms: StoredTerm[], texts: SavedText[]): Avoid
     }),
   );
   if (patterns.length === 0) return [];
-  return texts.flatMap(({ field, text, markdown }) => {
+  return texts.flatMap((saved) => {
+    const { prose, offsets } = proseOf(saved);
     const found: (AvoidedWord & { offset: number })[] = [];
-    for (const [start, end] of markdown ? proseRanges(text) : [[0, text.length] as [number, number]]) {
-      const prose = text.slice(start, end);
-      for (const { pattern, term } of patterns) {
-        for (const match of prose.matchAll(pattern)) {
-          const offset = start + match.index;
-          found.push({ field, word: match[0], ...lineAndColumn(text, offset), term, offset });
-        }
+    for (const { pattern, term } of patterns) {
+      for (const match of prose.matchAll(pattern)) {
+        const offset = offsets[match.index]!;
+        const end = offsets[match.index + match[0].length - 1]! + 1;
+        found.push({ field: saved.field, word: saved.text.slice(offset, end), ...lineAndColumn(saved.text, offset), term, offset });
       }
     }
     return found.sort((a, b) => a.offset - b.offset || a.term.name.localeCompare(b.term.name)).map(({ offset: _, ...word }) => word);
@@ -111,7 +125,13 @@ export async function avoidedWordsIn(db: Queryable, actor: Actor, projectId: str
 }
 
 /** The texts a save of a title and Markdown body wrote, leaving out those the request didn't send. */
-export const titleAndBody = (input: { title?: string | undefined; body?: string | undefined }, bodyField = "body"): SavedText[] => [
+export const titleAndBody = (input: { title?: string | undefined; body?: string | undefined }): SavedText[] => [
   ...(input.title !== undefined ? [{ field: "title", text: input.title, markdown: false }] : []),
-  ...(input.body !== undefined ? [{ field: bodyField, text: input.body, markdown: true }] : []),
+  ...(input.body !== undefined ? [{ field: "body", text: input.body, markdown: true }] : []),
+];
+
+/** The texts a save of a Ticket's title and Markdown description wrote, leaving out those the request didn't send. */
+export const titleAndDescription = (input: { title?: string | undefined; description?: string | undefined }): SavedText[] => [
+  ...titleAndBody({ title: input.title }),
+  ...(input.description !== undefined ? [{ field: "description", text: input.description, markdown: true }] : []),
 ];

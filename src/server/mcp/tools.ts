@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
-import type { AvoidedWord } from "../knowledge/avoided-words.js";
+import type { AvoidedWord } from "../api-types.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 
