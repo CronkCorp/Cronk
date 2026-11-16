@@ -2,7 +2,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Queryable } from "../db/database.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
 import { replaceReferenceText } from "../../shared/ticket-references.js";
-import { DECISION_REFERENCE } from "../../shared/knowledge-references.js";
+import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowledge-references.js";
 import type { MentionKind } from "../../shared/values.js";
 
 /**
@@ -77,7 +77,28 @@ async function ownDecisionKey(db: Queryable, id: string): Promise<string | undef
   return rows[0]?.key;
 }
 
-/** Records what one source mentions now, from its text as stored, replacing what it mentioned before. */
+/**
+ * The Terms that apply where a source lies, by name as `normalName` gives it: in a Project its own,
+ * and the Workspace's it has no Term of the same name for (ignoring case); in the Workspace, its own.
+ */
+async function applicableTerms(db: Queryable, workspaceId: string, projectId: string | null): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; name: string }>(
+    `SELECT t.id, t.name FROM terms t
+     WHERE t.workspace_id = $1 AND (t.project_id = $2 OR (t.project_id IS NULL AND NOT EXISTS (
+       SELECT 1 FROM terms o WHERE o.workspace_id = $1 AND o.project_id = $2 AND lower(o.name) = lower(t.name))))`,
+    [workspaceId, projectId],
+  );
+  return new Map(rows.map((r) => [normalName(r.name), r.id]));
+}
+
+/** The ids of the Terms of `terms` (by name) that `texts` name with their capitalisation as whole words, without repeats. */
+function termIdsIn(texts: string[], terms: Map<string, string>): string[] {
+  const pattern = termPattern([...terms.keys()]);
+  if (!pattern) return [];
+  return [...new Set(texts.flatMap((text) => [...text.matchAll(pattern)].map((m) => terms.get(normalName(m[0]))!)))];
+}
+
+/** Records what one source mentions now, from its text as stored, replacing what it mentioned before. A source never mentions itself. */
 async function record(db: Queryable, source: SourceRow): Promise<void> {
   const column = SOURCE_COLUMN[source.kind];
   await db.query(`DELETE FROM mentions WHERE ${column} = $1`, [source.id]);
@@ -85,6 +106,8 @@ async function record(db: Queryable, source: SourceRow): Promise<void> {
   const own = source.kind === "decision" ? await ownDecisionKey(db, source.id) : undefined;
   const keys = decisionKeysIn(texts).filter((k) => k !== own);
   await db.query(`INSERT INTO mentions (${column}, decision_key) SELECT $1, unnest($2::text[])`, [source.id, keys]);
+  const termIds = termIdsIn(texts, await applicableTerms(db, source.workspace_id, source.project_id)).filter((id) => id !== source.id);
+  await db.query(`INSERT INTO mentions (${column}, mentioned_term_id) SELECT $1, unnest($2::uuid[])`, [source.id, termIds]);
 }
 
 /**
@@ -94,6 +117,24 @@ async function record(db: Queryable, source: SourceRow): Promise<void> {
 export async function recordMentions(db: Queryable, source: MentionSource): Promise<void> {
   const { rows } = await db.query<SourceRow>(`SELECT * FROM ${SOURCES} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
   if (rows[0]) await record(db, rows[0]);
+}
+
+/**
+ * Records again what each source mentions whose text may name one of `names`, among those lying
+ * where a Term of `place` applies (all the Workspace for a Workspace Term), as after a Term there
+ * takes or gives up one of those names. Run in the transaction that changes the Term.
+ */
+export async function recordMentionsOfNames(db: Queryable, place: { workspaceId: string; projectId: string | null }, names: string[]): Promise<void> {
+  // Any text naming one of them holds its longest word, whatever the case.
+  const words = names.map((name) => normalName(name).split(" ").reduce((a, b) => (b.length > a.length ? b : a)).toLowerCase());
+  const { rows } = await db.query<SourceRow>(
+    `SELECT * FROM ${SOURCES}
+     WHERE s.workspace_id = $1 AND ($2::uuid IS NULL OR s.project_id = $2)
+       AND EXISTS (SELECT 1 FROM unnest($3::text[]) w WHERE strpos(lower(s.title || ' ' || s.body), w) > 0)
+     ORDER BY s.kind, s.id`,
+    [place.workspaceId, place.projectId, words],
+  );
+  for (const row of rows) await record(db, row);
 }
 
 /** How many sources a full recording reads at a time, so a large Workspace isn't held in memory at once. */

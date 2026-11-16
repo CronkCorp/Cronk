@@ -13,6 +13,7 @@ import { importProject } from "./projects.js";
 import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
 import { importWorkspaceSettings } from "./workspace.js";
+import { recordAllMentions } from "../knowledge/mentions.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -67,6 +68,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await tickets.storeRelations(ctx);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
+  // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.
+  await recordAllMentions(db, workspaceId);
   return { scope, projects: created, renamedIds: ctx.renamedIds };
 }
 

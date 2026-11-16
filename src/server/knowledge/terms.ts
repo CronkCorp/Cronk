@@ -1,7 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Readable } from "../identity/access.js";
-import { recordMentions } from "./mentions.js";
+import { recordMentions, recordMentionsOfNames } from "./mentions.js";
 
 /**
  * Terms: the Workspace's or a Project's glossary, each Term naming one concept with its definition
@@ -109,6 +109,7 @@ export async function insertTerm(
   const id = await insertTermRow(db, { ...input.place, ...fields, version: 1, createdAt: input.now, updatedAt: input.now });
   await insertTermVersion(db, id, { number: 1, ...fields, at: input.now, actor: input.actor });
   await recordMentions(db, { kind: "term", id });
+  await recordMentionsOfNames(db, input.place, [fields.name]);
   return (await findTerm(db, input.place.workspaceId, id))!;
 }
 
@@ -239,12 +240,14 @@ export async function saveTermVersion(
     save.now,
   ]);
   await recordMentions(db, { kind: "term", id: term.id });
+  if (fields.name !== term.name) await recordMentionsOfNames(db, place, [term.name, fields.name]);
   return { ...term, ...fields, version: number, updatedAt: save.now };
 }
 
-/** Deletes a Term and its Versions. */
-export async function deleteTerm(db: Queryable, id: string): Promise<void> {
-  await db.query("DELETE FROM terms WHERE id = $1", [id]);
+/** Deletes a Term and its Versions, and what mentions it then mentions any Workspace Term it overrode. Run inside a transaction. */
+export async function deleteTerm(db: Queryable, workspaceId: string, term: StoredTerm): Promise<void> {
+  await db.query("DELETE FROM terms WHERE id = $1", [term.id]);
+  if (term.projectId !== null) await recordMentionsOfNames(db, { workspaceId, projectId: term.projectId }, [term.name]);
 }
 
 /** One saved state of a Term, with the Actor who saved it. */
