@@ -39,6 +39,8 @@ export interface CommentWork {
   comment: ReturnType<typeof publicComment>;
   ticket: CommentOn["ticket"];
   document: CommentOn["document"];
+  /** The Artifact the Comment is on, with the Version it was on. */
+  artifact: CommentOn["artifact"];
 }
 
 /** A User's rejection of a Decision the Agent proposed, with their reason and the Ticket it came from. */
@@ -48,6 +50,7 @@ export interface RejectionWork {
   decision: RejectedDecision;
   ticket: { key: string; title: string } | null;
   document: null;
+  artifact: null;
 }
 
 /** A Decision as its rejection reaches the Agent that proposed it: the Version that rejected it. */
@@ -74,6 +77,7 @@ export interface SuggestionRejectionWork {
   };
   ticket: { key: string; title: string } | null;
   document: null;
+  artifact: null;
 }
 
 /** The rejection of a rejected `suggestion` as Waiting Work. */
@@ -91,6 +95,7 @@ export function suggestionRejectionOf(suggestion: Suggestion): SuggestionRejecti
     },
     ticket: suggestion.sourceTicket,
     document: null,
+    artifact: null,
   };
 }
 
@@ -102,6 +107,7 @@ export function rejectionOf(decision: Pick<Decision, "key" | "sourceTicket">, re
     decision: { key: decision.key, title: rejecting.title, reason: rejecting.statusReason ?? "", rejectedBy: rejecting.actor, at: rejecting.at },
     ticket: decision.sourceTicket,
     document: null,
+    artifact: null,
   };
 }
 
@@ -116,6 +122,8 @@ export interface CommentPlace {
   projectId: string | null;
   /** The Delegate of the Ticket it is on, if any. */
   delegateId: string | null;
+  /** On an Artifact: the Agent that published the Version it is on, if an Agent did. */
+  publisherId: string | null;
 }
 
 /** An @mention of an Agent: its name, and the name of the Owner it picks, if it picks one. Both lower-cased. */
@@ -209,8 +217,8 @@ export async function withWaitingWork<T>(
 
 /**
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the
- * Agent whose question it answers (`answered`), every Agent it @mentions by name, and the
- * Delegate of the Ticket it is on. Never for the Agent that posted it, and only for Agents
+ * Agent whose question it answers (`answered`), every Agent it @mentions by name, the
+ * Delegate of the Ticket it is on, and the Agent that published the Artifact Version it is on. Never for the Agent that posted it, and only for Agents
  * that can see where it was posted. Returns the Agents it now waits for, and why. Calls
  * `positioned` with each position as soon as it is taken, before the transaction commits.
  */
@@ -228,6 +236,7 @@ export async function markWaiting(
     answer: answered ? [answered.agentId] : [],
     mention: mentionedAgents(agents, actor, mentionsIn(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
+    published: place.publisherId ? [place.publisherId] : [],
     rejected: [],
     suggestion_rejected: [],
   };
@@ -381,7 +390,7 @@ async function waitingWorkFor(db: Queryable, agent: AgentActor, rows: WaitingRow
       const found = comments.get(row.comment_id);
       if (!found || !(await canRead(db, agent, found.on.projectId))) continue;
       const reason = row.reason as CommentWork["reason"];
-      work.push({ seq: row.seq, work: { reason, comment: publicComment(found.comment), ticket: found.on.ticket, document: found.on.document } });
+      work.push({ seq: row.seq, work: { reason, comment: publicComment(found.comment), ticket: found.on.ticket, document: found.on.document, artifact: found.on.artifact } });
     } else if (row.suggestion_id !== null) {
       const found = suggestions.get(row.suggestion_id);
       if (!found || !(await canRead(db, agent, found.item.projectId))) continue;

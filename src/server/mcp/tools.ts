@@ -296,26 +296,29 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerGroupedTool(server, ctx, {
     name: "comments",
     description:
-      "Comments: conversation any User or Agent posts on a Ticket or a Document, kept apart from Activities. Reply to a Comment " +
+      "Comments: conversation any User or Agent posts on a Ticket, a Document or an Artifact, kept apart from Activities. Reply to a Comment " +
       "to thread under it. A User answers your question by replying to its Activity. On a Document, a Comment can anchor to a " +
-      "passage it is about. Comments that @mention you, answer your questions or land on Tickets delegated to you wait for you " +
+      "passage it is about; on an Artifact, it records the Version it is on. Comments that @mention you, answer your questions, " +
+      "land on Tickets delegated to you or on Artifact Versions you published wait for you " +
       `in your welcome. ${MENTION_SYNTAX}`,
     parameters: {
       key: z.string().optional().describe("Ticket key, such as CRONK-12, for its Comments (list, post)"),
       documentId: z.string().optional().describe("Document id, for its Comments, instead of a key (list, post)"),
+      artifactId: z.string().optional().describe("Artifact id, for its Comments on all its Versions, instead of a key (list, post)"),
+      version: z.number().int().optional().describe("On an Artifact: the number of the Version the Comment is about; the latest if left out (post)"),
       body: z.string().optional().describe("Markdown text of the Comment; @name, @owner/name or @\"quoted name\" mentions an Agent (post)"),
-      replyToCommentId: z.string().optional().describe("The Comment to reply to, on the same Ticket or Document (post)"),
+      replyToCommentId: z.string().optional().describe("The Comment to reply to, on the same Ticket, Document or Artifact (post)"),
       replyToActivityId: z.string().optional().describe("The Activity on the same Ticket to reply to (post)"),
       passage: z.string().optional().describe("On a Document: the exact text of its current Version the Comment is about (post)"),
     },
     actions: {
       list: {
-        description: "the Comments on a Ticket or a Document, oldest first",
+        description: "the Comments on a Ticket, a Document or an Artifact, oldest first",
         writes: false,
         run: (api, a) => api("GET", commentsPath(a, "list")),
       },
       post: {
-        description: "post a Comment on a Ticket or a Document, optionally replying to a Comment or an Activity",
+        description: "post a Comment on a Ticket, a Document or an Artifact Version, optionally replying to a Comment or an Activity",
         writes: true,
         run: (api, a) =>
           api("POST", commentsPath(a, "post"), {
@@ -323,6 +326,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             ...(a.replyToCommentId !== undefined && { replyToCommentId: a.replyToCommentId }),
             ...(a.replyToActivityId !== undefined && { replyToActivityId: a.replyToActivityId }),
             ...(a.passage !== undefined && { anchor: { passage: a.passage } }),
+            ...(a.version !== undefined && { version: a.version }),
           }),
       },
     },
@@ -787,10 +791,14 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
   );
 }
 
-/** Where the Comments on the Ticket `key` or the Document `documentId` live; exactly one must be given. */
-function commentsPath(a: { key?: string | undefined; documentId?: string | undefined }, action: string): string {
-  if ((a.key === undefined) === (a.documentId === undefined)) throw new ToolError(`The ${action} action needs a key or a documentId`);
-  return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
+/** Where the Comments on the Ticket `key`, the Document `documentId` or the Artifact `artifactId` live; exactly one must be given. */
+function commentsPath(a: { key?: string | undefined; documentId?: string | undefined; artifactId?: string | undefined }, action: string): string {
+  if ([a.key, a.documentId, a.artifactId].filter((v) => v !== undefined).length !== 1) {
+    throw new ToolError(`The ${action} action needs one of key, documentId or artifactId`);
+  }
+  if (a.key !== undefined) return `/api/tickets/${encodeURIComponent(a.key)}/comments`;
+  if (a.documentId !== undefined) return `/api/documents/${encodeURIComponent(a.documentId)}/comments`;
+  return `/api/artifacts/${encodeURIComponent(a.artifactId!)}/comments`;
 }
 
 /** Where the Attachments of the one Ticket (`key`), Document or Comment the arguments name are. */

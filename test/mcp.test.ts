@@ -774,7 +774,7 @@ describe("the comments tool", () => {
 
     expect((await callTool(mcp, "comments", { action: "list", key: "CRONK-1" })).body).toEqual((await admin.get("/api/tickets/CRONK-1/comments")).body);
     expect((await callTool(mcp, "comments", { action: "list", documentId: doc.id })).body.comments).toHaveLength(1);
-    expect(await callTool(mcp, "comments", { action: "list" })).toEqual({ isError: true, body: "The list action needs a key or a documentId" });
+    expect(await callTool(mcp, "comments", { action: "list" })).toEqual({ isError: true, body: "The list action needs one of key, documentId or artifactId" });
   });
 
   it("offers a read-only token only the list", async () => {
