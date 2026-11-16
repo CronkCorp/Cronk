@@ -28,8 +28,9 @@ import {
   listInvitations,
   publicInvitation,
 } from "./invitations.js";
-import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { claimUserWithoutPassword, countUsers, findUserByEmail, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
+import { issuePasswordReset, usePasswordReset, userForPasswordReset, type ResetRefusal } from "./password-resets.js";
+import { createSignIn, deleteSignIn, endSignIns } from "./sign-ins.js";
+import { claimUserWithoutPassword, countUsers, findUserByEmail, findUserById, insertUser, listUsers, passwordHashOf, publicUser, setPasswordHash, updateUser, type Role } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -44,6 +45,18 @@ const userAnswer = holding("user", "User");
 const invitationTokenParams = pathParams({ token: { type: "string", description: "The secret token the invitation was sent with." } });
 
 const INVITATION_GONE = "This invitation has expired or was withdrawn";
+
+/** The path parameters of the routes anyone holding a password reset link's token may call. */
+const resetTokenParams = pathParams({ token: { type: "string", description: "The secret token from the password reset link." } });
+
+const RESET_GONE = "This password reset link has expired or no longer works";
+
+/** Why a User can't be given a reset link, as the API answers it. */
+const RESET_REFUSED: Record<ResetRefusal, HttpError> = {
+  "no such user": new HttpError(404, "No such User"),
+  deactivated: new HttpError(409, "This User is deactivated; reactivate them first"),
+  "not joined": new HttpError(409, "This User hasn't joined yet; invite them instead"),
+};
 
 const dummyHash = hashPassword("dummy password for unknown emails");
 
@@ -311,6 +324,107 @@ export function identityRoutes(ctx: AppContext) {
         // A new role can show or hide private Projects, and so the items in them.
         if (request.body.role !== undefined) inboxesChanged(ctx.live, [updated.user.id]);
         return { user: publicUser(updated.user) };
+      },
+    );
+
+    app.post<{ Params: { id: string } }>(
+      "/api/users/:id/password-reset",
+      {
+        schema: {
+          params: pathParams({ id: userIdParam }),
+          response: {
+            201: answer(
+              "The reset link's secret token, only ever returned here, and when it expires. Until the link is used the User's old password no longer works and their sign-ins have ended; their Agents' Sessions keep running",
+              { type: "object", required: ["token", "expiresAt"], properties: { token: { type: "string" }, expiresAt: { type: "string", format: "date-time" } } },
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        requireAdmin(user, "issue password reset links");
+        const target = await findUserById(ctx.db, request.params.id);
+        if (target?.workspaceId !== user.workspaceId) throw new HttpError(404, "No such User");
+        const issued = await transaction(ctx.db, (tx) => issuePasswordReset(tx, { userId: target.id, issuedBy: user.id, now: ctx.clock.now() }));
+        if (typeof issued === "string") throw RESET_REFUSED[issued];
+        return reply.code(201).send(issued);
+      },
+    );
+
+    // Anyone holding a reset link's token may view and use it; the token is the proof.
+    app.get<{ Params: { token: string } }>(
+      "/api/password-resets/by-token/:token",
+      {
+        schema: {
+          params: resetTokenParams,
+          ...publicRoute,
+          response: {
+            200: answer("Whose password the link resets, and in which Workspace", {
+              type: "object",
+              required: ["email", "name", "workspaceName"],
+              properties: { email: { type: "string" }, name: { type: "string" }, workspaceName: { type: "string" } },
+            }),
+            ...errors(404),
+          },
+        },
+      },
+      async (request) => {
+        const user = await userForPasswordReset(ctx.db, request.params.token, ctx.clock.now());
+        if (!user) throw new HttpError(404, RESET_GONE);
+        const workspace = await getWorkspace(ctx.db, user.workspaceId);
+        return { email: user.email, name: user.name, workspaceName: workspace.name };
+      },
+    );
+
+    app.post<{ Params: { token: string }; Body: { password: string } }>(
+      "/api/password-resets/by-token/:token",
+      {
+        schema: {
+          params: resetTokenParams,
+          ...publicRoute,
+          body: { type: "object", required: ["password"], additionalProperties: false, properties: { password } },
+          response: { 200: answer("The User, with the new password, now signed in; the link no longer works", userAnswer), ...errors(400, 404) },
+        },
+      },
+      async (request, reply) => {
+        const passwordHash = await hashPassword(request.body.password);
+        const user = await transaction(ctx.db, (tx) => usePasswordReset(tx, request.params.token, passwordHash, ctx.clock.now()));
+        if (!user) throw new HttpError(404, RESET_GONE);
+        const signIn = await createSignIn(ctx.db, ctx.clock, user.id);
+        setSignInCookie(ctx, reply, signIn.token, signIn.expiresAt);
+        return { user: publicUser(user) };
+      },
+    );
+
+    app.put<{ Body: { currentPassword: string; password: string } }>(
+      "/api/me/password",
+      {
+        schema: {
+          body: {
+            type: "object",
+            required: ["currentPassword", "password"],
+            additionalProperties: false,
+            properties: { currentPassword: { type: "string", maxLength: 1024 }, password },
+          },
+          response: {
+            204: noContent("The password is changed; this sign-in stays, the User's other sign-ins have ended"),
+            ...errors(400, 401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const user = await requireUser(ctx, request);
+        const current = await passwordHashOf(ctx.db, user.id);
+        if (!current || !(await verifyPassword(request.body.currentPassword, current))) {
+          throw new HttpError(403, "The current password is incorrect");
+        }
+        const passwordHash = await hashPassword(request.body.password);
+        await transaction(ctx.db, async (tx) => {
+          await setPasswordHash(tx, user.id, passwordHash);
+          await endSignIns(tx, user.id, { except: request.cookies[SIGN_IN_COOKIE] });
+        });
+        return reply.code(204).send();
       },
     );
 

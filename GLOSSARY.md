@@ -162,6 +162,10 @@ _Avoid_: Person, human account
 A one-time link, valid 7 days, that an Admin creates to let someone join as a User or an imported User set a password. The Admin passes it on themselves until outside-app email arrives.
 _Avoid_: Invite code, signup link
 
+**Password reset link**:
+A one-time link, valid 7 days like an Invitation, that lets a User who has joined choose a new password. An Admin issues it from the Users page, or the operator from the server when no Admin can sign in, and passes it on. Issuing it stops the User's old password and ends their sign-ins until it is used; their Agents' Sessions keep running.
+_Avoid_: Recovery code, password token
+
 **Admin**:
 A User who manages the Workspace: its Users, settings and Workspace Guidance. Has Write in every Project, private ones included, and can see every Agent but change only their own.
 _Avoid_: Owner (reserved for Agents), superuser

@@ -24,12 +24,12 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
   - Inbox, Triage, Documents, Terms, Decisions and Agents. Triage shows the number of items the User could act on, in `--muted`. Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
   - **Projects**, each listed by key and name. Archived Projects are left out.
   - **Workspace**: Guidance, plus Users and Settings for Admins.
-  - The signed-in User and their role, which opens the sign-out menu.
+  - The signed-in User and their role, which opens a menu: Change password (the `/password` page) and Sign out.
 - **Active item:** `--accent-soft` background with `--accent` text. There is exactly one active item, and a Ticket or Document marks its Project or Documents.
 - **Below 760px** the sidebar becomes a wrapping strip with the main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
 - **Page head:** breadcrumbs (13px, muted), then a row holding the `h1`, the view switcher and the actions. The primary action comes last. Destructive actions such as Archive and Delete go in a "…" menu, never next to the primary action.
 - **Project views:** List, Board and Reports are a segmented control in the page head. Statuses, Guidance and Access move into the Project's settings.
-- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. Terms live at `/terms` (`?project=KEY` for a Project's scope) and `/terms/:id`.
+- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. The signed-out link pages, `/invite/:token` and `/reset-password/:token`, show their card whoever is signed in. Terms live at `/terms` (`?project=KEY` for a Project's scope) and `/terms/:id`.
 
 ## Design tokens
 

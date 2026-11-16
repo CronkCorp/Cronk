@@ -31,6 +31,7 @@ function currentItem(route: Route): string | undefined {
       return projectItem(projectKeyOfTicket(route.key));
     case "projects":
     case "search":
+    case "password":
       return undefined;
   }
 }
@@ -72,6 +73,7 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
   const phoneMenu: MenuItem[] = [
     ...projectList.map((p) => ({ group: "Projects", label: `${p.key} ${p.name}`, onSelect: () => navigate(`/projects/${encodeURIComponent(p.key)}`) })),
     ...workspaceLinks.map((l) => ({ group: "Workspace", label: l.label, onSelect: () => navigate(l.to) })),
+    { group: `${props.me.name} · ${ROLE_NAMES[props.me.role]}`, label: "Change password", onSelect: () => navigate("/password") },
     { group: `${props.me.name} · ${ROLE_NAMES[props.me.role]}`, label: "Sign out", onSelect: props.onSignOut },
   ];
 
@@ -130,7 +132,10 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
               <span className="muted">{ROLE_NAMES[props.me.role]}</span>
             </Button>
           }
-          items={[{ label: "Sign out", onSelect: props.onSignOut }]}
+          items={[
+            { label: "Change password", onSelect: () => navigate("/password") },
+            { label: "Sign out", onSelect: props.onSignOut },
+          ]}
         />
       </div>
     </nav>
