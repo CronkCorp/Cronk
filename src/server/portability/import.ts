@@ -7,6 +7,7 @@ import { importGuidance } from "./guidance.js";
 import { importDecisions } from "./decisions.js";
 import { importTree } from "./documents.js";
 import { importTerms } from "./terms.js";
+import { storeSuggestionSources } from "./suggestions.js";
 import { ImportContext } from "./import-context.js";
 import type { ImportedFiles } from "./import-context.js";
 import { importPeople } from "./people.js";
@@ -73,6 +74,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   }
   await tickets.storeRelations(ctx);
   await tickets.storeDecisionSources(ctx);
+  await storeSuggestionSources(ctx, tickets);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
   // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.

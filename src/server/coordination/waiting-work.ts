@@ -11,12 +11,13 @@ import type { User } from "../identity/users.js";
 import { findCommentsByIds, publicComment, type Comment, type CommentOn } from "../conversation/comments.js";
 import { WAITING_REASONS, type WaitingReason } from "../../shared/values.js";
 import { findDecisionById, findDecisionVersion, type Decision, type DecisionVersion } from "../knowledge/decisions.js";
+import { findSuggestionsByIds, type Suggestion } from "../knowledge/suggestions.js";
 
 export type { WaitingReason };
 
 /**
  * Work waiting for an Agent (ADR 0005): Cronk never starts an Agent, so when a Comment
- * concerns one, or a User rejects a Decision it proposed, Cronk marks it as waiting for that
+ * concerns one, or a User rejects a Decision it proposed or a Suggestion it made, Cronk marks it as waiting for that
  * Agent. It is listed in the welcome of the Agent's next Agent Session, which takes it, and
  * pushed to the Agent's live Agent Sessions.
  */
@@ -29,12 +30,12 @@ export interface WaitingFor {
   seq: string;
 }
 
-/** Work waiting for an Agent: a Comment, or the rejection of a Decision it proposed. */
-export type WaitingWork = CommentWork | RejectionWork;
+/** Work waiting for an Agent: a Comment, or the rejection of a Decision it proposed or of a Suggestion it made. */
+export type WaitingWork = CommentWork | RejectionWork | SuggestionRejectionWork;
 
 /** A Comment waiting for an Agent, with why and what it is on. */
 export interface CommentWork {
-  reason: Exclude<WaitingReason, "rejected">;
+  reason: Exclude<WaitingReason, "rejected" | "suggestion_rejected">;
   comment: ReturnType<typeof publicComment>;
   ticket: CommentOn["ticket"];
   document: CommentOn["document"];
@@ -57,6 +58,40 @@ export interface RejectedDecision {
   reason: string;
   rejectedBy: RecordedActor;
   at: Date;
+}
+
+/** A User's rejection of a Suggestion the Agent made, with their reason and the Ticket it came from. */
+export interface SuggestionRejectionWork {
+  reason: "suggestion_rejected";
+  comment: null;
+  suggestion: {
+    id: string;
+    item: Pick<Suggestion["item"], "kind" | "id" | "key" | "title" | "projectKey">;
+    /** Why the User rejected it. */
+    reason: string;
+    rejectedBy: RecordedActor;
+    at: Date;
+  };
+  ticket: { key: string; title: string } | null;
+  document: null;
+}
+
+/** The rejection of a rejected `suggestion` as Waiting Work. */
+export function suggestionRejectionOf(suggestion: Suggestion): SuggestionRejectionWork {
+  const { kind, id, key, title, projectKey } = suggestion.item;
+  return {
+    reason: "suggestion_rejected",
+    comment: null,
+    suggestion: {
+      id: suggestion.id,
+      item: { kind, id, key, title, projectKey },
+      reason: suggestion.reason ?? "",
+      rejectedBy: { kind: "user", ...suggestion.decidedBy! },
+      at: suggestion.decidedAt!,
+    },
+    ticket: suggestion.sourceTicket,
+    document: null,
+  };
 }
 
 /** The rejection of `decision` at Version `rejecting` as Waiting Work: as that Version says it. */
@@ -194,6 +229,7 @@ export async function markWaiting(
     mention: mentionedAgents(agents, actor, mentionsIn(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
     rejected: [],
+    suggestion_rejected: [],
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;
   const marked = new Map<string, WaitingReason>();
@@ -237,14 +273,39 @@ export async function markRejected(
   at: Date,
   positioned: Positioned,
 ): Promise<string | undefined> {
+  return markFor(db, workspaceId, agentId, decision.projectId, positioned, {
+    sql: "INSERT INTO waiting_work (agent_id, decision_id, decision_version, reason, at) VALUES ($1, $2, $3, 'rejected', $4) ON CONFLICT DO NOTHING RETURNING seq",
+    params: [agentId, decision.id, decision.version, at],
+  });
+}
+
+/**
+ * Marks the rejection of `suggestion`, which the Agent that made it hears of, as waiting for it, if the
+ * Agent can still see its item and its Owner is active. Returns its position, which `positioned` hears
+ * first, before the transaction commits.
+ */
+export async function markSuggestionRejected(db: Queryable, workspaceId: string, suggestion: Suggestion, at: Date, positioned: Positioned): Promise<string | undefined> {
+  const agentId = suggestion.proposedBy.id;
+  return markFor(db, workspaceId, agentId, suggestion.item.projectId, positioned, {
+    sql: "INSERT INTO waiting_work (agent_id, suggestion_id, reason, at) VALUES ($1, $2, 'suggestion_rejected', $3) ON CONFLICT DO NOTHING RETURNING seq",
+    params: [agentId, suggestion.id, at],
+  });
+}
+
+/** Inserts one piece of work for an Agent with `insert`, if it can still read where it lies (`projectId`) and its Owner is active. */
+async function markFor(
+  db: Queryable,
+  workspaceId: string,
+  agentId: string,
+  projectId: string | null,
+  positioned: Positioned,
+  insert: { sql: string; params: unknown[] },
+): Promise<string | undefined> {
   const found = (await listAgents(db, workspaceId)).find((a) => a.agent.id === agentId);
-  if (!found?.owner.active || !(await canRead(db, agentReading(found.agent, found.owner), decision.projectId))) return undefined;
+  if (!found?.owner.active || !(await canRead(db, agentReading(found.agent, found.owner), projectId))) return undefined;
   // As in `markWaiting`: one Agent's work takes positions and commits in order.
   await lockUntilCommit(db, `waiting-work:${agentId}`);
-  const { rows } = await db.query<{ seq: string }>(
-    "INSERT INTO waiting_work (agent_id, decision_id, decision_version, reason, at) VALUES ($1, $2, $3, 'rejected', $4) ON CONFLICT DO NOTHING RETURNING seq",
-    [agentId, decision.id, decision.version, at],
-  );
+  const { rows } = await db.query<{ seq: string }>(insert.sql, insert.params);
   if (!rows[0]) return undefined;
   positioned(agentId, rows[0].seq);
   return rows[0].seq;
@@ -305,13 +366,15 @@ interface WaitingRow {
   comment_id: string | null;
   decision_id: string | null;
   decision_version: number | null;
+  suggestion_id: string | null;
 }
 
-const SELECT_WAITING = "SELECT seq::text AS seq, reason, comment_id, decision_id, decision_version FROM waiting_work";
+const SELECT_WAITING = "SELECT seq::text AS seq, reason, comment_id, decision_id, decision_version, suggestion_id FROM waiting_work";
 
 /** The waiting work these rows hold, each with its position, in their order, leaving out what `agent` can't see. */
 async function waitingWorkFor(db: Queryable, agent: AgentActor, rows: WaitingRow[]): Promise<{ seq: string; work: WaitingWork }[]> {
   const comments = new Map((await findCommentsByIds(db, rows.flatMap((r) => (r.comment_id ? [r.comment_id] : [])))).map((c) => [c.comment.id, c]));
+  const suggestions = new Map((await findSuggestionsByIds(db, rows.flatMap((r) => (r.suggestion_id ? [r.suggestion_id] : [])))).map((s) => [s.id, s]));
   const work: { seq: string; work: WaitingWork }[] = [];
   for (const row of rows) {
     if (row.comment_id !== null) {
@@ -319,6 +382,10 @@ async function waitingWorkFor(db: Queryable, agent: AgentActor, rows: WaitingRow
       if (!found || !(await canRead(db, agent, found.on.projectId))) continue;
       const reason = row.reason as CommentWork["reason"];
       work.push({ seq: row.seq, work: { reason, comment: publicComment(found.comment), ticket: found.on.ticket, document: found.on.document } });
+    } else if (row.suggestion_id !== null) {
+      const found = suggestions.get(row.suggestion_id);
+      if (!found || !(await canRead(db, agent, found.item.projectId))) continue;
+      work.push({ seq: row.seq, work: suggestionRejectionOf(found) });
     } else {
       const decision = await findDecisionById(db, row.decision_id!);
       const version = decision && (await findDecisionVersion(db, decision, row.decision_version!));

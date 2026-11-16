@@ -4,6 +4,7 @@ import { PROJECT_KEY_PATTERN } from "../work/projects.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { DecisionStatus } from "../../shared/values.js";
 import { recordMentions } from "./mentions.js";
+import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
 /**
  * Decisions: recorded choices with their reasoning and a status, belonging to a Project or the
@@ -299,6 +300,8 @@ export interface DecisionVersion {
   supersedes: string[];
   at: Date;
   actor: RecordedActor;
+  /** The Suggestion a User accepted to make it, unchanged or edited; null for a Version saved otherwise. */
+  suggestion: VersionSuggestion | null;
 }
 
 interface DecisionVersionRow extends RecordedActorRow {
@@ -317,7 +320,7 @@ const SELECT_DECISION_VERSIONS = `
          u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, v.actor_session_id AS session_id
   FROM decision_versions v JOIN users u ON u.id = v.actor_user_id LEFT JOIN agents a ON a.id = v.actor_agent_id`;
 
-const toDecisionVersion = (decision: Decision, row: DecisionVersionRow): DecisionVersion => ({
+const toDecisionVersion = (decision: Decision, row: DecisionVersionRow): Omit<DecisionVersion, "suggestion"> => ({
   number: row.number,
   title: row.title,
   body: row.body,
@@ -332,13 +335,13 @@ const toDecisionVersion = (decision: Decision, row: DecisionVersionRow): Decisio
 /** One of a Decision's Versions, by number. */
 export async function findDecisionVersion(db: Queryable, decision: Decision, number: number): Promise<DecisionVersion | undefined> {
   const { rows } = await db.query<DecisionVersionRow>(`${SELECT_DECISION_VERSIONS} WHERE v.decision_id = $1 AND v.number = $2`, [decision.id, number]);
-  return rows[0] && toDecisionVersion(decision, rows[0]);
+  return rows[0] && (await withSuggestions(db, { kind: "decision", id: decision.id }, [toDecisionVersion(decision, rows[0])]))[0];
 }
 
 /** A Decision's Versions, newest first, without their bodies. */
 export async function listDecisionVersions(db: Queryable, decision: Decision): Promise<Omit<DecisionVersion, "body">[]> {
   const { rows } = await db.query<DecisionVersionRow>(`${SELECT_DECISION_VERSIONS} WHERE v.decision_id = $1 ORDER BY v.number DESC`, [decision.id]);
-  return rows.map((row) => toDecisionVersion(decision, row)).map(({ body: _, ...summary }) => summary);
+  return withSuggestions(db, { kind: "decision", id: decision.id }, rows.map((row) => toDecisionVersion(decision, row)).map(({ body: _, ...summary }) => summary));
 }
 
 /**
