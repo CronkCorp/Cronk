@@ -124,3 +124,36 @@ describe("Where an Artifact is embedded", () => {
     expect((await admin.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn).toHaveLength(2);
   });
 });
+
+describe("Embeds across an export and import", () => {
+  it("are recorded again for what an import brings in", async () => {
+    const { admin, artifact } = await setup();
+    await admin.post("/api/projects/CRONK/documents", { title: "Limits", body: artifact.versionUrl });
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    expect((await elsewhere.upload("/api/import", (await admin.download("/api/export")).body)).status).toBe(201);
+
+    const embeddedIn = (await elsewhere.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn;
+    expect(embeddedIn).toEqual([expect.objectContaining({ kind: "document", title: "Limits", version: 1 })]);
+    expect((await elsewhere.get(`/api/documents/${embeddedIn[0].id}`)).body.document.embeds).toEqual([{ artifactId: artifact.id, version: 1 }]);
+  });
+});
+
+describe("Upgrading an installation", () => {
+  it("records what existing Documents and Comments embed", async () => {
+    const { cronk, admin, artifact } = await setup();
+    await admin.post("/api/projects/CRONK/tickets", { title: "Show the limits" });
+    await admin.post("/api/projects/CRONK/documents", { title: "Limits", body: artifact.url });
+    cronk.clock.advance(1000);
+    await admin.post("/api/tickets/CRONK-1/comments", { body: artifact.versionUrl });
+
+    await cronk.undoMigration("0032_artifact_embeds", "DROP TABLE artifact_embeds");
+    await cronk.restart();
+
+    const embeddedIn = (await admin.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn;
+    expect(embeddedIn.map((e: { kind: string; version: number | null }) => [e.kind, e.version])).toEqual([
+      ["comment", 1],
+      ["document", null],
+    ]);
+  });
+});
