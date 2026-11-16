@@ -3,7 +3,8 @@ import { artifactFileKey, insertArtifactRow, insertArtifactVersion, type Artifac
 import { mediaTypeOf } from "../files/artifact-routes.js";
 import { extraOrigins, type ExtraOrigin } from "../files/origins.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
-import { bytesOf } from "./archive.js";
+import { HttpError } from "../context.js";
+import { formatBytes } from "../files/sizes.js";
 import { date, integer, isUuid, list, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
@@ -50,11 +51,11 @@ export async function exportArtifacts(ctx: ExportContext, dir: string, projectId
     );
     const written = [];
     for (const v of versions) {
-      const { rows: files } = await ctx.db.query<{ id: string; path: string; content_type: string }>(
-        "SELECT id, path, content_type FROM artifact_files WHERE artifact_id = $1 AND version = $2 ORDER BY path",
+      const { rows: files } = await ctx.db.query<{ id: string; path: string; content_type: string; size: string }>(
+        "SELECT id, path, content_type, size FROM artifact_files WHERE artifact_id = $1 AND version = $2 ORDER BY path",
         [a.id, v.number],
       );
-      for (const f of files) await ctx.addStoredFile(`${base}/${v.number}/${f.path}`, artifactFileKey(f.id));
+      for (const f of files) ctx.addStoredFile(`${base}/${v.number}/${f.path}`, artifactFileKey(f.id), Number(f.size));
       written.push({
         number: v.number,
         title: v.title,
@@ -102,14 +103,24 @@ export async function importArtifacts(ctx: ImportContext, dir: string, projectId
       const number = integer(v.number, at("number"));
       if (number <= artifact.version) refuse(`${at("number")} must count up`);
       const listed = Array.isArray(v.files) ? (v.files as Record<string, unknown>[]) : refuse(`${at("files")} must be a list`);
-      const files: ArtifactFile[] = [];
-      for (const [j, f] of listed.entries()) {
+      const contents = listed.map((f, j) => {
         const filePath = text(f.path, at(`files[${j}] path`));
-        const contents = ctx.folder.get(`${base}/${number}/${filePath}`) ?? refuse(`${at("files")} names ${filePath}, which the export doesn't hold in ${base}/${number}/`);
+        return { f, filePath, contents: ctx.folder.get(`${base}/${number}/${filePath}`) ?? refuse(`${at("files")} names ${filePath}, which the export doesn't hold in ${base}/${number}/`) };
+      });
+      // Within the Workspace's limits, as publishing the Version would be.
+      const limits = await ctx.fileLimits();
+      if (contents.length > limits.artifactMaxFiles) {
+        throw new HttpError(413, `${base}/${number}/ holds ${contents.length} files, more than the ${limits.artifactMaxFiles} an Artifact Version may hold in this Workspace`);
+      }
+      const bytes = contents.reduce((sum, c) => sum + ctx.sizeOf(c.contents), 0);
+      if (bytes > limits.artifactMaxBytes) {
+        throw new HttpError(413, `${base}/${number}/'s files take ${formatBytes(bytes)}, more than the ${formatBytes(limits.artifactMaxBytes)} an Artifact Version may take in this Workspace`);
+      }
+      const files: ArtifactFile[] = [];
+      for (const { f, filePath, contents: file } of contents) {
         const fileId = randomUUID();
-        const bytes = bytesOf(contents);
-        await ctx.storeFile(artifactFileKey(fileId), bytes);
-        files.push({ id: fileId, path: filePath, contentType: typeof f.contentType === "string" ? f.contentType : mediaTypeOf(filePath), size: bytes.length });
+        const size = await ctx.storeFile(artifactFileKey(fileId), file);
+        files.push({ id: fileId, path: filePath, contentType: typeof f.contentType === "string" ? f.contentType : mediaTypeOf(filePath), size });
       }
       if (!files.some((f) => f.path === "index.html")) refuse(`${at("files")} must list index.html, the page an Artifact opens on`);
       const sourceTicket = typeof v.sourceTicket === "string" ? (tickets.ids.get(v.sourceTicket.toUpperCase()) ?? null) : null;

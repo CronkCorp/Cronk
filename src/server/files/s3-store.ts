@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -17,6 +17,9 @@ export interface S3StorageConfig {
   /** Address buckets as `endpoint/bucket` rather than `bucket.endpoint`; MinIO and most self-hosted stores need it. */
   forcePathStyle: boolean;
 }
+
+/** The largest object S3 copies in one request. */
+const MAX_COPY_BYTES = 5 * 1024 * 1024 * 1024;
 
 /** A `FileStore` in a bucket of an S3-compatible store. An object appears only once wholly uploaded, so a reader never sees half of one. */
 export class S3Store implements FileStore {
@@ -88,6 +91,19 @@ export class S3Store implements FileStore {
 
   async close(): Promise<void> {
     this.s3.destroy();
+  }
+
+  async move(from: string, to: string): Promise<void> {
+    const Bucket = this.bucket;
+    const Key = checkKey(to);
+    // S3 has no rename: the object is copied, then the original deleted. One copy takes at most 5 GB; a larger object is streamed across in parts.
+    const { ContentLength } = await this.s3.send(new HeadObjectCommand({ Bucket, Key: checkKey(from) }));
+    if ((ContentLength ?? 0) <= MAX_COPY_BYTES) {
+      await this.s3.send(new CopyObjectCommand({ Bucket, Key, CopySource: `${Bucket}/${from.split("/").map(encodeURIComponent).join("/")}` }));
+    } else {
+      await this.put(to, this.get(from));
+    }
+    await this.delete(from);
   }
 
   async delete(key: string): Promise<void> {

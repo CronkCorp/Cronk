@@ -1,8 +1,7 @@
 import type { Queryable } from "../db/database.js";
-import type { Folder } from "./archive.js";
+import { isStored, type StoredFile, type StoredFolder } from "./archive.js";
 import { exportArtifacts } from "./artifacts.js";
 import { exportDecisions } from "./decisions.js";
-import type { FileStore } from "../files/store.js";
 import { exportTree } from "./documents.js";
 import { ExportContext, iso, type ExportScope } from "./export-context.js";
 import { FORMAT, README } from "./format.js";
@@ -23,9 +22,12 @@ import { exportWorkspaceSettings } from "./workspace.js";
 
 export type { ExportScope };
 
-/** Builds the export's files. Run inside a read-only, repeatable-read transaction so they agree with each other. */
-export async function exportFolder(db: Queryable, scope: ExportScope, files: FileStore): Promise<Folder> {
-  const ctx = await ExportContext.start(db, scope, files);
+/**
+ * Builds the export's files. Run inside a read-only, repeatable-read transaction so they agree with each other. The
+ * files of Attachments and Artifacts stand in it by their keys in the file store, to be read as the archive is packed.
+ */
+export async function exportFolder(db: Queryable, scope: ExportScope): Promise<StoredFolder> {
+  const ctx = await ExportContext.start(db, scope);
   if (scope.projectId === null) {
     await exportWorkspaceSettings(ctx);
     await exportGuidance(ctx, "guidance", null);
@@ -56,8 +58,8 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
   const whole = scope.projectId === null;
   ctx.add("README.md", { cronk: { format: FORMAT, scope: whole ? "workspace" : "project", exportedAt: iso(scope.now), versions: scope.versions } }, README);
 
-  // README first, then people, so someone opening the archive reads them first.
-  return new Map([...ctx.folder].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)));
+  // README first, then people, so someone opening the archive reads them first; then the other Markdown files, and the stored
+  // files last, so an import has every Markdown file, workspace.md's limits among them, before the first large file arrives.
+  const rank = ([path, contents]: [string, string | Buffer | StoredFile]) => (path === "README.md" ? 0 : path === "people.md" ? 1 : isStored(contents) ? 3 : 2);
+  return new Map([...ctx.folder].sort((a, b) => rank(a) - rank(b) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
 }
-
-const rank = (path: string) => (path === "README.md" ? 0 : path === "people.md" ? 1 : 2);

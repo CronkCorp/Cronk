@@ -1,15 +1,23 @@
 import type { StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { textOf, type Folder } from "./archive.js";
+import { bytesOf, isStored, textOf, type StoredFile, type StoredFolder } from "./archive.js";
 import type { FileStore } from "../files/store.js";
 import { natural, refuse, type File } from "./fields.js";
 import { readFrontmatter } from "./frontmatter.js";
 import { recordRenamedId, type RenamedId } from "./renamed-ids.js";
+import { getWorkspace } from "../workspace/workspaces.js";
 
-/** Where an import stores the files of Attachments, and the keys it stored so far. */
+/** Where an import stores the files of Attachments and Artifacts, and the keys it stored them under so far. */
 export interface ImportedFiles {
   store: FileStore;
   stored: string[];
+}
+
+/** A Workspace's limits on the files an import brings in. */
+export interface FileLimits {
+  attachmentMaxBytes: number;
+  artifactMaxBytes: number;
+  artifactMaxFiles: number;
 }
 
 /**
@@ -33,8 +41,8 @@ export class ImportContext {
   constructor(
     readonly db: Queryable,
     readonly workspaceId: string,
-    /** The export, unwrapped. */
-    readonly folder: Folder,
+    /** The export, unwrapped: its Markdown files in memory, and its other files in the file store under temporary keys. */
+    readonly folder: StoredFolder,
     readonly now: Date,
     /** Where the files of Attachments go. */
     readonly files: ImportedFiles,
@@ -48,18 +56,49 @@ export class ImportContext {
     await recordRenamedId(this.db, this.workspaceId, renamed);
   }
 
-  /** Stores `bytes` under `key` in the file store, noting the key so a failed import can remove it again. */
-  async storeFile(key: string, bytes: Buffer): Promise<void> {
+  /** Where each file of the export already moved to its place went, by its temporary key. */
+  private readonly moved = new Map<string, string>();
+
+  /**
+   * Puts `contents`, a file of the export, under `key` in the file store, noting the key so a failed import can remove it
+   * again, and answers its size. A file the import streamed into the store is moved there from its temporary key; one
+   * the export names twice is copied from where it went the first time.
+   */
+  async storeFile(key: string, contents: string | Buffer | StoredFile): Promise<number> {
     this.files.stored.push(key);
-    await this.files.store.put(key, bytes);
+    const { store } = this.files;
+    if (!isStored(contents)) return store.put(key, bytesOf(contents));
+    const earlier = this.moved.get(contents.key);
+    if (earlier !== undefined) return store.put(key, store.get(earlier));
+    await store.move(contents.key, key);
+    this.moved.set(contents.key, key);
+    return contents.size;
+  }
+
+  /** The size of `contents`, a file of the export, in bytes. */
+  sizeOf(contents: string | Buffer | StoredFile): number {
+    return isStored(contents) ? contents.size : bytesOf(contents).length;
+  }
+
+  /** The Workspace's limits on files, as its own settings or, once imported, the export's `workspace.md` set them. */
+  fileLimits(): Promise<FileLimits> {
+    return getWorkspace(this.db, this.workspaceId);
+  }
+
+  /** The text of the file at `path`, which the export must hold in memory as it holds Markdown files. */
+  text(path: string): string | undefined {
+    const contents = this.folder.get(path);
+    if (contents === undefined) return undefined;
+    if (isStored(contents)) refuse(`${path} must be a Markdown file`);
+    return textOf(contents);
   }
 
   /** The file at `path`, read, if the export has it. */
   read(path: string): File | undefined {
-    const contents = this.folder.get(path);
+    const contents = this.text(path);
     if (contents === undefined) return undefined;
     try {
-      return { path, ...readFrontmatter(textOf(contents)) };
+      return { path, ...readFrontmatter(contents) };
     } catch (err) {
       refuse(`${path} can't be read: ${(err as Error).message}`);
     }
