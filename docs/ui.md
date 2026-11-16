@@ -81,7 +81,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
 - **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour. The `danger` pill also marks a merge's "Both changed".
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
-- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, Comment `--accent`, and To review and Unverified `--info`.
+- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report and Decision `--agent`, Comment `--accent`, and To review and Unverified `--info`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
@@ -126,7 +126,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion) and S sends back. None of them fire while focus is in a text field. A line under the split names them.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion or a proposed Decision) and S sends back (or opens Reject… on a proposed Decision). None of them fire while focus is in a text field. A line under the split names them.
 - **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
 - **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
 - **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
@@ -200,7 +200,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **An Unverified completion** shows the Report like a review, an `--info` banner listing Tickets that already continued on it, and **Accept** (primary) and **Reopen…**.
 - **Reopen…** opens a dialog: a required "What is wrong" box, then every dependent that already continued, each with a choice. In progress: **Keep going** (default) or **Pause**, which releases its Claim and moves it to Unstarted. Completed: **Keep** (default) or **Reopen too**. Not started: no choice, it waits again.
 - **A Discovered Ticket** shows where it was found and a `--warn` banner listing the Tickets it pauses, with a link to remove a block. Actions: **Delegate to <Agent>** (primary, the Agent that found it), **Delegate to…**, **Keep in Backlog**, and Cancel in the ghost style.
-- **A proposed Decision** shows its body and **Accept** (primary) and **Reject…**.
+- **A proposed Decision** shows who proposed it and from which Ticket, its body, and **Accept** (primary), **Reject…**, which opens a required reason box (the reason reaches the Agent as Waiting Work), and Open Decision.
 - **Triage** is the same split view, with the same keyboard shortcuts. A Discovered Ticket's primary action is **Take it**, which assigns it to the User.
 
 | Side by side | Merge on accept | Reopen | Triage |

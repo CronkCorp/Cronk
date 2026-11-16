@@ -4,7 +4,7 @@ import { HttpError, requireActor, requireUser, type AppContext } from "../contex
 import { userActor } from "../actor.js";
 import { findStatusToMoveInto, listStatuses } from "../work/projects.js";
 import { updateTicket } from "../work/tickets.js";
-import { transaction, type Queryable } from "../db/database.js";
+import type { Queryable } from "../db/database.js";
 import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
@@ -15,7 +15,7 @@ import { ticketsChanged } from "../work/ticket-changes.js";
 import { tellNewlyReady } from "../coordination/ready.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
-import { markWaiting, waitingEvent, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
+import { markWaiting, waitingEvent, withWaitingWork, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
@@ -103,24 +103,9 @@ export function conversationRoutes(ctx: AppContext) {
       return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at, positioned) };
     };
 
-    /**
-     * Runs `fn` in a transaction, passing it what to tell `post` about the positions it takes,
-     * then `committed` with its result. Each position is expected on its Agent's stream
-     * (`LiveUpdates.expect`) before it commits, until `committed` pushes it (`pushWaiting`). If the
-     * transaction rolls back or `committed` throws, they are forgotten, so they never hold a
-     * stream's `ready` back for good.
-     */
-    const posting = async <T>(fn: (tx: Queryable, positioned: Positioned) => Promise<T>, committed: (result: T) => void): Promise<T> => {
-      const forget: (() => void)[] = [];
-      try {
-        const result = await transaction(ctx.db, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
-        committed(result);
-        return result;
-      } catch (err) {
-        for (const f of forget) f();
-        throw err;
-      }
-    };
+    /** Runs `fn` in a transaction, then `committed`, keeping the positions it takes expected meanwhile (see `withWaitingWork`). */
+    const posting = <T,>(fn: (tx: Queryable, positioned: Positioned) => Promise<T>, committed: (result: T) => void): Promise<T> =>
+      withWaitingWork(ctx, fn, committed);
 
     /**
      * Tells each Agent the Comment now waits for, through its live Agent Sessions. Call from `posting`'s `committed`.

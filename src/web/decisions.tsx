@@ -3,6 +3,7 @@ import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
+import { RejectDecisionForm } from "./components/reject-decision.js";
 import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip, ProtectedMark } from "./components/tags.js";
 import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
@@ -215,6 +216,17 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
   const canWrite = useCanWrite(d.projectKey);
   const [editing, setEditing] = useState(props.startEditing);
   const status = useAction((to: DecisionStatus) => api.setDecisionStatus(d.key, to), props.onChanged);
+  // Rejecting needs a reason, typed into a box the Reject action opens.
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const reject = useAction(
+    () => api.setDecisionStatus(d.key, "rejected", reason),
+    (changed: Decision) => {
+      setRejecting(false);
+      setReason("");
+      props.onChanged(changed);
+    },
+  );
   const protect = useAction((value: boolean) => api.protectDecision(d.key, value), props.onChanged);
   const moves: [DecisionStatus, string][] = [
     ["accepted", "Accept"],
@@ -249,7 +261,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
                 label="More actions"
                 trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
                 items={[
-                  ...otherMoves.map(([to, label]) => ({ label, onSelect: () => void status.run(to), disabled: status.busy })),
+                  ...otherMoves.map(([to, label]) => ({
+                    label: to === "rejected" ? `${label}…` : label,
+                    onSelect: () => (to === "rejected" ? setRejecting(true) : void status.run(to)),
+                    disabled: status.busy,
+                  })),
                   { label: d.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!d.protected), disabled: protect.busy },
                 ]}
               />
@@ -259,6 +275,17 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
         </div>
         {status.error && <p className="error" role="alert">{status.error}</p>}
         {protect.error && <p className="error" role="alert">{protect.error}</p>}
+        {reject.error && <p className="error" role="alert">{reject.error}</p>}
+        {rejecting && (
+          <RejectDecisionForm
+            proposedBy={d.proposedBy}
+            reason={reason}
+            onReasonChange={setReason}
+            onReject={() => void reject.run()}
+            onCancel={() => setRejecting(false)}
+            busy={reject.busy}
+          />
+        )}
         <h1 className="decision-title">{d.title}</h1>
         {d.supersedes.length > 0 && (
           <Banner tone="info" role="status">
@@ -294,6 +321,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
             <h4>Status</h4>
             <div><DecisionStatusPill status={d.status} /></div>
             <span className="muted small">by {d.statusChangedBy.name}, <RelativeTime at={d.statusChangedAt} /></span>
+            {d.statusReason && (
+              <div className="markdown decision-status-reason">
+                <CronkMarkdown>{d.statusReason}</CronkMarkdown>
+              </div>
+            )}
           </div>
           <div className="side-group">
             <h4>Group</h4>
@@ -302,6 +334,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           <div className="side-group">
             <h4>Proposed by</h4>
             <Actor actor={d.proposedBy} />
+            {d.sourceTicket && (
+              <span className="muted small">
+                from <Link to={`/tickets/${d.sourceTicket.key}`} className="link"><span className="mono">{d.sourceTicket.key}</span> {d.sourceTicket.title}</Link>
+              </span>
+            )}
           </div>
           <div className="side-group">
             <h4>Version</h4>

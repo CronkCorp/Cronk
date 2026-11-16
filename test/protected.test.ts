@@ -220,6 +220,11 @@ describe("a Protected Decision", () => {
       { protected: true, at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
     ]);
 
+    const agent = await agentOf(cronk, admin, "claude");
+    const refused = await agent.patch("/api/decisions/CRONK-D1", { baseVersion: 2, body: "Rewritten." });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/only while it is proposed.*Protected.*Suggestion/);
+
     const unmarked = await admin.post("/api/decisions/CRONK-D1/protection", { protected: false });
     expect(unmarked.status).toBe(200);
     expect(unmarked.body.decision).toMatchObject({ protected: false, status: "accepted", version: 2 });
@@ -256,7 +261,7 @@ describe("upgrading an installation with accepted Decisions", () => {
     await admin.post("/api/projects/CRONK/decisions", { title: "Proposed" });
 
     await cronk.undoMigration(
-      "0027_protected",
+      "0028_protected",
       `DROP TABLE protection_markings;
        ALTER TABLE documents DROP COLUMN protected; ALTER TABLE terms DROP COLUMN protected; ALTER TABLE decisions DROP COLUMN protected`,
     );

@@ -92,6 +92,12 @@ function avoidedWordsHint(words: AvoidedWord[] | undefined): string | null {
   return ["Saved, but it uses words a Term says to avoid:", ...lines].join("\n");
 }
 
+/** The one group a Decision is filed under, as `propose` and `update` take it: empty for none. */
+function singleGroup(group: string | string[] | undefined, action: string): string | null | undefined {
+  if (Array.isArray(group)) throw new ToolError(`The ${action} action takes one group, as text`);
+  return group === undefined ? undefined : group.trim() === "" ? null : group;
+}
+
 /** A query string repeating each key once per value, as the API's list filters take them. */
 function query(params: Record<string, string[] | undefined>): string {
   const search = new URLSearchParams();
@@ -404,18 +410,36 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description:
       "Decisions: recorded choices with their reasoning, belonging to a Project or, without a project, the Workspace, keyed like " +
       "CRONK-D7 (D7 in the Workspace). Each has a status: proposed, accepted, rejected, deprecated, or superseded by a newer accepted " +
-      "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status.",
+      "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status. When you make a choice " +
+      "worth keeping, propose a Decision: a User reviews it (the Assignee of the Ticket you hold the Claim on, or else your Owner) and " +
+      "accepts or rejects it; a rejection reaches you as waiting work, with the reason. You may update your proposal while it is " +
+      "proposed, unless a User marked it `protected`; an accepted Decision is Protected, so propose a change to it as a Suggestion. Saving text that uses a word a Term says to " +
+      "avoid still goes through: the result lists each such word with the Term to use, as `avoidedWords`.",
     parameters: {
-      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list)"),
-      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get, mentions)"),
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list, propose)"),
+      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get, mentions, update)"),
       status: z.array(z.enum(DECISION_STATUSES)).optional().describe("Only Decisions with one of these statuses (list)"),
-      group: z.array(z.string()).optional().describe("Only Decisions in one of these groups, ignoring case (list)"),
+      group: z
+        .union([z.string(), z.array(z.string())])
+        .optional()
+        .describe("Only Decisions in one of these groups, ignoring case (list); or the group to file it under, empty for none (propose, update)"),
+      title: z.string().optional().describe("The Decision's title (propose), or its new one (update)"),
+      body: z
+        .string()
+        .optional()
+        .describe("Markdown: what was decided and why, its Consequences and the Considered Options (propose; left out, those sections to fill in), or its new body (update)"),
+      supersedes: z.array(z.string()).optional().describe("Keys of the Decisions of the same Project or Workspace it replaces once accepted (propose, update)"),
+      ticket: z
+        .string()
+        .optional()
+        .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (propose)"),
+      baseVersion: z.number().int().optional().describe("The Decision's `version` you are editing from; refused if it is no longer current (update)"),
     },
     actions: {
       list: {
         description: "a Project's (or the Workspace's) Decisions, newest first, without their bodies, optionally filtered",
         writes: false,
-        run: (api, a) => api("GET", `${scopePath(a.project)}/decisions${query({ status: a.status, group: a.group })}`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/decisions${query({ status: a.status, group: typeof a.group === "string" ? [a.group] : a.group })}`),
       },
       get: {
         description: "one Decision with its Markdown body, what it supersedes and what superseded it",
@@ -426,6 +450,30 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         description: "what names a Decision's key: Tickets, Documents, Comments, Terms and Decisions, most recently changed first",
         writes: false,
         run: (api, a) => api("GET", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "mentions"))}/mentions`),
+      },
+      propose: {
+        description: "record a new Decision in a Project (or the Workspace), as proposed, for a User to accept or reject",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `${scopePath(a.project)}/decisions`, {
+            title: required(a.title, "a title", "propose"),
+            body: a.body,
+            group: singleGroup(a.group, "propose"),
+            supersedes: a.supersedes,
+            ticket: a.ticket,
+          }),
+      },
+      update: {
+        description: "edit a Decision while it is still proposed: its title, body, group or what it supersedes; give only what changes",
+        writes: true,
+        run: (api, a) =>
+          api("PATCH", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "update"))}`, {
+            baseVersion: required(a.baseVersion, "a baseVersion", "update"),
+            title: a.title,
+            body: a.body,
+            group: singleGroup(a.group, "update"),
+            supersedes: a.supersedes,
+          }),
       },
     },
   });

@@ -132,3 +132,23 @@ describe("replacing a section", () => {
     expect(replaced.body.avoidedWords.map((w: any) => [w.field, w.word, w.line, w.column])).toEqual([["body", "issue", 2, 1]]);
   });
 });
+
+describe("an Agent's proposed Decision with a word a Term says to avoid", () => {
+  it("is saved, listing the words in its title and body, when proposed and when refined", async () => {
+    const { admin, agent, ticketTerm } = await claimedWithTerms();
+    const term = { id: ticketTerm.id, name: "Ticket" };
+
+    const proposed = await agent.post("/api/projects/CRONK/decisions", { title: "One issue per change", body: "Each work item is one change." });
+    expect(proposed.status).toBe(201);
+    expect(proposed.body.avoidedWords).toEqual([
+      { field: "title", word: "issue", line: 1, column: 5, term },
+      { field: "body", word: "work item", line: 1, column: 6, term },
+    ]);
+    const workspace = await agent.post("/api/workspace/decisions", { title: "Fine words", body: "Each Ticket is one change." });
+    expect(workspace.body.avoidedWords).toEqual([]);
+
+    const refined = await agent.patch("/api/decisions/CRONK-D1", { baseVersion: 1, body: "Each issue is one change." });
+    expect(refined.body.avoidedWords).toEqual([{ field: "body", word: "issue", line: 1, column: 6, term }]);
+    expect((await admin.get("/api/decisions/CRONK-D1")).body.decision.body).toBe("Each issue is one change.");
+  });
+});
