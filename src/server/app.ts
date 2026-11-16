@@ -13,6 +13,7 @@ import { mcpRoutes } from "./mcp/server.js";
 import { identityRoutes } from "./identity/routes.js";
 import { guidanceRoutes } from "./knowledge/guidance-routes.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
+import { decisionRoutes } from "./knowledge/decision-routes.js";
 import { termRoutes } from "./knowledge/term-routes.js";
 import { portabilityRoutes } from "./portability/routes.js";
 import { searchRoutes } from "./search/routes.js";
@@ -174,6 +175,7 @@ export async function buildApp(opts: {
   await app.register(attachmentRoutes(ctx));
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
+  await app.register(decisionRoutes(ctx));
   await app.register(termRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(conversationRoutes(ctx));

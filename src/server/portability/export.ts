@@ -1,5 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { Folder } from "./archive.js";
+import { exportDecisions } from "./decisions.js";
 import type { FileStore } from "../files/store.js";
 import { exportTree } from "./documents.js";
 import { ExportContext, iso, type ExportScope } from "./export-context.js";
@@ -27,6 +28,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
     await exportWorkspaceSettings(ctx);
     await exportGuidance(ctx, "guidance", null);
     await exportTree(ctx, "documents", null);
+    await exportDecisions(ctx, "", null, null);
     await exportTerms(ctx, "", { projectId: null, workspaceName: (await getWorkspace(db, scope.workspaceId)).name });
   }
   const { rows: projects } = await db.query<ProjectRow>("SELECT * FROM projects WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY key", [
@@ -38,6 +40,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
     const statusNow = await exportProject(ctx, dir, p);
     await exportGuidance(ctx, `${dir}/guidance`, p.id);
     await exportTree(ctx, `${dir}/documents`, p.id);
+    await exportDecisions(ctx, dir, p.id, p.key);
     await exportTerms(ctx, `${dir}/`, { projectId: p.id, projectKey: p.key });
     await exportTickets(ctx, dir, p, statusNow);
   }
