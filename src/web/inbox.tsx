@@ -463,7 +463,7 @@ function ListItem(props: { item: WaitingItem; selected: boolean; arrived: boolea
           : item.kind === "unattended"
           ? unattendedBecause(item)
           : item.kind === "discovered"
-            ? foundBy(item.ticket)
+            ? foundBy(item)
           : item.reports.length
           ? `Report: ${item.reports.map((r) => r.title).join(", ")}`
           : "No Report";
@@ -878,9 +878,10 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
 }
 
 /** Who found a Discovered Ticket and where, as its list item says it: "By claude-laptop · from CRONK-12". */
-function foundBy(ticket: DiscoveredItem["ticket"]): string {
-  const { agent, sourceTicket } = ticket.discovered!;
-  return `By ${agent.name}${sourceTicket ? ` · from ${sourceTicket.key}` : ""}`;
+function foundBy(item: DiscoveredItem): string {
+  const { agent, sourceTicket } = item.ticket.discovered!;
+  const pauses = item.blocks.length === 0 ? "" : ` · pauses ${item.blocks.length === 1 ? "1 Ticket" : `${item.blocks.length} Tickets`}`;
+  return `By ${agent.name}${sourceTicket ? ` · from ${sourceTicket.key}` : ""}${pauses}`;
 }
 
 /**
@@ -890,7 +891,7 @@ function foundBy(ticket: DiscoveredItem["ticket"]): string {
  * User and moves it to their Inbox, and Cancel.
  */
 function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
-  const { ticket } = props.item;
+  const { ticket, blocks } = props.item;
   const { agent, session, sourceTicket } = ticket.discovered!;
   // An Inbox holds only the User's own; Triage, those with no Assignee or one who can't act on them.
   const inTriage = ticket.assignee?.id !== props.me.id;
@@ -901,6 +902,8 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
   const delegate = useAction((delegateId: string) => props.acting(() => api.updateTicket(ticket.key, { delegateId })), props.onDone);
   const take = useAction(() => props.acting(() => api.updateTicket(ticket.key, { assigneeId: props.me.id })), props.onDone);
   const keep = useAction(() => props.acting(() => api.keepInBacklog(ticket.key)), props.onDone);
+  // From the blocked Ticket's side, which needs Write there only; the Inbox's stream then shows the block gone.
+  const unblock = useAction((blockedKey: string) => api.removeRelation(blockedKey, "blocked_by", ticket.key), () => {});
   const cancel = useAction(
     () =>
       props.acting(async () => {
@@ -911,8 +914,8 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
       }),
     props.onDone,
   );
-  const busy = delegate.busy || take.busy || keep.busy || cancel.busy;
-  const error = delegate.error ?? take.error ?? keep.error ?? cancel.error;
+  const busy = delegate.busy || take.busy || keep.busy || cancel.busy || unblock.busy;
+  const error = delegate.error ?? take.error ?? keep.error ?? cancel.error ?? unblock.error;
   const primary = inTriage ? () => void take.run() : finder ? () => void delegate.run(finder.id) : undefined;
   useDetailKeys(props.keys, props.resolved || !primary ? {} : { complete: () => !busy && primary() });
   const others = own.filter((a) => a.id !== finder?.id);
@@ -933,6 +936,24 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
           )}
         </span>
       </div>
+      {blocks.length > 0 && (
+        <Banner tone="warn" role="status">
+          <p>{`Pauses ${blocks.length === 1 ? "1 Ticket" : `${blocks.length} Tickets`} until it is finished:`}</p>
+          <ul className="paused-list" aria-label="Paused Tickets">
+            {blocks.map((b) => (
+              <li key={b.key}>
+                <div className="paused-ticket">
+                  <Link to={`/tickets/${b.key}`} className="link"><span className="mono">{b.key}</span> {b.title}</Link>
+                  <button type="button" className="link-button" aria-label={`Remove the block on ${b.key}`} disabled={busy} onClick={() => void unblock.run(b.key)}>
+                    Remove block
+                  </button>
+                </div>
+                {b.block && <p className="muted small">{b.block.reason}</p>}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      )}
       {ticket.description.trim() ? (
         <div className="markdown inbox-agent-text">
           <CronkMarkdown projectKey={ticket.projectKey}>{ticket.description}</CronkMarkdown>

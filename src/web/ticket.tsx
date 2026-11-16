@@ -18,6 +18,7 @@ import {
   type Ticket,
   type TicketChanges,
   type TicketDetail,
+  type Relations,
   type TicketRef,
 } from "./api.js";
 import { PRIORITIES } from "../shared/values.js";
@@ -487,7 +488,7 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean }) {
   const [other, setOther] = useState("");
   const add = useAction(() => api.addRelation(t.key, kind, other.trim()), () => setOther(""));
   const remove = useAction((kind: RelationKind, otherKey: string) => api.removeRelation(t.key, kind, otherKey), () => {});
-  const lists: [RelationKind, TicketRef[]][] = [
+  const lists: [RelationKind, (TicketRef & { block?: Relations["blocks"][number]["block"] })[]][] = [
     ["blocks", props.detail.relations.blocks],
     ["blocked_by", props.detail.relations.blockedBy],
     ["relates_to", props.detail.relations.relatesTo],
@@ -614,7 +615,11 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
   );
 }
 
-function TicketRefList(props: { name: string; refs: TicketRef[]; onRemove?: (ref: TicketRef) => void; busy?: boolean }) {
+/**
+ * Tickets listed beside a Ticket, each linked, with Remove when given `onRemove`. A block an Agent added from its Discovered Ticket
+ * also says which Agent added it and why (docs/ui.md § Ticket).
+ */
+function TicketRefList(props: { name: string; refs: (TicketRef & { block?: Relations["blocks"][number]["block"] })[]; onRemove?: (ref: TicketRef) => void; busy?: boolean }) {
   return (
     <ul className="side-list" aria-label={props.name}>
       {props.refs.map((ref) => (
@@ -629,6 +634,11 @@ function TicketRefList(props: { name: string; refs: TicketRef[]; onRemove?: (ref
             <Button variant="ghost" aria-label={`Remove ${ref.key}`} disabled={props.busy} onClick={() => props.onRemove!(ref)}>
               Remove
             </Button>
+          )}
+          {ref.block && (
+            <p className="side-ref-why muted small">
+              <Actor actor={agentActor(ref.block.agent)} />: {ref.block.reason}
+            </p>
           )}
         </li>
       ))}

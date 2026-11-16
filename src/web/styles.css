@@ -260,6 +260,12 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .side-ref-link { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1; color: var(--text); text-decoration: none; }
 .side-ref-link:hover .side-ref-title { text-decoration: underline; }
 .side-ref-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Who added a block from a Discovered Ticket, and why, under the blocking Ticket. */
+.side-ref-why { flex-basis: 100%; margin: 0 0 0 20px; overflow-wrap: anywhere; }
+/* The Tickets a Discovered Ticket pauses, in its Inbox banner. */
+.paused-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.paused-list p { overflow-wrap: anywhere; }
+.paused-ticket { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .side-group .key { min-width: 0; font-size: 12px; }
 .dot-only .status-pill { font-size: 0; gap: 0; }
 
