@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
+import { namedSession } from "./welcome.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
 export interface ToolContext {
@@ -50,19 +51,19 @@ function registerCronkTool<Schema extends z.ZodObject<z.ZodRawShape>>(
   run: (api: ApiCall, input: z.infer<Schema>) => Promise<ApiResponse> | ApiResponse,
 ): void {
   server.registerTool(name, { description, inputSchema: inputSchema as z.ZodObject<z.ZodRawShape> }, async (input, extra) => {
-    const api = ctx.api({ token: extra.authInfo!.token, sessionId: extra.sessionId });
     let result: CallToolResult;
     try {
+      const api = ctx.api({ token: extra.authInfo!.token, sessionId: extra.sessionId });
       result = toResult(await run(api, input as z.infer<Schema>));
     } catch (err) {
       // A ToolError, or a fault in the tool itself: either way an error result, so it names the Session too.
       result = error(err instanceof Error ? err.message : String(err));
     }
-    return { ...result, content: [{ type: "text", text: `Agent Session ${extra.sessionId}` }, ...result.content] };
+    return { ...result, content: [{ type: "text", text: namedSession(extra.sessionId!) }, ...result.content] };
   });
 }
 
-/** A tool call the Agent got wrong, such as a missing parameter, answered as a tool error. */
+/** A tool call the Agent got wrong, such as a missing parameter, answered as a tool error with this message for the Agent to act on. */
 class ToolError extends Error {}
 
 function required<T>(value: T | undefined, what: string, action: string): T {

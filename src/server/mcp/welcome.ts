@@ -1,12 +1,15 @@
 import type { WaitingWork, Welcome } from "../api-types.js";
 
+/** How the welcome and every tool result name an Agent Session, so a Transcript holding it links to the Session (ADR 0013). */
+export const namedSession = (sessionId: string): string => `Agent Session ${sessionId}`;
+
 /** The welcome as the Markdown an MCP client hands its model as the server's instructions. */
 export function welcomeText(welcome: Welcome, sessionId: string): string {
   const { agent, workspace, projects } = welcome;
   const lines = [
     `# Welcome to Cronk${workspace ? `, ${workspace.name}` : ""}`,
     "",
-    `You are the Agent **${agent.name}**, acting for ${agent.owner.name} in Agent Session ${sessionId}.`,
+    `You are the Agent **${agent.name}**, acting for ${agent.owner.name} in ${namedSession(sessionId)}.`,
     "Cronk holds the Tickets and Documents that Users and Agents share; use the tools, most with an `action`, to work with them.",
     "Look things up with the `search` tool. Claiming a Ticket gives you its parent, Sub-Tickets, related Tickets, Reports and the Documents that mention it.",
   ];

@@ -51,7 +51,7 @@ describe("every MCP tool result", () => {
     // The Agent left out a parameter the action needs.
     expect(await rawResult(mcp, "tickets", { action: "get" })).toEqual({ isError: true, texts: [named, "The get action needs a key"] });
     // The tool itself throws: a lone surrogate can't be put in a URL.
-    expect(await rawResult(mcp, "tickets", { action: "get", key: "\uD800" })).toEqual({ isError: true, texts: [named, expect.any(String)] });
+    expect(await rawResult(mcp, "tickets", { action: "get", key: "\uD800" })).toEqual({ isError: true, texts: [named, "URI malformed"] });
   });
 
   it("names the Agent Session that made the call, so two Sessions each see their own", async () => {
