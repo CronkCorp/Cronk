@@ -187,7 +187,8 @@ function servingNote(allowed: string[] | undefined, extras: Artifact["extraOrigi
   const from = allowed === undefined ? "the Workspace's allow-list" : allowed.length === 0 ? "nowhere else" : hosts(allowed);
   const requests = extras.filter((e) => e.uses.includes("connect")).map((e) => e.origin);
   return (
-    `It loads scripts, styles and fonts only from itself and ${from}${extras.length > 0 ? ", plus the extra origins this Version declared" : ""}. ` +
+    `It loads scripts, styles and fonts only from itself and ${from}` +
+    `${extras.length > 0 ? ", and whatever else only from the extra origins this Version declared, for what each was declared for" : ""}. ` +
     (requests.length > 0 ? `Network requests go only to ${hosts(requests)}.` : "Network requests are blocked.")
   );
 }
@@ -199,7 +200,7 @@ function ExtraOrigins(props: { extras: Artifact["extraOrigins"]; apply: boolean 
     <Popover
       label="Extra origins"
       trigger={
-        <button type="button" className="extra-origins-chip">
+        <button type="button" className="chip warn extra-origins-chip">
           {count} extra {count === 1 ? "origin" : "origins"}
           {props.apply ? "" : " · off"} ▾
         </button>

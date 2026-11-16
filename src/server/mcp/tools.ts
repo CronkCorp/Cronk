@@ -1,10 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, EXTRA_ORIGIN_USES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { AvoidedWord, Welcome } from "../api-types.js";
 import { formatBytes } from "../files/sizes.js";
-import { EXTRA_ORIGIN_USES } from "../files/origins.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 import { packFolder, type Folder } from "../portability/archive.js";

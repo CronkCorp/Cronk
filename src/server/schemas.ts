@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -825,7 +825,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       origin: { type: "string", description: "A bare origin, such as `https://cdn.plot.ly`." },
       uses: {
         type: "array",
-        items: { type: "string", enum: ["scripts", "styles", "fonts", "images", "media", "connect"] },
+        items: { type: "string", enum: EXTRA_ORIGIN_USES },
         description: "What the page may load from it; `connect` lets it send requests there.",
       },
       reason: { type: "string", description: "Why the page needs it, as the publisher wrote it." },

@@ -1,3 +1,4 @@
+import { EXTRA_ORIGIN_USES } from "../../shared/values.js";
 import { HttpError } from "../context.js";
 
 /**
@@ -30,8 +31,6 @@ export function bareOrigins(values: string[], what: string): string[] {
   return origins;
 }
 
-/** What a declared extra origin may be loaded from for, each opening one directive of the content policy. */
-export const EXTRA_ORIGIN_USES = ["scripts", "styles", "fonts", "images", "media", "connect"] as const;
 export type ExtraOriginUse = (typeof EXTRA_ORIGIN_USES)[number];
 
 /** An origin a publish declared for its Version beyond the Workspace's allow-list: what the page loads from there, and why. */

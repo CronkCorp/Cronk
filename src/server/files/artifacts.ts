@@ -202,7 +202,7 @@ export interface Publish {
   actor: Actor | StoredActor;
   sourceTicketId: string | null;
   files: ArtifactFile[];
-  extraOrigins?: ExtraOrigin[];
+  extraOrigins: ExtraOrigin[];
   now: Date;
 }
 
@@ -236,7 +236,7 @@ export async function insertArtifactVersion(
   await db.query(
     `INSERT INTO artifact_versions (artifact_id, number, title, source_ticket_id, at, extra_origins, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [artifact.id, number, publish.title, publish.sourceTicketId, publish.now, JSON.stringify(publish.extraOrigins ?? []), ...actorColumns(publish.actor)],
+    [artifact.id, number, publish.title, publish.sourceTicketId, publish.now, JSON.stringify(publish.extraOrigins), ...actorColumns(publish.actor)],
   );
   for (const file of publish.files) {
     await db.query("INSERT INTO artifact_files (id, artifact_id, version, path, content_type, size) VALUES ($1, $2, $3, $4, $5, $6)", [

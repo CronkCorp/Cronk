@@ -12,7 +12,8 @@ import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
 import { formatBytes } from "./sizes.js";
-import { EXTRA_ORIGIN_USES, parseExtraOrigins, type ExtraOrigin } from "./origins.js";
+import { EXTRA_ORIGIN_USES } from "../../shared/values.js";
+import { parseExtraOrigins, type ExtraOrigin } from "./origins.js";
 import {
   artifactFileKey,
   findArtifact,

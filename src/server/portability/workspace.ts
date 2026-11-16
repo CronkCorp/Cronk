@@ -1,4 +1,4 @@
-import { bareOrigin } from "../files/origins.js";
+import { bareOrigins } from "../files/origins.js";
 import { agentAccessSchema } from "../schemas.js";
 import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, updateWorkspace } from "../workspace/workspaces.js";
@@ -39,7 +39,12 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
     ...(w.data.artifactMaxBytes !== undefined && { artifactMaxBytes: positive(w.data.artifactMaxBytes, "workspace.md artifactMaxBytes") }),
     ...(w.data.artifactMaxFiles !== undefined && { artifactMaxFiles: positive(w.data.artifactMaxFiles, "workspace.md artifactMaxFiles") }),
     // ...and so do those from before the Admin's allow-list.
-    ...(w.data.artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: allowedOrigins(w.data.artifactAllowedOrigins) }),
+    ...(w.data.artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: bareOrigins(
+        Array.isArray(w.data.artifactAllowedOrigins) && w.data.artifactAllowedOrigins.every((v) => typeof v === "string")
+          ? (w.data.artifactAllowedOrigins as string[])
+          : refuse("workspace.md artifactAllowedOrigins must be a list of origins"),
+        "workspace.md artifactAllowedOrigins",
+      ) }),
     ...(w.data.artifactExtraOriginsAllowed !== undefined && {
       artifactExtraOriginsAllowed:
         typeof w.data.artifactExtraOriginsAllowed === "boolean" ? w.data.artifactExtraOriginsAllowed : refuse("workspace.md artifactExtraOriginsAllowed must be true or false"),
@@ -54,15 +59,6 @@ function transcriptMaxBytes(value: unknown): number {
     refuse(`workspace.md transcriptMaxBytes must be from ${MIN_TRANSCRIPT_BYTES} to ${MAX_TRANSCRIPT_BYTES}`);
   }
   return bytes;
-}
-
-/** The allow-list `workspace.md` sets: bare origins, each once. */
-function allowedOrigins(value: unknown): string[] {
-  const where = "workspace.md artifactAllowedOrigins";
-  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) refuse(`${where} must be a list of origins`);
-  const origins = (value as string[]).map((v) => bareOrigin(v) ?? refuse(`${where} must hold bare http or https origins, not "${v}"`));
-  if (new Set(origins).size !== origins.length) refuse(`${where} lists an origin more than once`);
-  return origins;
 }
 
 /** A limit `workspace.md` sets, which must be a whole number above 0. */
