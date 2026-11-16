@@ -367,11 +367,14 @@ const fieldsOf = (v: { group: string | null; supersedes: string[] }) => ({ [GROU
 /** The keys typed into the Supersedes field. */
 const keysIn = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
-/** A whole field of a Decision merge as the merge panel settles it: as text, with a conflict's sides as text too. */
-function mergedField<T>(label: string, merged: T | null, conflict: FieldConflict<T> | null, text: (value: T) => string): MergedField {
-  if (!conflict) return { label, text: text(merged as T), conflict: null };
+/**
+ * A whole field of a Decision merge as the merge panel settles it: as text, with a conflict's sides
+ * as text too. Only a list of keys can keep both sides; a group is one side's or the other's.
+ */
+function mergedField<T>(label: string, merged: T | null, conflict: FieldConflict<T> | null, text: (value: T) => string, combinable: boolean): MergedField {
+  if (!conflict) return { label, text: text(merged as T), conflict: null, combinable };
   const [base, mine, theirs] = [conflict.base, conflict.mine, conflict.theirs].map(text) as [string, string, string];
-  return { label, text: null, conflict: { base, mine, theirs, both: mine && theirs ? `${mine}, ${theirs}` : mine || theirs } };
+  return { label, text: null, conflict: { base, mine, theirs, both: mine && theirs ? `${mine}, ${theirs}` : mine || theirs }, combinable };
 }
 
 /**
@@ -396,8 +399,8 @@ function EditDecision(props: { decision: Decision; onSaved: (d: Decision) => voi
       const [merge, started] = await Promise.all([api.mergeDecision(d.key, { baseVersion, ...edit(draft) }), api.decisionVersion(d.key, baseVersion)]);
       const saved = (v: DecisionVersion) => ({ number: v.number, title: v.title, body: v.body, fields: fieldsOf(v) });
       const fields = [
-        mergedField(GROUP, merge.group, merge.groupConflict, (g) => g ?? ""),
-        mergedField(SUPERSEDES, merge.supersedes, merge.supersedesConflict, (keys) => keys.join(", ")),
+        mergedField(GROUP, merge.group, merge.groupConflict, (g) => g ?? "", false),
+        mergedField(SUPERSEDES, merge.supersedes, merge.supersedesConflict, (keys) => keys.join(", "), true),
       ];
       return {
         base: saved(started),

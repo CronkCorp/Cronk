@@ -219,7 +219,16 @@ export function useStaleSave<D extends Draft, T>(options: {
  * One conflicting part as a panel: the User's side and theirs next to each other, buttons to take
  * either or both, and the text to keep, which starts as the User's own.
  */
-function ConflictChoice(props: { label: string; theirsLabel: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
+function ConflictChoice(props: {
+  label: string;
+  theirsLabel: string;
+  conflict: Conflict;
+  value: string;
+  onChange: (v: string) => void;
+  rows: number;
+  /** Whether to offer keeping both sides; true unless said otherwise. */
+  combinable?: boolean;
+}) {
   const c = props.conflict;
   const side = (name: string, text: string | null) => (
     <section className="merge-side" aria-label={name}>
@@ -240,7 +249,7 @@ function ConflictChoice(props: { label: string; theirsLabel: string; conflict: C
       <div className="actions merge-choices">
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</Button>
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</Button>
-        <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>
+        {props.combinable !== false && <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>}
         <span className="muted">or edit below</span>
       </div>
       <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
@@ -256,6 +265,8 @@ export interface MergedField {
   text: string | null;
   /** Set when both sides changed it differently. */
   conflict: Conflict | null;
+  /** Whether keeping both sides makes sense, as it does for a list; false offers only one side or the other. */
+  combinable: boolean;
 }
 
 /** What `ResolveMerge` settles: a merge's sections, for a Document or Decision its title, and for a Decision its other fields. */
@@ -311,6 +322,7 @@ export function ResolveMerge(props: {
             label={f.label}
             theirsLabel={props.theirsLabel}
             conflict={f.conflict}
+            combinable={f.combinable}
             value={fields[f.label]!}
             onChange={(v) => setFields((all) => ({ ...all, [f.label]: v }))}
             rows={1}
