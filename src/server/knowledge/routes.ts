@@ -20,6 +20,7 @@ import {
   ref,
   savedHolding,
 } from "../schemas.js";
+import { attachmentKey, documentAttachmentIds } from "../files/attachments.js";
 import { findTicketByKey } from "../work/tickets.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { documentFor } from "./document-reads.js";
@@ -445,14 +446,18 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { id, assignee } = await transaction(ctx.db, async (tx) => {
+        const { id, assignee, attachmentIds } = await transaction(ctx.db, async (tx) => {
           const document = await lockForDelete(tx, actor, request.params.id);
           await requireCurrent(tx, document, request.query.baseVersion, "delete");
+          // Its Attachments, and those in its Comments, go with it.
+          const attachmentIds = await documentAttachmentIds(tx, document.id);
           if (!(await deleteDocument(tx, treeFor(actor, document.projectId), document))) {
             throw new HttpError(409, `${document.title} has Documents under it; move or delete them first`);
           }
-          return { id: document.id, assignee: await reportAssignee(tx, actor, document) };
+          return { id: document.id, assignee: await reportAssignee(tx, actor, document), attachmentIds };
         });
+        // Only once their records are gone, so a failed delete never leaves a record without its file.
+        for (const attachmentId of attachmentIds) await ctx.files.delete(attachmentKey(attachmentId));
         inboxesChanged(ctx.live, [assignee]);
         // Its watchers, no longer able to see it, stop watching.
         ctx.live.publish(documentTopic(id), { event: "deleted", data: {} });

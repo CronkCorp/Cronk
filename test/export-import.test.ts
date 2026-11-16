@@ -137,11 +137,16 @@ async function snapshot(admin: Client): Promise<unknown> {
     if (res.status !== 200) throw new Error(`GET ${path} answered ${res.status}: ${JSON.stringify(res.body)}`);
     return res.body;
   };
+  const attachments = async (path: string) =>
+    Promise.all(
+      (await get(path)).attachments.map(async (a: { id: string }) => ({ ...a, file: (await admin.download(`/api/attachments/${a.id}/file`)).body.toString("base64") })),
+    );
   const document = async (id: string) => ({
     ...(await get(`/api/documents/${id}`)),
     protection: await get(`/api/documents/${id}/protection`),
     versions: await Promise.all((await get(`/api/documents/${id}/versions`)).versions.map((v: { number: number }) => get(`/api/documents/${id}/versions/${v.number}`))),
     comments: await get(`/api/documents/${id}/comments`),
+    attachments: await attachments(`/api/documents/${id}/attachments`),
   });
   const decisions = async (path: string) => {
     const { decisions: listed } = await get(path);
@@ -178,12 +183,7 @@ async function snapshot(admin: Client): Promise<unknown> {
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
             changes: await get(`/api/tickets/${t.key}/changes`),
-            attachments: await Promise.all(
-              (await get(`/api/tickets/${t.key}/attachments`)).attachments.map(async (a: { id: string }) => ({
-                ...a,
-                file: (await admin.download(`/api/attachments/${a.id}/file`)).body.toString("base64"),
-              })),
-            ),
+            attachments: await attachments(`/api/tickets/${t.key}/attachments`),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -221,6 +221,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     decisions: await decisions("/api/workspace/decisions"),
     artifacts: await artifacts("/api/workspace/artifacts"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
+    inbox: await get("/api/inbox"),
   };
   const ids = new Map<string, string>();
   return JSON.parse(JSON.stringify(raw).replace(UUID, (id) => ids.get(id) ?? (ids.set(id, `#${ids.size + 1}`), `#${ids.size}`)));
@@ -228,7 +229,7 @@ async function snapshot(admin: Client): Promise<unknown> {
 
 /** A Workspace with some of everything in it, made by Ada, Grace and Ada's Agent claude-laptop. */
 async function busyWorkspace() {
-  const { cronk, admin, session } = await delegatedSetup(3);
+  const { cronk, admin, session, claude } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
   await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024, artifactMaxBytes: 30 * 1024 * 1024, artifactMaxFiles: 800 });
@@ -268,6 +269,12 @@ async function busyWorkspace() {
   await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
   await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");
   await admin.upload("/api/tickets/CRONK-2/attachments?name=notes.md", Buffer.from("---\ntitle: not a Ticket\n---\n"), "text/markdown");
+  // ...and on the Report, on Ada's answer, and on the Agent's own Comment.
+  // Each a minute apart: Attachments list in the order attached, which an import, going item by item, can't keep for ties.
+  cronk.clock.advance(60_000);
+  await agent.upload(`/api/documents/${report.id}/attachments?name=trace.log`, Buffer.from("cache miss"), "text/plain");
+  cronk.clock.advance(60_000);
+  await admin.upload(`/api/comments/${answer.id}/attachments?name=disk.png`, Buffer.from([0x89, 0x50, 0x01]), "image/png");
   await agent.patch(`/api/documents/${report.id}`, { baseVersion: 1, body: "It was the disk cache." });
   const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
   expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
@@ -286,17 +293,26 @@ async function busyWorkspace() {
   await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done", body: "Shipped the API." });
   const done = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed");
   expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
+  // A minute later, Ada Reopens it once and claude-laptop completes it again; the minute keeps its two Reports in order.
+  cronk.clock.advance(60_000);
+  await admin.post("/api/tickets/CRONK-2/reopen", { comment: "Version it.", dependents: {} });
+  await autonomous.post("/api/tickets/CRONK-2/claim");
+  await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done again", body: "Versioned." });
+  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
   await autonomous.delete("/api/agent-sessions/current");
 
-  // Documents with Versions and Comments, in both page trees.
-  cronk.clock.advance(60_000);
+  // Documents with Versions and Comments, in both page trees, in the same minute.
   const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "# Guide\n\nStart here." })).body.document;
   await admin.post("/api/projects/CRONK/documents", { title: "Setup / Docker", body: "docker compose up", parentId: guide.id });
   await admin.post("/api/projects/CRONK/documents", { title: "Roadmap" });
   await admin.patch(`/api/documents/${guide.id}`, { baseVersion: 1, body: "# Guide\n\nStart here, then read on." });
   await admin.post(`/api/documents/${guide.id}/versions/1/restore`, { baseVersion: 2 });
   const remark = (await grace.post(`/api/documents/${guide.id}/comments`, { body: "Which here?", anchor: { passage: "Start here" } })).body.comment;
-  await admin.post(`/api/documents/${guide.id}/comments`, { body: "This one.", replyToCommentId: remark.id });
+  const reply = (await admin.post(`/api/documents/${guide.id}/comments`, { body: "This one.", replyToCommentId: remark.id })).body.comment;
+  // Attachments on a Document, kept across its Versions, and on a Comment on it.
+  await admin.upload(`/api/documents/${guide.id}/attachments?name=map.png`, Buffer.from([0x89, 0x50, 0x02]), "image/png");
+  cronk.clock.advance(60_000);
+  await admin.upload(`/api/comments/${reply.id}/attachments?name=here.png`, Buffer.from([0x89, 0x50, 0x03]), "image/png");
   await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome." });
   await admin.upload("/api/workspace/artifacts?title=Team%20board", await tarGz({ "index.html": "<p>team</p>" }));
   // A line of dashes, as frontmatter ends with, in a title, a body and an anchored passage.
@@ -329,6 +345,30 @@ async function busyWorkspace() {
   await admin.post(`/api/terms/${ticketTerm.id}/protection`, { protected: true });
   await admin.post("/api/decisions/CRONK-D2/protection", { protected: false });
 
+  // Suggestions by claude-laptop while it holds CRONK-4's Claim: on the Guide, accepted as is; on the Ticket Term, accepted with Ada's
+  // edits; on CRONK-D4, from CRONK-4, rejected; and open ones on the Workspace's Guidance, in Triage, and CRONK's, which Ada reviews.
+  await admin.post("/api/projects/CRONK/tickets", { title: "Tidy the docs" });
+  await admin.patch("/api/tickets/CRONK-4", { assigneeId: (await admin.get("/api/me")).body.user.id, delegateId: claude.agentId });
+  const suggester = await session();
+  expect((await suggester.post("/api/tickets/CRONK-4/claim")).status).toBe(200);
+  const suggest = async (item: object, baseVersion: number, content: object) => {
+    const made = await suggester.post("/api/suggestions", { item, baseVersion, content, reasoning: "Clearer, *I think*." });
+    expect(made.status).toBe(201);
+    return made.body.suggestion.id as string;
+  };
+  const suggestions = [
+    await suggest({ kind: "document", id: guide.id }, 3, { body: "# Guide\n\nStart here.\n---\nThen read on." }),
+    await suggest({ kind: "term", id: ticketTerm.id }, 2, { avoid: ["Issue"] }),
+    await suggest({ kind: "decision", key: "CRONK-D4" }, 2, { title: "Per-email sign-in limits", group: "Security" }),
+    await suggest({ kind: "guidance" }, 2, { markdown: "Be kind and brief." }),
+    await suggest({ kind: "guidance", project: "CRONK" }, 1, { markdown: "Run the tests first." }),
+  ];
+  cronk.clock.advance(60_000);
+  await admin.post(`/api/suggestions/${suggestions[0]}/accept`);
+  await admin.post(`/api/suggestions/${suggestions[1]}/accept`, { content: { avoid: ["Issue", "job"] } });
+  await grace.post(`/api/suggestions/${suggestions[2]}/reject`, { reason: "Keep the title." });
+  await suggester.delete("/api/agent-sessions/current");
+
   // A second, archived Project; a removed Agent.
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
   await admin.post("/api/projects/OLD/tickets", { title: "Legacy" });
@@ -347,7 +387,7 @@ async function busyWorkspace() {
   await admin.patch("/api/projects/OLD", { archived: true });
   const gone = (await admin.post("/api/agents", { name: "old-bot" })).body.agent;
   await admin.delete(`/api/agents/${gone.id}`);
-  return { cronk, admin, grace };
+  return { cronk, admin, grace, suggestions };
 }
 
 describe("importing an export", () => {
@@ -367,12 +407,24 @@ describe("importing an export", () => {
     expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
     const moves = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
     expect(moves.map((c: { to: { name: string } }) => c.to.name)).toEqual(["In Progress"]);
+    const reopenings = (await admin.get("/api/tickets/CRONK-2/changes")).body.changes.filter((c: { reopened?: boolean }) => c.reopened);
+    expect(reopenings.map((c: { from: { name: string }; to: { name: string } }) => [c.from.name, c.to.name])).toEqual([["Done", "In Progress"]]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
       value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
+    // Suggestions keep their ids, as Agents may have noted them, and all they hold.
+    const own = ({ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason, item, reviewer }: any) => ({
+      ...{ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason },
+      item: { kind: item.kind, key: item.key, title: item.title, projectKey: item.projectKey, version: item.version },
+      reviewer: reviewer?.name ?? null,
+    });
+    for (const id of before.suggestions) {
+      const read = async (client: Client) => own((await client.get(`/api/suggestions/${id}`)).body.suggestion);
+      expect(await read(admin)).toEqual(await read(before.admin));
+    }
     // Decision numbers carry on where the export left off.
     expect((await admin.post("/api/projects/CRONK/decisions", { title: "Next" })).body.decision.key).toBe("CRONK-D5");
     expect((await admin.post("/api/workspace/decisions", { title: "Next" })).body.decision.key).toBe("D2");
@@ -412,7 +464,7 @@ describe("importing a Project export", () => {
     expect(linked.map((d: { title: string; reason: string }) => [d.title, d.reason])).toEqual([["Setup / Docker", "linked"]]);
     expect((await grace.get("/api/projects/CRONK/members")).status).toBe(200);
     // Tickets go on numbering where they left off.
-    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-4");
+    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-5");
   });
 
   it("keeps the names history recorded for Users, Agents and Tickets the export leaves out", async () => {
@@ -608,7 +660,7 @@ describe("Terms in an export", () => {
       "# Acme Labs glossary\n\n" +
         "**Customer**:\nA paying organization.\n\n" +
         "## Work\n\n" +
-        "**Ticket**:\nA unit of work\n---\ntracked within a *Project*.\n_Avoid_: Issue, task\n",
+        "**Ticket**:\nA unit of work\n---\ntracked within a *Project*.\n_Avoid_: Issue, job\n",
     );
     expect(files["projects/CRONK/GLOSSARY.md"]).toBe(
       "# CRONK glossary\n\nWithin CRONK, these Terms replace the Workspace's of the same name.\n\n" +
@@ -653,6 +705,50 @@ describe("Terms in an export", () => {
   });
 });
 
+describe("Suggestions in an export", () => {
+  it("are written in the frontmatter of the items they belong to", async () => {
+    const { admin, suggestions } = await busyWorkspace();
+    const files = await untarGz((await admin.download("/api/export")).body);
+
+    const guide = markdown(files[Object.keys(files).find((path) => /projects\/CRONK\/documents\/\d+-guide\.md$/.test(path))!]).data;
+    expect(guide.suggestions).toEqual([
+      {
+        id: suggestions[0],
+        baseVersion: 3,
+        content: { title: "Guide", body: "# Guide\n\nStart here.\n---\nThen read on." },
+        reasoning: "Clearer, *I think*.",
+        at: expect.any(String),
+        by: { agent: expect.any(String), session: expect.any(String) },
+        sourceTicket: "CRONK-4",
+        state: "accepted",
+        acceptedWithEdits: false,
+        resultVersion: 4,
+        decidedAt: expect.any(String),
+        decidedBy: "ada@example.com",
+      },
+    ]);
+    const rejected = markdown(files[Object.keys(files).find((path) => path.startsWith("projects/CRONK/docs/adr/0004-"))!]).data;
+    expect(rejected.suggestions).toMatchObject([{ id: suggestions[2], state: "rejected", reason: "Keep the title.", decidedBy: "grace@example.com" }]);
+    expect(markdown(files["guidance.md"]).data.suggestions).toMatchObject([{ id: suggestions[3], state: "open" }]);
+    expect(markdown(files["terms.md"]).data.terms.find((t: { name: string }) => t.name === "Ticket").suggestions).toMatchObject([{ state: "accepted", acceptedWithEdits: true }]);
+  });
+});
+
+describe("a Suggestion on Guidance nobody has written", () => {
+  it("is exported with that Guidance at Version 0, and imported leaving it unwritten", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const made = await agent.post("/api/suggestions", { item: { kind: "guidance" }, baseVersion: 0, content: { markdown: "Be kind." }, reasoning: "A start." });
+    const exported = await admin.download("/api/export");
+    expect(markdown((await untarGz(exported.body))["guidance.md"])).toMatchObject({ data: { version: 0 }, body: "" });
+
+    const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    expect((await elsewhere.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "", version: 0 });
+    expect((await elsewhere.get(`/api/suggestions/${made.body.suggestion.id}`)).body.suggestion).toMatchObject({ state: "open", baseVersion: 0, content: { markdown: "Be kind." } });
+  });
+});
+
 describe("Protected marks in an export", () => {
   it("are written in the frontmatter of the items they belong to, with who marked and unmarked them", async () => {
     const { admin } = await busyWorkspace();
@@ -660,14 +756,14 @@ describe("Protected marks in an export", () => {
     const ada = "ada@example.com";
 
     const guide = markdown(files[Object.keys(files).find((path) => /projects\/CRONK\/documents\/\d+-guide\.md$/.test(path))!]).data;
-    expect(guide).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:05:00.000Z", by: "grace@example.com" }] });
+    expect(guide).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:08:00.000Z", by: "grace@example.com" }] });
     const docker = markdown(files[Object.keys(files).find((path) => /guide\/\d+-setup-docker\.md$/.test(path))!]).data;
     expect(docker).toMatchObject({ protected: false });
     expect(docker.protection).toBeUndefined();
     const [customer] = markdown(files["projects/CRONK/terms.md"]).data.terms;
     expect(customer).toMatchObject({ protected: false, protection: [{ protected: true, by: ada }, { protected: false, by: ada }] });
     const accepted = markdown(files[Object.keys(files).find((path) => path.startsWith("projects/CRONK/docs/adr/0004-"))!]).data;
-    expect(accepted).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:04:00.000Z", by: "grace@example.com" }] });
+    expect(accepted).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:07:00.000Z", by: "grace@example.com" }] });
   });
 
   it("leave an accepted Decision Protected when an older export, from before them, says nothing of them", async () => {
@@ -848,6 +944,19 @@ describe("a delegated Ticket without an Assignee in an export", () => {
 });
 
 describe("Attachments in an export", () => {
+  it("are beside the Document or Comment they are on, as a Ticket's are", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide" })).body.document;
+    await admin.upload(`/api/documents/${guide.id}/attachments?name=map.png`, Buffer.from([0x89, 0x50]), "image/png");
+    const comment = (await admin.post(`/api/documents/${guide.id}/comments`, { body: "Here." })).body.comment;
+    await admin.upload(`/api/comments/${comment.id}/attachments?name=here.txt`, Buffer.from("here"), "text/plain");
+
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(markdown(files["projects/CRONK/documents/1-guide.attachments/index.md"]).data.attachments).toMatchObject([{ file: "1-map.png", name: "map.png" }]);
+    expect(files["projects/CRONK/documents/1-guide.comments/1.attachments/1-here.txt"]).toBe("here");
+  });
+
   it("keep their ids, so links to their files still work after the move", async () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });

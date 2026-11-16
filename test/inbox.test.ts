@@ -89,7 +89,7 @@ describe("The Inbox", () => {
     expect(await inboxLines(admin, `?agent=${claude.agentId}`)).toEqual(["question CRONK-1", "review CRONK-2"]);
     expect(await inboxLines(admin, `?kind=review&agent=${codex.agentId}`)).toEqual(["review DOCS-1"]);
     expect(await inboxLines(admin, `?project=CRONK&agent=${codex.agentId}`)).toEqual([]);
-    expect((await admin.get("/api/inbox?kind=suggestion")).status).toBe(400);
+    expect((await admin.get("/api/inbox?kind=gossip")).status).toBe(400);
   });
 
   it("leaves out the questions of an Agent its Owner removed", async () => {

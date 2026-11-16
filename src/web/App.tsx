@@ -172,7 +172,7 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "search":
       return <SearchPage filter={searchFilterFrom(search)} />;
     case "inbox":
-      return <InboxPage address={inboxAddressFrom(search)} />;
+      return <InboxPage address={inboxAddressFrom(search)} me={props.me} />;
     case "documents":
       return <DocumentsPage />;
     case "projectDocuments":

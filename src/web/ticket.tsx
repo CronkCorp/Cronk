@@ -4,6 +4,7 @@ import { Button } from "./components/button.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { FieldPicker, type PickerOption } from "./components/picker.js";
 import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
+import { ReopenDialog } from "./components/reopen-dialog.js";
 import { RelativeTime, useNow } from "./components/time.js";
 import {
   api,
@@ -23,7 +24,7 @@ import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
-import { AttachmentViewer, FilesPanel, type AttachmentsView, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
+import { AttachmentThumbnails, AttachmentViewer, FilesPanel, PageAttachments, type AttachmentsView, useAttach, usePageDrop } from "./attachments.js";
 import type { Attachment } from "./api.js";
 import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -150,7 +151,7 @@ function TicketView(props: {
   const [opened, setOpened] = useState<Attachment>();
   const archived = project.kind === "loaded" && project.value.project.archived;
   const canWrite = project.kind === "loaded" && project.value.project.access === "write";
-  const attaching = useAttach(t.key, props.onAttached);
+  const attaching = useAttach((file) => api.attach(t.key, file), props.onAttached);
   const dragging = usePageDrop(canWrite, (files) => void attaching.attach(files));
   const files: AttachmentsView = {
     attachments: props.attachments,
@@ -186,9 +187,9 @@ function TicketView(props: {
               {t.description.trim() ? <CronkMarkdown>{t.description}</CronkMarkdown> : <p className="muted">No description.</p>}
             </div>
           )}
-          <TicketAttachments {...files} />
+          <AttachmentThumbnails {...files} attachments={props.attachments.filter((a) => a.on === "ticket")} />
           <h2>Timeline</h2>
-          {props.timeline(canWrite)}
+          <PageAttachments.Provider value={{ attachments: props.attachments, onOpen: setOpened }}>{props.timeline(canWrite)}</PageAttachments.Provider>
         </div>
         <aside className="ticket-side" aria-label="Ticket fields">
           <TicketFields ticket={t} canWrite={canWrite} statuses={project.kind === "loaded" ? project.value.statuses : [t.status]} />
@@ -338,16 +339,27 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
   );
 }
 
-/** An Agent's completion's Verification: Unverified, with Accept, until a User Accepts it, then Verified. */
+/** An Agent's completion's Verification: Unverified, with Accept and Reopen…, until a User Accepts or Reopens it, then Verified. */
 function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
   const accept = useAction(() => api.accept(props.ticket.key), () => {});
+  const [reopening, setReopening] = useState(false);
   const unverified = props.ticket.verification === "unverified";
   return (
     <div className="side-field">
       <span className="side-field-label">Verification</span>
       <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
       {unverified && props.canWrite && (
-        <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+        <>
+          <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+          <Button variant="secondary" onClick={() => setReopening(true)} disabled={accept.busy}>Reopen…</Button>
+          <ReopenDialog
+            ticket={props.ticket}
+            open={reopening}
+            onOpenChange={setReopening}
+            reopen={(input) => api.reopen(props.ticket.key, input)}
+            onDone={() => {}}
+          />
+        </>
       )}
       {accept.error && <p className="error" role="alert">{accept.error}</p>}
     </div>

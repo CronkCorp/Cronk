@@ -135,6 +135,7 @@ describe("editing a Term", () => {
       group: null,
       at: "2026-01-01T09:00:00.000Z",
       actor: { kind: "user", id: ada.id, name: "Ada" },
+      suggestion: null,
     });
     expect(versions.body.versions[0].actor).toMatchObject({ name: "claude-laptop", session: { id: claude.sessionId } });
   });

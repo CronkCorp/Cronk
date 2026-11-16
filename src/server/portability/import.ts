@@ -8,6 +8,7 @@ import { importArtifacts } from "./artifacts.js";
 import { importDecisions } from "./decisions.js";
 import { importTree } from "./documents.js";
 import { importTerms } from "./terms.js";
+import { storeSuggestionSources } from "./suggestions.js";
 import { ImportContext } from "./import-context.js";
 import type { ImportedFiles } from "./import-context.js";
 import { importPeople } from "./people.js";
@@ -79,6 +80,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   for (const { dirKey, id } of projectIds) await importArtifacts(ctx, `projects/${dirKey}/`, id, tickets);
   await tickets.storeRelations(ctx);
   await tickets.storeDecisionSources(ctx);
+  await storeSuggestionSources(ctx, tickets);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
   // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.

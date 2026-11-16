@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
-import { sourceClaimOf } from "../coordination/source-claim.js";
+import { sourceClaimOf } from "../coordination/sources.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "../knowledge/protection.js";
@@ -43,8 +43,6 @@ const projectParams = pathParams({ key: projectKeyParam });
 /** The largest archive a publish takes; the Workspace's limits on what it unpacks to are usually far lower. */
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 
-/** How refusals name an Artifact when an Agent names the Ticket it came from. */
-const SOURCE = { noun: "Artifact", refusedAction: "publishing an Artifact from it" };
 
 const publishRules =
   "The request body is the whole folder as a zip archive, or a tar archive gzipped (`tar czf`) or not, sent as `application/zip`, `application/gzip`, " +
@@ -100,7 +98,7 @@ export function artifactRoutes(ctx: AppContext) {
     const create = (actor: Actor, projectId: string | null, body: unknown, query: PublishQuery) =>
       publish(actor, body, async (tx, files) => {
         const now = ctx.clock.now();
-        const source = await sourceClaimOf(tx, actor, { projectId, ticketKey: query.ticket, now }, SOURCE);
+        const source = await sourceClaimOf(tx, actor, projectId, query.ticket, now, "an Artifact");
         return insertArtifact(
           tx,
           { workspaceId: actingUser(actor).workspaceId, projectId },
@@ -177,7 +175,7 @@ export function artifactRoutes(ctx: AppContext) {
             );
           }
           const now = ctx.clock.now();
-          const source = await sourceClaimOf(tx, actor, { projectId: current.projectId, ticketKey: request.query.ticket, now }, SOURCE);
+          const source = await sourceClaimOf(tx, actor, current.projectId, request.query.ticket, now, "an Artifact");
           const title = request.query.title?.trim() ?? current.title;
           return insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
         });

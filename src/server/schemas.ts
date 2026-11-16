@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -76,7 +76,8 @@ export type SharedSchemaName =
   | "Artifact"
   | "ArtifactVersion"
   | "StaleArtifact"
-  | "AvoidedWord";
+  | "AvoidedWord"
+  | "Suggestion";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -155,6 +156,30 @@ const recordedActor = {
 const protectedDescription = (when: string) =>
   `Whether Agents may read but not change it, whatever their Agent Access: true when ${when}. An Agent proposes a change to it as a Suggestion.`;
 
+/** What a Suggestion proposes: the fields its item's kind holds. */
+const suggestedContent = {
+  type: "object",
+  description:
+    "The item's whole content as its next Version would hold it: a Document's `title` and `body`; a Term's `name`, `definition`, `avoid` and `group`; " +
+    "a Decision's `title`, `body` and `group`; Guidance's `markdown`.",
+  properties: {
+    title: { type: "string" },
+    body: { type: "string", description: "Markdown." },
+    name: { type: "string" },
+    definition: { type: "string", description: "Markdown." },
+    avoid: { type: "array", items: { type: "string" } },
+    group: nullable({ type: "string" }),
+    markdown: { type: "string" },
+  },
+} as const;
+
+/** The accepted Suggestion a Version came from (ADR 0014). */
+const versionSuggestion = {
+  ...nullable(object({ id, acceptedWithEdits: { type: "boolean" }, acceptedBy: named })),
+  description:
+    "The Suggestion a User accepted to make it: unchanged, when the Version is credited to the Agent; or edited first, when it is the User's. Null for a Version saved otherwise.",
+};
+
 /** A Version's fields, all but its body. */
 const versionFields = {
   number: { type: "integer", description: "Counts from 1 per Document." },
@@ -162,6 +187,7 @@ const versionFields = {
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
   restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+  suggestion: versionSuggestion,
 };
 
 const decisionStatus = { type: "string", enum: DECISION_STATUSES } as const;
@@ -209,6 +235,7 @@ const decisionVersionFields = {
   supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
+  suggestion: versionSuggestion,
 };
 
 /** What a Term says, as each of its Versions records it. */
@@ -278,12 +305,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   GuidanceVersion: {
-    description: "One saved state of Guidance, with the User who saved it and when.",
+    description: "One saved state of Guidance, with the Actor who saved it and when: a User, or an Agent whose Suggestion a User accepted unchanged.",
     ...object({
       version: { type: "integer" },
       markdown: { type: "string" },
       at: timestamp,
-      actor: object({ kind: { type: "string", const: "user" }, id, name: { type: "string" } }),
+      actor: { ...recordedActor, description: "Who saved it." },
+      suggestion: versionSuggestion,
     }),
   },
   Agent: object(
@@ -421,6 +449,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         from: ref("Status"),
         to: ref("Status"),
         sentBack: { type: "boolean", description: "True for the move back to a Started Status a User made sending the Ticket back from review." },
+        reopened: { type: "boolean", description: "True for the move back to a Started Status a User made Reopening an Agent's Unverified completion." },
       }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),
@@ -485,7 +514,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   WaitingWork: {
     description:
-      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed, with their reason.",
+      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed or of a " +
+      "Suggestion it made, with their reason.",
     ...object(
       {
         reason: {
@@ -493,7 +523,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           enum: WAITING_REASONS,
           description:
             "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
-            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why.",
+            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why. " +
+            "`suggestion_rejected`: a User rejected a Suggestion the Agent made; `suggestion` says which and why.",
         },
         comment: { ...nullable(ref("Comment")), description: "The Comment; null for a rejection." },
         decision: {
@@ -506,10 +537,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           }),
           description: "For a rejection only: the Decision, as the Version that rejected it holds it.",
         },
-        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision came from; null otherwise." },
+        suggestion: {
+          ...object({
+            id,
+            item: object({
+              kind: { type: "string", enum: SUGGESTION_KINDS },
+              id: nullable(id),
+              key: nullable({ type: "string" }),
+              title: { type: "string" },
+              projectKey: nullable({ type: "string" }),
+            }),
+            reason: { type: "string", description: "Why the User rejected it, in Markdown." },
+            rejectedBy: recordedActor,
+            at: timestamp,
+          }),
+          description: "For a rejected Suggestion only: which, and why.",
+        },
+        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision or Suggestion came from; null otherwise." },
         document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
       },
-      ["decision"],
+      ["decision", "suggestion"],
     ),
   },
   Document: {
@@ -689,6 +736,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ...termFields,
       at: timestamp,
       actor: { ...recordedActor, description: "Who saved it." },
+      suggestion: versionSuggestion,
     }),
   },
   StaleTermVersion: {
@@ -743,11 +791,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Attachment: {
     description:
-      "A plain file, such as an image, video, PDF or log, attached to a Ticket. Whoever can read the Ticket can read it; " +
-      "download it from GET /api/attachments/{id}/file.",
+      "A plain file, such as an image, video, PDF or log, attached to a Ticket, a Document or Report, or a Comment. Whoever can read " +
+      "that item can read it; download it from GET /api/attachments/{id}/file. One on a Document belongs to the Document, not to a Version.",
     ...object({
       id,
-      ticketKey: { type: "string", description: "The Ticket it is attached to." },
+      on: { type: "string", enum: ["ticket", "document", "comment"], description: "What it is attached to." },
+      ticketKey: {
+        ...nullable({ type: "string" }),
+        description: "The Ticket it is on: attached to it, or in one of its Comments or Reports, or in a Comment on one of its Reports.",
+      },
+      documentId: { ...nullable({ type: "string", format: "uuid" }), description: "The Document or Report it is on: attached to it, or in one of its Comments." },
+      commentId: { ...nullable({ type: "string", format: "uuid" }), description: "The Comment it is attached to." },
       name: { type: "string", description: "Its file name, as attached." },
       contentType: { type: "string", description: "Its media type, such as `image/png`, as attached." },
       size: { type: "integer", description: "Its size in bytes." },
@@ -828,6 +882,48 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A Transcript without its text.",
     ...object(transcriptFields),
   },
+  Suggestion: {
+    description:
+      "A new Version of a Protected Document, Term or Decision, or of Guidance, that an Agent proposes (ADR 0014): the item's whole new content, the Version it " +
+      "started from and the Agent's reasoning. It takes effect only when a User accepts it: unchanged, as the item's next Version credited to the Agent; " +
+      "edited first, credited to the User and linked to the Suggestion. Rejecting it needs a reason, which reaches the Agent as Waiting Work.",
+    ...object({
+      id,
+      item: {
+        description: "The item it would change, as it stands now.",
+        ...object({
+          kind: { type: "string", enum: SUGGESTION_KINDS },
+          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance." },
+          key: { ...nullable({ type: "string" }), description: "A Decision's key; null for the other kinds." },
+          title: { type: "string", description: "A Document's or Decision's title, a Term's name, or `Guidance`." },
+          status: { ...nullable(decisionStatus), description: "A Decision's status; null for the other kinds." },
+          projectId: { ...nullable(id), description: "Null for a Workspace item." },
+          projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace item." },
+          protected: { type: "boolean", description: protectedDescription("it is marked Protected (Guidance always is)") },
+          version: { type: "integer", description: "Its current Version." },
+        }),
+      },
+      baseVersion: { type: "integer", description: "The Version of the item the Suggestion started from." },
+      base: { ...suggestedContent, description: "What the item held at the base Version, in the same shape as `content`." },
+      content: suggestedContent,
+      reasoning: { type: "string", description: "Why the Agent suggests the change, in Markdown." },
+      proposedBy: { ...recordedActor, description: "The Agent that made it, with its Owner and Agent Session." },
+      at: timestamp,
+      sourceTicket: { ...nullable(ticketName), description: "The Ticket whose Claim the Agent held when making it; null for none." },
+      reviewer: {
+        ...nullable(named),
+        description:
+          "The User whose Inbox it is in: on a Project item, the source Ticket's Assignee, else the Agent's Owner; null when it is in Triage, as on a Workspace item.",
+      },
+      state: { type: "string", enum: SUGGESTION_STATES },
+      outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then needs a merge." },
+      acceptedWithEdits: { ...nullable({ type: "boolean" }), description: "Whether the User changed it before accepting it; null unless accepted." },
+      resultVersion: { ...nullable({ type: "integer" }), description: "The Version of the item accepting it made; null unless accepted." },
+      decidedBy: { ...nullable(named), description: "The User who accepted or rejected it." },
+      decidedAt: nullable(timestamp),
+      reason: { ...nullable({ type: "string" }), description: "Why it was rejected; null unless rejected." },
+    }),
+  },
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
     ...object({
@@ -896,6 +992,8 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
+/** A Comment's id. */
+export const commentIdParam = { type: "string", format: "uuid", description: "The Comment's id." } as const;
 
 /** An Attachment's id. */
 export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;

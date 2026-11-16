@@ -1,11 +1,13 @@
 import { insertComment, type CommentTarget } from "../conversation/comments.js";
+import { exportAttachments, importAttachments } from "./attachments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, integer, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
  * Comments on a Ticket or Document: a folder beside it of files numbered from 1 in the order they
- * were posted. Replies name the Comment or Activity they answer by its number.
+ * were posted, each with its Attachments in `<n>.attachments/`. Replies name the Comment or Activity
+ * they answer by its number.
  */
 
 /** Writes the Comments on a Ticket or Document into `dir`; returns their numbers by id. */
@@ -42,6 +44,7 @@ export async function exportComments(
       },
       c.body,
     );
+    await exportAttachments(ctx, `${dir}/${numbers.get(c.id)}`, { commentId: c.id });
   }
   return numbers;
 }
@@ -80,6 +83,7 @@ export async function importComments(
       at,
     );
     ids.set(n, comment.id);
+    await importAttachments(ctx, `${dir}/${n}`, { commentId: comment.id });
   }
   return ids;
 }

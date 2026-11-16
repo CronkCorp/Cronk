@@ -64,6 +64,10 @@ export async function listProtectionMarkings(db: Queryable, item: ProtectableIte
   return rows.map((r) => ({ protected: r.protected, at: r.at, actor: { kind: "user", id: r.user_id, name: r.user_name } }));
 }
 
+/** What an Agent refused a change to an item it may not change does instead, ending a refusal's sentence. */
+export const SUGGEST_INSTEAD =
+  "make a Suggestion of the change instead (POST /api/suggestions, or the `suggestions` tool), for a User to accept or reject";
+
 /**
  * Refuses an Agent's change to a Protected item (a 403) with a pointer to Suggestions, the way an
  * Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3", and
@@ -73,6 +77,6 @@ export function requireUnprotected(actor: Actor, item: { protected: boolean }, w
   if (actor.kind !== "agent" || !item.protected) return;
   throw new HttpError(
     403,
-    `${what} is Protected: Agents may read it but not ${change}. Make a Suggestion of the change instead, for a User to accept or reject`,
+    `${what} is Protected: Agents may read it but not ${change}. ${SUGGEST_INSTEAD.charAt(0).toUpperCase()}${SUGGEST_INSTEAD.slice(1)}`,
   );
 }

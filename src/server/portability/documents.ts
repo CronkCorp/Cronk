@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { insertDocumentRow, insertVersion } from "../knowledge/documents.js";
+import { exportAttachments, importAttachments } from "./attachments.js";
 import { exportComments, importComments } from "./comments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, integer, isUuid, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
+import { importSuggestions, suggestionsToExport } from "./suggestions.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
  * Documents and Reports: `<name>.md` with what it says now, its Versions in `<name>.versions/`
- * when the export includes them, and its Comments in `<name>.comments/`. The page tree nests
+ * when the export includes them, its Comments in `<name>.comments/` and its Attachments in `<name>.attachments/`. The page tree nests
  * the Documents under one in a folder of its name.
  */
 
@@ -41,6 +43,7 @@ export async function exportDocument(ctx: ExportContext, base: string, d: Docume
       claim: d.claim_id ?? undefined,
       version: d.version,
       ...(await protectionToExport(ctx, { kind: "document", id: d.id }, d.protected)),
+      ...(await suggestionsToExport(ctx, { kind: "document", id: d.id })),
       createdAt: iso(d.created_at),
       createdBy: ctx.actor(first),
       updatedAt: iso(d.updated_at),
@@ -54,6 +57,7 @@ export async function exportDocument(ctx: ExportContext, base: string, d: Docume
     }
   }
   await exportComments(ctx, `${base}.comments`, "document_id", d.id);
+  await exportAttachments(ctx, base, { documentId: d.id });
 }
 
 /** Writes the page tree of the Workspace (projectId null) or a Project into `dir`. */
@@ -120,7 +124,9 @@ export async function importDocument(ctx: ImportContext, base: string, place: Do
       restoredFrom,
     });
   }
+  await importSuggestions(ctx, { kind: "document", id }, place.projectId, d.data, d.path);
   await importComments(ctx, `${base}.comments`, { documentId: id }, undefined, version);
+  await importAttachments(ctx, base, { documentId: id });
   return id;
 }
 

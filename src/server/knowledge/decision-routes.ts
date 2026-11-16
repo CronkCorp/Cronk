@@ -10,7 +10,7 @@ import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
 import { markRejected, rejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { agentTopic } from "../live/topics.js";
-import { sourceClaimOf } from "../coordination/source-claim.js";
+import { sourceClaimOf } from "../coordination/sources.js";
 import {
   contentOf,
   DECISION_TEMPLATE,
@@ -28,7 +28,7 @@ import {
   type DecisionVersion,
 } from "./decisions.js";
 import { listMentions } from "./mentions.js";
-import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
+import { listProtectionMarkings, requireUnprotected, setProtected, SUGGEST_INSTEAD } from "./protection.js";
 
 /** A Decision title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -143,9 +143,7 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      const now = ctx.clock.now();
-      const source = await sourceClaimOf(tx, actor, { projectId: scope.projectId, ticketKey: input.ticket, now }, { noun: "Decision", refusedAction: "proposing a Decision from it" });
-      const decision = await insertDecision(tx, scope, content, actor, now, source);
+      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceClaimOf(tx, actor, scope.projectId, input.ticket, ctx.clock.now(), "a Decision"));
       return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
     };
 
@@ -259,8 +257,11 @@ export function decisionRoutes(ctx: AppContext) {
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (actor.kind === "agent" && current.status !== "proposed") {
-            const instead = current.protected ? ". It is Protected: make a Suggestion of the change instead, for a User to accept or reject" : "";
-            throw new HttpError(403, `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}; only Users change it now${instead}`);
+            throw new HttpError(
+              403,
+              `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}${current.protected ? " and Protected" : ""}; ` +
+                `only Users change it now, so ${SUGGEST_INSTEAD}`,
+            );
           }
           // A proposal a User marked Protected is closed to Agents too.
           requireUnprotected(actor, current, current.key);
