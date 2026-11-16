@@ -311,7 +311,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
-      "move, or create Documents under; propose a change to it as a Suggestion instead.",
+      "move, or create Documents under; propose a change to it with the `suggestions` tool instead.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
@@ -413,7 +413,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status. When you make a choice " +
       "worth keeping, propose a Decision: a User reviews it (the Assignee of the Ticket you hold the Claim on, or else your Owner) and " +
       "accepts or rejects it; a rejection reaches you as waiting work, with the reason. You may update your proposal while it is " +
-      "proposed, unless a User marked it `protected`; an accepted Decision is Protected, so propose a change to it as a Suggestion. Saving text that uses a word a Term says to " +
+      "proposed, unless a User marked it `protected`; an accepted Decision is Protected, so propose a change to it with the `suggestions` tool. Saving text that uses a word a Term says to " +
       "avoid still goes through: the result lists each such word with the Term to use, as `avoidedWords`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list, propose)"),
@@ -474,6 +474,71 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             group: singleGroup(a.group, "update"),
             supersedes: a.supersedes,
           }),
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "suggestions",
+    description:
+      "Suggestions: how you propose a change to an item you may not change yourself: a Protected Document, Term or Decision (an accepted Decision is " +
+      "Protected), or Guidance, which only Users write. Send the item's new content based on the Version you read (`baseVersion`, the item's `version`; " +
+      "Guidance at 0 when nobody has written it) with your reasoning; fields you leave out keep what that Version holds. A User reviews it (the Assignee " +
+      "of the Ticket you hold the Claim on, or else your Owner; a Workspace item goes to Triage) and accepts it as is, credited to you, edits and accepts " +
+      "it, credited to them, or rejects it with a reason, which reaches you as waiting work. Check where yours stand with `list`.",
+    parameters: {
+      kind: z.enum(["document", "term", "decision", "guidance"]).optional().describe("What kind of item to change (create)"),
+      itemId: z.string().optional().describe("The Document's or Term's id (create)"),
+      key: z.string().optional().describe("The Decision's key, such as CRONK-D7 (create)"),
+      project: z.string().optional().describe("For Guidance, the Project key whose Guidance to change; leave out for the Workspace's (create)"),
+      baseVersion: z.number().int().optional().describe("The item's `version` you read and are changing (create)"),
+      title: z.string().optional().describe("A Document's or Decision's new title (create)"),
+      body: z.string().optional().describe("A Document's or Decision's new Markdown body (create)"),
+      name: z.string().optional().describe("A Term's new name (create)"),
+      definition: z.string().optional().describe("A Term's new definition, in Markdown (create)"),
+      avoid: z.array(z.string()).optional().describe("A Term's new words to avoid (create)"),
+      group: z.string().nullable().optional().describe("A Term's or Decision's new group; null for none (create)"),
+      markdown: z.string().optional().describe("Guidance's new Markdown (create)"),
+      reasoning: z.string().optional().describe("Why the change, in Markdown, for the User who reviews it (create)"),
+      ticket: z
+        .string()
+        .optional()
+        .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (create)"),
+      state: z.array(z.enum(["open", "accepted", "rejected"])).optional().describe("Only your Suggestions in these states (list)"),
+      id: z.string().optional().describe("The Suggestion's id (get)"),
+    },
+    actions: {
+      create: {
+        description: "suggest a new Version of a Protected Document, Term or Decision, or of Guidance",
+        writes: true,
+        run: (api, a) => {
+          const kind = required(a.kind, "a kind", "create");
+          const item =
+            kind === "decision"
+              ? { kind, key: required(a.key, "a key for a Decision", "create") }
+              : kind === "guidance"
+                ? { kind, project: a.project ?? null }
+                : { kind, id: required(a.itemId, `an itemId for a ${kind === "document" ? "Document" : "Term"}`, "create") };
+          const fields = { title: a.title, body: a.body, name: a.name, definition: a.definition, avoid: a.avoid, group: a.group, markdown: a.markdown };
+          const content = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+          return api("POST", "/api/suggestions", {
+            item,
+            baseVersion: required(a.baseVersion, "a baseVersion", "create"),
+            content,
+            reasoning: required(a.reasoning, "reasoning", "create"),
+            ticket: a.ticket,
+          });
+        },
+      },
+      list: {
+        description: "your own Suggestions, newest first, with where each stands: open, accepted (and the Version it made) or rejected (and why)",
+        writes: false,
+        run: (api, a) => api("GET", `/api/suggestions${query({ state: a.state })}`),
+      },
+      get: {
+        description: "one Suggestion, with its item as it stands now",
+        writes: false,
+        run: (api, a) => api("GET", `/api/suggestions/${encodeURIComponent(required(a.id, "an id", "get"))}`),
       },
     },
   });

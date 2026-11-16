@@ -93,7 +93,7 @@ A message any Actor posts on a Ticket or Document, possibly in reply to another 
 _Avoid_: Reply, note, message, discussion
 
 **Waiting Work**:
-A Comment that concerns an Agent: it answers the Agent's Question, @mentions it, or is on a Ticket delegated to it or an Artifact Version it published. A User's rejection of a Decision the Agent proposed, with the reason, is Waiting Work too. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
+A Comment that concerns an Agent: it answers the Agent's Question, @mentions it, or is on a Ticket delegated to it or an Artifact Version it published. A User's rejection of a Decision the Agent proposed, or of a Suggestion it made, with the reason, is Waiting Work too. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:

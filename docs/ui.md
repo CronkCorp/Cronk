@@ -126,7 +126,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion or a proposed Decision) and S sends back (or opens Reject… on a proposed Decision). None of them fire while focus is in a text field. A line under the split names them.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion or a proposed Decision) and S sends back (or opens Reopen… on an Unverified completion, or Reject… on a proposed Decision). None of them fire while focus is in a text field. A line under the split names them.
 - **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
 - **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
 - **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
@@ -141,13 +141,14 @@ The Project page is shown in `docs/ui/frame.png`.
 
 - **Main column:** the title, the description, then one **timeline** and the Comment box at the end.
 - **Side panel (280px, sticky):**
-  - Status, Priority, Assignee, Delegate, Autonomy (Autonomous, or Stops at In Review; always shown, and pre-filled from the Project's default on delegating) and Labels, each edited in place. An Agent's completion adds a Verification row: an Unverified chip with Accept, or Verified.
+  - Status, Priority, Assignee, Delegate, Autonomy (Autonomous, or Stops at In Review; always shown, and pre-filled from the Project's default on delegating) and Labels, each edited in place. An Agent's completion adds a Verification row: an Unverified chip with Accept and Reopen…, or Verified.
   - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter spans the silence threshold, from when the Agent Session was last heard from to the lapse time. It is hidden when the Ticket is not Claimed.
   - Parent, Sub-Tickets, Relations and Mentioned in.
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
   - **Comment:** the body in a bordered bubble, with replies indented under it. The Comment of a Send back is labelled `SENT BACK`.
+  - A Reopen shows as its Change, "reopened it: Done → In Progress", followed by its reason as a Comment.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
   - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review". A Change Cronk made itself, such as an upgrade's, names "Cronk" in plain muted text with no avatar.
 - **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.

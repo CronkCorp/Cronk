@@ -35,7 +35,8 @@ import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, DecisionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { QuestionItem, DecisionItem, ReviewItem, SuggestionInboxItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { Suggestion as StoredSuggestion, SuggestedContent } from "./knowledge/suggestions.js";
 import type {
   Decision as StoredDecision,
   DecisionSummary as StoredDecisionSummary,
@@ -46,6 +47,7 @@ export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
+export type { ReopenChoice } from "./work/reopen.js";
 export type { ActivityKind, DecisionStatus, Priority, RelationKind, SearchKind, StatusCategory, Verification } from "../shared/values.js";
 export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
@@ -160,12 +162,20 @@ export type Merge = StoredMerge & { onto: Version };
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
-/** One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, or a Decision an Agent proposed. */
+/**
+ * One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, a Decision an
+ * Agent proposed, or a Suggestion an Agent made.
+ */
 export type InboxItem =
   | Serialized<ReviewItem>
   | Serialized<UnverifiedItem>
   | (Serialized<Omit<QuestionItem, "question">> & { question: Activity })
-  | Serialized<DecisionItem>;
+  | Serialized<DecisionItem>
+  | Serialized<SuggestionInboxItem>;
+
+/** A new Version of a Protected item, or of Guidance, an Agent proposes for a User to accept or reject (ADR 0014). */
+export type Suggestion = Serialized<StoredSuggestion>;
+export type { SuggestedContent };
 export type InboxKind = InboxItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */

@@ -35,9 +35,10 @@ export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
 /**
  * Why work waits for an Agent. A Comment, in order of precedence: it answers the Agent's question,
- * @mentions it, or is on a Ticket delegated to it. Or `rejected`: a User rejected a Decision the Agent proposed.
+ * @mentions it, or is on a Ticket delegated to it. Or `rejected`: a User rejected a Decision the Agent proposed;
+ * or `suggestion_rejected`: a User rejected a Suggestion the Agent made.
  */
-export const WAITING_REASONS = ["answer", "mention", "comment", "rejected"] as const;
+export const WAITING_REASONS = ["answer", "mention", "comment", "rejected", "suggestion_rejected"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
 
 /** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
@@ -71,6 +72,14 @@ export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
 export const MARKDOWN_FILE = /\.(md|markdown)$/i;
+
+/** The kinds of item a Suggestion can change (ADR 0014). */
+export const SUGGESTION_KINDS = ["document", "term", "decision", "guidance"] as const;
+export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
+
+/** Where a Suggestion stands: open until a User accepts or rejects it. */
+export const SUGGESTION_STATES = ["open", "accepted", "rejected"] as const;
+export type SuggestionState = (typeof SUGGESTION_STATES)[number];
 
 /** A Decision's lifecycle status. Only Users change it; a Decision becomes superseded when one superseding it is accepted. */
 export const DECISION_STATUSES = ["proposed", "accepted", "rejected", "deprecated", "superseded"] as const;

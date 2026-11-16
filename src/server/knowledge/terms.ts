@@ -2,6 +2,7 @@ import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type Rec
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Readable } from "../identity/access.js";
 import { recordMentions, recordMentionsOfNames } from "./mentions.js";
+import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
 /**
  * Terms: the Workspace's or a Project's glossary, each Term naming one concept with its definition
@@ -217,7 +218,7 @@ export async function saveTermVersion(
   db: Queryable,
   workspaceId: string,
   term: StoredTerm,
-  save: { fields: TermFields; actor: Actor; now: Date },
+  save: { fields: TermFields; actor: Actor | StoredActor; now: Date },
 ): Promise<StoredTerm | "name taken"> {
   const fields = tidyFields(save.fields);
   const same =
@@ -268,6 +269,8 @@ export interface TermVersion extends TermFields {
   number: number;
   at: Date;
   actor: RecordedActor;
+  /** The Suggestion a User accepted to make it, unchanged or edited; null for a Version saved otherwise. */
+  suggestion: VersionSuggestion | null;
 }
 
 interface TermVersionRow extends RecordedActorRow {
@@ -288,7 +291,7 @@ export async function listTermVersions(db: Queryable, termId: string): Promise<T
      WHERE v.term_id = $1 ORDER BY v.number DESC`,
     [termId],
   );
-  return rows.map((r) => ({
+  const versions = rows.map((r) => ({
     number: r.number,
     name: r.name,
     definition: r.definition,
@@ -297,4 +300,5 @@ export async function listTermVersions(db: Queryable, termId: string): Promise<T
     at: r.at,
     actor: toRecordedActor(r),
   }));
+  return withSuggestions(db, { kind: "term", id: termId }, versions);
 }

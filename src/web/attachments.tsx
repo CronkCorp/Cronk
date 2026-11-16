@@ -256,7 +256,7 @@ export function AttachmentViewer(props: { attachment: Attachment | undefined; ca
     <>
       <Dialog
         open
-        wide
+        size="wide"
         onOpenChange={(open) => !open && props.onClose()}
         title={a.name}
         description={
