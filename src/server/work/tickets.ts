@@ -1,7 +1,8 @@
 import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type ChangeActorRow, type RecordedActor, type StoredActor, type SystemActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
-import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
+import type { Priority, RelationKind, StatusCategory, Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
+import { recordMentions } from "../knowledge/mentions.js";
 
 /** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
 export const ticketKeySql = (project: string, ticket: string) => `${project}.key || '-' || ${ticket}.number`;
@@ -54,6 +55,10 @@ export interface Ticket {
   delegate: AgentRef | null;
   /** Set on a Sub-Ticket. */
   parent: TicketName | null;
+  /** Autonomous Delegation: the Delegate may complete the Ticket itself. Only Users set it. */
+  autonomous: boolean;
+  /** An Agent's completion: Unverified until a User Accepts it (Verified). Null for any other Ticket. */
+  verification: Verification | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +81,8 @@ interface TicketRow {
   delegate_name: string | null;
   parent_number: number | null;
   parent_title: string | null;
+  autonomous: boolean;
+  verification: Verification | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -94,12 +101,14 @@ const toTicket = (row: TicketRow): Ticket => ({
   assignee: row.assignee_id === null ? null : { id: row.assignee_id, name: row.assignee_name! },
   delegate: row.delegate_id === null ? null : { id: row.delegate_id, name: row.delegate_name! },
   parent: row.parent_number === null ? null : { key: `${row.project_key}-${row.parent_number}`, title: row.parent_title! },
+  autonomous: row.autonomous,
+  verification: row.verification,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
 const SELECT_TICKETS = `
-  SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.created_at, t.updated_at,
+  SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
          a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
@@ -130,6 +139,7 @@ export async function insertTicket(
     description: input.description,
     status: input.status,
   });
+  await recordMentions(db, { kind: "ticket", id });
   return (await findTicketById(db, id))!;
 }
 
@@ -180,6 +190,7 @@ export interface TicketChanges {
   assigneeId?: string | null;
   delegateId?: string | null;
   parentKey?: string | null;
+  autonomous?: boolean;
 }
 
 export interface TicketEdit {
@@ -196,6 +207,10 @@ export interface TicketEdit {
   delegate?: AgentRef | null;
   /** A Ticket of the same Project that isn't this one or below it (see `wouldNestUnderItself`), or null. */
   parent?: Ticket | null;
+  /** Autonomous Delegation; only Users set it. */
+  autonomous?: boolean;
+  /** Set to Unverified by an Agent's completion, to Verified by a User's Accept, and cleared when the Ticket leaves its Completed Status. */
+  verification?: Verification | null;
 }
 
 /**
@@ -239,6 +254,14 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     recorded.push({ change: "parent", from: ticket.parent, to });
     columns.push(["parent_id", changes.parent?.id ?? null]);
   }
+  if (changes.autonomous !== undefined && changes.autonomous !== ticket.autonomous) {
+    recorded.push({ change: "autonomous", from: ticket.autonomous, to: changes.autonomous });
+    columns.push(["autonomous", changes.autonomous]);
+  }
+  if (changes.verification !== undefined && changes.verification !== ticket.verification) {
+    recorded.push({ change: "verification", from: ticket.verification, to: changes.verification });
+    columns.push(["verification", changes.verification]);
+  }
   if (recorded.length === 0) return ticket;
 
   columns.push(["updated_at", now]);
@@ -247,6 +270,7 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     ...columns.map(([, value]) => value),
   ]);
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
+  if (columns.some(([column]) => column === "title" || column === "description")) await recordMentions(db, { kind: "ticket", id: ticket.id });
   return (await findTicketById(db, ticket.id))!;
 }
 
@@ -260,6 +284,25 @@ export async function clearDelegationsTo(db: Queryable, agentId: string, actor: 
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.delegate_id = $1 ORDER BY t.id FOR UPDATE OF t`, [agentId]);
   const changed: Ticket[] = [];
   for (const row of rows) changed.push(await updateTicket(db, toTicket(row), { delegate: null }, actor, now));
+  return changed;
+}
+
+/**
+ * Turns Autonomous Delegation on or off for every Ticket below `ticketId`, recording each change as `actor`'s,
+ * so a whole piece of work follows its top Ticket. Run inside a transaction. Returns the Tickets as changed.
+ */
+export async function setAutonomousBelow(db: Queryable, ticketId: string, autonomous: boolean, actor: Actor, now: Date): Promise<Ticket[]> {
+  // Locked in id order, so it queues behind concurrent edits of these Tickets rather than deadlocking with them.
+  const { rows } = await db.query<TicketRow>(
+    `WITH RECURSIVE below(id) AS (
+       SELECT id FROM tickets WHERE parent_id = $1
+       UNION SELECT t.id FROM tickets t JOIN below b ON t.parent_id = b.id
+     )
+     ${SELECT_TICKETS} WHERE t.id IN (SELECT id FROM below) AND t.autonomous <> $2 ORDER BY t.id FOR UPDATE OF t`,
+    [ticketId, autonomous],
+  );
+  const changed: Ticket[] = [];
+  for (const row of rows) changed.push(await updateTicket(db, toTicket(row), { autonomous }, actor, now));
   return changed;
 }
 
@@ -288,6 +331,8 @@ export type TicketChange =
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
   | { change: "delegate"; from: AgentRef | null; to: AgentRef | null }
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
+  | { change: "autonomous"; from: boolean; to: boolean }
+  | { change: "verification"; from: Verification | null; to: Verification | null }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
   | { change: "document linked" | "document unlinked"; document: DocumentName };
 

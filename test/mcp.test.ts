@@ -284,6 +284,83 @@ describe("the guidance tool", () => {
   });
 });
 
+describe("the decisions tool", () => {
+  it("lists and gets Decisions of the Workspace or a Project through the API's access rules", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await projectWithTickets(admin, "SECRET", 0);
+    await admin.patch("/api/projects/SECRET", { agentAccess: "none" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres", body: "We use Postgres.", group: "Storage" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "SQLite" });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+    await admin.post("/api/projects/SECRET/decisions", { title: "Hush" });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    const listed = await callTool(mcp, "decisions", { action: "list", project: "CRONK", status: ["accepted"] });
+    expect(listed.body.decisions.map((d: { key: string }) => d.key)).toEqual(["CRONK-D1"]);
+    expect((await callTool(mcp, "decisions", { action: "list" })).body.decisions.map((d: { key: string }) => d.key)).toEqual(["D1"]);
+    expect((await callTool(mcp, "decisions", { action: "list", project: "CRONK", group: ["storage"] })).body.decisions).toHaveLength(1);
+    expect((await callTool(mcp, "decisions", { action: "get", key: "cronk-d1" })).body.decision).toMatchObject({
+      key: "CRONK-D1",
+      status: "accepted",
+      body: "We use Postgres.",
+    });
+    expect(await callTool(mcp, "decisions", { action: "get", key: "SECRET-D1" })).toEqual({ isError: true, body: "No such Decision" });
+    expect(await callTool(mcp, "decisions", { action: "get" })).toEqual({ isError: true, body: "The get action needs a key" });
+  });
+  it("proposes Decisions, from the Ticket the Agent holds the Claim on, and refines them only while proposed", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const proposed = await callTool(mcp, "decisions", { action: "propose", project: "CRONK", title: "Markdown for Decisions", body: "v1", group: "Storage" });
+    expect(proposed.body.decision).toMatchObject({ key: "CRONK-D1", status: "proposed", group: "Storage", sourceTicket: { key: "CRONK-1" } });
+    expect((await callTool(mcp, "decisions", { action: "propose", title: "Compose for installs" })).body.decision.key).toBe("D1");
+    const refined = await callTool(mcp, "decisions", { action: "update", key: "CRONK-D1", baseVersion: 1, body: "v2" });
+    expect(refined.body.decision).toMatchObject({ body: "v2", version: 2 });
+    expect(await callTool(mcp, "decisions", { action: "update", key: "CRONK-D1", body: "v3" })).toEqual({ isError: true, body: "The update action needs a baseVersion" });
+
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    const refused = await callTool(mcp, "decisions", { action: "update", key: "CRONK-D1", baseVersion: 3, body: "v3" });
+    expect(refused.isError).toBe(true);
+    expect(refused.body).toMatch(/only while it is proposed/);
+  });
+
+  it("offers a read-only token only list, get and mentions", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    const action = tools.find((t) => t.name === "decisions")!.inputSchema.properties!.action as { enum: string[] };
+    expect(action.enum).toEqual(["list", "get", "mentions"]);
+  });
+
+  it("welcomes the Agent with the reason a User rejected a Decision it proposed", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const first = await connectMcp(cronk, claude.secret);
+    await callTool(first, "decisions", { action: "propose", title: "Compose for installs" });
+    await first.disconnect();
+    await admin.post("/api/decisions/D1/status", { status: "rejected", reason: "We ship a single binary.\nCompose is too much." });
+
+    const instructions = (await connectMcp(cronk, claude.secret)).client.getInstructions()!;
+    expect(instructions).toContain("- D1: Compose for installs: Ada rejected it, which you proposed, saying why:\n  > We ship a single binary.\n  > Compose is too much.");
+  });
+
+  it("and the terms tool list what mentions a Decision or Term", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await admin.post("/api/workspace/decisions", { title: "Postgres" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse", description: "Each Claim, per D1." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    expect((await callTool(mcp, "decisions", { action: "mentions", key: "d1" })).body).toEqual((await admin.get("/api/decisions/D1/mentions")).body);
+    expect((await callTool(mcp, "terms", { action: "mentions", id: claim.id })).body).toEqual((await admin.get(`/api/terms/${claim.id}/mentions`)).body);
+    expect((await callTool(mcp, "terms", { action: "mentions", id: claim.id })).body.mentions).toHaveLength(1);
+    expect(await callTool(mcp, "terms", { action: "mentions" })).toEqual({ isError: true, body: "The mentions action needs an id" });
+  });
+});
+
 describe("the terms tool", () => {
   it("lists the Terms that apply in a Project or the Workspace, and gets one by name or id", async () => {
     const { cronk, admin } = await startInstalledCronk();
@@ -323,6 +400,33 @@ describe("the terms tool", () => {
   });
 });
 
+describe("a tool that saves text", () => {
+  it("follows the API's answer with a hint naming each word a Term says to avoid and the Term to use", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["issue", "work item"] });
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const { isError, texts } = await rawResult(mcp, "documents", {
+      action: "write_report",
+      key: "CRONK-1",
+      title: "Fixed the issue",
+      body: "This work item is done.\n\n`issue` in code\n\n> an issue quoted",
+    });
+    expect(isError).toBe(false);
+    expect(texts).toHaveLength(3);
+    expect(JSON.parse(texts[1]!).avoidedWords).toHaveLength(2);
+    expect(texts[2]).toBe(
+      "Saved, but it uses words a Term says to avoid:\n" +
+        '- "issue" (title, line 1, column 11): use Ticket\n' +
+        '- "work item" (body, line 1, column 6): use Ticket',
+    );
+
+    const clean = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "progress", body: "All good." });
+    expect(clean.body.avoidedWords).toEqual([]);
+  });
+});
+
 describe("working a delegated Ticket over MCP", () => {
   /** Ada's Project CRONK with `count` Tickets assigned to her and delegated to her Agent claude-laptop, which connects over MCP. */
   async function delegatedOverMcp(count: number) {
@@ -337,6 +441,25 @@ describe("working a delegated Ticket over MCP", () => {
   it("welcomes the Agent with its Ready Tickets", async () => {
     const { mcp } = await delegatedOverMcp(2);
     expect(mcp.client.getInstructions()).toMatch(/Ready Tickets[\s\S]*CRONK-1: Ticket 1[\s\S]*CRONK-2: Ticket 2/);
+  });
+
+  it("welcomes the Agent saying which Ready Tickets are autonomous, and completes one with a Report", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 2);
+    const claude = await registerAgent(admin, "claude-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId, autonomous: true });
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId });
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const instructions = mcp.client.getInstructions()!;
+    expect(instructions).toMatch(/Autonomous Delegation/);
+    expect(instructions).toContain("- CRONK-1: Ticket 1 (Backlog, autonomous: complete it yourself with a Report)");
+    expect(instructions).toContain("- CRONK-2: Ticket 2 (Backlog)\n");
+
+    expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.ticket.autonomous).toBe(true);
+    await callTool(mcp, "documents", { action: "write_report", key: "CRONK-1", title: "Done", body: "Fixed the cache." });
+    const done = await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "Done" });
+    expect(done).toMatchObject({ isError: false, body: { ticket: { status: { category: "completed" }, verification: "unverified" } } });
   });
 
   it("Claims the next Ready Ticket, moves it, splits it and releases it", async () => {
@@ -687,5 +810,62 @@ describe("a Ticket becoming Ready over MCP", () => {
       logger: "cronk",
       data: { message: expect.stringMatching(/CRONK-2: Ticket 2[\s\S]*`claim`/), ticketReady: { key: "CRONK-2", title: "Ticket 2" } },
     });
+  });
+});
+
+describe("the documents tool and a Protected Document", () => {
+  it("shows it Protected and passes on the API's refusal to change it, pointing to Suggestions", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const { document } = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome." })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    expect((await callTool(mcp, "documents", { action: "get", id: document.id })).body.document).toMatchObject({ protected: true });
+    const update = await callTool(mcp, "documents", { action: "update", id: document.id, baseVersion: 1, body: "Rewritten." });
+    expect(update.isError).toBe(true);
+    expect(update.body).toMatch(/^Handbook is Protected: Agents may read it but not change it\. Make a Suggestion/);
+  });
+});
+
+describe("the attachments tool", () => {
+  it("attaches text or base64 files to a Ticket the Agent holds the Claim on, and lists them", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect((await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "log.txt", content: "boom" })).isError).toBe(true);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const log = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "sign-in-flood.log", content: "429 x 50\n" });
+    expect(log.isError).toBe(false);
+    expect(log.body.attachment).toMatchObject({ name: "sign-in-flood.log", contentType: "text/plain", size: 9, actor: { kind: "agent", session: { id: mcp.transport.sessionId } } });
+
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const image = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "proxy-ip.png", contentBase64: png.toString("base64"), contentType: "image/png" });
+    expect(image.body.attachment).toMatchObject({ contentType: "image/png", size: 8 });
+    expect((await admin.download(`/api/attachments/${image.body.attachment.id}/file`)).body.equals(png)).toBe(true);
+
+    expect(await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "x", content: "a", contentBase64: "YQ==" })).toEqual({
+      isError: true,
+      body: "The attach action needs either content or contentBase64, not both",
+    });
+    const listed = await callTool(mcp, "attachments", { action: "list", key: "CRONK-1" });
+    expect(listed.body).toEqual((await admin.get("/api/tickets/CRONK-1/attachments")).body);
+  });
+
+  it("takes files of several MB, not only what fits a small JSON request", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const recording = Buffer.alloc(3 * 1024 * 1024, 7);
+    const attached = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "repro.mp4", contentBase64: recording.toString("base64"), contentType: "video/mp4" });
+    expect(attached.body.attachment).toMatchObject({ name: "repro.mp4", size: recording.length });
+  });
+
+  it("offers a read-only token only list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "attachments")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
   });
 });

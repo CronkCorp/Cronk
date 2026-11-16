@@ -1,9 +1,10 @@
 import { insertActivity, markAnswered, type Activity } from "../coordination/activities.js";
-import { ACTIVITY_KINDS, PRIORITIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, VERIFICATIONS } from "../../shared/values.js";
 import { recordChange, ticketKeySql } from "../work/tickets.js";
 import { findUserById } from "../identity/users.js";
 import { storeRelation } from "../work/relations.js";
 import { storeDocumentLink } from "../work/document-links.js";
+import { exportAttachments, importAttachments } from "./attachments.js";
 import { exportComments, importComments } from "./comments.js";
 import { exportDocument, importDocument, type DocumentRow } from "./documents.js";
 import { exportHistory, importHistory } from "./history.js";
@@ -29,6 +30,8 @@ interface TicketRow {
   assignee_id: string | null;
   delegate_id: string | null;
   parent_number: number | null;
+  autonomous: boolean;
+  verification: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -87,6 +90,9 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
         assignee: ctx.user(t.assignee_id),
         delegate: ctx.agent(t.delegate_id),
         parent: t.parent_number === null ? null : `${projectKey}-${t.parent_number}`,
+        // Written only when set, as a Ticket from before Autonomous Delegation has neither.
+        autonomous: t.autonomous || undefined,
+        verification: t.verification ?? undefined,
         blocks: sorted(related("blocks", "from")),
         blockedBy: sorted(related("blocks", "to")),
         relatesTo: sorted([...related("relates_to", "from"), ...related("relates_to", "to")]),
@@ -98,6 +104,7 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
     );
   });
   await exportActivitiesAndComments(ctx, base, t.id);
+  await exportAttachments(ctx, base, t.id);
   await exportHistory(ctx, base, t.id, statusNow);
   const { rows: reports } = await ctx.db.query<DocumentRow>("SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id", [t.id]);
   for (const [i, r] of reports.entries()) await exportDocument(ctx, `${base}.reports/${i + 1}`, r);
@@ -152,6 +159,8 @@ export class ImportedTickets {
   readonly relations: PendingRelation[] = [];
   readonly documentLinks: PendingDocumentLink[] = [];
   readonly histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
+  /** Agents' proposed Decisions, by the key of the Ticket each came from, to link once the Tickets are in. */
+  readonly decisionSources: { decisionId: string; ticketKey: string; claimId: string | null }[] = [];
   /** Delegated Tickets the export left without an Assignee, which this import assigned to the Delegate's Owner. */
   readonly assignedToOwner: { ticketId: string; ownerId: string }[] = [];
 
@@ -162,6 +171,14 @@ export class ImportedTickets {
       const to = this.ids.get(r.to);
       if (!from || !to || from === to) continue;
       await storeRelation(ctx.db, { kind: r.kind, from, to });
+    }
+  }
+
+  /** Links each proposed Decision to the Ticket it came from, if that Ticket came in with this import. */
+  async storeDecisionSources(ctx: ImportContext): Promise<void> {
+    for (const { decisionId, ticketKey, claimId } of this.decisionSources) {
+      const ticketId = this.ids.get(ticketKey.toUpperCase());
+      if (ticketId) await ctx.db.query("UPDATE decisions SET source_ticket_id = $2, source_claim_id = $3 WHERE id = $1", [decisionId, ticketId, claimId]);
     }
   }
 
@@ -202,6 +219,7 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
     const history = ctx.read(`${base}.history.md`);
     if (history) tickets.histories.push({ ticketId: id, statusIds: project.statusIds, file: history });
     await importActivitiesAndComments(ctx, base, id);
+    await importAttachments(ctx, base, id);
     for (const report of ctx.filesIn(`${base}.reports`)) {
       await importDocument(ctx, report.slice(0, -".md".length), { projectId: project.id, parentId: null, position: 0, ticketId: id });
     }
@@ -228,9 +246,11 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
   const assignedToOwner = delegate && assignee === null ? delegate.ownerId : undefined;
   const labels = t.data.labels ?? [];
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === "string")) refuse(`${t.path} labels must be a list of text`);
+  if (t.data.autonomous !== undefined && typeof t.data.autonomous !== "boolean") refuse(`${t.path} autonomous must be true or false`);
+  const verification = t.data.verification === undefined || t.data.verification === null ? null : oneOf(t.data.verification, VERIFICATIONS, `${t.path} verification`);
   const { rows } = await ctx.db.query<{ id: string }>(
-    `INSERT INTO tickets (project_id, number, title, description, status_id, priority, labels, assignee_id, delegate_id, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    `INSERT INTO tickets (project_id, number, title, description, status_id, priority, labels, assignee_id, delegate_id, autonomous, verification, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
     [
       project.id,
       number,
@@ -241,6 +261,8 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
       labels,
       assignee ?? assignedToOwner ?? null,
       delegate?.id ?? null,
+      t.data.autonomous === true,
+      verification,
       date(t.data.createdAt, `${t.path} createdAt`),
       date(t.data.updatedAt, `${t.path} updatedAt`),
     ],

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type { AppConfig } from "./app.js";
+import type { StorageConfig } from "./files/storage.js";
 
 export interface ServerConfig extends AppConfig {
   host: string;
@@ -16,6 +17,12 @@ export interface ServerConfig extends AppConfig {
  * - `PUBLIC_URL` (optional): the address Users reach Cronk at, such as `https://cronk.example`. Signed-in
  *   writes are taken only from this site; without it, from the host each request was sent to.
  * - `WEB_ROOT` (default: the built client next to the server, if present), absolute or relative to the working directory.
+ * - `FILES_STORAGE` (default `disk`): where the files of Attachments are stored, `disk` or `s3` (any S3-compatible store).
+ * - `FILES_DIR` (default `data/files`): with `disk`, the directory files are stored in, absolute or relative to the working directory.
+ *   Keep it on a volume that outlives the server, like the database's.
+ * - With `s3`: `S3_BUCKET` (required), `S3_ENDPOINT` (default: AWS S3 itself), `S3_REGION` (default `us-east-1`),
+ *   `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` (default: the AWS SDK's usual sources), and `S3_FORCE_PATH_STYLE`
+ *   (default `true` with an `S3_ENDPOINT`, else `false`).
  */
 export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): ServerConfig {
   const databaseUrl = env.DATABASE_URL;
@@ -35,5 +42,24 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
     cookieSecure: cookieSecure === "true",
     publicUrl,
     webRoot: env.WEB_ROOT ? resolve(env.WEB_ROOT) : defaultWebRoot,
+    storage: loadStorage(env),
   };
+}
+
+function loadStorage(env: NodeJS.ProcessEnv): StorageConfig {
+  const kind = env.FILES_STORAGE || "disk";
+  if (kind === "disk") return { kind, dir: resolve(env.FILES_DIR || "data/files") };
+  if (kind !== "s3") throw new Error(`FILES_STORAGE must be "disk" or "s3", got "${kind}"`);
+  const bucket = env.S3_BUCKET;
+  if (!bucket) throw new Error("S3_BUCKET is required when FILES_STORAGE is s3");
+  const endpoint = env.S3_ENDPOINT || undefined;
+  const accessKeyId = env.S3_ACCESS_KEY_ID || undefined;
+  const secretAccessKey = env.S3_SECRET_ACCESS_KEY || undefined;
+  if (!accessKeyId !== !secretAccessKey) {
+    throw new Error("Set both S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY, or neither to use the AWS SDK's usual credentials");
+  }
+  // Self-hosted stores such as MinIO answer only at `endpoint/bucket`; AWS S3 prefers `bucket.endpoint`.
+  const pathStyle = env.S3_FORCE_PATH_STYLE || (endpoint ? "true" : "false");
+  if (pathStyle !== "true" && pathStyle !== "false") throw new Error(`S3_FORCE_PATH_STYLE must be "true" or "false", got "${pathStyle}"`);
+  return { kind, bucket, endpoint, region: env.S3_REGION || "us-east-1", accessKeyId, secretAccessKey, forcePathStyle: pathStyle === "true" };
 }

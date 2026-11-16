@@ -1,11 +1,13 @@
+import { Banner } from "./components/banner.js";
 import { Button, buttonClass } from "./components/button.js";
-import { Chip, KindLabel, StatusPill, type Kind } from "./components/tags.js";
+import { Chip, DecisionStatusPill, KindLabel, StatusPill, type Kind } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type StatusCategory } from "./api.js";
+import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
@@ -14,7 +16,7 @@ import { Show, TextArea, useAction, useLoad } from "./ui.js";
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
 // one on the right, where the User reads it in full and acts on it without leaving the Inbox.
 
-const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "To review" };
+const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "To review", unverified: "Unverified", decision: "Proposed Decisions" };
 
 /** Where the Inbox is: its filter, and the item selected in it, if the address names one. */
 export interface InboxAddress {
@@ -44,19 +46,28 @@ const inboxPath = (address: InboxAddress) => {
 
 type QuestionItem = Extract<InboxItem, { kind: "question" }>;
 type ReviewItem = Extract<InboxItem, { kind: "review" }>;
+type UnverifiedItem = Extract<InboxItem, { kind: "unverified" }>;
+type DecisionItem = Extract<InboxItem, { kind: "decision" }>;
 
-/** An item's id in the address: stable across reloads, and readable for a review. */
-const itemId = (item: InboxItem) => (item.kind === "question" ? `question-${item.question.id}` : `review-${item.ticket.key}`);
+/** An item's id in the address: stable across reloads, and readable for a review or a Decision. */
+const itemId = (item: InboxItem) =>
+  item.kind === "question" ? `question-${item.question.id}` : item.kind === "decision" ? `decision-${item.decision.key}` : `${item.kind}-${item.ticket.key}`;
 
-/** The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews. */
+/**
+ * The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews, then Unverified
+ * completions, then Decisions Agents proposed.
+ */
 const GROUPS: { name: string; holds: (item: InboxItem) => boolean }[] = [
   { name: "Blocking", holds: (item) => item.kind === "question" && item.question.blocking },
   { name: "Questions", holds: (item) => item.kind === "question" && !item.question.blocking },
   { name: "To review", holds: (item) => item.kind === "review" },
+  { name: "Unverified", holds: (item) => item.kind === "unverified" },
+  { name: "Proposed Decisions", holds: (item) => item.kind === "decision" },
 ];
 
 /**
- * The signed-in User's Inbox: Tickets In Review they are Assignee of and their Agents' open questions. It
+ * The signed-in User's Inbox: Tickets In Review they are Assignee of, Agents' Unverified completions of them, their Agents' open questions,
+ * and the Decisions Agents proposed that they review. It
  * loads again whenever the server says it may have changed. The kind filter narrows what the API returned
  * for the Project and Agent filters, so each kind's chip can show its count.
  */
@@ -165,7 +176,13 @@ interface Seen {
 }
 
 /** The empty state's heading, by the kind the Inbox is narrowed to. */
-const NOTHING: Record<InboxKind | "all", string> = { all: "Nothing waiting on you", question: "No questions waiting", review: "Nothing to review" };
+const NOTHING: Record<InboxKind | "all", string> = {
+  all: "Nothing waiting on you",
+  question: "No questions waiting",
+  review: "Nothing to review",
+  unverified: "No Unverified completions",
+  decision: "No proposed Decisions",
+};
 
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
 function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; address: InboxAddress; onChanged: () => void }) {
@@ -256,7 +273,7 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
     return (
       <div className="empty">
         <h2>{NOTHING[props.kind ?? "all"]}</h2>
-        <p className="muted">Agents' questions and Tickets handed over for review show up here.</p>
+        <p className="muted">Agents' questions, Tickets handed over for review, Agents' Unverified completions and the Decisions they propose show up here.</p>
       </div>
     );
   }
@@ -289,12 +306,16 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
           </Link>
           {selected.kind === "question" ? (
             <QuestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
+          ) : selected.kind === "unverified" ? (
+            <UnverifiedDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
+          ) : selected.kind === "decision" ? (
+            <DecisionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           ) : (
             <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           )}
         </section>
       </div>
-      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes, S sends back.</p>
+      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes or Accepts, S sends back or rejects.</p>
     </div>
   );
 }
@@ -311,16 +332,29 @@ const inOverlay = (target: EventTarget | null) => target instanceof Element && !
 /** What an item's kind label says, short in the list and in full in the detail pane, and how it is coloured. */
 function kindOf(item: InboxItem): { kind: Kind; label: string; full: string } {
   if (item.kind === "review") return { kind: "review", label: "To review", full: "To review" };
+  if (item.kind === "unverified") return { kind: "unverified", label: "Unverified", full: "Unverified completion" };
+  if (item.kind === "decision") return { kind: "decision", label: "Decision", full: "Proposed Decision" };
   return item.question.blocking
     ? { kind: "blocking", label: "Blocking", full: "Blocking question" }
     : { kind: "question", label: "Question", full: "Question" };
 }
 
-/** One item in the list: its kind, Ticket key, time, Ticket title, and a snippet of the question or the Report's title. */
+/**
+ * One item in the list: its kind, key, time and title, then a snippet: of the question, the Reports' titles, or
+ * a proposed Decision's body. The key and title are the Ticket's, or the proposed Decision's.
+ */
 function ListItem(props: { item: InboxItem; selected: boolean; arrived: boolean; to: string }) {
   const { item } = props;
   const { kind, label } = kindOf(item);
-  const snippet = item.kind === "question" ? plainText(item.question.body) : item.reports.length ? `Report: ${item.reports.map((r) => r.title).join(", ")}` : "No Report";
+  const named = item.kind === "decision" ? item.decision : item.ticket;
+  const snippet =
+    item.kind === "question"
+      ? plainText(item.question.body)
+      : item.kind === "decision"
+        ? `${item.decision.proposedBy.name}: ${plainText(item.decision.body)}`
+        : item.reports.length
+          ? `Report: ${item.reports.map((r) => r.title).join(", ")}`
+          : "No Report";
   return (
     <Link
       to={props.to}
@@ -329,24 +363,25 @@ function ListItem(props: { item: InboxItem; selected: boolean; arrived: boolean;
     >
       <span className="inbox-item-head">
         <KindLabel kind={kind}>{label}</KindLabel>
-        <span className="key">{item.ticket.key}</span>
+        <span className="key">{named.key}</span>
         <RelativeTime at={item.at} />
       </span>
-      <span className="inbox-item-title">{item.ticket.title}</span>
+      <span className="inbox-item-title">{named.title}</span>
       <span className="inbox-item-snippet">{snippet}</span>
     </Link>
   );
 }
 
-/** The detail pane's head: the item's kind, its Ticket's key and title, linking to the Ticket. */
+/** The detail pane's head: the item's kind, and its Ticket's key and title, linking to the Ticket, or else its Decision's. */
 function DetailHead(props: { item: InboxItem }) {
-  const { ticket } = props.item;
-  const { kind, full } = kindOf(props.item);
+  const { item } = props;
+  const { kind, full } = kindOf(item);
+  const [key, title, to] = item.kind === "decision" ? [item.decision.key, item.decision.title, `/decisions/${item.decision.key}`] : [item.ticket.key, item.ticket.title, `/tickets/${item.ticket.key}`];
   return (
     <div className="inbox-detail-head">
       <KindLabel kind={kind}>{full}</KindLabel>
-      <span className="key">{ticket.key}</span>
-      <Link to={`/tickets/${ticket.key}`} className="link">{ticket.title}</Link>
+      <span className="key">{key}</span>
+      <Link to={to} className="link">{title}</Link>
     </div>
   );
 }
@@ -366,7 +401,7 @@ function QuestionDetail(props: DetailProps<QuestionItem>) {
         {!props.resolved && <Chip tone={question.blocking ? "danger" : "warn"}>{`${question.agent.name} is waiting`}</Chip>}
       </div>
       <div className="inbox-question">
-        <CronkMarkdown>{question.body}</CronkMarkdown>
+        <CronkMarkdown projectKey={props.item.ticket.key.replace(/-[0-9]+$/, "")}>{question.body}</CronkMarkdown>
       </div>
       <CommentForm
         label="Answer"
@@ -445,6 +480,120 @@ function ReviewDetail(props: DetailProps<ReviewItem>) {
           <Button onClick={runComplete} disabled={props.resolved || complete.busy}>Complete</Button>
           <Button variant="secondary" onClick={() => setSendingBack(true)} disabled={props.resolved}>Send back…</Button>
           <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Started, In Review or finished: work that went on after its blocker was completed. */
+const CONTINUED: readonly StatusCategory[] = ["started", "in_review", "completed"];
+
+/**
+ * An Agent's Unverified completion: the Reports like a review, the Tickets that already continued on it,
+ * and Accept and a link to the Ticket.
+ */
+function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
+  const { ticket, reports } = props.item;
+  const [detail] = useLoad(() => api.ticket(ticket.key), [ticket.key]);
+  const continued = detail.kind === "loaded" ? detail.value.relations.blocks.filter((t) => CONTINUED.includes(t.status.category)) : [];
+  const accept = useAction(() => props.acting(() => api.accept(ticket.key)), props.onDone);
+  const runAccept = () => {
+    if (!accept.busy) void accept.run();
+  };
+  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept });
+
+  return (
+    <div className="inbox-detail-body">
+      <DetailHead item={props.item} />
+      {props.resolved && <ResolvedElsewhere />}
+      <div className="inbox-detail-who">
+        <StatusPill status={ticket.status} />
+        {ticket.delegate && <span className="muted">by <Actor actor={agentActor(ticket.delegate)} /> on its own</span>}
+      </div>
+      {continued.length > 0 && (
+        <Banner tone="info" role="status">
+          <p>{`Already continued on it: ${continued.map((t) => `${t.key} (${t.status.name})`).join(", ")}`}</p>
+        </Banner>
+      )}
+      {reports.length > 0 ? (
+        <div className="inbox-reports">
+          {reports.map((r) => <ReportCard key={r.id} report={r} />)}
+        </div>
+      ) : (
+        <p className="muted">No Report.</p>
+      )}
+      {accept.error && <p className="error" role="alert">{accept.error}</p>}
+      <div className="actions">
+        <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+        <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A Decision an Agent proposed: who proposed it and from which Ticket, its body, and Accept, Reject… with a required
+ * reason, which reaches the Agent, and a link to the Decision.
+ */
+function DecisionDetail(props: DetailProps<DecisionItem>) {
+  const { decision, ticket } = props.item;
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const accept = useAction(() => props.acting(() => api.setDecisionStatus(decision.key, "accepted")), props.onDone);
+  const reject = useAction(() => props.acting(() => api.setDecisionStatus(decision.key, "rejected", reason)), props.onDone);
+  const error = accept.error ?? reject.error;
+  const runAccept = () => {
+    if (!accept.busy) void accept.run();
+  };
+  const reasonBox = useRef<HTMLTextAreaElement>(null);
+  // Opening the Reject box puts the cursor in it, whether from the button or from S.
+  useEffect(() => {
+    if (rejecting) reasonBox.current?.focus();
+  }, [rejecting]);
+  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept, sendBack: () => (rejecting ? reasonBox.current?.focus() : setRejecting(true)) });
+
+  return (
+    <div className="inbox-detail-body">
+      <DetailHead item={props.item} />
+      {props.resolved && <ResolvedElsewhere />}
+      <div className="inbox-detail-who">
+        <DecisionStatusPill status={decision.status} />
+        <span className="muted">
+          by <Actor actor={decision.proposedBy} /> <RelativeTime at={props.item.at} />
+          {ticket && (
+            <>
+              {" from "}
+              <Link to={`/tickets/${ticket.key}`} className="link"><span className="mono">{ticket.key}</span> {ticket.title}</Link>
+            </>
+          )}
+        </span>
+      </div>
+      {decision.supersedes.length > 0 && (
+        <Banner tone="info" role="status">
+          <p>{`Supersedes ${decision.supersedes.map((s) => `${s.key} ${s.title}`).join(", ")} once accepted`}</p>
+        </Banner>
+      )}
+      <div className="markdown inbox-decision-body">
+        <CronkMarkdown>{decision.body}</CronkMarkdown>
+      </div>
+      {error && <p className="error" role="alert">{error}</p>}
+      {rejecting ? (
+        <RejectDecisionForm
+          proposedBy={decision.proposedBy}
+          reason={reason}
+          onReasonChange={setReason}
+          onReject={() => void reject.run()}
+          onCancel={() => setRejecting(false)}
+          busy={reject.busy}
+          disabled={props.resolved}
+          inputRef={reasonBox}
+        />
+      ) : (
+        <div className="actions">
+          <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+          <Button variant="secondary" onClick={() => setRejecting(true)} disabled={props.resolved}>Reject…</Button>
+          <Link to={`/decisions/${decision.key}`} className={buttonClass("ghost")}>Open Decision</Link>
         </div>
       )}
     </div>

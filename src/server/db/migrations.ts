@@ -1,5 +1,6 @@
 import type { Queryable } from "./database.js";
 import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
+import { recordAllMentions } from "../knowledge/mentions.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -519,6 +520,204 @@ export const migrations: Migration[] = [
         PRIMARY KEY (term_id, number),
         CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
       );
+    `,
+  },
+  {
+    id: "0022_decisions",
+    sql: `
+      -- The number the next Decision of a Project, or of the Workspace outside any Project, gets;
+      -- taken and bumped in one UPDATE so numbers never repeat.
+      ALTER TABLE projects ADD COLUMN next_decision_number integer NOT NULL DEFAULT 1;
+      ALTER TABLE workspaces ADD COLUMN next_decision_number integer NOT NULL DEFAULT 1;
+
+      -- A Decision belongs to a Project, or to the Workspace when project_id is null, and is numbered in
+      -- order within it. title, body, status, group_name and supersedes repeat its current Version.
+      -- supersedes and superseded_by name other Decisions of the same Project (or the Workspace) by number.
+      CREATE TABLE decisions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        number integer NOT NULL CHECK (number > 0),
+        title text NOT NULL,
+        body text NOT NULL,
+        status text NOT NULL CHECK (status IN ('proposed', 'accepted', 'rejected', 'deprecated', 'superseded')),
+        group_name text,
+        supersedes integer[] NOT NULL DEFAULT '{}',
+        superseded_by integer,
+        version integer NOT NULL,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE UNIQUE INDEX decisions_number_unique ON decisions (workspace_id, project_id, number) NULLS NOT DISTINCT;
+
+      -- Every saved state of a Decision, numbered from 1 and never changed, with the Actor who saved it:
+      -- an edit, or a change of status.
+      CREATE TABLE decision_versions (
+        decision_id uuid NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+        number integer NOT NULL,
+        title text NOT NULL,
+        body text NOT NULL,
+        status text NOT NULL,
+        group_name text,
+        supersedes integer[] NOT NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        PRIMARY KEY (decision_id, number),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+    `,
+  },
+  {
+    id: "0023_autonomous_delegation",
+    sql: `
+      -- Autonomous Delegation (work/routes.ts): whether the Delegate may complete the Ticket itself. Only Users set it.
+      ALTER TABLE tickets ADD COLUMN autonomous boolean NOT NULL DEFAULT false;
+      -- What delegating one of the Project's Tickets sets Autonomous Delegation to, unless the User says otherwise.
+      ALTER TABLE projects ADD COLUMN autonomous_by_default boolean NOT NULL DEFAULT false;
+      -- Verification of an Agent's completion: Unverified until a User Accepts it (Verified). Null for any other Ticket.
+      ALTER TABLE tickets ADD COLUMN verification text CHECK (verification IN ('unverified', 'verified'));
+    `,
+  },
+  {
+    id: "0024_attachments",
+    sql: `
+      -- A file attached to a Ticket (files/attachments.ts). Its bytes live in the file store under
+      -- attachments/<id>; the row is what Cronk knows of it. It is readable by whoever can read its Ticket.
+      CREATE TABLE attachments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        seq bigserial NOT NULL,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        name text NOT NULL CHECK (name <> ''),
+        content_type text NOT NULL,
+        size bigint NOT NULL CHECK (size >= 0),
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+      CREATE INDEX attachments_ticket ON attachments (ticket_id, seq);
+      CREATE INDEX attachments_workspace ON attachments (workspace_id);
+
+      -- The largest file an Attachment may be: 100 MB unless an Admin changes it.
+      ALTER TABLE workspaces ADD COLUMN attachment_max_bytes bigint NOT NULL DEFAULT 104857600 CHECK (attachment_max_bytes > 0);
+    `,
+  },
+  {
+    id: "0025_transcripts",
+    sql: `
+      -- The most a Transcript may hold, all its texts together, in bytes: 10 MB unless an Admin changes it.
+      ALTER TABLE workspaces ADD COLUMN transcript_max_bytes integer NOT NULL DEFAULT 10485760 CHECK (transcript_max_bytes > 0);
+
+      -- The verbatim chat behind an Agent's changes (transcripts/transcripts.ts), one per Agent and client chat id. markdown is
+      -- the latest upload's text; earlier holds, oldest first, texts a later upload didn't continue. Its Owner is its Agent's.
+      CREATE TABLE transcripts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        chat_id text NOT NULL,
+        markdown text NOT NULL,
+        earlier text[] NOT NULL DEFAULT '{}',
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        UNIQUE (agent_id, chat_id)
+      );
+
+      -- The uploading Agent's Agent Sessions a Transcript names, and so everything they changed. Links only grow.
+      CREATE TABLE transcript_sessions (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        session_id uuid NOT NULL REFERENCES agent_sessions(id),
+        PRIMARY KEY (transcript_id, session_id)
+      );
+      CREATE INDEX transcript_sessions_session ON transcript_sessions (session_id);
+    `,
+  },
+  {
+    id: "0026_mentions",
+    sql: `
+      -- What mentions each Decision and Term (knowledge/mentions.ts): the Ticket, Document, Comment, Term or
+      -- Decision whose current text names a Decision's key (kept as written, so a mention counts once a Decision
+      -- with that key exists) or a Term's name (the Term it names where the text lies). Rewritten on every change
+      -- to the text, and for every text naming a Term's name when a Term takes or gives up that name.
+      CREATE TABLE mentions (
+        ticket_id uuid REFERENCES tickets(id) ON DELETE CASCADE,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        decision_key text,
+        mentioned_term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        CHECK (num_nonnulls(ticket_id, document_id, comment_id, term_id, decision_id) = 1),
+        CHECK (num_nonnulls(decision_key, mentioned_term_id) = 1)
+      );
+      CREATE INDEX mentions_decision_key ON mentions (decision_key);
+      CREATE INDEX mentions_mentioned_term ON mentions (mentioned_term_id);
+      CREATE INDEX mentions_ticket ON mentions (ticket_id);
+      CREATE INDEX mentions_document ON mentions (document_id);
+      CREATE INDEX mentions_comment ON mentions (comment_id);
+      CREATE INDEX mentions_term ON mentions (term_id);
+      CREATE INDEX mentions_decision ON mentions (decision_id);
+    `,
+    backfill: (db) => recordAllMentions(db),
+  },
+  {
+    id: "0027_proposed_decisions",
+    sql: `
+      -- Why a Decision took its status, as the User gave it; required when rejecting one. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN status_reason text;
+      ALTER TABLE decision_versions ADD COLUMN status_reason text;
+      -- An Agent's proposed Decision: the Ticket whose Claim its Agent Session held when proposing it, and that
+      -- Claim's id (see tickets.claim_id), which a Report written in the same Claim lists it by. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      ALTER TABLE decisions ADD COLUMN source_claim_id uuid;
+      CREATE INDEX decisions_source_claim ON decisions (source_claim_id) WHERE source_claim_id IS NOT NULL;
+      -- Waiting Work is also a rejection of a Decision the Agent proposed: the Version that rejected it, with its reason.
+      ALTER TABLE waiting_work ALTER COLUMN comment_id DROP NOT NULL;
+      ALTER TABLE waiting_work ADD COLUMN decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE;
+      ALTER TABLE waiting_work ADD COLUMN decision_version integer;
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check CHECK (reason IN ('answer', 'mention', 'comment', 'rejected'));
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_on_one CHECK (
+        (comment_id IS NULL) = (reason = 'rejected') AND (decision_id IS NULL) = (reason <> 'rejected') AND (decision_version IS NULL) = (decision_id IS NULL));
+      ALTER TABLE waiting_work ADD UNIQUE (agent_id, decision_id, decision_version);
+    `,
+  },
+  {
+    id: "0028_protected",
+    sql: `
+      -- Protected (ADR 0004): Agents may read the item but never change it. Only Users set or unset the mark.
+      -- A Document's mark also covers every Document under it in the page tree, worked out when read.
+      ALTER TABLE documents ADD COLUMN protected boolean NOT NULL DEFAULT false;
+      ALTER TABLE terms ADD COLUMN protected boolean NOT NULL DEFAULT false;
+      ALTER TABLE decisions ADD COLUMN protected boolean NOT NULL DEFAULT false;
+
+      -- Every time a User marked or unmarked an item, its protection history. Exactly one item column is set.
+      CREATE TABLE protection_markings (
+        id bigserial PRIMARY KEY,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        protected boolean NOT NULL,
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        CHECK (num_nonnulls(document_id, term_id, decision_id) = 1)
+      );
+      CREATE INDEX protection_markings_document ON protection_markings (document_id) WHERE document_id IS NOT NULL;
+      CREATE INDEX protection_markings_term ON protection_markings (term_id) WHERE term_id IS NOT NULL;
+      CREATE INDEX protection_markings_decision ON protection_markings (decision_id) WHERE decision_id IS NOT NULL;
+
+      -- Accepted Decisions are Protected by default: mark those already accepted, as by the User who accepted them, then.
+      INSERT INTO protection_markings (decision_id, protected, at, actor_user_id)
+      SELECT d.id, true, v.at, v.actor_user_id
+      FROM decisions d JOIN decision_versions v ON v.decision_id = d.id
+      WHERE d.status = 'accepted'
+        AND v.number = (SELECT coalesce(max(number), 0) + 1 FROM decision_versions WHERE decision_id = d.id AND status <> 'accepted');
+      UPDATE decisions SET protected = true WHERE status = 'accepted';
     `,
   },
 ];

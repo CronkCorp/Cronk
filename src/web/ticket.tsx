@@ -20,9 +20,11 @@ import {
   type TicketRef,
 } from "./api.js";
 import { PRIORITIES } from "../shared/values.js";
-import { CronkMarkdown } from "./markdown.js";
+import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
+import { AttachmentViewer, FilesPanel, type AttachmentsView, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
+import type { Attachment } from "./api.js";
 import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
 /**
@@ -37,6 +39,7 @@ export function TicketPage(props: { ticketKey: string }) {
   const key = props.ticketKey;
   const [detail, reloadDetail] = useLoad(() => api.ticket(key), [key]);
   const [changes, reloadChanges] = useLoad(() => api.ticketChanges(key), [key]);
+  const [attachments, reloadAttachments] = useLoad(() => api.attachments(key), [key]);
   const [loaded, reloadLists] = useLoad(
     async () => {
       const [activities, reports, comments] = await Promise.all([api.activities(key), api.ticketReports(key), api.ticketComments(key)]);
@@ -57,11 +60,13 @@ export function TicketPage(props: { ticketKey: string }) {
         reloadDetail();
         reloadChanges();
         reloadLists();
+        reloadAttachments();
       },
       on: {
         changed: () => {
           reloadDetail();
           reloadChanges();
+          reloadAttachments();
         },
         activity: ({ activity }) => setArrived((a) => ({ ...a, activities: [...a.activities, activity] })),
         report: ({ report }) => setArrived((a) => ({ ...a, reports: [...a.reports, report] })),
@@ -76,6 +81,8 @@ export function TicketPage(props: { ticketKey: string }) {
       {(d) => (
         <TicketView
           detail={d}
+          attachments={attachments.kind === "loaded" ? attachments.value : []}
+          onAttached={reloadAttachments}
           live={<LiveIndicator state={live} />}
           // An Agent Session's calls keep its Claim but aren't pushed, so the page reads the Claim again when it would lapse.
           onClaimDue={reloadDetail}
@@ -130,17 +137,32 @@ const never = () => false;
 
 function TicketView(props: {
   detail: TicketDetail;
+  attachments: Attachment[];
+  onAttached: () => void;
   live: ReactNode;
   timeline: (canWrite: boolean) => ReactNode;
   onClaimDue: () => void;
 }) {
   const t = props.detail.ticket;
   const [project] = useLoad(() => api.project(t.projectKey), [t.projectKey]);
+  const [workspace] = useLoad(api.workspace, []);
   const [editing, setEditing] = useState(false);
+  const [opened, setOpened] = useState<Attachment>();
   const archived = project.kind === "loaded" && project.value.project.archived;
   const canWrite = project.kind === "loaded" && project.value.project.access === "write";
+  const attaching = useAttach(t.key, props.onAttached);
+  const dragging = usePageDrop(canWrite, (files) => void attaching.attach(files));
+  const files: AttachmentsView = {
+    attachments: props.attachments,
+    canWrite,
+    attaching,
+    maxBytes: workspace.kind === "loaded" ? workspace.value.attachmentMaxBytes : undefined,
+    dragging,
+    onOpen: setOpened,
+  };
 
   return (
+    <MarkdownPlace.Provider value={t.projectKey}>
     <article className="ticket">
       <div className="muted crumbs">
         <Link to={archived ? "/archived" : "/"} className="link">Projects</Link> /{" "}
@@ -164,12 +186,14 @@ function TicketView(props: {
               {t.description.trim() ? <CronkMarkdown>{t.description}</CronkMarkdown> : <p className="muted">No description.</p>}
             </div>
           )}
+          <TicketAttachments {...files} />
           <h2>Timeline</h2>
           {props.timeline(canWrite)}
         </div>
         <aside className="ticket-side" aria-label="Ticket fields">
           <TicketFields ticket={t} canWrite={canWrite} statuses={project.kind === "loaded" ? project.value.statuses : [t.status]} />
           {props.detail.claim && <ClaimCard claim={props.detail.claim} onDue={props.onClaimDue} />}
+          <FilesPanel {...files} />
           <section className="side-panel side-related">
             <ParentEditor ticket={t} readOnly={!canWrite} />
             {props.detail.subTickets.length > 0 && (
@@ -183,11 +207,24 @@ function TicketView(props: {
           </section>
         </aside>
       </div>
+      <AttachmentViewer
+        attachment={opened}
+        canWrite={canWrite}
+        onClose={() => setOpened(undefined)}
+        onDeleted={() => {
+          setOpened(undefined);
+          props.onAttached();
+        }}
+      />
     </article>
+    </MarkdownPlace.Provider>
   );
 }
 
-/** Status, Priority, Assignee, Delegate and Labels, each edited in place. A change shows once the Ticket's stream tells of it. */
+/**
+ * Status, Priority, Assignee, Delegate, Autonomous Delegation and Labels, each edited in place, and an Agent's completion's
+ * Verification when it has one. A change shows once the Ticket's stream tells of it.
+ */
 function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Ticket["status"][] }) {
   const t = props.ticket;
   const update = useAction((changes: TicketChanges) => api.updateTicket(t.key, changes), () => {});
@@ -216,6 +253,10 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
   const assigneeOptions: PickerOption[] = [
     { value: "", label: "Unassigned", content: none("Unassigned") },
     ...assignees.map((u) => ({ value: u.id, label: u.name, content: <Actor actor={userActor(u.name)} /> })),
+  ];
+  const autonomyOptions: PickerOption[] = [
+    { value: "off", label: "Stops at In Review", content: none("Stops at In Review") },
+    { value: "on", label: "Autonomous", content: <Chip>Autonomous</Chip> },
   ];
   const delegateOptions: PickerOption[] = [
     { value: "", label: "Not delegated", content: none("Not delegated") },
@@ -257,6 +298,16 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
         empty={t.assignee ? "None of the Assignee's Agents match" : "None of your Agents match"}
         onPick={(id) => id !== (t.delegate?.id ?? "") && void update.run({ delegateId: id || null })}
       />
+      {/* Always shown, so the User knows what the Delegate may do; delegating pre-fills it from the Project's default. */}
+      <FieldPicker
+        label="Autonomy"
+        value={t.autonomous ? <Chip>Autonomous</Chip> : none("Stops at In Review")}
+        options={autonomyOptions}
+        selected={[t.autonomous ? "on" : "off"]}
+        disabled={disabled}
+        onPick={(value) => (value === "on") !== t.autonomous && void update.run({ autonomous: value === "on" })}
+      />
+      {t.verification && <VerificationField ticket={t} canWrite={props.canWrite} />}
       <FieldPicker
         label="Labels"
         multiple
@@ -284,6 +335,22 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
       />
       {update.error && <p className="error" role="alert">{update.error}</p>}
     </section>
+  );
+}
+
+/** An Agent's completion's Verification: Unverified, with Accept, until a User Accepts it, then Verified. */
+function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
+  const accept = useAction(() => api.accept(props.ticket.key), () => {});
+  const unverified = props.ticket.verification === "unverified";
+  return (
+    <div className="side-field">
+      <span className="side-field-label">Verification</span>
+      <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
+      {unverified && props.canWrite && (
+        <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+      )}
+      {accept.error && <p className="error" role="alert">{accept.error}</p>}
+    </div>
   );
 }
 

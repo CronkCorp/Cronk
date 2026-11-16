@@ -7,6 +7,7 @@ import { agentForToken } from "./identity/agents.js";
 import { userForSignIn } from "./identity/sign-ins.js";
 import type { User } from "./identity/users.js";
 import type { LiveUpdates } from "./live/live-updates.js";
+import type { FileStore } from "./files/store.js";
 
 export const SIGN_IN_COOKIE = "cronk_sign_in";
 
@@ -28,6 +29,8 @@ export interface AppContext {
   clock: Clock;
   cookieSecure: boolean;
   live: LiveUpdates;
+  /** Where the files of Attachments are stored. */
+  files: FileStore;
 }
 
 export class HttpError extends Error {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -58,11 +58,22 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
+  | "Mention"
+  | "Transcript"
+  | "TranscriptSummary"
   | "AgentRecordEntry"
+  | "Decision"
+  | "DecisionSummary"
+  | "DecisionVersion"
+  | "DecisionVersionSummary"
+  | "StaleDecision"
   | "Term"
   | "TermVersion"
   | "StaleTermVersion"
-  | "RenamedId";
+  | "RenamedId"
+  | "ProtectionMarking"
+  | "Attachment"
+  | "AvoidedWord";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -78,6 +89,39 @@ const object = (properties: Record<string, object>, optional: string[] = []) => 
 /** A User or Agent as another record names it. */
 const named = object({ id, name: { type: "string" } });
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
+
+/** What a Transcript and its summary share. */
+const transcriptFields = {
+  id,
+  chatId: { type: "string", description: "The client's id for the chat, such as Claude Code's `session_id`; one Transcript per Agent and chat." },
+  agent: {
+    ...object({ id, name: { type: "string" }, owner: named }),
+    description: "The Agent that uploaded it, with its Owner.",
+  },
+  sessions: { type: "array", items: object({ id }), description: "The uploading Agent's Agent Sessions it names, in the order they started." },
+  tickets: {
+    type: "array",
+    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    description: "The Tickets its Sessions changed, wrote Activities or Comments on, or attached files to, that the caller can read.",
+  },
+  documents: {
+    type: "array",
+    items: object({ id, title: { type: "string" } }),
+    description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
+  },
+  terms: {
+    type: "array",
+    items: object({ id, name: { type: "string" } }),
+    description: "The Terms its Sessions saved, that the caller can read.",
+  },
+  decisions: {
+    type: "array",
+    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    description: "The Decisions its Sessions proposed or refined, that the caller can read.",
+  },
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
 /** Another Ticket as a Ticket's parent and history name it. */
 /** Who wrote an Activity or a Report: the Agent with the Owner it acts for, and the Agent Session it was in. */
 const writtenBy = {
@@ -104,6 +148,10 @@ const recordedActor = {
   ),
 };
 
+/** Describes an item's `protected` flag: true when `when`. */
+const protectedDescription = (when: string) =>
+  `Whether Agents may read but not change it, whatever their Agent Access: true when ${when}. An Agent proposes a change to it as a Suggestion.`;
+
 /** A Version's fields, all but its body. */
 const versionFields = {
   number: { type: "integer", description: "Counts from 1 per Document." },
@@ -111,6 +159,53 @@ const versionFields = {
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
   restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+};
+
+const decisionStatus = { type: "string", enum: DECISION_STATUSES } as const;
+/** Another Decision of the same Project or Workspace, as a Decision names it. */
+const decisionRef = object({ key: { type: "string" }, title: { type: "string" }, status: decisionStatus });
+
+/** A Decision's fields as its register lists them. */
+const decisionSummaryFields = {
+  id,
+  key: { type: "string", description: "Such as `CRONK-D7`, or `D7` for a Workspace Decision." },
+  number: { type: "integer", description: "Counts from 1 per Project, and in the Workspace." },
+  projectId: { ...nullable(id), description: "Null for a Workspace Decision." },
+  projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Decision." },
+  title: { type: "string" },
+  status: decisionStatus,
+  group: { ...nullable({ type: "string" }), description: "The group it is filed under; null for none." },
+  version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when editing." },
+  protected: { type: "boolean", description: protectedDescription("a User marked it Protected, as accepting it does") },
+  supersededBy: { ...nullable(decisionRef), description: "The accepted Decision that replaced it, if it is superseded." },
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+
+const decisionFields = {
+  ...decisionSummaryFields,
+  body: { type: "string", description: "Markdown." },
+  supersedes: { type: "array", items: decisionRef, description: "The Decisions it replaces once accepted, of the same Project or Workspace." },
+  sourceTicket: {
+    ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
+    description: "The Ticket an Agent was working on when it proposed it, holding its Claim; null otherwise.",
+  },
+  proposedBy: { ...recordedActor, description: "Who recorded it." },
+  statusReason: { ...nullable({ type: "string" }), description: "Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given." },
+  statusChangedAt: { ...timestamp, description: "When it took its current status." },
+  statusChangedBy: { ...recordedActor, description: "Who gave it its current status." },
+};
+
+/** A Decision Version's fields, all but its body. */
+const decisionVersionFields = {
+  number: { type: "integer", description: "Counts from 1 per Decision." },
+  title: { type: "string" },
+  status: decisionStatus,
+  statusReason: { ...nullable({ type: "string" }), description: "Why it had that status, as given when it took it." },
+  group: nullable({ type: "string" }),
+  supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
+  at: timestamp,
+  actor: { ...recordedActor, description: "Who saved it." },
 };
 
 /** What a Term says, as each of its Versions records it. */
@@ -167,6 +262,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     name: { type: "string" },
     agentAccess: agentAccessSchema,
     silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+    attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
+    transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
@@ -243,6 +340,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     archived: { type: "boolean" },
     visibility: { type: "string", enum: ["open", "private"] },
     agentAccess: agentAccessSchema,
+    autonomousByDefault: {
+      type: "boolean",
+      description: "What delegating one of its Tickets sets Autonomous Delegation to, unless the delegating User says otherwise. Off unless a User turns it on.",
+    },
     access: { ...accessSchema, description: "What the caller may do in the Project." },
   }),
   Status: object({
@@ -264,6 +365,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     assignee: nullable(named),
     delegate: { ...nullable(named), description: "The Agent the Assignee handed the Ticket to; always one of the Assignee's own." },
     parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
+    autonomous: {
+      type: "boolean",
+      description: "Autonomous Delegation: the Delegate may complete the Ticket itself, each completion Unverified until a User Accepts it. Only Users set it.",
+    },
+    verification: {
+      ...nullable({ type: "string", enum: VERIFICATIONS }),
+      description:
+        "Where an Agent's completion under Autonomous Delegation stands: `unverified` until a User Accepts it, then `verified`. Null for any other Ticket.",
+    },
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
@@ -292,7 +402,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
         ],
@@ -311,6 +421,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "labels" }, from: labels, to: labels }),
       ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
+      object({ change: { const: "autonomous" }, from: { type: "boolean" }, to: { type: "boolean" } }),
+      object({ change: { const: "verification" }, from: nullable({ type: "string", enum: VERIFICATIONS }), to: nullable({ type: "string", enum: VERIFICATIONS }) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },
@@ -367,17 +479,33 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   WaitingWork: {
-    description: "A Comment waiting for an Agent (ADR 0005), with why and what it is on.",
-    ...object({
-      reason: {
-        type: "string",
-        enum: WAITING_REASONS,
-        description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
+    description:
+      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed, with their reason.",
+    ...object(
+      {
+        reason: {
+          type: "string",
+          enum: WAITING_REASONS,
+          description:
+            "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why.",
+        },
+        comment: { ...nullable(ref("Comment")), description: "The Comment; null for a rejection." },
+        decision: {
+          ...object({
+            key: { type: "string" },
+            title: { type: "string" },
+            reason: { type: "string", description: "Why the User rejected it, in Markdown." },
+            rejectedBy: recordedActor,
+            at: timestamp,
+          }),
+          description: "For a rejection only: the Decision, as the Version that rejected it holds it.",
+        },
+        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision came from; null otherwise." },
+        document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
       },
-      comment: ref("Comment"),
-      ticket: { ...nullable(ticketName), description: "The Ticket it is on; null on a Document." },
-      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document it is on; null on a Ticket." },
-    }),
+      ["decision"],
+    ),
   },
   Document: {
     description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",
@@ -390,9 +518,42 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       title: { type: "string" },
       body: { type: "string", description: "Markdown." },
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      protected: { type: "boolean", description: protectedDescription("it is marked Protected, or sits under a Document that is") },
+      protectedBy: {
+        ...nullable(object({ id, title: { type: "string" } })),
+        description: "The Document whose Protected mark covers it: itself if marked, else the nearest marked Document above it; null if none.",
+      },
+      covers: { type: "integer", description: "When it is itself marked Protected, how many Documents under it the mark covers; 0 otherwise." },
       createdAt: timestamp,
       updatedAt: timestamp,
     }),
+  },
+  ProtectionMarking: {
+    description: "One marking or unmarking of an item as Protected, with the User who did it.",
+    ...object({
+      protected: { type: "boolean", description: "True when it was marked, false when unmarked." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "The User who did it; only Users mark and unmark." },
+    }),
+  },
+  Decision: {
+    description:
+      "A recorded choice with its reasoning and a status, belonging to a Project or the Workspace, kept as Markdown. Only Users change its status; " +
+      "accepting a Decision that supersedes others marks them superseded.",
+    ...object(decisionFields),
+  },
+  DecisionSummary: {
+    description: "A Decision as its register lists it, without its body; read it by its key.",
+    ...object(decisionSummaryFields),
+  },
+  DecisionVersion: {
+    description: "One saved state of a Decision, an edit or a change of status, recording which Actor produced it. Never changes.",
+    ...object({ ...decisionVersionFields, body: { type: "string", description: "Markdown." } }),
+  },
+  DecisionVersionSummary: { description: "A Decision's Version without its body, as its Version list shows it.", ...object(decisionVersionFields) },
+  StaleDecision: {
+    description: "An edit of a Decision refused because the Version it is based on is no longer current, with the current Version to merge with.",
+    ...object({ error: { type: "string" }, current: ref("DecisionVersion") }),
   },
   Report: {
     description:
@@ -407,6 +568,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       createdAt: timestamp,
       updatedAt: timestamp,
       ...writtenBy,
+      decisions: {
+        type: "array",
+        items: decisionRef,
+        description: "The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the Workspace, oldest first.",
+      },
     }),
   },
   LinkedDocument: {
@@ -426,6 +592,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
     }),
   },
+  Mention: {
+    description:
+      "Something whose current text mentions a Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term or Decision.",
+    ...object({
+      kind: { type: "string", enum: MENTION_KINDS, description: "What mentions it." },
+      id: { ...id, description: "Its id; read a Ticket or Decision by its key instead." },
+      key: { ...nullable({ type: "string" }), description: "A Ticket's or Decision's key; null for the others." },
+      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket or Document it is on." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, or a Report: the Ticket's key." },
+      documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
+    }),
+  },
   DocumentTreeEntry: {
     description: "A Document as its page tree lists it.",
     ...object({
@@ -433,6 +613,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       parentId: { ...nullable(id), description: "The Document it sits under; null at the top." },
       title: { type: "string" },
       depth: { type: "integer", description: "How deep it sits: 0 at the top." },
+      protected: { type: "boolean", description: protectedDescription("it, or a Document above it, is marked Protected") },
     }),
   },
   Version: {
@@ -482,6 +663,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Term." },
       ...termFields,
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      protected: { type: "boolean", description: protectedDescription("a User marked it Protected") },
       createdAt: timestamp,
       updatedAt: timestamp,
       overrides: {
@@ -508,6 +690,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A save or delete of a Term refused because the Version it is based on is no longer current, with the current Version.",
     ...object({ error: { type: "string" }, current: ref("TermVersion") }),
   },
+  AvoidedWord: {
+    description:
+      "A word a Term says to avoid, found in the prose a save wrote, with the Term to use instead. The save succeeds regardless; " +
+      "words in code spans, code blocks, block quotes and raw HTML don't count.",
+    ...object({
+      field: { type: "string", description: "The request field it was written in, such as `title`, `body` or `description`." },
+      word: { type: "string", description: "The word or phrase as written." },
+      line: { type: "integer", minimum: 1, description: "The line it starts on in the field as sent, counting from 1." },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "The column of that line it starts at, counting from 1 in UTF-16 code units, as JavaScript strings index text.",
+      },
+      term: { ...named, description: "The Term to use instead, as it applies where the text was saved." },
+    }),
+  },
   RenamedId: {
     description: "An Agent or Agent Session an import gave a new id, because the id it had in the export was taken.",
     ...object({
@@ -518,7 +716,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   AgentRecordEntry: {
-    description: "One entry in an Agent's record: one thing it did. `kind` says which; the field named after it holds what, and the other three are null.",
+    description: "One entry in an Agent Record: one thing the Agent did. `kind` says which; the field named after it holds what, and the other three are null.",
     ...object({
       kind: { type: "string", enum: ["change", "activity", "comment", "version"], description: "A Change to a Ticket, an Activity, a Comment or a saved Version." },
       at: timestamp,
@@ -537,6 +735,38 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       comment: { ...nullable(object({ id, body: { type: "string" } })), description: "A Comment it posted; the body is Markdown." },
       version: { ...nullable(object({ number: { type: "integer" } })), description: "A Version of the Document it saved." },
     }),
+  },
+  Attachment: {
+    description:
+      "A plain file, such as an image, video, PDF or log, attached to a Ticket. Whoever can read the Ticket can read it; " +
+      "download it from GET /api/attachments/{id}/file.",
+    ...object({
+      id,
+      ticketKey: { type: "string", description: "The Ticket it is attached to." },
+      name: { type: "string", description: "Its file name, as attached." },
+      contentType: { type: "string", description: "Its media type, such as `image/png`, as attached." },
+      size: { type: "integer", description: "Its size in bytes." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who attached it." },
+    }),
+  },
+  Transcript: {
+    description:
+      "The verbatim chat that led an Agent to change things, uploaded from the client side and linked by the Agent's own Agent Session ids found in it, " +
+      "and so to everything those Sessions changed.",
+    ...object({
+      ...transcriptFields,
+      markdown: { type: "string", description: "The text of the latest upload, in the turn convention (Markdown)." },
+      earlier: {
+        type: "array",
+        items: { type: "string" },
+        description: "Texts of earlier uploads that a later one didn't continue, oldest first; kept beside the latest.",
+      },
+    }),
+  },
+  TranscriptSummary: {
+    description: "A Transcript without its text.",
+    ...object(transcriptFields),
   },
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
@@ -559,6 +789,13 @@ export function addSharedSchemas(app: FastifyInstance): void {
 /** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
 export const holding = (field: string, name: SharedSchemaName) => object({ [field]: ref(name) });
 
+/**
+ * The answer to a save of text: one field holding a shared shape, such as `{ report: Document }`, and
+ * `avoidedWords`, the words a Term says to avoid that the save wrote, in the order of the request's fields.
+ */
+export const savedHolding = (field: string, name: SharedSchemaName) =>
+  object({ [field]: ref(name), avoidedWords: { type: "array", items: ref("AvoidedWord") } });
+
 /** A JSON body with one field listing items, such as `{ tickets: Ticket[] }`. */
 export const listing = (field: string, items: object) => object({ [field]: { type: "array", items } });
 
@@ -578,6 +815,9 @@ const ERROR_MEANINGS = {
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",
+  413: "The upload is larger than the Workspace allows: an Attachment's file, or a Transcript with every text it keeps",
+  416: "The range asked for lies outside the file",
+  422: "The request is well formed but can't be kept as it is",
 } as const;
 
 /** The error answers of a route, each with the shared `Error` shape. */
@@ -597,8 +837,27 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 
+/** An Attachment's id. */
+export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
+
 /** A Term's id. */
 export const termIdParam = { type: "string", format: "uuid", description: "The Term's id." } as const;
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
+
+/** The body of a request marking an item Protected or unmarking it. */
+export const protectionBody = {
+  type: "object",
+  required: ["protected"],
+  additionalProperties: false,
+  properties: {
+    protected: { type: "boolean", description: "True to mark it Protected, so Agents may read but not change it; false to unmark it." },
+  },
+} as const;
+
+/** An item's protection history, newest first. */
+export const protectionHistoryAnswer = answer(
+  "Each time a User marked it Protected or unmarked it, newest first",
+  listing("markings", ref("ProtectionMarking")),
+);

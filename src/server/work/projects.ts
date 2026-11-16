@@ -26,6 +26,8 @@ export interface Project {
   archived: boolean;
   visibility: Visibility;
   agentAccess: AgentAccess;
+  /** What delegating one of its Tickets sets Autonomous Delegation to, unless the User says otherwise. */
+  autonomousByDefault: boolean;
 }
 
 export interface Status {
@@ -41,6 +43,7 @@ interface ProjectRow {
   archived_at: Date | null;
   visibility: Visibility;
   agent_access: AgentAccess;
+  autonomous_by_default: boolean;
 }
 
 const toProject = (row: ProjectRow): Project => ({
@@ -50,6 +53,7 @@ const toProject = (row: ProjectRow): Project => ({
   archived: row.archived_at !== null,
   visibility: row.visibility,
   agentAccess: row.agent_access,
+  autonomousByDefault: row.autonomous_by_default,
 });
 
 /** Creates a Project with the default Statuses, or returns undefined if its key is taken. Run inside a transaction. */
@@ -212,7 +216,7 @@ export async function deleteStatus(db: Queryable, statusId: string): Promise<voi
 export async function updateProject(
   db: Queryable,
   id: string,
-  changes: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess },
+  changes: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess; autonomousByDefault?: boolean },
   now: Date,
 ): Promise<Project> {
   const { rows } = await db.query<ProjectRow>(
@@ -220,11 +224,12 @@ export async function updateProject(
        name = coalesce($2, name),
        visibility = coalesce($5, visibility),
        agent_access = coalesce($6, agent_access),
+       autonomous_by_default = coalesce($7, autonomous_by_default),
        archived_at = CASE WHEN $3::boolean IS NULL THEN archived_at
                           WHEN $3 THEN coalesce(archived_at, $4)
                           ELSE NULL END
      WHERE id = $1 RETURNING *`,
-    [id, changes.name ?? null, changes.archived ?? null, now, changes.visibility ?? null, changes.agentAccess ?? null],
+    [id, changes.name ?? null, changes.archived ?? null, now, changes.visibility ?? null, changes.agentAccess ?? null, changes.autonomousByDefault ?? null],
   );
   return toProject(rows[0]!);
 }

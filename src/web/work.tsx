@@ -117,7 +117,7 @@ function NewProject(props: { onDone: (project: Project) => void; onCancel: () =>
 export type ProjectView = "list" | "board" | "reports" | "settings";
 
 /** The sections of a Project's settings, in the order the settings view shows them. */
-export type SettingsSection = "access" | "agent-access" | "statuses" | "guidance";
+export type SettingsSection = "access" | "agent-access" | "autonomous-delegation" | "statuses" | "guidance";
 
 /**
  * The view a Project page's `view` parameter asks for, and the settings section it lands on. Statuses and
@@ -189,6 +189,13 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
     async (access: AgentAccess) => {
       if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
       return { ...project.value, project: await api.updateProject(props.projectKey, { agentAccess: access }) };
+    },
+    setProject,
+  );
+  const autonomousByDefault = useAction(
+    async (on: boolean) => {
+      if (project.kind !== "loaded") throw new Error("The Project hasn't loaded");
+      return { ...project.value, project: await api.updateProject(props.projectKey, { autonomousByDefault: on }) };
     },
     setProject,
   );
@@ -292,6 +299,26 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                           onChange={(a) => void agentAccess.run(a)}
                         />
                         {agentAccess.error && <p className="error" role="alert">{agentAccess.error}</p>}
+                      </div>
+                    </SettingsPart>
+                    <SettingsPart id="autonomous-delegation" title="Autonomous Delegation" landOn={props.section}>
+                      <div className="panel wide">
+                        <p className="muted">
+                          Whether delegating one of this Project's Tickets lets the Agent complete it itself, rather than stopping at In Review.
+                          Each completion stays Unverified until a User Accepts it. You can still change it on each Ticket.
+                        </p>
+                        <label className="field inline">
+                          <span>When delegating</span>
+                          <select
+                            value={p.autonomousByDefault ? "on" : "off"}
+                            disabled={p.access !== "write" || autonomousByDefault.busy}
+                            onChange={(e) => void autonomousByDefault.run(e.target.value === "on")}
+                          >
+                            <option value="off">Stops at In Review</option>
+                            <option value="on">Autonomous</option>
+                          </select>
+                        </label>
+                        {autonomousByDefault.error && <p className="error" role="alert">{autonomousByDefault.error}</p>}
                       </div>
                     </SettingsPart>
                     <SettingsPart id="statuses" title="Statuses" landOn={props.section}>

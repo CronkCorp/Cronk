@@ -3,6 +3,7 @@ import { insertTermRow, insertTermVersion, tidyFields, type TermFields } from ".
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, integer, list, refuse, text, type File } from "./fields.js";
 import { isRecord } from "./format.js";
+import { importProtection, protectionToExport } from "./protection.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -17,6 +18,7 @@ interface TermRow {
   avoid: string[];
   group_name: string | null;
   version: number;
+  protected: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -46,6 +48,7 @@ export async function exportTerms(ctx: ExportContext, dir: string, place: { proj
     terms.push({
       ...fieldsOf(t),
       version: t.version,
+      ...(await protectionToExport(ctx, { kind: "term", id: t.id }, t.protected)),
       createdAt: iso(t.created_at),
       createdBy: ctx.actor(versions[0]!),
       updatedAt: iso(t.updated_at),
@@ -88,6 +91,7 @@ export async function importTerms(ctx: ImportContext, dir: string, projectId: st
       createdAt: date(entry.createdAt, `${where} createdAt`),
       updatedAt: date(entry.updatedAt, `${where} updatedAt`),
     });
+    await importProtection(ctx, { kind: "term", id }, entry, where);
     if (versions.length === 0) {
       const actor = await ctx.actor(entry.createdBy, `${where} createdBy`);
       await insertTermVersion(ctx.db, id, { number: 1, ...fields, at: date(entry.updatedAt, `${where} updatedAt`), actor });
