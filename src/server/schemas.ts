@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -75,6 +75,7 @@ export type SharedSchemaName =
   | "Attachment"
   | "Artifact"
   | "ArtifactVersion"
+  | "ExtraOrigin"
   | "StaleArtifact"
   | "EmbeddedIn"
   | "AvoidedWord"
@@ -309,6 +310,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
     artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
     artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
+    artifactAllowedOrigins: {
+      type: "array",
+      items: { type: "string" },
+      description: "The origins every Artifact may load scripts, styles and fonts from, besides its own files.",
+    },
+    artifactExtraOriginsAllowed: {
+      type: "boolean",
+      description: "Whether a publish may declare extra origins for its Version; turned off, Versions are served without those they declared.",
+    },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
@@ -837,6 +847,18 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       actor: { ...recordedActor, description: "Who attached it." },
     }),
   },
+  ExtraOrigin: {
+    description: "An origin a publish declared for its Version beyond the Workspace's allow-list: what the page loads from there, and why.",
+    ...object({
+      origin: { type: "string", description: "A bare origin, such as `https://cdn.plot.ly`." },
+      uses: {
+        type: "array",
+        items: { type: "string", enum: EXTRA_ORIGIN_USES },
+        description: "What the page may load from it; `connect` lets it send requests there.",
+      },
+      reason: { type: "string", description: "Why the page needs it, as the publisher wrote it." },
+    }),
+  },
   Artifact: {
     description:
       "A folder of files with `index.html`, such as a prototype or dashboard, published by a User or an Agent and served in isolation " +
@@ -858,6 +880,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: {
           ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
           description: "The Ticket the latest Version came from: the one whose Claim the publishing Agent Session held.",
+        },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins the latest Version's publish declared; served with it only while the Workspace allows extra origins.",
         },
         createdAt: timestamp,
         updatedAt: { ...timestamp, description: "When its latest Version was published." },
@@ -881,6 +908,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: { ...nullable(object({ key: { type: "string" }, title: { type: "string" } })), description: "The Ticket it came from, if any." },
         fileCount: { type: "integer", description: "How many files it holds." },
         size: { type: "integer", description: "How many bytes its files take." },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins its publish declared, never carried over from an earlier Version; served with it only while the Workspace allows extra origins.",
+        },
         url: { type: "string", description: "Its address in Cronk." },
         frameUrl: { type: "string", description: "Where it is served on the Artifact hostname, signed for the caller and valid for 12 hours; only when one Version is asked for." },
         files: {
@@ -912,7 +944,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Suggestion: {
     description:
-      "A new Version of a Protected Document, Term or Decision, or of Guidance, that an Agent proposes (ADR 0014): the item's whole new content, the Version it " +
+      "A new Version of a Protected Document, Term or Decision, or of Guidance, or a new Document under a protected branch, that an Agent proposes (ADR 0014): " +
+      "the item's whole new content, the Version it " +
       "started from and the Agent's reasoning. It takes effect only when a User accepts it: unchanged, as the item's next Version credited to the Agent; " +
       "edited first, credited to the User and linked to the Suggestion. Rejecting it needs a reason, which reaches the Agent as Waiting Work.",
     ...object({
@@ -921,20 +954,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The item it would change, as it stands now.",
         ...object({
           kind: { type: "string", enum: SUGGESTION_KINDS },
-          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance." },
+          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance, and for a new Document until it is accepted." },
           key: { ...nullable({ type: "string" }), description: "A Decision's key; null for the other kinds." },
-          title: { type: "string", description: "A Document's or Decision's title, a Term's name, or `Guidance`." },
+          title: { type: "string", description: "A Document's or Decision's title (a new Document's as suggested), a Term's name, or `Guidance`." },
           status: { ...nullable(decisionStatus), description: "A Decision's status; null for the other kinds." },
           projectId: { ...nullable(id), description: "Null for a Workspace item." },
           projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace item." },
           protected: { type: "boolean", description: protectedDescription("it is marked Protected (Guidance always is)") },
-          version: { type: "integer", description: "Its current Version." },
+          version: { type: "integer", description: "Its current Version; 0 for a new Document until it is accepted." },
         }),
       },
       baseVersion: { type: "integer", description: "The Version of the item the Suggestion started from." },
       base: { ...suggestedContent, description: "What the item held at the base Version, in the same shape as `content`." },
       content: suggestedContent,
       reasoning: { type: "string", description: "Why the Agent suggests the change, in Markdown." },
+      parent: {
+        ...nullable(object({ id, title: { type: "string" } })),
+        description:
+          "For a Suggestion of a new Document under a protected branch (`baseVersion` 0, `item.id` null until accepted): the Document it goes under; " +
+          "once accepted, the one the new Document sits under now, null at the top. Null for a Suggestion changing an existing item.",
+      },
       proposedBy: { ...recordedActor, description: "The Agent that made it, with its Owner and Agent Session." },
       at: timestamp,
       sourceTicket: { ...nullable(ticketName), description: "The Ticket whose Claim the Agent held when making it; null for none." },

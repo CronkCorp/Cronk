@@ -16,7 +16,8 @@ import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
 
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
-// one on the right, where the User reads it in full and acts on it without leaving the Inbox.
+// one on the right, where the User reads it in full and acts on it without leaving the Inbox. Triage (triage.tsx)
+// is the same split view over the waiting items with no clear User (docs/ui.md § Inbox and Triage in Phase 2).
 
 const KIND_NAMES: Record<InboxKind, string> = {
   question: "Questions",
@@ -46,11 +47,14 @@ export function inboxAddressFrom(search: URLSearchParams): InboxAddress {
   };
 }
 
-const inboxPath = (address: InboxAddress) => {
+/** The address of a split view at `base` with a filter and a selected item, such as the Inbox's or Triage's. */
+export const viewPath = (base: string, address: { filter: object; item?: string }) => {
   const entries = [...Object.entries(address.filter), ["item", address.item]];
   const query = new URLSearchParams(entries.filter((entry): entry is [string, string] => !!entry[1]));
-  return `/inbox${query.size ? `?${query}` : ""}`;
+  return `${base}${query.size ? `?${query}` : ""}`;
 };
+
+const inboxPath = (address: InboxAddress) => viewPath("/inbox", address);
 
 type QuestionItem = Extract<InboxItem, { kind: "question" }>;
 type ReviewItem = Extract<InboxItem, { kind: "review" }>;
@@ -59,7 +63,7 @@ type DecisionItem = Extract<InboxItem, { kind: "decision" }>;
 type SuggestionItem = Extract<InboxItem, { kind: "suggestion" }>;
 
 /** An item's id in the address: stable across reloads, and readable for a review or a Decision. */
-const itemId = (item: InboxItem) =>
+export const itemId = (item: InboxItem) =>
   item.kind === "question"
     ? `question-${item.question.id}`
     : item.kind === "decision"
@@ -68,17 +72,24 @@ const itemId = (item: InboxItem) =>
         ? `suggestion-${item.suggestion.id}`
         : `${item.kind}-${item.ticket.key}`;
 
+/** A group of the list: its name, the kind of item it holds, and which items of that kind. */
+export interface Group {
+  name: string;
+  kind: InboxKind;
+  holds: (item: InboxItem) => boolean;
+}
+
 /**
  * The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews, then Unverified
  * completions, then Agents' Suggestions, then Decisions Agents proposed.
  */
-const GROUPS: { name: string; holds: (item: InboxItem) => boolean }[] = [
-  { name: "Blocking", holds: (item) => item.kind === "question" && item.question.blocking },
-  { name: "Questions", holds: (item) => item.kind === "question" && !item.question.blocking },
-  { name: "To review", holds: (item) => item.kind === "review" },
-  { name: "Unverified", holds: (item) => item.kind === "unverified" },
-  { name: "Suggestions", holds: (item) => item.kind === "suggestion" },
-  { name: "Proposed Decisions", holds: (item) => item.kind === "decision" },
+export const GROUPS: Group[] = [
+  { name: "Blocking", kind: "question", holds: (item) => item.kind === "question" && item.question.blocking },
+  { name: "Questions", kind: "question", holds: (item) => item.kind === "question" && !item.question.blocking },
+  { name: "To review", kind: "review", holds: (item) => item.kind === "review" },
+  { name: "Unverified", kind: "unverified", holds: (item) => item.kind === "unverified" },
+  { name: "Suggestions", kind: "suggestion", holds: (item) => item.kind === "suggestion" },
+  { name: "Proposed Decisions", kind: "decision", holds: (item) => item.kind === "decision" },
 ];
 
 /**
@@ -91,7 +102,6 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
   const { filter } = props.address;
   const { kind: _kind, ...scope } = filter;
   const [items, reload] = useLoad(() => api.inbox(scope), [filter.project, filter.agent]);
-  const [projects] = useLoad(() => api.projects(), []);
   const [agents] = useLoad(() => api.agents(), []);
   // Reload on every (re)connect, so changes made while the stream was away aren't missed, and on each change.
   const [live, onLive] = useLiveState();
@@ -99,7 +109,6 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
   // A new filter starts a new list, so nothing selected before carries over.
   const setFilter = (changes: InboxFilter) => navigate(inboxPath({ filter: { ...filter, ...changes } }));
   const all = items.kind === "loaded" ? items.value : [];
-  const count = (kind?: InboxKind) => all.filter((item) => !kind || item.kind === kind).length;
   const agentName = agents.kind === "loaded" ? agents.value.find((a) => a.id === filter.agent)?.name : undefined;
 
   return (
@@ -108,20 +117,7 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
         <h1>Inbox</h1>
         <div className="inbox-filters" role="group" aria-label="Filters">
           <LiveIndicator state={live} />
-          <FilterChip pressed={!filter.kind} onClick={() => setFilter({ kind: undefined })}>{`Everything ${count()}`}</FilterChip>
-          {(Object.keys(KIND_NAMES) as InboxKind[]).map((kind) => (
-            <FilterChip key={kind} pressed={filter.kind === kind} onClick={() => setFilter({ kind })}>
-              {`${KIND_NAMES[kind]} ${count(kind)}`}
-            </FilterChip>
-          ))}
-          <Menu
-            label="Filter by Project"
-            trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${filter.project} ▾` : "Project ▾"}</FilterChip>}
-            items={[
-              { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
-              ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
-            ]}
-          />
+          <KindAndProjectFilters kinds={KIND_NAMES} items={all} filter={filter} setFilter={setFilter} />
           <Menu
             label="Filter by Agent"
             trigger={<FilterChip menu pressed={!!filter.agent}>{filter.agent ? `Agent: ${agentName ?? "unknown"} ▾` : "Agent ▾"}</FilterChip>}
@@ -137,14 +133,54 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
           <InboxSplit
             key={`${filter.project ?? ""}/${filter.agent ?? ""}/${filter.kind ?? ""}`}
             items={loaded.filter((item) => !filter.kind || item.kind === filter.kind)}
-            kind={filter.kind}
-            address={props.address}
+            item={props.address.item}
+            pathTo={(item) => inboxPath({ filter, ...(item ? { item: itemId(item) } : {}) })}
+            groups={GROUPS}
+            label="Inbox items"
+            empty={{
+              heading: NOTHING[filter.kind ?? "all"],
+              hint: "Agents' questions, Tickets handed over for review, Agents' Unverified completions, and the Suggestions and Decisions they propose show up here.",
+            }}
+            keysHint="J / K moves through the list, A answers, C completes or Accepts, S sends back, reopens or rejects."
             me={props.me}
             onChanged={reload}
           />
         )}
       </Show>
     </section>
+  );
+}
+
+/**
+ * The filter chips a split view shares: Everything and one per kind, each with its count among `items`, then the Project menu.
+ * `kinds` names the kinds the view holds, in the order their chips are shown.
+ */
+export function KindAndProjectFilters<K extends InboxKind>(props: {
+  kinds: Record<K, string>;
+  items: InboxItem[];
+  filter: { kind?: K; project?: string };
+  setFilter: (changes: { kind?: K; project?: string }) => void;
+}) {
+  const { filter, setFilter } = props;
+  const [projects] = useLoad(() => api.projects(), []);
+  const count = (kind?: K) => props.items.filter((item) => !kind || item.kind === kind).length;
+  return (
+    <>
+      <FilterChip pressed={!filter.kind} onClick={() => setFilter({ kind: undefined })}>{`Everything ${count()}`}</FilterChip>
+      {(Object.keys(props.kinds) as K[]).map((kind) => (
+        <FilterChip key={kind} pressed={filter.kind === kind} onClick={() => setFilter({ kind })}>
+          {`${props.kinds[kind]} ${count(kind)}`}
+        </FilterChip>
+      ))}
+      <Menu
+        label="Filter by Project"
+        trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${filter.project} ▾` : "Project ▾"}</FilterChip>}
+        items={[
+          { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
+          ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
+        ]}
+      />
+    </>
   );
 }
 
@@ -202,10 +238,27 @@ const NOTHING: Record<InboxKind | "all", string> = {
   decision: "No proposed Decisions",
 };
 
+/** What the split view shows and where: its items, the one the address names, and how it groups and names them. */
+interface SplitProps {
+  items: InboxItem[];
+  /** The id of the item the address selects, if any. */
+  item: string | undefined;
+  /** The address of the view with `item` selected, or with none. */
+  pathTo: (item?: InboxItem) => string;
+  groups: Group[];
+  /** The list's accessible name. */
+  label: string;
+  /** What the view says when nothing is waiting. */
+  empty: { heading: string; hint: string };
+  /** The line below the view naming its keyboard shortcuts. */
+  keysHint: string;
+  me: User;
+  onChanged: () => void;
+}
+
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
-function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; address: InboxAddress; me: User; onChanged: () => void }) {
-  const { items } = props;
-  const pathTo = (item?: InboxItem) => inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) });
+export function InboxSplit(props: SplitProps) {
+  const { items, pathTo } = props;
   // Items acted on here leave the list as the action succeeds rather than waiting for the reload, which would
   // otherwise find them gone and show them as resolved elsewhere; while the action runs, `busy` holds its item
   // for a reload that lands before the action's reply. Once a load no longer holds an acted-on item, it is
@@ -213,13 +266,13 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
   const acted = useRef(new Set<string>());
   const busy = useRef<string>(undefined);
   for (const id of acted.current) if (!items.some((item) => itemId(item) === id)) acted.current.delete(id);
-  const ordered = GROUPS.flatMap((group) => items.filter((item) => group.holds(item) && !acted.current.has(itemId(item))));
+  const ordered = props.groups.flatMap((group) => items.filter((item) => group.holds(item) && !acted.current.has(itemId(item))));
   // The selected item as last seen in the list, and where it was. When a reload drops it because it was
   // resolved elsewhere, the detail pane keeps showing it until the User moves on (docs/ui.md § Live updates).
   const seen = useRef<Seen>(undefined);
   const at = (id: string | undefined) => ordered.findIndex((item) => itemId(item) === id);
   // An address naming an item that isn't here, as an old link does, opens what was shown, or else the first.
-  let wanted = props.address.item;
+  let wanted = props.item;
   if (!wanted || (at(wanted) < 0 && wanted !== seen.current?.id)) wanted = seen.current?.id ?? (ordered[0] && itemId(ordered[0]));
   let index = at(wanted);
   // Whether the selected item has left the list, and whether that was someone else's doing.
@@ -290,20 +343,18 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
   if (!selected) {
     return (
       <div className="empty">
-        <h2>{NOTHING[props.kind ?? "all"]}</h2>
-        <p className="muted">
-          Agents' questions, Tickets handed over for review, Agents' Unverified completions, and the Suggestions and Decisions they propose show up here.
-        </p>
+        <h2>{props.empty.heading}</h2>
+        <p className="muted">{props.empty.hint}</p>
       </div>
     );
   }
 
   return (
     <div className="inbox-view">
-      <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
-        <section className="inbox-list" aria-label="Inbox items">
+      <div className={`inbox-split${props.item ? " picked" : ""}`}>
+        <section className="inbox-list" aria-label={props.label}>
           {ordered.length === 0 && <p className="muted inbox-none">Nothing else is waiting.</p>}
-          {GROUPS.map((group) => {
+          {props.groups.map((group) => {
             const held = ordered.filter(group.holds);
             if (held.length === 0) return null;
             return (
@@ -337,7 +388,7 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
           )}
         </section>
       </div>
-      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes or Accepts, S sends back, reopens or rejects.</p>
+      <p className="muted inbox-keys">{props.keysHint}</p>
     </div>
   );
 }
@@ -362,10 +413,15 @@ function kindOf(item: InboxItem): { kind: Kind; label: string; full: string } {
     : { kind: "question", label: "Question", full: "Question" };
 }
 
-/** A Suggestion's item as the Inbox names it: its key and title, and where it is. */
-function suggestedItem(item: SuggestionItem["suggestion"]["item"]): { key: string; title: string; to: string } {
+/** Whether a Suggestion proposes a new Document under a protected branch, not created until a User accepts it. */
+const isNewDocument = (suggestion: SuggestionItem["suggestion"]) => suggestion.item.kind === "document" && suggestion.item.id === null;
+
+/** A Suggestion's item as the Inbox names it: its key and title, and where it is; a new Document's goes to the Document it would go under. */
+function suggestedItem(suggestion: SuggestionItem["suggestion"]): { key: string; title: string; to: string } {
+  const { item } = suggestion;
   if (item.kind === "decision") return { key: item.key!, title: item.title, to: `/decisions/${item.key}` };
   if (item.kind === "term") return { key: "Term", title: item.title, to: `/terms/${item.id}` };
+  if (isNewDocument(suggestion)) return { key: "New Document", title: item.title, to: `/documents/${suggestion.parent!.id}` };
   if (item.kind === "document") return { key: "Document", title: item.title, to: `/documents/${item.id}` };
   return item.projectKey === null
     ? { key: "Guidance", title: "The Workspace's Guidance", to: "/guidance" }
@@ -380,7 +436,7 @@ function suggestedItem(item: SuggestionItem["suggestion"]["item"]): { key: strin
 function ListItem(props: { item: InboxItem; selected: boolean; arrived: boolean; to: string }) {
   const { item } = props;
   const { kind, label } = kindOf(item);
-  const named = item.kind === "decision" ? item.decision : item.kind === "suggestion" ? suggestedItem(item.suggestion.item) : item.ticket;
+  const named = item.kind === "decision" ? item.decision : item.kind === "suggestion" ? suggestedItem(item.suggestion) : item.ticket;
   const snippet =
     item.kind === "question"
       ? plainText(item.question.body)
@@ -416,7 +472,7 @@ function DetailHead(props: { item: InboxItem }) {
     item.kind === "decision"
       ? [item.decision.key, item.decision.title, `/decisions/${item.decision.key}`]
       : item.kind === "suggestion"
-        ? Object.values(suggestedItem(item.suggestion.item))
+        ? Object.values(suggestedItem(item.suggestion))
         : [item.ticket.key, item.ticket.title, `/tickets/${item.ticket.key}`];
   return (
     <div className="inbox-detail-head">
@@ -685,7 +741,14 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         <Actor actor={proposedBy} />
         <span className="muted">
           <RelativeTime at={suggestion.at} />
-          {` · from Version ${suggestion.baseVersion}`}
+          {isNewDocument(suggestion) ? (
+            <>
+              {" · new, under "}
+              <Link to={`/documents/${suggestion.parent!.id}`} className="link">{suggestion.parent!.title}</Link>
+            </>
+          ) : (
+            ` · from Version ${suggestion.baseVersion}`
+          )}
           {suggestion.sourceTicket && (
             <>
               {" · while working on "}
@@ -704,9 +767,9 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         <ContentEditor kind={item.kind} value={edited} onChange={setEdited} disabled={props.resolved} />
       ) : (
         <Diff
-          before={contentText(item.kind, suggestion.base)}
+          before={isNewDocument(suggestion) ? "" : contentText(item.kind, suggestion.base)}
           after={contentText(item.kind, suggestion.content)}
-          beforeLabel={`Version ${suggestion.baseVersion}${suggestion.outdated ? "" : ", current"}`}
+          beforeLabel={isNewDocument(suggestion) ? "Nothing yet" : `Version ${suggestion.baseVersion}${suggestion.outdated ? "" : ", current"}`}
           afterLabel={`Suggested by ${proposedBy.name}`}
           view={view}
           onViewChange={setView}

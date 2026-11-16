@@ -147,7 +147,7 @@ describe("Upgrading an installation", () => {
     cronk.clock.advance(1000);
     await admin.post("/api/tickets/CRONK-1/comments", { body: artifact.versionUrl });
 
-    await cronk.undoMigration("0032_artifact_embeds", "DROP TABLE artifact_embeds");
+    await cronk.undoMigration("0034_artifact_embeds", "DROP TABLE artifact_embeds");
     await cronk.restart();
 
     const embeddedIn = (await admin.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn;
