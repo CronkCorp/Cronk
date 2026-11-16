@@ -36,6 +36,36 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSI
 
 Everything the script changes then shows in history with the Session it was made in. The full API is described at `/api/openapi.json`.
 
+### Upload Transcripts from Claude Code
+
+A Transcript is the chat that led an Agent to change things, kept beside what it changed so reviewers can see what was asked and why (ADR 0013). Cronk never sees the chat itself: a hook on your machine uploads it. The repository ships one for Claude Code, `hooks/claude-code/cronk-transcript.mjs`, a single file with no dependencies that needs Node.js 22. To install it:
+
+1. Copy `hooks/claude-code/cronk-transcript.mjs` somewhere stable, such as `~/.claude/hooks/`.
+2. Add it to your Claude Code settings (`~/.claude/settings.json`, or `.claude/settings.local.json` in one project), with the same Agent token the MCP server uses. It mustn't be read-only.
+
+   ```json
+   {
+     "env": { "CRONK_URL": "http://localhost:3000", "CRONK_TOKEN": "<token>" },
+     "hooks": {
+       "Stop": [{ "hooks": [{ "type": "command", "command": "node ~/.claude/hooks/cronk-transcript.mjs" }] }],
+       "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node ~/.claude/hooks/cronk-transcript.mjs" }] }]
+     }
+   }
+   ```
+
+Each time Claude finishes answering, and when the chat ends, the hook converts the whole chat to Markdown and uploads it under Claude Code's session id. Cronk keeps only chats in which the Agent changed something, so the hook uploads every chat and stays quiet about the ones Cronk turns down for that; anything else that goes wrong is shown in Claude Code without stopping Claude. To see what it would upload, run `node cronk-transcript.mjs --print <chat.jsonl>` on a chat file from `~/.claude/projects/`.
+
+The conversion leaves out Claude's reasoning, subagents' chats, and what Claude Code adds itself (commands' output, notifications and the summary that continues a compacted chat), shows images as `[image]`, and trims a tool call or result over 4,000 characters to its first 3,000 and last 1,000. Because subagents' chats are left out, a change only a subagent made through Cronk doesn't link the chat. A chat you rewound keeps the turns you went back on, in the order they happened. Cronk scrubs known secret patterns from what it receives, but only on a best-effort basis: don't rely on it for secrets you paste into a chat.
+
+#### The turn convention
+
+A hook for another client uploads its chat with `PUT /api/transcripts/by-chat/{chatId}` as `text/markdown`, written this way:
+
+- Each turn starts with a `## User` or `## Assistant` line, followed by its text.
+- A tool call is a fenced block in the Assistant's turn with the info string `tool-call <tool name>`, holding its input; its result follows as a block with `tool-result`, or `tool-result error` when the tool failed. Each fence is longer than any run of backticks inside it.
+- Results of Cronk's tools keep their first line, which names the Agent Session: that's how Cronk links the Transcript to what the Session changed.
+- The same chat always converts to the same text, and a chat that has grown converts to text that starts with what was uploaded before. Cronk then replaces the stored text; when the new text doesn't continue it, Cronk keeps the old text as well.
+
 ## Forgotten passwords
 
 An Admin issues a password reset link from the Users page and passes it on; it works once, for 7 days. Signed-in Users change their own password from the menu under their name in the sidebar.

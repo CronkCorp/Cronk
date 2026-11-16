@@ -81,7 +81,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
 - **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour. The `danger` pill also marks a merge's "Both changed".
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
-- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report and Decision `--agent`, Comment `--accent`, and To review and Unverified `--info`.
+- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report and Decision `--agent`, Comment `--accent`, To review and Unverified `--info`, and Unattended `--warn`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
@@ -204,6 +204,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **A Discovered Ticket** shows where it was found and a `--warn` banner listing the Tickets it pauses, with a link to remove a block. Actions: **Delegate to <Agent>** (primary, the Agent that found it), **Delegate to…**, **Keep in Backlog**, and Cancel in the ghost style.
 - **A proposed Decision** shows who proposed it and from which Ticket, its body, and **Accept** (primary), **Reject…**, which opens a required reason box (the reason reaches the Agent as Waiting Work), and Open Decision.
 - **Triage** is the same split view, with the same keyboard shortcuts. A Discovered Ticket's primary action is **Take it**, which assigns it to the User.
+- **An Unattended Ticket** (in Triage only) is a delegated or In Review Ticket whose Assignee is deactivated or can't see its Project. The list names why ("Carol is deactivated", "Carol can't see CRONK"); the detail pane repeats it in a `--warn` banner, then shows the Status, the Delegate and any Reports. Actions: **Reassign to…** (primary), a menu of the active Users with the signed-in User first, and Open Ticket. A note says the Delegate stays only if it goes to the Delegate's Owner.
 
 | Side by side | Merge on accept | Reopen | Triage |
 |---|---|---|---|

@@ -27,12 +27,20 @@ export interface AccessTarget {
 /**
  * What a User has in a Project. Admins have Write everywhere. A Member listed in a Project
  * has the access listed; otherwise an open Project gives them Write and a private one nothing.
+ * Keep it in step with `noAccessSql`.
  */
 function userAccess(user: User, project: AccessTarget, listed: Access | undefined): Level {
   if (user.role === "admin") return "write";
   if (listed) return listed;
   return project.visibility === "open" ? "write" : "none";
 }
+
+/**
+ * SQL for whether the User row `u` has no access to the Project row `p`, as `userAccess` resolves it: not an Admin, not listed in
+ * the Project, and the Project private. Keep it in step with `userAccess`.
+ */
+export const noAccessSql = (u: string, p: string) =>
+  `(${u}.role <> 'admin' AND ${p}.visibility = 'private' AND NOT EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ${p}.id AND pm.user_id = ${u}.id))`;
 
 /** How much an Actor may do somewhere: nothing, or some Access. */
 type Level = "none" | Access;
