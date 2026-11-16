@@ -66,7 +66,7 @@ import { findAgent } from "../identity/agents.js";
 import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleChanges, visibleRelations } from "./ticket-reads.js";
-import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
+import { waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
 import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
 import { readyNow, tellReadyAfter, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
@@ -209,7 +209,7 @@ export function workRoutes(ctx: AppContext) {
         const updated = await tellReadyAfter(ctx, opensUp ? { projectId: project.id } : undefined, (tx) =>
           updateProject(tx, project.id, changes, ctx.clock.now()),
         );
-        if (visibility !== undefined && visibility !== project.visibility) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
+        if (visibility !== undefined && visibility !== project.visibility) waitingItemsChanged(ctx.live, await usersWithItemsOn(ctx.db, { projectId: project.id }));
         return { project: { ...updated, access } };
       },
     );
@@ -265,7 +265,7 @@ export function workRoutes(ctx: AppContext) {
         // Write for the Owner can make Tickets delegated to their Agents here Ready.
         const affected = request.body.access === "write" ? { projectId: project.id, ownerId: member.id } : undefined;
         await tellReadyAfter(ctx, affected, (tx) => setMembership(tx, project.id, member.id, request.body.access));
-        inboxesChanged(ctx.live, [member.id]);
+        waitingItemsChanged(ctx.live, [member.id]);
         return { member: { user: publicUser(member), access: request.body.access } };
       },
     );
@@ -285,7 +285,7 @@ export function workRoutes(ctx: AppContext) {
         // In an open Project, no longer being listed with Read gives Write, which can make Tickets Ready.
         const affected = project.visibility === "open" ? { projectId: project.id, ownerId: request.params.userId } : undefined;
         await tellReadyAfter(ctx, affected, (tx) => removeMembership(tx, project.id, request.params.userId));
-        inboxesChanged(ctx.live, [request.params.userId]);
+        waitingItemsChanged(ctx.live, [request.params.userId]);
         return reply.code(204).send();
       },
     );
@@ -356,7 +356,7 @@ export function workRoutes(ctx: AppContext) {
           return { projectId: project.id, status };
         });
         statusesChanged(ctx.live, projectId);
-        if (name !== undefined) inboxesChanged(ctx.live, await usersWithItemsOn(ctx.db, { statusId: status.id }));
+        if (name !== undefined) waitingItemsChanged(ctx.live, await usersWithItemsOn(ctx.db, { statusId: status.id }));
         return { status };
       },
     );
@@ -418,7 +418,7 @@ export function workRoutes(ctx: AppContext) {
         ticketsChanged(ctx.live, [...moved, ...(await findTicketsByIds(ctx.db, mayBecomeReady))]);
         await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         // Moved Tickets may have entered or left an In Review Status.
-        inboxesChanged(ctx.live, moved.map((t) => t.assignee?.id));
+        waitingItemsChanged(ctx.live, moved.map((t) => t.assignee?.id));
         return reply.code(204).send();
       },
     );
@@ -796,7 +796,7 @@ export function workRoutes(ctx: AppContext) {
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
         if (ticket !== before) {
-          inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
+          waitingItemsChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
           // The Tickets it blocks show its Status, and may now be unblocked.
           // Its parents list their Sub-Tickets, and Sub-Tickets may have followed its Autonomous Delegation.
           ticketsChanged(ctx.live, [ticket, ...alsoChanged, ...(await findTicketsByIds(ctx.db, blockedIds))]);
@@ -826,7 +826,7 @@ export function workRoutes(ctx: AppContext) {
           if (ticket.verification !== "unverified") throw new HttpError(409, `${ticket.key} isn't an Unverified completion, so there is nothing to Accept`);
           return updateTicket(tx, ticket, { verification: "verified" }, actor, ctx.clock.now());
         });
-        inboxesChanged(ctx.live, [ticket.assignee?.id]);
+        waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         ticketsChanged(ctx.live, [ticket]);
         return { ticket };
       },

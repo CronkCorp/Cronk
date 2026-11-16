@@ -7,7 +7,7 @@ import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAcces
 import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, savedHolding } from "../schemas.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
-import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
+import { decisionReviewer, waitingItemsChanged } from "../inbox/inbox.js";
 import { markRejected, rejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { agentTopic } from "../live/topics.js";
 import { sourceClaimOf } from "../coordination/sources.js";
@@ -115,7 +115,7 @@ export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /** Tells the Inbox of whoever reviews each of `decisions`, if an Agent proposed it, that it may have changed. Call once committed. */
     const reviewersHear = async (decisions: Decision[]) =>
-      inboxesChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
+      waitingItemsChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
 
     /**
      * Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step, adding

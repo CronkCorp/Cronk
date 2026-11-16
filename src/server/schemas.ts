@@ -916,7 +916,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Suggestion: {
     description:
-      "A new Version of a Protected Document, Term or Decision, or of Guidance, that an Agent proposes (ADR 0014): the item's whole new content, the Version it " +
+      "A new Version of a Protected Document, Term or Decision, or of Guidance, or a new Document under a protected branch, that an Agent proposes (ADR 0014): " +
+      "the item's whole new content, the Version it " +
       "started from and the Agent's reasoning. It takes effect only when a User accepts it: unchanged, as the item's next Version credited to the Agent; " +
       "edited first, credited to the User and linked to the Suggestion. Rejecting it needs a reason, which reaches the Agent as Waiting Work.",
     ...object({
@@ -925,20 +926,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The item it would change, as it stands now.",
         ...object({
           kind: { type: "string", enum: SUGGESTION_KINDS },
-          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance." },
+          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance, and for a new Document until it is accepted." },
           key: { ...nullable({ type: "string" }), description: "A Decision's key; null for the other kinds." },
-          title: { type: "string", description: "A Document's or Decision's title, a Term's name, or `Guidance`." },
+          title: { type: "string", description: "A Document's or Decision's title (a new Document's as suggested), a Term's name, or `Guidance`." },
           status: { ...nullable(decisionStatus), description: "A Decision's status; null for the other kinds." },
           projectId: { ...nullable(id), description: "Null for a Workspace item." },
           projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace item." },
           protected: { type: "boolean", description: protectedDescription("it is marked Protected (Guidance always is)") },
-          version: { type: "integer", description: "Its current Version." },
+          version: { type: "integer", description: "Its current Version; 0 for a new Document until it is accepted." },
         }),
       },
       baseVersion: { type: "integer", description: "The Version of the item the Suggestion started from." },
       base: { ...suggestedContent, description: "What the item held at the base Version, in the same shape as `content`." },
       content: suggestedContent,
       reasoning: { type: "string", description: "Why the Agent suggests the change, in Markdown." },
+      parent: {
+        ...nullable(object({ id, title: { type: "string" } })),
+        description:
+          "For a Suggestion of a new Document under a protected branch (`baseVersion` 0, `item.id` null until accepted): the Document it goes under; " +
+          "once accepted, the one the new Document sits under now, null at the top. Null for a Suggestion changing an existing item.",
+      },
       proposedBy: { ...recordedActor, description: "The Agent that made it, with its Owner and Agent Session." },
       at: timestamp,
       sourceTicket: { ...nullable(ticketName), description: "The Ticket whose Claim the Agent held when making it; null for none." },

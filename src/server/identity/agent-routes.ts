@@ -20,7 +20,7 @@ import {
   type Agent,
 } from "./agents.js";
 import { findUserById, type User } from "./users.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { waitingItemsChanged } from "../inbox/inbox.js";
 import { agentsTopic } from "../live/topics.js";
 import { claimsEnded } from "../coordination/ready.js";
 import { clearDelegationsTo } from "../work/tickets.js";
@@ -155,7 +155,7 @@ export function agentRoutes(ctx: AppContext) {
         await claimsEnded(ctx, claimed);
         ticketsChanged(ctx.live, undelegated);
         // Its open questions leave its Owner's Inbox.
-        inboxesChanged(ctx.live, [user.id]);
+        waitingItemsChanged(ctx.live, [user.id]);
         return reply.code(204).send();
       },
     );

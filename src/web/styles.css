@@ -107,6 +107,7 @@ h3 { font-size: 14px; font-weight: 600; }
 .nav-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-key { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); min-width: 44px; }
 .nav-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: var(--on-accent); font-size: 12px; font-weight: 600; text-align: center; }
+.nav-muted { font-size: 12px; color: var(--muted); }
 .nav-live { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ok); }
 .sidebar-more { display: flex; flex-direction: column; gap: 16px; }
 .nav-label { padding: 0 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
@@ -583,6 +584,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .dialog-actions { justify-content: flex-end; }
 
 /* Inbox: a split view of the grouped list and the selected item (docs/ui.md § Inbox). */
+.page-intro { margin: 0 0 16px; }
 .inbox-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .filter-chip { font: inherit; font-size: 12px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .filter-chip:hover { background: var(--surface-2); }

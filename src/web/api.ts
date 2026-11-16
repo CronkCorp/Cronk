@@ -24,6 +24,8 @@ import type {
   GuidanceVersion,
   InboxItem,
   InboxKind,
+  TriageItem,
+  TriageKind,
   IssuedAgentToken,
   Invitation,
   LinkedDocument,
@@ -89,6 +91,8 @@ export type {
   GuidanceVersion,
   InboxItem,
   InboxKind,
+  TriageItem,
+  TriageKind,
   IssuedAgentToken,
   Invitation,
   LinkedDocument,
@@ -470,6 +474,11 @@ export const api = {
     const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
     return request<{ items: InboxItem[] }>("GET", `/api/inbox${query.size ? `?${query}` : ""}`).then((r) => r.items);
   },
+  /** The items in Triage the signed-in User could act on, narrowed by any of the filters given. */
+  triage: (filter: TriageFilter = {}) => {
+    const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    return request<{ items: TriageItem[] }>("GET", `/api/triage${query.size ? `?${query}` : ""}`).then((r) => r.items);
+  },
   /** Sends a Ticket under review back to a Started Status (the Project's first, unless named), with a Comment. */
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
@@ -502,6 +511,12 @@ export interface InboxFilter {
   kind?: InboxKind;
   project?: string;
   agent?: string;
+}
+
+/** Narrows Triage: an item kind, a Project key. */
+export interface TriageFilter {
+  kind?: TriageKind;
+  project?: string;
 }
 
 /** A Comment to post: its Markdown, and what it replies to, if anything. */
@@ -564,6 +579,13 @@ function watch<Events>(
 
 /** Watches the signed-in User's Inbox; `changed` arrives whenever it may have changed (see `watch`). */
 export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/inbox/events", handlers);
+
+/**
+ * Watches the signed-in User's Inbox and Triage on one stream, as browsers allow only a few per site: `changed` arrives whenever
+ * the Inbox may have changed, and `triage` whenever Triage may have, for anyone (see `watch`).
+ */
+export const watchInboxAndTriage = (handlers: Parameters<typeof watch<{ changed: object; triage: object }>>[1]) =>
+  watch<{ changed: object; triage: object }>("/api/inbox/events?triage=true", handlers);
 
 /** Watches the signed-in User's own Agents; `changed` arrives every few seconds while their live Agent Sessions change (see `watch`). */
 export const watchAgents = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/agents/events", handlers);
