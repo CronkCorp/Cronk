@@ -145,7 +145,7 @@ A plain file, such as an image, video, PDF or log, attached to a Document, Repor
 _Avoid_: Upload, asset, media, file (as the term)
 
 **Term**:
-A glossary entry naming one concept: its canonical name, definition and the words to avoid for it. Belongs to the Workspace or a Project; within a Project, a Project Term replaces any Workspace Term of the same name.
+A glossary entry naming one concept: its canonical name, definition and the words to avoid for it. Belongs to the Workspace or a Project; within a Project, a Project Term replaces any Workspace Term of the same name. Every change saves a Version; only a User may delete one, since a delete removes its Versions for good.
 _Avoid_: Glossary entry, definition, word
 
 **Decision**:
