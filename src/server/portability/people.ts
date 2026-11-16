@@ -94,6 +94,7 @@ async function importAgents(ctx: ImportContext, people: File): Promise<void> {
         })
       ).id;
     ctx.agentIds.set(exportedId, { id, ownerId });
+    await ctx.renamed("agent", exportedId, id);
   }
 }
 
@@ -114,6 +115,7 @@ async function importSessions(ctx: ImportContext, people: File): Promise<void> {
       ],
     );
     ctx.sessionIds.set(exportedId, rows[0]!.id);
+    await ctx.renamed("agentSession", exportedId, rows[0]!.id);
   }
 }
 

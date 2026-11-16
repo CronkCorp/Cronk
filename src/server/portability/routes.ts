@@ -8,6 +8,7 @@ import { packFolder, unpackFolder } from "./archive.js";
 import { exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
+import { listRenamedIds } from "./renamed-ids.js";
 
 /** The media types an uploaded archive may come as. */
 const ARCHIVE_TYPES = [
@@ -112,15 +113,17 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           "Imports an export made by GET /api/export or GET /api/projects/{key}/export, all of it or nothing. A Workspace export goes into a Workspace " +
           "with no Projects, Documents or Guidance yet, as in a fresh installation; a Project export becomes a new Project, refused if its key is taken. " +
           "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, until an Admin invites them and they accept, " +
-          "and Agents not found are created without tokens. Relations to Tickets outside the export are left out. " +
+          "and Agents not found are created without tokens. Agents and Agent Sessions keep their ids, unless an id is already taken here: then they get a new one, " +
+          "and the import answers and keeps which id became which (GET /api/import/renamed-ids). Relations to Tickets outside the export are left out. " +
           archiveUpload,
         response: {
           201: answer("What the import brought in", {
             type: "object",
-            required: ["scope", "projects"],
+            required: ["scope", "projects", "renamedIds"],
             properties: {
               scope: { type: "string", enum: ["workspace", "project"], description: "Whether it was a Workspace or a Project export." },
               projects: { type: "array", items: { type: "string" }, description: "The keys of the Projects it created." },
+              renamedIds: { type: "array", items: ref("RenamedId"), description: "The Agents and Agent Sessions it gave new ids, because their ids were taken." },
             },
           }),
           ...errors(400, 401, 403, 409, 410),
@@ -140,6 +143,23 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
         if (typeof code === "string" && /^2[23]/.test(code)) throw new HttpError(400, `The export holds data Cronk can't take: ${(err as Error).message}`);
         throw err;
       }
+    },
+  );
+
+  app.get(
+    "/api/import/renamed-ids",
+    {
+      schema: {
+        description:
+          "Every Agent and Agent Session an import gave a new id because the id it had in the export was taken here, oldest first, " +
+          "so something naming the old id, such as a chat written before a move, can be matched to it.",
+        response: { 200: answer("The ids imports renamed, in the order they did", listing("renamedIds", ref("RenamedId"))), ...errors(401, 403, 410) },
+      },
+    },
+    async (request) => {
+      const user = await requireUser(ctx, request);
+      requireAdmin(user, "see the ids imports renamed");
+      return { renamedIds: await listRenamedIds(ctx.db, user.workspaceId) };
     },
   );
 }

@@ -430,4 +430,21 @@ export const migrations: Migration[] = [
       ALTER TABLE comments ADD COLUMN send_back boolean NOT NULL DEFAULT false CHECK (NOT send_back OR ticket_id IS NOT NULL);
     `,
   },
+  {
+    id: "0018_renamed_ids",
+    sql: `
+      -- An Agent or Agent Session an import (portability/people.ts) couldn't give the id it had in the
+      -- export, because the id was taken here: the id it had there and the one it got. Transcripts name
+      -- Agent Sessions by id, so linking one written before a move looks its ids up here too.
+      CREATE TABLE renamed_ids (
+        seq bigserial PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        kind text NOT NULL CHECK (kind IN ('agent', 'agent_session')),
+        from_id uuid NOT NULL,
+        to_id uuid NOT NULL,
+        at timestamptz NOT NULL
+      );
+      CREATE INDEX renamed_ids_from ON renamed_ids (workspace_id, from_id);
+    `,
+  },
 ];

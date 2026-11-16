@@ -58,7 +58,8 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
-  | "AgentRecordEntry";
+  | "AgentRecordEntry"
+  | "RenamedId";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -453,6 +454,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       markdown: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
       conflicts: { type: "integer", description: "How many sections conflict." },
       sections: mergedSections("Markdown"),
+    }),
+  },
+  RenamedId: {
+    description: "An Agent or Agent Session an import gave a new id, because the id it had in the export was taken.",
+    ...object({
+      kind: { type: "string", enum: ["agent", "agentSession"] },
+      from: { ...id, description: "Its id in the export." },
+      to: { ...id, description: "Its id here." },
+      at: { ...timestamp, description: "When it was imported." },
     }),
   },
   AgentRecordEntry: {
