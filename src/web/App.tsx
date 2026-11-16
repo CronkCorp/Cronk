@@ -12,7 +12,7 @@ import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
 import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
-import { AuthCard, Field, messageOf, Show, useLoad, useSubmit } from "./ui.js";
+import { AuthCard, Field, messageOf, Show, TextArea, useLoad, useSubmit } from "./ui.js";
 import { formatBytes } from "./components/files.js";
 import { filterFrom, ProjectPage, ProjectsPage, projectViewOf } from "./work.js";
 import { TicketPage } from "./ticket.js";
@@ -182,7 +182,7 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "projectArtifacts":
       return <ArtifactsPage projectKey={route.key} />;
     case "artifact":
-      return <ArtifactPage id={route.id} version={versionOf(search.get("version"))} />;
+      return <ArtifactPage id={route.id} version={versionOf(search.get("version"))} workspace={props.workspace} />;
     case "document":
       return <DocumentPage id={route.id} edit={search.get("edit") === "1"} />;
     case "decisions":
@@ -215,6 +215,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
   const [attachmentMegabytes, setAttachmentMegabytes] = useState(String(props.current.attachmentMaxBytes / MB));
   const [artifactMegabytes, setArtifactMegabytes] = useState(String(props.current.artifactMaxBytes / MB));
   const [artifactFiles, setArtifactFiles] = useState(String(props.current.artifactMaxFiles));
+  const [allowedOrigins, setAllowedOrigins] = useState(props.current.artifactAllowedOrigins.join("\n"));
+  const [extraOrigins, setExtraOrigins] = useState(props.current.artifactExtraOriginsAllowed);
   const [storage] = useLoad(api.storage, []);
   const { submit, error, busy } = useSubmit(
     () => {
@@ -226,6 +228,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         attachmentMaxBytes: Math.round(Number(attachmentMegabytes) * MB),
         artifactMaxBytes: Math.round(Number(artifactMegabytes) * MB),
         artifactMaxFiles: Math.round(Number(artifactFiles)),
+        artifactAllowedOrigins: allowedOrigins.split("\n").map((line) => line.trim()).filter((line) => line !== ""),
+        artifactExtraOriginsAllowed: extraOrigins,
       });
     },
     (workspace) => {
@@ -248,6 +252,21 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <p className="muted hint">The most one Version of an Artifact may hold, all its files together, from 1 MB to 500 MB.</p>
         <Field label="Artifact file limit" type="number" value={artifactFiles} onChange={setArtifactFiles} />
         <p className="muted hint">The most files one Version of an Artifact may hold, from 1 to 10,000.</p>
+        <TextArea label="Artifact allow-list" rows={5} value={allowedOrigins} onChange={setAllowedOrigins} placeholder="https://cdn.jsdelivr.net" />
+        <p className="muted hint">
+          The origins every Artifact may load scripts, styles and fonts from, one per line, such as https://cdn.jsdelivr.net. Network requests stay blocked.
+        </p>
+        <label className="field inline">
+          <span>Extra origins</span>
+          <select value={extraOrigins ? "allowed" : "off"} onChange={(e) => setExtraOrigins(e.target.value === "allowed")}>
+            <option value="allowed">Publishes may declare them</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <p className="muted hint">
+          A publish may declare origins beyond the allow-list for its Version, each with a reason, shown on the Artifact. Turned off, such publishes are
+          refused and Versions are served without the extras they declared.
+        </p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
           <Button type="submit" disabled={busy}>Save</Button>

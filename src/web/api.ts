@@ -259,6 +259,8 @@ export const api = {
     attachmentMaxBytes?: number;
     artifactMaxBytes?: number;
     artifactMaxFiles?: number;
+    artifactAllowedOrigins?: string[];
+    artifactExtraOriginsAllowed?: boolean;
   }) =>
     request<Workspace>("PATCH", "/api/workspace", changes),
   /** How much storage the Workspace's files take; Admins only. */

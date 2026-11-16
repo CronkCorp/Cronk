@@ -229,7 +229,7 @@ The Project page is shown in `docs/ui/frame.png`.
 
 ![Artifact](ui/phase-2-artifact.png)
 
-- **Full bleed** under a thin bar: title, Protected mark, the Version menu (which also lists Versions, **Copy link to latest**, and where the Artifact is embedded), its source Ticket and who published the Version, any declared extra origins as a `--warn` pill, **Copy link to Version n**, Open full size, **Comments n**, and a "…" menu with Publish new Version and Protect or Unprotect for those with Write. Its protection history is under the frame.
+- **Full bleed** under a thin bar: title, Protected mark, the Version menu (which also lists Versions, **Copy link to latest**, and where the Artifact is embedded), its source Ticket and who published the Version, any extra origins the shown Version declared as a `--warn` pill ("2 extra origins", with "· off" while the Workspace doesn't allow them) that opens each origin with what it loads and the reason given, **Copy link to Version n**, Open full size, **Comments n**, and a "…" menu with Publish new Version and Protect or Unprotect for those with Write. Under the frame, a note says where it is served from and what it may load: the Workspace's allow-list, the Version's extras in force, and where network requests may go. Its protection history is under that.
 - **The list** (`/projects/:key/artifacts`, `/artifacts`): one row per Artifact, most recently published first, with its title, lock, Version chip, source Ticket, publisher and time; **Publish Artifact** is the primary action. Publishing, there or from the "…" menu, opens a dialog to pick a folder holding `index.html`, which is packed and sent whole.
 - **Comments** open in a 300px drawer on the right, each saying which Version it was on. Below 900px the drawer moves under the Artifact.
 - **Embedded** in a Report or Document: a bordered block with a bar (kind label, title, Version chip, Open full size) above the sandboxed frame.
@@ -242,7 +242,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Files** in the side panel: every Attachment on the Ticket, in Comments and Reports too, and the Artifacts from its work, each with type, size and Actor.
 - **Dropping a file anywhere** on the Ticket page attaches it to the Ticket, as does pasting one. Video and images posted in a Comment or Report show inline where they were posted.
 - **Opening one** (a thumbnail or a Files entry) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
-- **Workspace settings** hold the Attachment size limit and the Artifact limits (size and files per Version), and show Admins the storage Attachments and Artifacts use.
+- **Workspace settings** hold the Attachment size limit, the Artifact limits (size and files per Version), the Artifact allow-list (one origin per line) and whether publishes may declare extra origins, and show Admins the storage Attachments and Artifacts use.
 
 ### Attachments on Documents, Reports and Comments
 
