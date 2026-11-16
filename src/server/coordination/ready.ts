@@ -89,7 +89,7 @@ export async function ticketsBlockedBy(db: Queryable, ticketIds: string[]): Prom
 }
 
 /** A Ticket as the welcome and a `ticketReady` event list it: what the Agent needs to pick it. */
-export const readyTicket = (t: Ticket) => ({ key: t.key, title: t.title, priority: t.priority, status: t.status });
+export const readyTicket = (t: Ticket) => ({ key: t.key, title: t.title, priority: t.priority, status: t.status, autonomous: t.autonomous });
 
 /** The `ticketReady` event telling an Agent that `ticket` became Ready for it. */
 export const readyEvent = (ticket: Ticket): LiveEvent => ({ event: "ticketReady", data: { ticket: readyTicket(ticket) } });

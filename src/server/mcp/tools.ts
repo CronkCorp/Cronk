@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
-import type { ApiCall, ApiResponse, Caller } from "./api.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import type { AvoidedWord } from "../api-types.js";
+import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
@@ -80,7 +81,15 @@ function toResult(res: ApiResponse): CallToolResult {
     const text = message ?? `The API answered ${res.status}`;
     return error(Object.keys(details).length > 0 ? `${text}\n\n${JSON.stringify(details)}` : text);
   }
-  return { content: [{ type: "text", text: JSON.stringify(res.body ?? {}) }] };
+  const hint = avoidedWordsHint(res.body?.avoidedWords);
+  return { content: [{ type: "text", text: JSON.stringify(res.body ?? {}) }, ...(hint ? [{ type: "text" as const, text: hint }] : [])] };
+}
+
+/** A save's words a Term says to avoid, one per line with where it is and the Term to use; none for a save without any. */
+function avoidedWordsHint(words: AvoidedWord[] | undefined): string | null {
+  if (!words || words.length === 0) return null;
+  const lines = words.map((w) => `- "${w.word}" (${w.field}, line ${w.line}, column ${w.column}): use ${w.term.name}`);
+  return ["Saved, but it uses words a Term says to avoid:", ...lines].join("\n");
 }
 
 /** A query string repeating each key once per value, as the API's list filters take them. */
@@ -149,7 +158,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
       move: {
         description:
-          "move a Ticket you hold the Claim on into another Status (Unstarted, Started or In Review only); In Review needs a Report written during your current Claim (documents, write_report)",
+          "move a Ticket you hold the Claim on into another Status: Unstarted, Started or In Review, or Completed when the Ticket is `autonomous` (Autonomous Delegation); " +
+          "In Review and Completed need a Report written during your current Claim (documents, write_report). A completion stays Unverified until a User Accepts it",
         writes: true,
         run: async (api, a) => {
           const key = required(a.key, "a key", "move");
@@ -237,7 +247,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           }),
       },
       ask: {
-        description: "ask a question on a Ticket you hold the Claim on; blocking if you wait for the answer",
+        description: "ask a question on a Ticket you hold the Claim on; blocking if you wait for the answer, except on an `autonomous` Ticket, where questions never block",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "ask"))}/activities`, {
@@ -321,13 +331,13 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       tree: {
         description: "a Project's (or the Workspace's) page tree, depth first, each Document with its depth",
         writes: false,
-        run: (api, a) => api("GET", `${treePath(a.project)}/documents`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/documents`),
       },
       create: {
         description: "a new Document at Version 1, last among its siblings",
         writes: true,
         run: (api, a) =>
-          api("POST", `${treePath(a.project)}/documents`, {
+          api("POST", `${scopePath(a.project)}/documents`, {
             title: required(a.title, "a title", "create"),
             ...(a.body !== undefined && { body: a.body }),
             ...(a.parentId !== undefined && { parentId: a.parentId }),
@@ -388,10 +398,37 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerGroupedTool(server, ctx, {
+    name: "decisions",
+    description:
+      "Decisions: recorded choices with their reasoning, belonging to a Project or, without a project, the Workspace, keyed like " +
+      "CRONK-D7 (D7 in the Workspace). Each has a status: proposed, accepted, rejected, deprecated, or superseded by a newer accepted " +
+      "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list)"),
+      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get)"),
+      status: z.array(z.enum(DECISION_STATUSES)).optional().describe("Only Decisions with one of these statuses (list)"),
+      group: z.array(z.string()).optional().describe("Only Decisions in one of these groups, ignoring case (list)"),
+    },
+    actions: {
+      list: {
+        description: "a Project's (or the Workspace's) Decisions, newest first, without their bodies, optionally filtered",
+        writes: false,
+        run: (api, a) => api("GET", `${scopePath(a.project)}/decisions${query({ status: a.status, group: a.group })}`),
+      },
+      get: {
+        description: "one Decision with its Markdown body, what it supersedes and what superseded it",
+        writes: false,
+        run: (api, a) => api("GET", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "get"))}`),
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
     name: "terms",
     description:
       "Terms: the glossary. Each names one concept with its definition and the words to avoid for it; use the name and avoid those words. " +
-      "The Workspace's apply everywhere; within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case.",
+      "The Workspace's apply everywhere; within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case. " +
+      "Saving text that uses a word to avoid, outside code and quotes, still goes through: the result lists each such word with the Term to use, as `avoidedWords`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK, for the Terms that apply in it; leave out for the Workspace's (list, get by name)"),
       name: z.string().optional().describe("The Term's name, ignoring case (get)"),
@@ -401,7 +438,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       list: {
         description: "the Terms that apply in a Project, or the Workspace's, by name, with their definitions",
         writes: false,
-        run: (api, a) => api("GET", `${treePath(a.project)}/terms`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/terms`),
       },
       get: {
         description: "one Term by name, as it applies in a Project or the Workspace, or by id",
@@ -409,11 +446,51 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         run: async (api, a) => {
           if (a.id !== undefined) return api("GET", `/api/terms/${encodeURIComponent(a.id)}`);
           if (a.name === undefined) throw new ToolError("The get action needs a name or an id");
-          const found = await api("GET", `${treePath(a.project)}/terms${query({ name: [a.name] })}`);
+          const found = await api("GET", `${scopePath(a.project)}/terms${query({ name: [a.name] })}`);
           if (found.status >= 400) return found;
           const [term] = found.body.terms as unknown[];
           if (!term) throw new ToolError(`No Term named ${a.name.trim()} applies in ${a.project?.toUpperCase() ?? "the Workspace"}`);
           return { status: 200, body: { term } };
+        },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "attachments",
+    description:
+      "Attachments: plain files on a Ticket, such as screenshots, recordings, logs or PDFs, kept as evidence with the work. " +
+      "Whoever can read the Ticket can read them. Attach one to a Ticket you hold the Claim on, as text (`content`) or as base64 " +
+      "(`contentBase64`) for anything else; each may be as large as the Workspace allows (100 MB unless an Admin changed it), " +
+      "and at most 100 MB through this tool. For a larger file, POST it to /api/tickets/{key}/attachments?name=<name> with the HTTP API.",
+    parameters: {
+      key: z.string().optional().describe("Ticket key, such as CRONK-12 (attach, list)"),
+      name: z.string().optional().describe("The file's name, such as sign-in-flood.log or proxy-ip.png (attach)"),
+      content: z.string().optional().describe("The file's text, stored as UTF-8 (attach)"),
+      contentBase64: z.string().optional().describe("The file's bytes as base64, instead of content (attach)"),
+      contentType: z
+        .string()
+        .optional()
+        .describe("The file's media type, such as image/png; text/plain for content and application/octet-stream for contentBase64 if left out (attach)"),
+    },
+    actions: {
+      list: {
+        description: "a Ticket's Attachments, in the order they were attached; download one at GET /api/attachments/{id}/file",
+        writes: false,
+        run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "list"))}/attachments`),
+      },
+      attach: {
+        description: "attach a file to a Ticket you hold the Claim on",
+        writes: true,
+        run: (api, a) => {
+          const key = required(a.key, "a key", "attach");
+          const name = required(a.name, "a name", "attach");
+          if ((a.content === undefined) === (a.contentBase64 === undefined)) throw new ToolError("The attach action needs either content or contentBase64, not both");
+          const file =
+            a.content !== undefined
+              ? new FileBody(Buffer.from(a.content, "utf8"), a.contentType ?? "text/plain")
+              : new FileBody(Buffer.from(a.contentBase64!, "base64"), a.contentType ?? "application/octet-stream");
+          return api("POST", `/api/tickets/${encodeURIComponent(key)}/attachments?name=${encodeURIComponent(name)}`, file);
         },
       },
     },
@@ -448,5 +525,5 @@ function commentsPath(a: { key?: string | undefined; documentId?: string | undef
   return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
 }
 
-/** Where a page tree's API lives: a Project's, or the Workspace's when no Project is named. */
-const treePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);
+/** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */
+const scopePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);

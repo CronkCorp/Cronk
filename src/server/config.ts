@@ -16,6 +16,8 @@ export interface ServerConfig extends AppConfig {
  * - `PUBLIC_URL` (optional): the address Users reach Cronk at, such as `https://cronk.example`. Signed-in
  *   writes are taken only from this site; without it, from the host each request was sent to.
  * - `WEB_ROOT` (default: the built client next to the server, if present), absolute or relative to the working directory.
+ * - `FILES_DIR` (default `data/files`): where the files of Attachments are stored, absolute or relative to the working directory.
+ *   Keep it on a volume that outlives the server, like the database's.
  */
 export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): ServerConfig {
   const databaseUrl = env.DATABASE_URL;
@@ -35,5 +37,6 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
     cookieSecure: cookieSecure === "true",
     publicUrl,
     webRoot: env.WEB_ROOT ? resolve(env.WEB_ROOT) : defaultWebRoot,
+    filesDir: resolve(env.FILES_DIR || "data/files"),
   };
 }

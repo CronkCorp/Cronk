@@ -13,6 +13,7 @@ import { mcpRoutes } from "./mcp/server.js";
 import { identityRoutes } from "./identity/routes.js";
 import { guidanceRoutes } from "./knowledge/guidance-routes.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
+import { decisionRoutes } from "./knowledge/decision-routes.js";
 import { termRoutes } from "./knowledge/term-routes.js";
 import { portabilityRoutes } from "./portability/routes.js";
 import { searchRoutes } from "./search/routes.js";
@@ -21,8 +22,11 @@ import { documentLinkRoutes } from "./work/document-link-routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
+import { transcriptRoutes } from "./transcripts/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
 import { refuseWritesFromOtherSites } from "./identity/same-site.js";
+import { attachmentRoutes } from "./files/attachment-routes.js";
+import { LocalDiskStore } from "./files/store.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -39,6 +43,8 @@ export interface AppConfig {
   publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;
+  /** Directory the files of Attachments are stored in, on local disk. */
+  filesDir: string;
 }
 
 /**
@@ -68,7 +74,13 @@ export async function buildApp(opts: {
     await db.end();
     throw err;
   }
-  const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure, live: opts.live ?? new LiveUpdates() };
+  const ctx: AppContext = {
+    db,
+    clock: opts.clock,
+    cookieSecure: opts.config.cookieSecure,
+    live: opts.live ?? new LiveUpdates(),
+    files: new LocalDiskStore(opts.config.filesDir),
+  };
 
   // Open live-update streams would otherwise keep the server from closing.
   app.addHook("preClose", async () => ctx.live.close());
@@ -161,14 +173,17 @@ export async function buildApp(opts: {
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
   await app.register(documentLinkRoutes(ctx));
+  await app.register(attachmentRoutes(ctx));
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
+  await app.register(decisionRoutes(ctx));
   await app.register(termRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(conversationRoutes(ctx));
   await app.register(searchRoutes(ctx));
   await app.register(inboxRoutes(ctx));
   await app.register(portabilityRoutes(ctx));
+  await app.register(transcriptRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 
   const webRoot = opts.config.webRoot;

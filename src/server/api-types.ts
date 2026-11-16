@@ -25,19 +25,26 @@ import type {
   UserRef,
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
+import type { publicAttachment } from "./files/attachments.js";
 import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
+import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, ReviewItem } from "./inbox/inbox.js";
+import type { QuestionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
+import type {
+  Decision as StoredDecision,
+  DecisionSummary as StoredDecisionSummary,
+  DecisionVersion as StoredDecisionVersion,
+} from "./knowledge/decisions.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
-export type { ActivityKind, Priority, RelationKind, SearchKind, StatusCategory } from "../shared/values.js";
+export type { ActivityKind, DecisionStatus, Priority, RelationKind, SearchKind, StatusCategory, Verification } from "../shared/values.js";
 export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
 
@@ -73,6 +80,12 @@ export type AgentToken = Serialized<StoredAgentToken>;
 export type IssuedAgentToken = Serialized<Awaited<ReturnType<typeof issueAgentToken>>>;
 export type Invitation = Serialized<ReturnType<typeof publicInvitation>>;
 export type Workspace = Serialized<ReturnType<typeof publicWorkspace>>;
+/** A file attached to a Ticket. */
+export type Attachment = Serialized<ReturnType<typeof publicAttachment>>;
+/** How much storage the Workspace's files take, by kind; Admins only. */
+export interface Storage {
+  attachments: { files: number; bytes: number };
+}
 /** Standing instructions Users write for Agents: its Markdown and current Version (0 before anyone writes it). */
 export type Guidance = Serialized<StoredGuidance>;
 /** One saved state of Guidance, with the User who saved it and when. */
@@ -141,6 +154,15 @@ export type Merge = StoredMerge & { onto: Version };
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
-/** One item in a User's Inbox: a Ticket to review, or an open question of one of their Agents. */
-export type InboxItem = Serialized<ReviewItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
+/** One item in a User's Inbox: a Ticket to review, an Unverified completion, or an open question of one of their Agents. */
+export type InboxItem = Serialized<ReviewItem> | Serialized<UnverifiedItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
 export type InboxKind = InboxItem["kind"];
+
+/** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
+export type { AvoidedWord };
+/** A recorded choice with its reasoning and status, at its current Version. */
+export type Decision = Serialized<StoredDecision>;
+/** A Decision as its register lists it, without its body. */
+export type DecisionSummary = Serialized<StoredDecisionSummary>;
+/** One saved state of a Decision. */
+export type DecisionVersion = Serialized<StoredDecisionVersion>;

@@ -13,6 +13,10 @@ export const FINISHED_CATEGORIES: readonly StatusCategory[] = ["completed", "can
 /** The Status Categories of work an Agent can take up: a Ticket In Review waits on a User, and finished work has nothing left to do. */
 export const WORKABLE_CATEGORIES: readonly StatusCategory[] = ["backlog", "unstarted", "started"];
 
+/** Where an Agent's completion under Autonomous Delegation stands: Unverified until a User Accepts it, then Verified. */
+export const VERIFICATIONS = ["unverified", "verified"] as const;
+export type Verification = (typeof VERIFICATIONS)[number];
+
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];
@@ -47,8 +51,23 @@ export const MENTION_SYNTAX =
   '`@"Ada Lovelace"/codex`. Mentions inside code and block quotes don\'t count.';
 
 /** What a search can find: Tickets, Documents in a page tree, Reports, and Comments. */
+/**
+ * The media types of the files a browser shows or plays in the page, by kind: Cronk serves these inline and shows them
+ * in the Ticket's Attachments. None can run script; any other file, HTML and SVG above all, is saved instead.
+ */
+export const SHOWN_MEDIA_TYPES = {
+  image: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"],
+  video: ["video/mp4", "video/webm", "video/ogg"],
+  audio: ["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/flac"],
+  text: ["text/plain"],
+} as const;
+
 export const SEARCH_KINDS = ["ticket", "document", "report", "comment"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
 export const MARKDOWN_FILE = /\.(md|markdown)$/i;
+
+/** A Decision's lifecycle status. Only Users change it; a Decision becomes superseded when one superseding it is accepted. */
+export const DECISION_STATUSES = ["proposed", "accepted", "rejected", "deprecated", "superseded"] as const;
+export type DecisionStatus = (typeof DECISION_STATUSES)[number];

@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import type { Priority, Status } from "../api.js";
+import { Link } from "../router.js";
+import type { DecisionStatus, Priority, Status } from "../api.js";
 
 // Small labels set into rows and headings: docs/ui.md § Component conventions.
 
 /** What an entry is. Each kind has its colour, which backs up the label and never replaces it. */
-export type Kind = "plan" | "progress" | "finding" | "question" | "blocking" | "error" | "report" | "comment" | "review";
+export type Kind = "plan" | "progress" | "finding" | "question" | "blocking" | "error" | "report" | "comment" | "review" | "unverified";
 
 /** An 11px uppercase label saying what an Activity, Comment or Report is. */
 export function KindLabel(props: { kind: Kind; children: ReactNode }) {
@@ -56,4 +57,27 @@ export function StatusPill(props: { status: Status }) {
 /** A Status as its Category's dot alone, for dense rows: the name is in its tooltip and accessible label. */
 export function StatusDot(props: { status: Status }) {
   return <span className={`dot ${props.status.category}`} role="img" aria-label={props.status.name} title={props.status.name} />;
+}
+
+/** Each Decision status as the UI names it. */
+export const DECISION_STATUS_NAMES: Record<DecisionStatus, string> = {
+  proposed: "Proposed",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  deprecated: "Deprecated",
+  superseded: "Superseded",
+};
+
+/** A Decision's status as an 11px uppercase pill, styled by status (docs/ui.md § Component conventions). */
+export function DecisionStatusPill(props: { status: DecisionStatus }) {
+  return <span className={`decision-status ${props.status}`}>{DECISION_STATUS_NAMES[props.status]}</span>;
+}
+
+/** A filter as a pill linking to the view it filters to, such as "Accepted 3"; the filter in force is marked current. */
+export function FilterChip(props: { to: string; current: boolean; children: string }) {
+  return (
+    <Link to={props.to} className={`filter-chip${props.current ? " pressed" : ""}`} {...(props.current ? { "aria-current": "true" as const } : {})}>
+      {props.children}
+    </Link>
+  );
 }

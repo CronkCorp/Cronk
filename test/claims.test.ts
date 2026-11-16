@@ -344,8 +344,8 @@ describe("The welcome", () => {
 
     const started = await cronk.client(claude.secret).post("/api/agent-sessions");
     expect(started.body.welcome.readyTickets).toEqual([
-      { key: "CRONK-3", title: "Ticket 3", priority: "urgent", status: expect.objectContaining({ category: "backlog" }) },
-      { key: "CRONK-2", title: "Ticket 2", priority: "none", status: expect.objectContaining({ category: "backlog" }) },
+      { key: "CRONK-3", title: "Ticket 3", priority: "urgent", status: expect.objectContaining({ category: "backlog" }), autonomous: false },
+      { key: "CRONK-2", title: "Ticket 2", priority: "none", status: expect.objectContaining({ category: "backlog" }), autonomous: false },
     ]);
   });
 });

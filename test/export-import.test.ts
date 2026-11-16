@@ -23,6 +23,7 @@ describe("exporting a Project", () => {
     await admin.post("/api/tickets/CRONK-1/comments", { body: "Starting." });
     const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "# Plan\n\nShip." })).body.document;
     await admin.post(`/api/tickets/CRONK-1/documents/${plan.id}`);
+    await admin.upload("/api/tickets/CRONK-1/attachments?name=sign-in-flood.log", Buffer.from("429 x 50\n"), "text/plain");
 
     const res = await admin.download("/api/projects/CRONK/export");
     expect(res.status).toBe(200);
@@ -46,6 +47,11 @@ describe("exporting a Project", () => {
       data: { at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" },
       body: "Starting.",
     });
+    // Attachments are their files, with an index saying what each is.
+    expect(markdown(files["projects/CRONK/tickets/CRONK-1.attachments/index.md"]).data.attachments).toEqual([
+      { id: expect.any(String), file: "1-sign-in-flood.log", name: "sign-in-flood.log", contentType: "text/plain", size: 9, at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" },
+    ]);
+    expect(files["projects/CRONK/tickets/CRONK-1.attachments/1-sign-in-flood.log"]).toBe("429 x 50\n");
     expect(markdown(files["projects/CRONK/documents/1-plan.md"])).toMatchObject({ data: { title: "Plan", version: 1 }, body: "# Plan\n\nShip." });
     expect(markdown(files["people.md"]).data.users).toEqual([{ email: "ada@example.com", name: "Ada", role: "admin", active: true }]);
     // History names Users by email, Statuses by name and Tickets by key, keeping the names recorded at the time.
@@ -69,6 +75,39 @@ describe("exporting a Project", () => {
     expect(markdown(files["projects/CRONK/tickets/CRONK-1.history.md"]).data.changes).toContainEqual(
       expect.objectContaining({ by: "ada@example.com", change: "delegate", from: null, to: { id: claude.agentId, name: "claude-laptop" } }),
     );
+  });
+
+  it("writes Decisions as docs/adr/NNNN-slug.md files with frontmatter", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits!", body: "Per email.", supersedes: ["CRONK-D1"] });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "Use Compose." });
+
+    const project = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(markdown(project["projects/CRONK/docs/adr/0001-limits-in-the-api.md"])).toEqual({
+      data: {
+        key: "CRONK-D1",
+        title: "Limits in the API",
+        status: "superseded",
+        group: "Security",
+        supersededBy: "CRONK-D2",
+        version: 3,
+        createdAt: "2026-01-01T09:00:00.000Z",
+        createdBy: "ada@example.com",
+        updatedAt: "2026-01-01T09:00:00.000Z",
+        updatedBy: "ada@example.com",
+      },
+      body: "Limit sign-ins.",
+    });
+    expect(markdown(project["projects/CRONK/docs/adr/0002-per-email-limits.md"]).data).toMatchObject({ key: "CRONK-D2", status: "accepted", supersedes: ["CRONK-D1"] });
+    expect(markdown(project["projects/CRONK/docs/adr/0001-limits-in-the-api.versions/2.md"]).data).toMatchObject({ status: "accepted", by: "ada@example.com" });
+    expect(Object.keys(project).filter((p) => p.startsWith("docs/"))).toEqual([]);
+
+    const workspace = await untarGz((await admin.download("/api/export")).body);
+    expect(markdown(workspace["docs/adr/0001-compose-for-installs.md"])).toMatchObject({ data: { key: "D1", status: "proposed" }, body: "Use Compose." });
   });
 
   it("is only for Admins", async () => {
@@ -100,6 +139,15 @@ async function snapshot(admin: Client): Promise<unknown> {
     versions: await Promise.all((await get(`/api/documents/${id}/versions`)).versions.map((v: { number: number }) => get(`/api/documents/${id}/versions/${v.number}`))),
     comments: await get(`/api/documents/${id}/comments`),
   });
+  const decisions = async (path: string) => {
+    const { decisions: listed } = await get(path);
+    return Promise.all(
+      listed.map(async (d: { key: string }) => ({
+        ...(await get(`/api/decisions/${d.key}`)),
+        versions: await Promise.all((await get(`/api/decisions/${d.key}/versions`)).versions.map((v: { number: number }) => get(`/api/decisions/${d.key}/versions/${v.number}`))),
+      })),
+    );
+  };
   const tree = async (path: string) => {
     const { documents } = await get(path);
     return { documents, contents: await Promise.all(documents.map((d: { id: string }) => document(d.id))) };
@@ -115,6 +163,7 @@ async function snapshot(admin: Client): Promise<unknown> {
       guidanceVersions: await get(`/api/projects/${key}/guidance/versions`),
       terms: await terms(`/api/projects/${key}/terms`),
       documents: await tree(`/api/projects/${key}/documents`),
+      decisions: await decisions(`/api/projects/${key}/decisions`),
       tickets: await Promise.all(
         tickets.map(async (t: { key: string }) => {
           const { reports } = await get(`/api/tickets/${t.key}/reports`);
@@ -123,6 +172,12 @@ async function snapshot(admin: Client): Promise<unknown> {
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
             changes: await get(`/api/tickets/${t.key}/changes`),
+            attachments: await Promise.all(
+              (await get(`/api/tickets/${t.key}/attachments`)).attachments.map(async (a: { id: string }) => ({
+                ...a,
+                file: (await admin.download(`/api/attachments/${a.id}/file`)).body.toString("base64"),
+              })),
+            ),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -133,12 +188,14 @@ async function snapshot(admin: Client): Promise<unknown> {
   const projects = [...(await get("/api/projects")).projects, ...(await get("/api/projects?archived=true")).projects];
   const raw = {
     workspace: await get("/api/workspace"),
+    storage: await get("/api/workspace/storage"),
     users: await get("/api/users"),
     agents: await get("/api/agents?all=true"),
     guidance: await get("/api/workspace/guidance"),
     guidanceVersions: await get("/api/workspace/guidance/versions"),
     terms: await terms("/api/workspace/terms"),
     documents: await tree("/api/workspace/documents"),
+    decisions: await decisions("/api/workspace/decisions"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
   };
   const ids = new Map<string, string>();
@@ -150,7 +207,7 @@ async function busyWorkspace() {
   const { cronk, admin, session } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
-  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600 });
+  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024 });
   await admin.put("/api/workspace/guidance", { baseVersion: 0, markdown: "Be kind." });
   await admin.put("/api/workspace/guidance", { baseVersion: 1, markdown: "Be kind. Be brief." });
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
@@ -179,6 +236,10 @@ async function busyWorkspace() {
   const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The *disk* one.", replyToActivityId: question.id })).body.comment;
   await agent.post("/api/tickets/CRONK-1/comments", { body: "Thanks.", replyToCommentId: answer.id });
   const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
+  // Attachments: the Agent's binary screenshot, and two of Ada's, one named as a hidden file would be.
+  await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
+  await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");
+  await admin.upload("/api/tickets/CRONK-2/attachments?name=notes.md", Buffer.from("---\ntitle: not a Ticket\n---\n"), "text/markdown");
   await agent.patch(`/api/documents/${report.id}`, { baseVersion: 1, body: "It was the disk cache." });
   const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
   expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
@@ -186,6 +247,16 @@ async function busyWorkspace() {
   // Ada sends it back once, then puts it In Review again herself.
   await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
   await admin.patch("/api/tickets/CRONK-1", { statusId: inReview.id });
+
+  // Autonomous Delegation: a Project default, and CRONK-2 completed by claude-laptop on its own, still Unverified.
+  await admin.patch("/api/projects/CRONK", { autonomousByDefault: true });
+  await admin.patch("/api/tickets/CRONK-2", { autonomous: true });
+  const autonomous = await session();
+  await autonomous.post("/api/tickets/CRONK-2/claim");
+  await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done", body: "Shipped the API." });
+  const done = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed");
+  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
+  await autonomous.delete("/api/agent-sessions/current");
 
   // Documents with Versions and Comments, in both page trees.
   cronk.clock.advance(60_000);
@@ -201,6 +272,16 @@ async function busyWorkspace() {
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
   await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
 
+  // Decisions in both scopes: one superseded by another Grace accepted, one rejected, one edited.
+  await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
+  await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+  await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the proxy", group: "Security" });
+  await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected" });
+  await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits", supersedes: ["CRONK-D1"] });
+  cronk.clock.advance(60_000);
+  await grace.post("/api/decisions/CRONK-D3/status", { status: "accepted" });
+  await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "v1" });
+  await admin.patch("/api/decisions/D1", { baseVersion: 1, body: "v2", group: "Ops" });
   // Terms in both places, with Versions, one saved by an Agent; a Project Term overriding a Workspace Term.
   const ticketTerm = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["Issue", "task"], group: "Work" })).body.term;
   await admin.patch(`/api/terms/${ticketTerm.id}`, { baseVersion: 1, definition: "A unit of work\n---\ntracked within a *Project*." });
@@ -254,6 +335,9 @@ describe("importing an export", () => {
       value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
+    // Decision numbers carry on where the export left off.
+    expect((await admin.post("/api/projects/CRONK/decisions", { title: "Next" })).body.decision.key).toBe("CRONK-D4");
+    expect((await admin.post("/api/workspace/decisions", { title: "Next" })).body.decision.key).toBe("D2");
   });
 });
 
@@ -681,5 +765,21 @@ describe("a delegated Ticket without an Assignee in an export", () => {
     expect(ticket.delegate).toMatchObject({ name: "claude-laptop" });
     const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: ada });
+  });
+});
+
+describe("Attachments in an export", () => {
+  it("keep their ids, so links to their files still work after the move", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const id = (await admin.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50]), "image/png")).body.attachment.id;
+    const exported = await admin.download("/api/export");
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    const file = await elsewhere.download(`/api/attachments/${id}/file`);
+    expect(file.status).toBe(200);
+    expect([...file.body]).toEqual([0x89, 0x50]);
   });
 });
