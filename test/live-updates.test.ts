@@ -98,7 +98,7 @@ describe("A Project's live updates", () => {
   });
 
   it("tell which Tickets changed when their Claims end because the Agents' Owner is deactivated", async () => {
-    const { cronk, admin } = await delegatedSetup(3);
+    const { cronk, admin } = await delegatedSetup(2);
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const bobId = (await admin.get("/api/users")).body.users.find((u: any) => u.email === "bob@example.com").id;
     const first = await registerAgent(bob, "bob-laptop");
@@ -116,6 +116,24 @@ describe("A Project's live updates", () => {
     const changed = [await project.next(), await project.next()].map((e) => e?.data.ticket).sort();
     expect(changed).toEqual(["CRONK-1", "CRONK-2"]);
     expect(await ticket.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+  });
+
+  it("don't tell again of a Claim that had lapsed before its Agent's Owner was deactivated", async () => {
+    const { cronk, admin } = await delegatedSetup(2);
+    const threshold = (await admin.get("/api/workspace")).body.silenceThresholdSeconds;
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await admin.get("/api/users")).body.users.find((u: any) => u.email === "bob@example.com").id;
+    const laptop = await registerAgent(bob, "bob-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: laptop.agentId });
+    expect((await (await startSession(cronk, laptop.secret)).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    const stream = await admin.events("/api/projects/CRONK/events");
+    expect((await stream.next())?.event).toBe("ready");
+    cronk.clock.advance(threshold * 1000 + 1);
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+
+    expect((await admin.patch(`/api/users/${bobId}`, { active: false })).status).toBe(200);
+    await admin.patch("/api/tickets/CRONK-2", { title: "After" });
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
   });
 
   it("tell which Ticket changed when its Claim lapses", async () => {
