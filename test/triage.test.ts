@@ -273,6 +273,34 @@ describe("Triage's unattended Tickets", () => {
     expect((await bob.get("/api/triage")).body.items).toMatchObject([{ kind: "unattended", reason: "deactivated", ticket: { key: "CRONK-1" } }]);
   });
 
+  it("tells Triage when the Ticket is reassigned or its Assignee reactivated, so the count updates", async () => {
+    const { admin, bob, carolId } = await carolsDelegatedTicket();
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    const stream = await bob.events("/api/inbox/events?triage=true");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch(`/api/users/${carolId}`, { active: true });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1"]);
+    await bob.patch("/api/tickets/CRONK-1", { assigneeId: (await bob.get("/api/me")).body.user.id });
+    // Bob's own Inbox hears of it first, as he is now its Assignee.
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+    expect(await triageLines(bob)).toEqual([]);
+  });
+
+  it("isn't shown to a User who can't see its Project", async () => {
+    const { cronk, admin, carolId } = await carolsDelegatedTicket();
+    const eve = await joinAs(cronk, admin, "eve@example.com");
+    await admin.put(`/api/projects/CRONK/members/${carolId}`, { access: "write" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(eve)).toEqual([]);
+  });
+
   it("tells Triage when an Assignee loses access to a Project", async () => {
     const { admin, bob, carolId } = await carolsDelegatedTicket();
     await admin.put(`/api/projects/CRONK/members/${carolId}`, { access: "write" });
