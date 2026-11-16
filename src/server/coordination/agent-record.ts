@@ -5,7 +5,7 @@ import { ticketKeySql, type RecordedChange } from "../work/tickets.js";
 import type { ActivityKind } from "../../shared/values.js";
 
 /**
- * An Agent's record: everything it did across the Workspace, as one feed: the Changes it made to Tickets,
+ * An Agent Record: everything an Agent did across the Workspace: the Changes it made to Tickets,
  * the Activities and Comments it wrote, and the Document Versions it saved. It answers
  * "what did my Agents do this week?" without opening every Ticket's timeline.
  */
