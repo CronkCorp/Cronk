@@ -160,7 +160,7 @@ export type TermVersion = Serialized<StoredTermVersion>;
 /** One marking of a Document, Term, Decision or Artifact as Protected, or unmarking, with the User who did it. */
 export type ProtectionMarking = Serialized<StoredProtectionMarking>;
 /** A Version without its body, as a Document's Version list shows it. */
-export type VersionSummary = Omit<Version, "body">;
+export type VersionSummary = Omit<Version, "body" | "embeds">;
 /** A Document as its page tree lists it. */
 export type DocumentTreeEntry = TreeEntry;
 /** A Report as its Ticket and Project list it, without its body; read it as a Document by its id. */

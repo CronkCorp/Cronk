@@ -1,6 +1,8 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { recordMentions } from "../knowledge/mentions.js";
+import { embedsSql, recordEmbeds } from "../files/artifact-embeds.js";
+import type { ArtifactAt } from "../../shared/artifact-embeds.js";
 
 /**
  * Comments: conversation any Actor posts on a Ticket or a Document, as opposed to an Agent's
@@ -19,6 +21,8 @@ export interface Comment {
   /** The passage of its Document it is anchored to; null when it isn't anchored. */
   anchor: Anchor | null;
   body: string;
+  /** The Artifacts its body embeds, in order (files/artifact-embeds.ts). */
+  embeds: ArtifactAt[];
   /** Whether a User posted it sending its Ticket back from review. */
   sendBack: boolean;
   at: Date;
@@ -47,6 +51,7 @@ interface CommentRow extends RecordedActorRow {
   anchor_version: number | null;
   anchor_in_current_version: boolean | null;
   body: string;
+  embeds: ArtifactAt[];
   send_back: boolean;
   at: Date;
   ticket_title: string | null;
@@ -61,7 +66,7 @@ interface CommentRow extends RecordedActorRow {
 const selectFrom = (source: string) => `
   SELECT c.id, c.ticket_id, p.key || '-' || t.number AS ticket_key, c.document_id, c.reply_to_comment_id, c.reply_to_activity_id,
     c.anchor_passage, c.anchor_version, strpos(d.body, c.anchor_passage) > 0 AS anchor_in_current_version,
-    c.body, c.send_back, c.at, t.title AS ticket_title, d.title AS document_title, coalesce(t.project_id, d.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
+    c.body, ${embedsSql("comment", "c")} AS embeds, c.send_back, c.at, t.title AS ticket_title, d.title AS document_title, coalesce(t.project_id, d.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
   FROM ${source} c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
     LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN documents d ON d.id = c.document_id`;
 
@@ -77,6 +82,7 @@ const toComment = (row: CommentRow): Comment => ({
       ? null
       : { passage: row.anchor_passage, version: row.anchor_version!, inCurrentVersion: row.anchor_in_current_version! },
   body: row.body,
+  embeds: row.embeds,
   sendBack: row.send_back,
   at: row.at,
   actor: toRecordedActor(row),
@@ -126,7 +132,7 @@ export async function insertComment(
     ],
   );
   await recordMentions(db, { kind: "comment", id: rows[0]!.id });
-  return toComment(rows[0]!);
+  return { ...toComment(rows[0]!), embeds: await recordEmbeds(db, { kind: "comment", id: rows[0]!.id }) };
 }
 
 /** The Comments on `target`, oldest first. */

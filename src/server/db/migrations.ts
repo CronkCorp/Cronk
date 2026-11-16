@@ -1,6 +1,7 @@
 import type { Queryable } from "./database.js";
 import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
+import { recordAllEmbeds } from "../files/artifact-embeds.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -850,5 +851,25 @@ export const migrations: Migration[] = [
       -- The secret the Artifact hostname's addresses are signed with, so a frame shows only what Cronk handed out.
       ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
     `,
+  },
+  {
+    id: "0032_artifact_embeds",
+    sql: `
+      -- Where each Artifact is embedded (files/artifact-embeds.ts): the Document (a Report too) or Comment whose current
+      -- text holds its address alone on a line, with the Version the address names (null for the latest) and where it
+      -- comes in the text. Rewritten on every change to the text.
+      CREATE TABLE artifact_embeds (
+        artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        version integer,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        position integer NOT NULL,
+        CHECK (num_nonnulls(document_id, comment_id) = 1)
+      );
+      CREATE INDEX artifact_embeds_artifact ON artifact_embeds (artifact_id);
+      CREATE INDEX artifact_embeds_document ON artifact_embeds (document_id);
+      CREATE INDEX artifact_embeds_comment ON artifact_embeds (comment_id);
+    `,
+    backfill: (db) => recordAllEmbeds(db),
   },
 ];

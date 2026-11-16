@@ -4,13 +4,14 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "../knowledge/protection.js";
 import { ARCHIVE_TYPES, archiveBody, unpackFolder, unwrapFolder, bytesOf, type Folder } from "../portability/archive.js";
 import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
+import { listEmbeddedIn } from "./artifact-embeds.js";
 import { formatBytes } from "./sizes.js";
 import {
   artifactFileKey,
@@ -235,6 +236,24 @@ export function artifactRoutes(ctx: AppContext) {
             files: files.map((f) => ({ path: f.path, contentType: f.contentType, size: f.size })),
           },
         };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/embedded-in",
+      {
+        schema: {
+          description:
+            "Where the Artifact is embedded: the Documents, Reports and Comments whose current text holds its address alone on a line, most recently " +
+            "changed first (at most 50), each with the Version it embeds, leaving out those you can't read.",
+          params: artifactParams,
+          response: { 200: answer("Where the Artifact is embedded", listing("embeddedIn", ref("EmbeddedIn"))), ...errors(401, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const artifact = await artifactFor(ctx.db, actor, request.params.id, "read");
+        return { embeddedIn: await listEmbeddedIn(ctx.db, artifact.id, await readablePlaces(ctx.db, actor)) };
       },
     );
 
