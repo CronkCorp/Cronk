@@ -20,7 +20,7 @@ import {
   type TicketRef,
 } from "./api.js";
 import { PRIORITIES } from "../shared/values.js";
-import { CronkMarkdown } from "./markdown.js";
+import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
 import { AttachmentViewer, FilesPanel, type AttachmentsView, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
@@ -162,6 +162,7 @@ function TicketView(props: {
   };
 
   return (
+    <MarkdownPlace.Provider value={t.projectKey}>
     <article className="ticket">
       <div className="muted crumbs">
         <Link to={archived ? "/archived" : "/"} className="link">Projects</Link> /{" "}
@@ -216,6 +217,7 @@ function TicketView(props: {
         }}
       />
     </article>
+    </MarkdownPlace.Provider>
   );
 }
 

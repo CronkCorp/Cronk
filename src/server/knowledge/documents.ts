@@ -3,6 +3,7 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
 import { recordTicketMentions } from "./ticket-mentions.js";
+import { recordMentions } from "./mentions.js";
 import type { LinkReason } from "../../shared/values.js";
 
 /**
@@ -164,6 +165,7 @@ export async function insertDocument(
   const id = rows[0]!.id;
   await insertVersion(db, id, { number: 1, title: input.title, body: input.body, actor: input.actor, now: input.now, restoredFrom: null });
   await recordTicketMentions(db, id, input);
+  await recordMentions(db, { kind: "document", id });
   return (await findDocument(db, input.tree.workspaceId, id))!;
 }
 
@@ -191,6 +193,7 @@ export async function insertDocumentRow(db: Queryable, d: DocumentRowInput): Pro
   );
   const id = rows[0]!.id;
   await recordTicketMentions(db, id, d);
+  await recordMentions(db, { kind: "document", id });
   return id;
 }
 
@@ -287,6 +290,7 @@ export async function saveVersion(
     save.now,
   ]);
   await recordTicketMentions(db, document.id, save);
+  await recordMentions(db, { kind: "document", id: document.id });
   return { ...document, title: save.title, body: save.body, version: number, updatedAt: save.now };
 }
 

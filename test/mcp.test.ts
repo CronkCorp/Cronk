@@ -309,6 +309,20 @@ describe("the decisions tool", () => {
     expect(await callTool(mcp, "decisions", { action: "get", key: "SECRET-D1" })).toEqual({ isError: true, body: "No such Decision" });
     expect(await callTool(mcp, "decisions", { action: "get" })).toEqual({ isError: true, body: "The get action needs a key" });
   });
+
+  it("and the terms tool list what mentions a Decision or Term", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await admin.post("/api/workspace/decisions", { title: "Postgres" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse", description: "Each Claim, per D1." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    expect((await callTool(mcp, "decisions", { action: "mentions", key: "d1" })).body).toEqual((await admin.get("/api/decisions/D1/mentions")).body);
+    expect((await callTool(mcp, "terms", { action: "mentions", id: claim.id })).body).toEqual((await admin.get(`/api/terms/${claim.id}/mentions`)).body);
+    expect((await callTool(mcp, "terms", { action: "mentions", id: claim.id })).body.mentions).toHaveLength(1);
+    expect(await callTool(mcp, "terms", { action: "mentions" })).toEqual({ isError: true, body: "The mentions action needs an id" });
+  });
 });
 
 describe("the terms tool", () => {

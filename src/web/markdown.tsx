@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Nodes } from "mdast";
 import Markdown, { type Components } from "react-markdown";
@@ -6,6 +7,7 @@ import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
 import { alignCodeToSource, alignToSource, encodeBounds, type Container, type SourceBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
+import { DECISION_REFERENCE, normalName, termPattern } from "../shared/knowledge-references.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
 interface MdNode extends MarkdownNode {
@@ -19,12 +21,55 @@ function pointIn(source: string, offset: number): MarkdownPoint {
   return { line: before.split("\n").length, column: offset - before.lastIndexOf("\n"), offset };
 }
 
+/** What rendered Markdown links: keys of known Projects, numbers of the Workspace's Decisions, and the Terms that apply where it lies. */
+interface LinkTargets {
+  projectKeys: Set<string>;
+  workspaceDecisions: Set<number>;
+  /** Term ids by name, as `normalName` gives it. */
+  terms: Map<string, string>;
+}
+
+/** A reference found in a run of text, with where it links. */
+interface Found {
+  index: number;
+  text: string;
+  url: string;
+}
+
 /**
- * A remark plugin that turns references to Tickets of known Projects into links
- * to those Tickets. Only keys of real Projects count, so text like `UTF-8`
- * stays plain. Code is never touched, as it isn't text in the tree.
+ * The references `text` makes, left to right without overlaps (the longer wins where two start
+ * together): Ticket and Decision keys of known Projects, keys of the Workspace's Decisions, and the
+ * names of Terms with their capitalisation, as whole words.
  */
-function linkTicketReferences(projectKeys: Set<string>, source: string) {
+function referencesIn(text: string, targets: LinkTargets, terms: RegExp | undefined): Found[] {
+  const found: Found[] = [];
+  for (const m of text.matchAll(TICKET_REFERENCE)) {
+    if (targets.projectKeys.has(m[1]!)) found.push({ index: m.index, text: m[0], url: `/tickets/${m[0]}` });
+  }
+  for (const m of text.matchAll(DECISION_REFERENCE)) {
+    const known = m[1] === undefined ? targets.workspaceDecisions.has(Number(m[2])) : targets.projectKeys.has(m[1]);
+    if (known) found.push({ index: m.index, text: m[0], url: `/decisions/${m[0]}` });
+  }
+  for (const m of terms ? text.matchAll(terms) : []) {
+    const id = targets.terms.get(normalName(m[0]));
+    if (id) found.push({ index: m.index, text: m[0], url: `/terms/${id}` });
+  }
+  found.sort((a, b) => a.index - b.index || b.text.length - a.text.length);
+  let end = 0;
+  return found.filter((f) => {
+    if (f.index < end) return false;
+    end = f.index + f.text.length;
+    return true;
+  });
+}
+
+/**
+ * A remark plugin that turns references in text into links: Ticket and Decision keys of known Projects
+ * (so text like `UTF-8` stays plain), keys of the Workspace's Decisions, and the names of the Terms that
+ * apply, written with their capitalisation. Code and existing links are never touched.
+ */
+function linkReferences(targets: LinkTargets, source: string) {
+  const terms = termPattern([...targets.terms.keys()]);
   /**
    * Where `length` characters from `from` in a text node's value sit in the source, if the node's position
    * is known and its value can be tied to the source character by character.
@@ -40,12 +85,11 @@ function linkTicketReferences(projectKeys: Set<string>, source: string) {
   const split = (text: string, node: MarkdownNode): MdNode[] => {
     const parts: MdNode[] = [];
     let last = 0;
-    for (const match of text.matchAll(TICKET_REFERENCE)) {
-      if (!projectKeys.has(match[1]!)) continue;
+    for (const match of referencesIn(text, targets, terms)) {
       if (match.index > last) parts.push({ type: "text", value: text.slice(last, match.index), ...positionWithin(node, last, match.index - last) });
-      const at = positionWithin(node, match.index, match[0].length);
-      parts.push({ type: "link", url: `/tickets/${match[0]}`, children: [{ type: "text", value: match[0], ...at }], ...at });
-      last = match.index + match[0].length;
+      const at = positionWithin(node, match.index, match.text.length);
+      parts.push({ type: "link", url: match.url, children: [{ type: "text", value: match.text, ...at }], ...at });
+      last = match.index + match.text.length;
     }
     if (last === 0) return [node];
     if (last < text.length) parts.push({ type: "text", value: text.slice(last), ...positionWithin(node, last, text.length - last) });
@@ -304,10 +348,58 @@ function loadProjectKeys(): Promise<Set<string>> {
   return projectKeys;
 }
 
+/** Numbers of the Workspace's Decisions, loaded once per page load; none if the reader can't read the Workspace. */
+let workspaceDecisions: Promise<Set<number>> | undefined;
+function loadWorkspaceDecisions(): Promise<Set<number>> {
+  workspaceDecisions ??= api.decisions().then(
+    (list) => new Set(list.map((d) => d.number)),
+    () => new Set(),
+  );
+  return workspaceDecisions;
+}
+
+/** The Terms that apply in each place (`""` for the Workspace) by name, loaded once per page load; none if the reader can't read them. */
+const placeTerms = new Map<string, Promise<Map<string, string>>>();
+function loadTerms(projectKey: string | null): Promise<Map<string, string>> {
+  const place = projectKey ?? "";
+  let terms = placeTerms.get(place);
+  if (!terms) {
+    terms = api.terms(projectKey ?? undefined).then(
+      (list) => new Map(list.map((t) => [normalName(t.name), t.id])),
+      () => new Map(),
+    );
+    placeTerms.set(place, terms);
+  }
+  return terms;
+}
+
 /** Forgets the known Project keys, so a Project created since shows up in links. */
 export function forgetProjectKeys(): void {
   projectKeys = undefined;
 }
+
+/** Forgets the known Decisions and Terms, so ones created or renamed since show up in links. */
+export function forgetLinkedKnowledge(): void {
+  workspaceDecisions = undefined;
+  placeTerms.clear();
+}
+
+/**
+ * Where rendered Markdown lies: in a Project (its key) or the Workspace (null), which decides the Terms
+ * whose names it links. Without one, no Terms are linked.
+ */
+export const MarkdownPlace = createContext<string | null | undefined>(undefined);
+
+async function loadLinkTargets(projectKey: string | null | undefined): Promise<LinkTargets> {
+  const [keys, decisions, terms] = await Promise.all([
+    loadProjectKeys(),
+    loadWorkspaceDecisions(),
+    projectKey === undefined ? new Map<string, string>() : loadTerms(projectKey),
+  ]);
+  return { projectKeys: keys, workspaceDecisions: decisions, terms };
+}
+
+const NO_TARGETS: LinkTargets = { projectKeys: new Set(), workspaceDecisions: new Set(), terms: new Map() };
 
 /**
  * How rendered Markdown shows its elements. Defined once, not per render: a new component each render
@@ -323,16 +415,18 @@ const COMPONENTS: Components = {
 };
 
 /**
- * Renders Cronk Markdown: CommonMark plus Ticket references as links. With `sourceOffsets`, each run of
- * text says where it sits in the Markdown, so a selection can be read back as the Markdown it shows, and
- * `highlights` are marked where their passages first appear.
+ * Renders Cronk Markdown: CommonMark plus Ticket and Decision keys and Term names as links, the Terms
+ * being those that apply in `projectKey` (null for the Workspace), or else where `MarkdownPlace` says it
+ * lies. With `sourceOffsets`, each run of text says where it sits in the Markdown, so a selection can be
+ * read back as the Markdown it shows, and `highlights` are marked where their passages first appear.
  */
-export function CronkMarkdown(props: { children: string; sourceOffsets?: boolean; highlights?: Highlight[] }) {
-  const [keys] = useLoad(loadProjectKeys, []);
-  const known = keys.kind === "loaded" ? keys.value : new Set<string>();
+export function CronkMarkdown(props: { children: string; projectKey?: string | null; sourceOffsets?: boolean; highlights?: Highlight[] }) {
+  const place = useContext(MarkdownPlace);
+  const projectKey = props.projectKey !== undefined ? props.projectKey : place;
+  const [targets] = useLoad(() => loadLinkTargets(projectKey), [projectKey]);
   return (
     <Markdown
-      remarkPlugins={[linkTicketReferences(known, props.children)]}
+      remarkPlugins={[linkReferences(targets.kind === "loaded" ? targets.value : NO_TARGETS, props.children)]}
       rehypePlugins={props.sourceOffsets ? [markSourceAndHighlights(props.children, props.highlights ?? [])] : []}
       components={COMPONENTS}
     >

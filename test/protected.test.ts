@@ -256,7 +256,7 @@ describe("upgrading an installation with accepted Decisions", () => {
     await admin.post("/api/projects/CRONK/decisions", { title: "Proposed" });
 
     await cronk.undoMigration(
-      "0026_protected",
+      "0027_protected",
       `DROP TABLE protection_markings;
        ALTER TABLE documents DROP COLUMN protected; ALTER TABLE terms DROP COLUMN protected; ALTER TABLE decisions DROP COLUMN protected`,
     );

@@ -2,6 +2,7 @@ import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type C
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory, Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
+import { recordMentions } from "../knowledge/mentions.js";
 
 /** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
 export const ticketKeySql = (project: string, ticket: string) => `${project}.key || '-' || ${ticket}.number`;
@@ -138,6 +139,7 @@ export async function insertTicket(
     description: input.description,
     status: input.status,
   });
+  await recordMentions(db, { kind: "ticket", id });
   return (await findTicketById(db, id))!;
 }
 
@@ -268,6 +270,7 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     ...columns.map(([, value]) => value),
   ]);
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
+  if (columns.some(([column]) => column === "title" || column === "description")) await recordMentions(db, { kind: "ticket", id: ticket.id });
   return (await findTicketById(db, ticket.id))!;
 }
 

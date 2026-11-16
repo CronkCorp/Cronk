@@ -8,7 +8,8 @@ import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
 import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionSummary } from "./api.js";
-import { CronkMarkdown } from "./markdown.js";
+import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
+import { MentionedIn } from "./mentions.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
@@ -165,7 +166,10 @@ function NewDecision(props: { projectKey: string | undefined; onCancel: () => vo
   const [group, setGroup] = useState("");
   const { submit, error, busy } = useSubmit(
     () => api.createDecision(props.projectKey, { title, group }),
-    (decision) => navigate(`/decisions/${decision.key}?edit=1`),
+    (decision) => {
+      forgetLinkedKnowledge();
+      navigate(`/decisions/${decision.key}?edit=1`);
+    },
   );
   return (
     <section className="panel">
@@ -191,14 +195,16 @@ function DecisionPage(props: { decisionKey: string; onChanged: () => void }) {
   return (
     <Show state={decision}>
       {(d) => (
-        <DecisionView
-          decision={d}
-          startEditing={editing}
-          onChanged={(changed) => {
-            setDecision(changed);
-            props.onChanged();
-          }}
-        />
+        <MarkdownPlace.Provider value={d.projectKey}>
+          <DecisionView
+            decision={d}
+            startEditing={editing}
+            onChanged={(changed) => {
+              setDecision(changed);
+              props.onChanged();
+            }}
+          />
+        </MarkdownPlace.Provider>
       )}
     </Show>
   );
@@ -301,6 +307,7 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
             <h4>Version</h4>
             <span>Version {d.version}, <RelativeTime at={d.updatedAt} /></span>
           </div>
+          <MentionedIn load={() => api.decisionMentions(d.key)} deps={[d.key, d.version]} what="its key" compact />
           <div className="side-group">
             <h4>Protected</h4>
             <span>{d.protected ? "Yes: Agents may read it but not edit it" : <span className="muted">No</span>}</span>

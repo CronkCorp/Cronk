@@ -7,6 +7,7 @@ import { answer, errors, holding, listing, noContent, pathParams, projectKeyPara
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
+import { listMentions } from "./mentions.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 import {
   deleteTerm,
@@ -305,7 +306,7 @@ export function termRoutes(ctx: AppContext) {
           requireUnprotected(actor, term, term.name, "delete it");
           requireUserActor(actor, "delete a Term");
           await requireCurrent(tx, term, request.query.baseVersion, "delete");
-          await deleteTerm(tx, term.id);
+          await deleteTerm(tx, actingUser(actor).workspaceId, term);
         });
         return reply.code(204).send();
       },
@@ -338,6 +339,28 @@ export function termRoutes(ctx: AppContext) {
       async (request) => {
         const term = await termFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
         return { markings: await listProtectionMarkings(ctx.db, { kind: "term", id: term.id }) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/terms/:id/mentions",
+      {
+        schema: {
+          params: termParams,
+          response: {
+            200: answer(
+              "What names the Term with its capitalisation, as a whole word, where it applies, most recently changed first (at most 50): " +
+                "Tickets, Documents, Comments, other Terms and Decisions the caller can read",
+              listing("mentions", ref("Mention")),
+            ),
+            ...errors(401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const term = await termFor(ctx.db, actor, request.params.id, "read");
+        return { mentions: await listMentions(ctx.db, { termId: term.id }, await readablePlaces(ctx.db, actor)) };
       },
     );
 

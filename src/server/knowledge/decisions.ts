@@ -2,6 +2,7 @@ import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type Rec
 import type { Queryable } from "../db/database.js";
 import { PROJECT_KEY_PATTERN } from "../work/projects.js";
 import type { DecisionStatus } from "../../shared/values.js";
+import { recordMentions } from "./mentions.js";
 
 /**
  * Decisions: recorded choices with their reasoning and a status, belonging to a Project or the
@@ -77,6 +78,10 @@ export function parseDecisionKey(key: string): { projectKey: string | null; numb
 }
 
 /** A Decision's key from its Project key (null for the Workspace) and number. */
+/** SQL for the key of the Decision aliased `decision`, whose Project, if any, is aliased `project`. */
+export const decisionKeySql = (project: string, decision: string) =>
+  `CASE WHEN ${project}.key IS NULL THEN 'D' || ${decision}.number ELSE ${project}.key || '-D' || ${decision}.number END`;
+
 export const decisionKey = (projectKey: string | null, number: number) => (projectKey === null ? `D${number}` : `${projectKey}-D${number}`);
 
 interface DecisionRow {
@@ -203,6 +208,7 @@ export async function insertDecision(db: Queryable, scope: DecisionScope, conten
   );
   const id = rows[0]!.id;
   await insertDecisionVersion(db, id, { ...content, number: 1, actor, now });
+  await recordMentions(db, { kind: "decision", id });
   return (await findDecisionById(db, id))!;
 }
 
@@ -246,6 +252,7 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
      WHERE id = $1`,
     [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now],
   );
+  await recordMentions(db, { kind: "decision", id: decision.id });
   return (await findDecisionById(db, decision.id))!;
 }
 
