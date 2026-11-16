@@ -12,7 +12,7 @@ import { documentFor } from "../knowledge/document-reads.js";
 import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
-import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
+import { agentTopic, artifactTopic, documentTopic, ticketTopic } from "../live/topics.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { tellNewlyReady } from "../coordination/ready.js";
 import { inboxesChanged } from "../inbox/inbox.js";
@@ -401,6 +401,7 @@ export function conversationRoutes(ctx: AppContext) {
             return { artifact, posted, avoidedWords: await avoidedWordsIn(tx, actor, artifact.projectId, titleAndBody({ body: input.body })) };
           },
           ({ artifact, posted }) => {
+            ctx.live.publish(artifactTopic(artifact.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: null, document: null, artifact: { id: artifact.id, title: artifact.title, version: posted.comment.artifactVersion! } });
           },
         );
@@ -419,6 +420,32 @@ export function conversationRoutes(ctx: AppContext) {
       async (request) => {
         const artifact = await artifactFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
         return { comments: (await listComments(ctx.db, { artifactId: artifact.id })).map(publicComment) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/events",
+      {
+        schema: {
+          params: artifactParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of the Artifact's changes as they happen, for as long as the caller can see it. It opens with a " +
+                "`ready` event; each new Comment arrives as a `comment` event whose data is `{ comment }`, a Comment as JSON.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const artifact = await artifactFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await artifactFor(ctx.db, actor, artifact.id, "read"));
+        };
+        ctx.live.stream(reply, artifactTopic(artifact.id), canSee);
       },
     );
 

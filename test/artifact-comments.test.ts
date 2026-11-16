@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { registerAgent, startInstalledCronk, startSession, tarGz, type Cronk } from "./harness.js";
+import { joinAs, registerAgent, startInstalledCronk, startSession, tarGz, type Cronk } from "./harness.js";
 
 /** A small site to publish. */
 const site = (version: number) => ({ "index.html": `<h1>Sign-in limits, take ${version}</h1>` });
@@ -87,5 +87,25 @@ describe("A Comment on an Artifact Version", () => {
       document: null,
       artifact: { id: artifact.id, title: "Limits", version: 2 },
     });
+  });
+});
+
+describe("An Artifact's live updates", () => {
+  it("push each new Comment to those watching the Artifact", async () => {
+    const { admin, agent, artifact } = await setup();
+    const stream = await admin.events(`/api/artifacts/${artifact.id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    const posted = (await agent.post(`/api/artifacts/${artifact.id}/comments`, { body: "Published the threshold line." })).body.comment;
+
+    expect(await stream.next()).toMatchObject({ event: "comment", data: { comment: posted } });
+  });
+
+  it("are refused to whoever can't read the Artifact", async () => {
+    const { cronk, admin, artifact } = await setup();
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+
+    expect((await bob.events(`/api/artifacts/${artifact.id}/events`)).status).toBe(404);
   });
 });
