@@ -236,6 +236,8 @@ async function busyWorkspace() {
   await admin.patch("/api/tickets/CRONK-2", { autonomous: true });
   const autonomous = await session();
   await autonomous.post("/api/tickets/CRONK-2/claim");
+  // It proposes a Decision from CRONK-2 on the way, which its Report lists.
+  await autonomous.post("/api/projects/CRONK/decisions", { title: "Version the API", body: "Under /v1." });
   await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done", body: "Shipped the API." });
   const done = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed");
   expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
@@ -255,14 +257,14 @@ async function busyWorkspace() {
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
   await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
 
-  // Decisions in both scopes: one superseded by another Grace accepted, one rejected, one edited.
+  // Decisions in both scopes: one superseded by another Grace accepted, one rejected, one edited; CRONK-D1 is claude-laptop's, above.
   await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
-  await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+  await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
   await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the proxy", group: "Security" });
-  await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected", reason: "The proxy sees no accounts." });
-  await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits", supersedes: ["CRONK-D1"] });
+  await admin.post("/api/decisions/CRONK-D3/status", { status: "rejected", reason: "The proxy sees no accounts." });
+  await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits", supersedes: ["CRONK-D2"] });
   cronk.clock.advance(60_000);
-  await grace.post("/api/decisions/CRONK-D3/status", { status: "accepted" });
+  await grace.post("/api/decisions/CRONK-D4/status", { status: "accepted" });
   await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "v1" });
   await admin.patch("/api/decisions/D1", { baseVersion: 1, body: "v2", group: "Ops" });
   // Terms in both places, with Versions, one saved by an Agent; a Project Term overriding a Workspace Term.
@@ -319,7 +321,7 @@ describe("importing an export", () => {
     );
     expect(await snapshot(admin)).toEqual(expected);
     // Decision numbers carry on where the export left off.
-    expect((await admin.post("/api/projects/CRONK/decisions", { title: "Next" })).body.decision.key).toBe("CRONK-D4");
+    expect((await admin.post("/api/projects/CRONK/decisions", { title: "Next" })).body.decision.key).toBe("CRONK-D5");
     expect((await admin.post("/api/workspace/decisions", { title: "Next" })).body.decision.key).toBe("D2");
   });
 });

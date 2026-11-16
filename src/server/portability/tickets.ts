@@ -157,6 +157,8 @@ export class ImportedTickets {
   readonly relations: PendingRelation[] = [];
   readonly documentLinks: PendingDocumentLink[] = [];
   readonly histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
+  /** Agents' proposed Decisions, by the key of the Ticket each came from, to link once the Tickets are in. */
+  readonly decisionSources: { decisionId: string; ticketKey: string; claimId: string | null }[] = [];
   /** Delegated Tickets the export left without an Assignee, which this import assigned to the Delegate's Owner. */
   readonly assignedToOwner: { ticketId: string; ownerId: string }[] = [];
 
@@ -167,6 +169,14 @@ export class ImportedTickets {
       const to = this.ids.get(r.to);
       if (!from || !to || from === to) continue;
       await storeRelation(ctx.db, { kind: r.kind, from, to });
+    }
+  }
+
+  /** Links each proposed Decision to the Ticket it came from, if that Ticket came in with this import. */
+  async storeDecisionSources(ctx: ImportContext): Promise<void> {
+    for (const { decisionId, ticketKey, claimId } of this.decisionSources) {
+      const ticketId = this.ids.get(ticketKey.toUpperCase());
+      if (ticketId) await ctx.db.query("UPDATE decisions SET source_ticket_id = $2, source_claim_id = $3 WHERE id = $1", [decisionId, ticketId, claimId]);
     }
   }
 

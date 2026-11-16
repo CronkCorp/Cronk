@@ -1,9 +1,10 @@
 import { continueNumbering, decisionKey, insertDecisionRow, insertDecisionVersion, parseDecisionKey, type DecisionScope } from "../knowledge/decisions.js";
 import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
-import { date, integer, oneOf, refuse, text, type File } from "./fields.js";
+import { date, integer, isUuid, oneOf, refuse, text, type File } from "./fields.js";
 import { slug } from "./format.js";
 import type { ImportContext } from "./import-context.js";
+import type { ImportedTickets } from "./tickets.js";
 
 /**
  * Decisions: `docs/adr/NNNN-<title>.md` for the Workspace's, and beside a Project's `project.md`
@@ -24,6 +25,9 @@ interface DecisionRow {
   version: number;
   created_at: Date;
   updated_at: Date;
+  source_claim_id: string | null;
+  /** The key of the Ticket an Agent proposed it from, if any. */
+  source_ticket: string | null;
 }
 
 type VersionRow = ActorColumns & Omit<DecisionRow, "id" | "version" | "created_at" | "updated_at" | "superseded_by"> & { at: Date };
@@ -33,7 +37,9 @@ const keys = (projectKey: string | null, numbers: number[]) => (numbers.length =
 /** Writes the Decisions of the Workspace (projectId null) or a Project into `${dir}/docs/adr`. */
 export async function exportDecisions(ctx: ExportContext, dir: string, projectId: string | null, projectKey: string | null): Promise<void> {
   const { rows } = await ctx.db.query<DecisionRow>(
-    "SELECT * FROM decisions WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 ORDER BY number",
+    `SELECT d.*, sp.key || '-' || st.number AS source_ticket
+     FROM decisions d LEFT JOIN tickets st ON st.id = d.source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id
+     WHERE d.workspace_id = $1 AND d.project_id IS NOT DISTINCT FROM $2 ORDER BY d.number`,
     [ctx.scope.workspaceId, projectId],
   );
   for (const d of rows) {
@@ -55,6 +61,9 @@ export async function exportDecisions(ctx: ExportContext, dir: string, projectId
         createdBy: ctx.actor(versions[0]!),
         updatedAt: iso(d.updated_at),
         updatedBy: ctx.actor(current),
+        // An Agent's proposal: the Ticket it came from, and the Claim it was proposed in, as its Reports name it.
+        sourceTicket: d.source_ticket ?? undefined,
+        sourceClaim: d.source_ticket === null ? undefined : (d.source_claim_id ?? undefined),
       },
       d.body,
     );
@@ -98,7 +107,13 @@ function contentIn(file: File, projectKey: string | null) {
 }
 
 /** Imports the Decisions in `${dir}/docs/adr` into the Workspace (projectId null) or a Project. */
-export async function importDecisions(ctx: ImportContext, dir: string, projectId: string | null, projectKey: string | null): Promise<void> {
+export async function importDecisions(
+  ctx: ImportContext,
+  dir: string,
+  projectId: string | null,
+  projectKey: string | null,
+  tickets: ImportedTickets,
+): Promise<void> {
   const scope: DecisionScope = { workspaceId: ctx.workspaceId, projectId };
   const adr = `${dir === "" ? "" : `${dir}/`}docs/adr`;
   const seen = new Set<number>();
@@ -114,6 +129,8 @@ export async function importDecisions(ctx: ImportContext, dir: string, projectId
     if (versions.length > 0 && !versions.some(([n]) => n === version)) refuse(`${path} is at Version ${version}, which ${base}.versions/ doesn't hold`);
     const supersededBy = d.data.supersededBy === undefined || d.data.supersededBy === null ? [] : numbersIn({ ...d, data: { by: [d.data.supersededBy] } }, "by", projectKey);
     const content = contentIn(d, projectKey);
+    const sourceTicket = d.data.sourceTicket;
+    if (sourceTicket !== undefined && sourceTicket !== null && typeof sourceTicket !== "string") refuse(`${path} sourceTicket must be a Ticket key`);
     const id = await insertDecisionRow(ctx.db, scope, {
       ...content,
       number,
@@ -122,6 +139,7 @@ export async function importDecisions(ctx: ImportContext, dir: string, projectId
       createdAt: date(d.data.createdAt, `${path} createdAt`),
       updatedAt: date(d.data.updatedAt, `${path} updatedAt`),
     });
+    if (typeof sourceTicket === "string") tickets.decisionSources.push({ decisionId: id, ticketKey: sourceTicket, claimId: isUuid(d.data.sourceClaim) ? d.data.sourceClaim : null });
     if (versions.length === 0) {
       // Without its Versions, it starts at Version 1 by whoever first wrote it.
       const by = await ctx.actor(d.data.createdBy, `${path} createdBy`);
