@@ -9,7 +9,12 @@ import type { ImportContext } from "./import-context.js";
 /** Writes `workspace.md`. */
 export async function exportWorkspaceSettings(ctx: ExportContext): Promise<void> {
   const w = await getWorkspace(ctx.db, ctx.scope.workspaceId);
-  ctx.add("workspace.md", { name: w.name, agentAccess: w.agentAccess, silenceThresholdSeconds: w.silenceThresholdSeconds });
+  ctx.add("workspace.md", {
+    name: w.name,
+    agentAccess: w.agentAccess,
+    silenceThresholdSeconds: w.silenceThresholdSeconds,
+    attachmentMaxBytes: w.attachmentMaxBytes,
+  });
 }
 
 /** Sets the Workspace's settings from `workspace.md`. */
@@ -19,5 +24,7 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
     name: text(w.data.name, "workspace.md name"),
     agentAccess: oneOf(w.data.agentAccess, agentAccessSchema.enum, "workspace.md agentAccess"),
     silenceThresholdSeconds: integer(w.data.silenceThresholdSeconds, "workspace.md silenceThresholdSeconds"),
+    // An export from before Attachments has none; the Workspace keeps its own.
+    ...(w.data.attachmentMaxBytes !== undefined && { attachmentMaxBytes: integer(w.data.attachmentMaxBytes, "workspace.md attachmentMaxBytes") }),
   });
 }

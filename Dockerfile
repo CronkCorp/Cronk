@@ -14,6 +14,8 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=build /app/dist ./dist
+# Where Attachments' files are kept; mount a volume here so they outlive the container.
+RUN mkdir -p /app/data/files && chown -R node:node /app/data
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server/main.js"]

@@ -1,6 +1,7 @@
 import type { Queryable } from "../db/database.js";
 import type { Folder } from "./archive.js";
 import { exportDecisions } from "./decisions.js";
+import type { FileStore } from "../files/store.js";
 import { exportTree } from "./documents.js";
 import { ExportContext, iso, type ExportScope } from "./export-context.js";
 import { FORMAT, README } from "./format.js";
@@ -21,8 +22,8 @@ import { exportWorkspaceSettings } from "./workspace.js";
 export type { ExportScope };
 
 /** Builds the export's files. Run inside a read-only, repeatable-read transaction so they agree with each other. */
-export async function exportFolder(db: Queryable, scope: ExportScope): Promise<Folder> {
-  const ctx = await ExportContext.start(db, scope);
+export async function exportFolder(db: Queryable, scope: ExportScope, files: FileStore): Promise<Folder> {
+  const ctx = await ExportContext.start(db, scope, files);
   if (scope.projectId === null) {
     await exportWorkspaceSettings(ctx);
     await exportGuidance(ctx, "guidance", null);

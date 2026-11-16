@@ -580,4 +580,31 @@ export const migrations: Migration[] = [
       ALTER TABLE tickets ADD COLUMN verification text CHECK (verification IN ('unverified', 'verified'));
     `,
   },
+  {
+    id: "0024_attachments",
+    sql: `
+      -- A file attached to a Ticket (files/attachments.ts). Its bytes live in the file store under
+      -- attachments/<id>; the row is what Cronk knows of it. It is readable by whoever can read its Ticket.
+      CREATE TABLE attachments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        seq bigserial NOT NULL,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        name text NOT NULL CHECK (name <> ''),
+        content_type text NOT NULL,
+        size bigint NOT NULL CHECK (size >= 0),
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+      CREATE INDEX attachments_ticket ON attachments (ticket_id, seq);
+      CREATE INDEX attachments_workspace ON attachments (workspace_id);
+
+      -- The largest file an Attachment may be: 100 MB unless an Admin changes it.
+      ALTER TABLE workspaces ADD COLUMN attachment_max_bytes bigint NOT NULL DEFAULT 104857600 CHECK (attachment_max_bytes > 0);
+    `,
+  },
 ];

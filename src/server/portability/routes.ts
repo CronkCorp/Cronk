@@ -56,7 +56,7 @@ function exportRoutes(app: FastifyInstance, ctx: AppContext) {
     const now = ctx.clock.now();
     const folder = await transaction(ctx.db, async (tx) => {
       await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
-      return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now });
+      return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }, ctx.files);
     });
     const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
     return reply
@@ -134,10 +134,13 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
       const user = await requireUser(ctx, request);
       requireAdmin(user, "import an export");
       const folder = await unpackFolder(archiveBody(request.body));
+      // The files the import stores, so none stays if it fails, even at the commit.
+      const stored: string[] = [];
       try {
-        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now()));
+        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
         return reply.code(201).send(imported);
       } catch (err) {
+        for (const key of stored) await ctx.files.delete(key);
         // The database refusing a value (a constraint or a malformed value) means the export holds data Cronk can't take.
         const code = (err as { code?: unknown }).code;
         if (typeof code === "string" && /^2[23]/.test(code)) throw new HttpError(400, `The export holds data Cronk can't take: ${(err as Error).message}`);

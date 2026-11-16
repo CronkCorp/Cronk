@@ -189,10 +189,16 @@ export function mcpRoutes(ctx: AppContext) {
     };
 
     for (const method of ["GET", "POST", "DELETE"] as const) {
-      app.route({ method, url: "/mcp", schema: { hide: true }, handler: handle });
+      app.route({ method, url: "/mcp", schema: { hide: true }, bodyLimit: MCP_BODY_LIMIT, handler: handle });
     }
   };
 }
+
+/**
+ * The largest MCP request taken: room for a 100 MB Attachment as base64 (which grows it by a third) and the JSON around it,
+ * so the attachments tool takes what the default Attachment size limit allows.
+ */
+const MCP_BODY_LIMIT = 140 * 1024 * 1024;
 
 /** Hands the request to the MCP transport, which answers it, with the token for tools to call the API with. */
 async function serve(transport: StreamableHTTPServerTransport, request: FastifyRequest, reply: FastifyReply, token: string) {
