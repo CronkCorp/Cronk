@@ -4,9 +4,10 @@ import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, tarGz, unta
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
-  const match = /^---\n([\s\S]*?)---\n/.exec(text ?? "");
+  // The closing --- starts its own line, so an indented --- inside a block scalar doesn't end the frontmatter.
+  const match = /^---\n([\s\S]*?\n)?---\n/.exec(text ?? "");
   if (!match) throw new Error(`Not Markdown with frontmatter: ${text}`);
-  return { data: parse(match[1]!), body: text!.slice(match[0].length) };
+  return { data: parse(match[1] ?? ""), body: text!.slice(match[0].length) };
 }
 
 describe("exporting a Project", () => {
