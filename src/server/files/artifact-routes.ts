@@ -11,6 +11,7 @@ import { answer, errors, holding, listing, pathParams, projectKeyParam, protecti
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
+import { formatBytes } from "./sizes.js";
 import {
   artifactFileKey,
   findArtifact,
@@ -41,6 +42,9 @@ const projectParams = pathParams({ key: projectKeyParam });
 
 /** The largest archive a publish takes; the Workspace's limits on what it unpacks to are usually far lower. */
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
+
+/** How refusals name an Artifact when an Agent names the Ticket it came from. */
+const SOURCE = { noun: "Artifact", refusedAction: "publishing an Artifact from it" };
 
 const publishRules =
   "The request body is the whole folder as a zip archive, or a tar archive gzipped (`tar czf`) or not, sent as `application/zip`, `application/gzip`, " +
@@ -80,8 +84,10 @@ export function artifactRoutes(ctx: AppContext) {
       const files: ArtifactFile[] = [];
       try {
         for (const [path, contents] of folder) {
-          const id = randomUUID();
-          files.push({ id, path, contentType: mediaTypeOf(path), size: await ctx.files.put(artifactFileKey(id), bytesOf(contents)) });
+          // Listed before it is stored, so a file the store fails partway through is removed too.
+          const file = { id: randomUUID(), path, contentType: mediaTypeOf(path), size: 0 };
+          files.push(file);
+          file.size = await ctx.files.put(artifactFileKey(file.id), bytesOf(contents));
         }
         return await transaction(ctx.db, (tx) => record(tx, files));
       } catch (err) {
@@ -94,7 +100,7 @@ export function artifactRoutes(ctx: AppContext) {
     const create = (actor: Actor, projectId: string | null, body: unknown, query: PublishQuery) =>
       publish(actor, body, async (tx, files) => {
         const now = ctx.clock.now();
-        const source = await sourceClaimOf(tx, actor, projectId, query.ticket, { noun: "Artifact", refusedAction: "publishing an Artifact from it" }, now);
+        const source = await sourceClaimOf(tx, actor, projectId, query.ticket, SOURCE, now);
         return insertArtifact(
           tx,
           { workspaceId: actingUser(actor).workspaceId, projectId },
@@ -171,7 +177,7 @@ export function artifactRoutes(ctx: AppContext) {
             );
           }
           const now = ctx.clock.now();
-          const source = await sourceClaimOf(tx, actor, current.projectId, request.query.ticket, { noun: "Artifact", refusedAction: "publishing an Artifact from it" }, now);
+          const source = await sourceClaimOf(tx, actor, current.projectId, request.query.ticket, SOURCE, now);
           const title = request.query.title?.trim() ?? current.title;
           return insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
         });
@@ -326,12 +332,6 @@ function checkedFolder(raw: Folder, limits: { artifactMaxBytes: number; artifact
   return folder;
 }
 
-/** A size as Users read it: whole MB where it is one, otherwise MB to one decimal, or bytes when under one MB. */
-function formatBytes(bytes: number): string {
-  const MB = 1024 * 1024;
-  if (bytes < MB) return `${bytes} bytes`;
-  return bytes % MB === 0 ? `${bytes / MB} MB` : `${(bytes / MB).toFixed(1)} MB`;
-}
 
 /** Media types by file extension, for the files a page loads; anything else is served as bytes, which a browser won't run. */
 const MEDIA_TYPES: Record<string, string> = {

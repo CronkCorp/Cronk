@@ -29,7 +29,7 @@ export interface ArtifactVersion {
   title: string;
   at: Date;
   actor: RecordedActor;
-  /** The Ticket it came from: the one whose Claim the publishing Agent Session held, or the one a User named. */
+  /** The Ticket it came from: the one whose Claim the publishing Agent Session held; none for a User's. */
   sourceTicket: { key: string; title: string } | null;
   /** How many files it holds, and how many bytes they take. */
   files: number;
@@ -43,6 +43,9 @@ export interface ArtifactFile {
   contentType: string;
   size: number;
 }
+
+/** An Artifact's id, as anything naming one must look before it is looked up. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Where an Artifact file's bytes are kept in the file store. */
 export const artifactFileKey = (id: string) => `artifact-files/${id}`;
@@ -113,7 +116,7 @@ async function withLatest(db: Queryable, rows: ArtifactRow[]): Promise<Artifact[
 
 /** The Artifact with this id in the Workspace, if there is one; `forUpdate` locks it until the transaction ends. */
 export async function findArtifact(db: Queryable, workspaceId: string, id: string, opts: { forUpdate?: boolean } = {}): Promise<Artifact | undefined> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return undefined;
+  if (!UUID.test(id)) return undefined;
   const { rows } = await db.query<ArtifactRow>(`${ARTIFACT_SELECT} WHERE x.workspace_id = $1 AND x.id = $2${opts.forUpdate ? " FOR UPDATE OF x" : ""}`, [
     workspaceId,
     id,
@@ -151,22 +154,25 @@ export async function findArtifactVersion(db: Queryable, artifactId: string, num
   return rows[0] && toVersion(rows[0]);
 }
 
+interface FileRow {
+  id: string;
+  path: string;
+  content_type: string;
+  size: string;
+}
+const FILE_SELECT = "SELECT id, path, content_type, size FROM artifact_files WHERE artifact_id = $1 AND version = $2";
+const toFile = (r: FileRow): ArtifactFile => ({ id: r.id, path: r.path, contentType: r.content_type, size: Number(r.size) });
+
 /** The files of one Version, by path. */
 export async function listArtifactFiles(db: Queryable, artifactId: string, version: number): Promise<ArtifactFile[]> {
-  const { rows } = await db.query<{ id: string; path: string; content_type: string; size: string }>(
-    "SELECT id, path, content_type, size FROM artifact_files WHERE artifact_id = $1 AND version = $2 ORDER BY path",
-    [artifactId, version],
-  );
-  return rows.map((r) => ({ id: r.id, path: r.path, contentType: r.content_type, size: Number(r.size) }));
+  const { rows } = await db.query<FileRow>(`${FILE_SELECT} ORDER BY path`, [artifactId, version]);
+  return rows.map(toFile);
 }
 
 /** One file of a Version by its path, if it holds one there. */
 export async function findArtifactFile(db: Queryable, artifactId: string, version: number, path: string): Promise<ArtifactFile | undefined> {
-  const { rows } = await db.query<{ id: string; path: string; content_type: string; size: string }>(
-    "SELECT id, path, content_type, size FROM artifact_files WHERE artifact_id = $1 AND version = $2 AND path = $3",
-    [artifactId, version, path],
-  );
-  return rows[0] && { id: rows[0].id, path: rows[0].path, contentType: rows[0].content_type, size: Number(rows[0].size) };
+  const { rows } = await db.query<FileRow>(`${FILE_SELECT} AND path = $3`, [artifactId, version, path]);
+  return rows[0] && toFile(rows[0]);
 }
 
 /** What a publish records: the Version's title, who published it and from which Ticket, and its files, whose bytes are already stored. */
@@ -237,7 +243,7 @@ export async function artifactSigningKey(db: Queryable, workspaceId: string): Pr
 
 /** The Workspace an Artifact belongs to, and its latest Version, looked up by id alone, as the Artifact hostname must. */
 export async function findArtifactAnywhere(db: Queryable, id: string): Promise<{ workspaceId: string; version: number } | undefined> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return undefined;
+  if (!UUID.test(id)) return undefined;
   const row = await findArtifactRow(db, id);
   return row && { workspaceId: row.workspaceId, version: row.version };
 }

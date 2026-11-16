@@ -71,7 +71,7 @@ Artifacts are pages Agents and Users publish, and their code may be buggy or ste
 
 1. Pick a hostname for them, such as `artifacts.cronk.example`. A separate domain is safest; a subdomain of Cronk's own is fine too.
 2. Point it at the same Cronk server, with its own TLS certificate if Cronk is served over HTTPS. Behind a reverse proxy, route both hostnames to Cronk and pass the `Host` header through.
-3. Set `ARTIFACTS_URL` to its address, such as `https://artifacts.cronk.example`, and `PUBLIC_URL` to Cronk's, which only may frame Artifacts. The two must be different hostnames, not only different ports, since browsers send cookies to every port.
+3. Set `ARTIFACTS_URL` to its address, such as `https://artifacts.cronk.example`, and `PUBLIC_URL` to Cronk's, the only site that may frame them. The two must be different hostnames, not only different ports, since browsers send cookies to every port.
 
 That hostname serves Artifacts' files and nothing else, never reads the sign-in cookie, and opens a Version only at a signed address Cronk hands out to whoever may read the Artifact, valid for 12 hours. Every file is served under a strict content policy: the page may load scripts, styles and fonts only from itself, cdnjs, jsDelivr, unpkg and Google Fonts, and may make no network requests. Without `ARTIFACTS_URL`, Cronk serves Artifacts from its own hostname in the same sandbox, which still gives them an origin of their own but is less safe; set it before Agents publish anything you haven't read.
 
