@@ -10,6 +10,9 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/server/app.js";
 import type { Clock } from "../src/server/clock.js";
 import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js";
+import { CreateBucketCommand, DeleteBucketCommand, DeleteObjectsCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import type { S3StorageConfig } from "../src/server/files/s3-store.js";
+import type { StorageConfig } from "../src/server/files/storage.js";
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
@@ -305,9 +308,10 @@ async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
 
 /**
  * Starts Cronk in-process on a fresh, empty database and stops it when the test ends.
- * `publicUrl` is the address Cronk is configured to be reached at, if any.
+ * `publicUrl` is the address Cronk is configured to be reached at, if any. `storage` is where it keeps files:
+ * by default a directory of the test's own on local disk.
  */
-export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cronk> {
+export async function startCronk(opts: { publicUrl?: string; storage?: StorageConfig } = {}): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
   const dbName = `cronk_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -318,12 +322,13 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
   url.pathname = `/${dbName}`;
   const databaseUrl = url.toString();
 
-  // Files are stored on local disk in a directory of the test's own, kept across restarts.
+  // Files are stored on local disk in a directory of the test's own, kept across restarts, unless the test says otherwise.
   const filesDir = await mkdtemp(join(tmpdir(), "cronk-files-"));
+  const storage = opts.storage ?? { kind: "disk", dir: filesDir };
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
   const start = () =>
-    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, filesDir }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -445,12 +450,73 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
   return cronk;
 }
 
+/** The disposable S3-compatible server (MinIO) of this run, or null when none could be started. */
+export function s3Server() {
+  return inject("s3Server");
+}
+
+/** A client of the bucket `config` names, for tests to look into it without going through Cronk. */
+function bucketClient(config: S3StorageConfig): S3Client {
+  return new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    forcePathStyle: config.forcePathStyle,
+    credentials: { accessKeyId: config.accessKeyId!, secretAccessKey: config.secretAccessKey! },
+  });
+}
+
+/** The keys of every object in the bucket `config` names, in order, however many pages they take. */
+export async function bucketKeys(config: S3StorageConfig): Promise<string[]> {
+  const s3 = bucketClient(config);
+  try {
+    const keys: string[] = [];
+    let ContinuationToken: string | undefined;
+    do {
+      const page = await s3.send(new ListObjectsV2Command({ Bucket: config.bucket, ContinuationToken }));
+      keys.push(...(page.Contents ?? []).map(({ Key }) => Key!));
+      ContinuationToken = page.NextContinuationToken;
+    } while (ContinuationToken);
+    return keys.sort();
+  } finally {
+    s3.destroy();
+  }
+}
+
+/**
+ * A new, empty bucket on the run's S3-compatible server, emptied and removed when the test ends, as storage
+ * configuration for it. Only call it where `s3Server()` answered a server.
+ */
+export async function disposableBucket(): Promise<S3StorageConfig> {
+  const server = s3Server();
+  if (!server) throw new Error("No S3-compatible server is running for this test run");
+  const config: S3StorageConfig = {
+    kind: "s3",
+    bucket: `cronk-test-${randomBytes(6).toString("hex")}`,
+    endpoint: server.endpoint,
+    region: "us-east-1",
+    accessKeyId: server.accessKeyId,
+    secretAccessKey: server.secretAccessKey,
+    forcePathStyle: true,
+  };
+  const s3 = bucketClient(config);
+  await s3.send(new CreateBucketCommand({ Bucket: config.bucket }));
+  onTestFinished(async () => {
+    const keys = await bucketKeys(config);
+    for (let i = 0; i < keys.length; i += 1000) {
+      await s3.send(new DeleteObjectsCommand({ Bucket: config.bucket, Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })) } }));
+    }
+    await s3.send(new DeleteBucketCommand({ Bucket: config.bucket }));
+    s3.destroy();
+  });
+  return config;
+}
+
 /** The first User in most tests: the Admin created at setup. */
 export const ada = { email: "ada@example.com", password: "correct horse battery", name: "Ada" } as const;
 
-/** Cronk after first-run setup, with Ada signed in as the Admin on `admin`. */
-export async function startInstalledCronk(workspaceName = "Acme"): Promise<{ cronk: Cronk; admin: Client }> {
-  const cronk = await startCronk();
+/** Cronk after first-run setup, with Ada signed in as the Admin on `admin`. `opts` are as for `startCronk`. */
+export async function startInstalledCronk(workspaceName = "Acme", opts: Parameters<typeof startCronk>[0] = {}): Promise<{ cronk: Cronk; admin: Client }> {
+  const cronk = await startCronk(opts);
   const admin = cronk.client();
   const setup = await admin.post("/api/setup", { ...ada, workspaceName });
   if (setup.status !== 201) throw new Error(`Setup failed: ${JSON.stringify(setup.body)}`);
