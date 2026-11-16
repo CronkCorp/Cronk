@@ -10,8 +10,7 @@ import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
 import { markRejected, rejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { agentTopic } from "../live/topics.js";
-import { ticketFor } from "../work/ticket-reads.js";
-import { listSessionClaims, requireClaimHolder, type SessionClaim } from "../coordination/claims.js";
+import { sourceClaimOf } from "../coordination/sources.js";
 import {
   contentOf,
   DECISION_TEMPLATE,
@@ -26,7 +25,6 @@ import {
   type Decision,
   type DecisionContent,
   type DecisionScope,
-  type DecisionSource,
   type DecisionVersion,
 } from "./decisions.js";
 import { listMentions } from "./mentions.js";
@@ -145,42 +143,8 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, scope, input.ticket));
+      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceClaimOf(tx, actor, scope.projectId, input.ticket, ctx.clock.now(), "a Decision"));
       return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
-    };
-
-    /**
-     * The Claim an Agent proposes a Decision in `scope` from: that of the Ticket `key` names, which its Agent
-     * Session must hold, or else the one Claim it holds whose Ticket fits. A Ticket fits when everyone who can
-     * read the Decision can read it: it is of the Decision's Project, or, for a Workspace Decision, of an open
-     * Project. None for a User.
-     */
-    const sourceOf = async (tx: Queryable, actor: Actor, scope: DecisionScope, key: string | undefined): Promise<DecisionSource | null> => {
-      if (actor.kind === "user") {
-        if (key !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Decision came from, as the one it holds the Claim on");
-        return null;
-      }
-      const held = actor.session ? await listSessionClaims(tx, actor.session.id) : [];
-      const fits = (claim: SessionClaim) => (scope.projectId === null ? !claim.private : claim.projectId === scope.projectId);
-      if (key === undefined) {
-        const fitting = held.filter(fits);
-        if (fitting.length > 1) {
-          throw new HttpError(400, `Your Agent Session holds the Claims on ${fitting.map((c) => c.ticketKey).join(", ")}; name the Ticket the Decision came from as \`ticket\``);
-        }
-        return fitting[0] ?? null;
-      }
-      const ticket = await ticketFor(tx, actor, key, "read");
-      const claimId = await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "proposing a Decision from it");
-      const claim = held.find((c) => c.claimId === claimId)!;
-      if (!fits(claim)) {
-        throw new HttpError(
-          400,
-          scope.projectId === null
-            ? `${ticket.key} is in a private Project, so a Workspace Decision can't name it: not everyone who reads the Decision may read it`
-            : `${ticket.key} isn't a Ticket of the Decision's Project; a Decision names a source Ticket of its own Project`,
-        );
-      }
-      return claim;
     };
 
     interface RegisterQuery {

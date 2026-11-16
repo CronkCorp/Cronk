@@ -720,4 +720,66 @@ export const migrations: Migration[] = [
       UPDATE decisions SET protected = true WHERE status = 'accepted';
     `,
   },
+  {
+    id: "0029_suggestions",
+    sql: `
+      -- Suggestions (ADR 0014): a new Version of a Document, Term, Decision or Guidance an Agent proposes, parked until a User
+      -- accepts or rejects it. Exactly one item column is set, except for Guidance, which project_id names (null for the
+      -- Workspace's). project_id is the item's Project for every kind. content is the full proposed content, as the kind holds
+      -- it; actor_user_id is the proposing Agent's Owner, as history records it. A Suggestion on a Project item waits for the
+      -- source Ticket's Assignee, else the Owner (see inbox.ts); on a Workspace item, for Triage.
+      CREATE TABLE suggestions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        kind text NOT NULL CHECK (kind IN ('document', 'term', 'decision', 'guidance')),
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        base_version integer NOT NULL CHECK (base_version >= 0),
+        content jsonb NOT NULL,
+        reasoning text NOT NULL,
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid NOT NULL REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL,
+        -- open until a User accepts it (with_edits when they changed it first, result_version the Version it made) or rejects it (reason).
+        state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'accepted', 'rejected')),
+        with_edits boolean,
+        result_version integer,
+        reason text,
+        decided_at timestamptz,
+        decided_by_user_id uuid REFERENCES users(id),
+        CHECK (num_nonnulls(document_id, term_id, decision_id) = CASE WHEN kind = 'guidance' THEN 0 ELSE 1 END),
+        CHECK ((kind = 'document') = (document_id IS NOT NULL) AND (kind = 'term') = (term_id IS NOT NULL) AND (kind = 'decision') = (decision_id IS NOT NULL)),
+        CHECK ((state = 'open') = (decided_at IS NULL) AND (decided_at IS NULL) = (decided_by_user_id IS NULL)),
+        CHECK ((state = 'accepted') = (result_version IS NOT NULL) AND (result_version IS NULL) = (with_edits IS NULL)),
+        CHECK ((state = 'rejected') = (reason IS NOT NULL))
+      );
+      CREATE INDEX suggestions_agent ON suggestions (actor_agent_id, at);
+      CREATE INDEX suggestions_open ON suggestions (workspace_id, at) WHERE state = 'open';
+      CREATE INDEX suggestions_document ON suggestions (document_id) WHERE document_id IS NOT NULL;
+      CREATE INDEX suggestions_term ON suggestions (term_id) WHERE term_id IS NOT NULL;
+      CREATE INDEX suggestions_decision ON suggestions (decision_id) WHERE decision_id IS NOT NULL;
+
+      -- Accepting a Suggestion on Guidance unchanged credits the Agent, so Guidance Versions record Actors as other Versions do.
+      ALTER TABLE guidance_versions ADD COLUMN actor_kind text NOT NULL DEFAULT 'user' CHECK (actor_kind IN ('user', 'agent'));
+      ALTER TABLE guidance_versions ALTER COLUMN actor_kind DROP DEFAULT;
+      ALTER TABLE guidance_versions ADD COLUMN actor_agent_id uuid REFERENCES agents(id);
+      ALTER TABLE guidance_versions ADD COLUMN actor_session_id uuid REFERENCES agent_sessions(id);
+      ALTER TABLE guidance_versions ADD CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL));
+
+      -- Waiting Work is also a rejection of a Suggestion the Agent made.
+      ALTER TABLE waiting_work ADD COLUMN suggestion_id uuid REFERENCES suggestions(id) ON DELETE CASCADE;
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check CHECK (reason IN ('answer', 'mention', 'comment', 'rejected', 'suggestion_rejected'));
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_on_one;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_on_one CHECK (
+        num_nonnulls(comment_id, decision_id, suggestion_id) = 1
+        AND (decision_id IS NULL) = (reason <> 'rejected') AND (suggestion_id IS NULL) = (reason <> 'suggestion_rejected')
+        AND (decision_version IS NULL) = (decision_id IS NULL));
+      ALTER TABLE waiting_work ADD UNIQUE (agent_id, suggestion_id);
+    `,
+  },
 ];

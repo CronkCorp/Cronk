@@ -15,6 +15,7 @@ import { guidanceRoutes } from "./knowledge/guidance-routes.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
 import { decisionRoutes } from "./knowledge/decision-routes.js";
 import { termRoutes } from "./knowledge/term-routes.js";
+import { suggestionRoutes } from "./knowledge/suggestion-routes.js";
 import { portabilityRoutes } from "./portability/routes.js";
 import { searchRoutes } from "./search/routes.js";
 import { workRoutes } from "./work/routes.js";
@@ -178,6 +179,7 @@ export async function buildApp(opts: {
   await app.register(guidanceRoutes(ctx));
   await app.register(decisionRoutes(ctx));
   await app.register(termRoutes(ctx));
+  await app.register(suggestionRoutes(ctx));
   await app.register(coordinationRoutes(ctx));
   await app.register(conversationRoutes(ctx));
   await app.register(searchRoutes(ctx));

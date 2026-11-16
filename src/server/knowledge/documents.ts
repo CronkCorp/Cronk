@@ -277,7 +277,7 @@ export async function listVersions(db: Queryable, documentId: string): Promise<O
 export async function saveVersion(
   db: Queryable,
   document: Document,
-  save: { title: string; body: string; actor: Actor; now: Date; restoredFrom?: number },
+  save: { title: string; body: string; actor: Actor | StoredActor; now: Date; restoredFrom?: number },
 ): Promise<Document> {
   if (save.restoredFrom === undefined && save.title === document.title && save.body === document.body) return document;
   const number = document.version + 1;

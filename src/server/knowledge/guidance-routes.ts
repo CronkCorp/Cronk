@@ -130,7 +130,7 @@ function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resourc
     async (request) => {
       const user = await requireUser(ctx, request);
       const owner = await resource.ownerToWrite(user, request.params as Params);
-      return { guidance: await save(ctx, owner, request.body, user.id) };
+      return { guidance: await save(ctx, owner, request.body, user) };
     },
   );
 
@@ -159,8 +159,8 @@ function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resourc
 }
 
 /** Saves Guidance on the Version the caller based it on; a 409 if someone saved since. */
-async function save(ctx: AppContext, owner: GuidanceOwner, body: GuidanceWrite, userId: string): Promise<Guidance> {
-  const saved = await writeGuidance(ctx.db, owner, { ...body, userId, now: ctx.clock.now() });
+async function save(ctx: AppContext, owner: GuidanceOwner, body: GuidanceWrite, user: User): Promise<Guidance> {
+  const saved = await writeGuidance(ctx.db, owner, { ...body, actor: userActor(user), now: ctx.clock.now() });
   if (saved) return saved;
   throw new HttpError(409, "This Guidance changed since the Version you based your save on; merge into the current Version and save again", {
     current: await getGuidance(ctx.db, owner),

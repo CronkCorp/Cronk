@@ -1,8 +1,10 @@
+import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 
 /**
  * Guidance: standing instructions Users write for Agents, for the Workspace or one Project.
- * Every save is a new Version recording who made it; the highest Version is current.
+ * Every save is a new Version recording who made it: a User, or an Agent whose Suggestion a User
+ * accepted unchanged. The highest Version is current.
  */
 
 /** Whose Guidance: the Workspace's, or one of its Projects'. */
@@ -37,24 +39,24 @@ export async function getGuidance(db: Queryable, owner: GuidanceOwner): Promise<
 export async function writeGuidance(
   db: Queryable,
   owner: GuidanceOwner,
-  input: { markdown: string; baseVersion: number; userId: string; now: Date },
+  input: { markdown: string; baseVersion: number; actor: Actor | StoredActor; now: Date },
 ): Promise<Guidance | undefined> {
   // Two saves on the same base both try to add the same Version; the unique index lets only one in.
   const { rows } = await db.query<Guidance>(
-    `INSERT INTO guidance_versions (workspace_id, project_id, version, markdown, at, actor_user_id)
-     SELECT $1, $2, $3::integer + 1, $4, $5, $6
+    `INSERT INTO guidance_versions (workspace_id, project_id, version, markdown, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
+     SELECT $1, $2, $3::integer + 1, $4, $5, $6, $7, $8, $9
      WHERE (SELECT coalesce(max(version), 0) FROM guidance_versions WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2) = $3
      ON CONFLICT DO NOTHING
      RETURNING markdown, version`,
-    [owner.workspaceId, owner.projectId, input.baseVersion, input.markdown, input.now, input.userId],
+    [owner.workspaceId, owner.projectId, input.baseVersion, input.markdown, input.now, ...actorColumns(input.actor)],
   );
   return rows[0];
 }
 
-/** One saved state of Guidance, with the User who saved it and when. */
+/** One saved state of Guidance, with the Actor who saved it and when. */
 export interface GuidanceVersion extends Guidance {
   at: Date;
-  actor: { kind: "user"; id: string; name: string };
+  actor: RecordedActor;
 }
 
 /** The Markdown `owner`'s Guidance had at `version`: empty at 0, undefined for a Version not saved yet. */
@@ -69,13 +71,13 @@ export async function guidanceAt(db: Queryable, owner: GuidanceOwner, version: n
 
 /** Every Version of `owner`'s Guidance, oldest first. */
 export async function listGuidanceVersions(db: Queryable, owner: GuidanceOwner): Promise<GuidanceVersion[]> {
-  const { rows } = await db.query<Guidance & { at: Date; user_id: string; user_name: string }>(
-    `SELECT g.version, g.markdown, g.at, u.id AS user_id, u.name AS user_name
-     FROM guidance_versions g JOIN users u ON u.id = g.actor_user_id
+  const { rows } = await db.query<Guidance & RecordedActorRow & { at: Date }>(
+    `SELECT g.version, g.markdown, g.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, g.actor_session_id AS session_id
+     FROM guidance_versions g JOIN users u ON u.id = g.actor_user_id LEFT JOIN agents a ON a.id = g.actor_agent_id
      WHERE g.workspace_id = $1 AND g.project_id IS NOT DISTINCT FROM $2 ORDER BY g.version`,
     [owner.workspaceId, owner.projectId],
   );
-  return rows.map((r) => ({ version: r.version, markdown: r.markdown, at: r.at, actor: { kind: "user", id: r.user_id, name: r.user_name } }));
+  return rows.map((r) => ({ version: r.version, markdown: r.markdown, at: r.at, actor: toRecordedActor(r) }));
 }
 
 /** The current Markdown of each of these Projects' Guidance, empty for one nobody has written. */

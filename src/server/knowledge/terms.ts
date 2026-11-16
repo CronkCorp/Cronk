@@ -217,7 +217,7 @@ export async function saveTermVersion(
   db: Queryable,
   workspaceId: string,
   term: StoredTerm,
-  save: { fields: TermFields; actor: Actor; now: Date },
+  save: { fields: TermFields; actor: Actor | StoredActor; now: Date },
 ): Promise<StoredTerm | "name taken"> {
   const fields = tidyFields(save.fields);
   const same =

@@ -73,7 +73,8 @@ export type SharedSchemaName =
   | "RenamedId"
   | "ProtectionMarking"
   | "Attachment"
-  | "AvoidedWord";
+  | "AvoidedWord"
+  | "Suggestion";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -151,6 +152,23 @@ const recordedActor = {
 /** Describes an item's `protected` flag: true when `when`. */
 const protectedDescription = (when: string) =>
   `Whether Agents may read but not change it, whatever their Agent Access: true when ${when}. An Agent proposes a change to it as a Suggestion.`;
+
+/** What a Suggestion proposes: the fields its item's kind holds. */
+const suggestedContent = {
+  type: "object",
+  description:
+    "The item's whole content as its next Version would hold it: a Document's `title` and `body`; a Term's `name`, `definition`, `avoid` and `group`; " +
+    "a Decision's `title`, `body` and `group`; Guidance's `markdown`.",
+  properties: {
+    title: { type: "string" },
+    body: { type: "string", description: "Markdown." },
+    name: { type: "string" },
+    definition: { type: "string", description: "Markdown." },
+    avoid: { type: "array", items: { type: "string" } },
+    group: nullable({ type: "string" }),
+    markdown: { type: "string" },
+  },
+} as const;
 
 /** A Version's fields, all but its body. */
 const versionFields = {
@@ -273,12 +291,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   GuidanceVersion: {
-    description: "One saved state of Guidance, with the User who saved it and when.",
+    description: "One saved state of Guidance, with the Actor who saved it and when: a User, or an Agent whose Suggestion a User accepted unchanged.",
     ...object({
       version: { type: "integer" },
       markdown: { type: "string" },
       at: timestamp,
-      actor: object({ kind: { type: "string", const: "user" }, id, name: { type: "string" } }),
+      actor: { ...recordedActor, description: "Who saved it." },
     }),
   },
   Agent: object(
@@ -767,6 +785,47 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   TranscriptSummary: {
     description: "A Transcript without its text.",
     ...object(transcriptFields),
+  },
+  Suggestion: {
+    description:
+      "A new Version of a Protected Document, Term or Decision, or of Guidance, that an Agent proposes (ADR 0014): the item's whole new content, the Version it " +
+      "started from and the Agent's reasoning. It takes effect only when a User accepts it: unchanged, as the item's next Version credited to the Agent; " +
+      "edited first, credited to the User and linked to the Suggestion. Rejecting it needs a reason, which reaches the Agent as Waiting Work.",
+    ...object({
+      id,
+      item: {
+        description: "The item it would change, as it stands now.",
+        ...object({
+          kind: { type: "string", enum: ["document", "term", "decision", "guidance"] },
+          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance." },
+          key: { ...nullable({ type: "string" }), description: "A Decision's key; null for the other kinds." },
+          title: { type: "string", description: "A Document's or Decision's title, a Term's name, or `Guidance`." },
+          projectId: { ...nullable(id), description: "Null for a Workspace item." },
+          projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace item." },
+          protected: { type: "boolean", description: protectedDescription("it is marked Protected (Guidance always is)") },
+          version: { type: "integer", description: "Its current Version." },
+        }),
+      },
+      baseVersion: { type: "integer", description: "The Version of the item the Suggestion started from." },
+      base: { ...suggestedContent, description: "What the item held at the base Version, in the same shape as `content`." },
+      content: suggestedContent,
+      reasoning: { type: "string", description: "Why the Agent suggests the change, in Markdown." },
+      proposedBy: { ...recordedActor, description: "The Agent that made it, with its Owner and Agent Session." },
+      at: timestamp,
+      sourceTicket: { ...nullable(ticketName), description: "The Ticket whose Claim the Agent held when making it; null for none." },
+      reviewer: {
+        ...nullable(named),
+        description:
+          "The User whose Inbox it is in: on a Project item, the source Ticket's Assignee, else the Agent's Owner; null when it is in Triage, as on a Workspace item.",
+      },
+      state: { type: "string", enum: ["open", "accepted", "rejected"] },
+      outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then needs a merge." },
+      acceptedWithEdits: { ...nullable({ type: "boolean" }), description: "Whether the User changed it before accepting it; null unless accepted." },
+      resultVersion: { ...nullable({ type: "integer" }), description: "The Version of the item accepting it made; null unless accepted." },
+      decidedBy: { ...nullable(named), description: "The User who accepted or rejected it." },
+      decidedAt: nullable(timestamp),
+      reason: { ...nullable({ type: "string" }), description: "Why it was rejected; null unless rejected." },
+    }),
   },
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
