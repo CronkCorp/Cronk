@@ -284,6 +284,45 @@ describe("the guidance tool", () => {
   });
 });
 
+describe("the terms tool", () => {
+  it("lists the Terms that apply in a Project or the Workspace, and gets one by name or id", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    const ticket = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    await admin.post("/api/workspace/terms", { name: "Customer", definition: "A paying organization." });
+    await admin.post("/api/projects/CRONK/terms", { name: "Customer", definition: "A billing account." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    expect((await callTool(mcp, "terms", { action: "list" })).body).toEqual((await admin.get("/api/workspace/terms")).body);
+    expect((await callTool(mcp, "terms", { action: "list", project: "cronk" })).body).toEqual((await admin.get("/api/projects/CRONK/terms")).body);
+    expect((await callTool(mcp, "terms", { action: "get", name: "customer", project: "CRONK" })).body.term.definition).toBe("A billing account.");
+    expect((await callTool(mcp, "terms", { action: "get", name: "customer" })).body.term.definition).toBe("A paying organization.");
+    expect((await callTool(mcp, "terms", { action: "get", id: ticket.id })).body).toEqual((await admin.get(`/api/terms/${ticket.id}`)).body);
+    expect(await callTool(mcp, "terms", { action: "get", name: "Board", project: "CRONK" })).toEqual({ isError: true, body: "No Term named Board applies in CRONK" });
+    expect(await callTool(mcp, "terms", { action: "get" })).toEqual({ isError: true, body: "The get action needs a name or an id" });
+  });
+
+  it("is named in the welcome: the Workspace's Term names, then each Project's own", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
+    await admin.post("/api/workspace/terms", { name: "Customer", definition: "A paying organization." });
+    await admin.post("/api/projects/CRONK/terms", { name: "customer", definition: "A billing account." });
+    await admin.post("/api/projects/CRONK/terms", { name: "Board", definition: "Columns." });
+    const claude = await registerAgent(admin, "claude-laptop");
+
+    const started = await cronk.client(claude.secret).post("/api/agent-sessions");
+    expect(started.body.welcome.workspace.terms).toEqual(["Customer", "Ticket"]);
+    expect(started.body.welcome.projects[0].terms).toEqual(["Board", "customer"]);
+
+    const instructions = (await connectMcp(cronk, claude.secret)).client.getInstructions()!;
+    expect(instructions).toContain("## Terms");
+    expect(instructions).toContain("- Workspace: Customer, Ticket");
+    expect(instructions).toContain("- CRONK: Board, customer (replaces the Workspace's)");
+    expect(instructions).toContain("`terms` tool");
+  });
+});
+
 describe("working a delegated Ticket over MCP", () => {
   /** Ada's Project CRONK with `count` Tickets assigned to her and delegated to her Agent claude-laptop, which connects over MCP. */
   async function delegatedOverMcp(count: number) {

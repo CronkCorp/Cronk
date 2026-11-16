@@ -27,9 +27,9 @@ export function PriorityTag(props: { priority: Priority }) {
 /**
  * A neutral chip, such as a Label or a marker like "Private". `as="li"` puts it in a list; `onRemove`
  * adds a × button named `Remove <children>`. `tone="ok"` marks something settled, such as "Answered"; `warn` and `danger` something waiting, as a question does;
- * `danger` also marks a merge's "Both changed".
+ * `danger` also marks a merge's "Both changed". `info` is an outlined pill for what to know, such as a Term overriding the Workspace's.
  */
-export function Chip(props: { children: string; as?: "span" | "li"; tone?: "ok" | "warn" | "danger"; onRemove?: () => void; disabled?: boolean }) {
+export function Chip(props: { children: string; as?: "span" | "li"; tone?: "ok" | "warn" | "danger" | "info"; onRemove?: () => void; disabled?: boolean }) {
   const Tag = props.as ?? "span";
   return (
     <Tag className={`chip${props.tone ? ` ${props.tone}` : ""}`}>

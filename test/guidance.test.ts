@@ -192,10 +192,10 @@ describe("Guidance in the welcome", () => {
 
     const { welcome } = (await claude.post("/api/agent-sessions")).body;
 
-    expect(welcome.workspace).toEqual({ name: "Acme", guidance: "Be kind." });
+    expect(welcome.workspace).toEqual({ name: "Acme", guidance: "Be kind.", terms: [] });
     expect(welcome.projects).toEqual([
-      { key: "CRONK", name: "Cronk", access: "write", guidance: "Use pnpm." },
-      { key: "DOCS", name: "Docs", access: "write", guidance: "" },
+      { key: "CRONK", name: "Cronk", access: "write", guidance: "Use pnpm.", terms: [] },
+      { key: "DOCS", name: "Docs", access: "write", guidance: "", terms: [] },
     ]);
   });
 });

@@ -4,7 +4,7 @@ import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { api, watchInbox, type Project, type User, type Workspace } from "./api.js";
 import { Link, navigate, useLocation } from "./router.js";
-import { routeOf, projectKeyOfTicket, type Route } from "./routes.js";
+import { routeOf, projectKeyOf, projectKeyOfTicket, termsAddress, type Route } from "./routes.js";
 import { SearchBox } from "./search.js";
 import { useLoad } from "./ui.js";
 
@@ -13,6 +13,9 @@ import { useLoad } from "./ui.js";
 /** Which sidebar item a page belongs to: a Ticket marks its Project, a Document marks Documents. */
 function currentItem(route: Route): string | undefined {
   switch (route.page) {
+    case "terms":
+    case "term":
+      return "terms";
     case "inbox":
     case "documents":
     case "document":
@@ -44,7 +47,10 @@ const ROLE_NAMES: Record<User["role"], string> = { admin: "Admin", member: "Memb
  */
 export function Sidebar(props: { me: User; workspace: Workspace | undefined; onSignOut: () => void }) {
   const { path } = useLocation();
-  const current = currentItem(routeOf(path));
+  const route = routeOf(path);
+  const current = currentItem(route);
+  // From a Project's page, Terms opens on that Project's (docs/ui.md § Terms).
+  const cameFrom = projectKeyOf(route);
   const admin = props.me.role === "admin";
   // Projects and Agent Sessions have no stream to the browser, so they load again on each navigation.
   const [projects] = useLoad(() => api.projects(), [path]);
@@ -90,6 +96,9 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         </NavItem>
         <NavItem to="/documents" current={current === "documents"}>
           <span className="nav-text">Documents</span>
+        </NavItem>
+        <NavItem to={termsAddress(cameFrom)} current={current === "terms"}>
+          <span className="nav-text">Terms</span>
         </NavItem>
         <NavItem to="/agents" current={current === "agents"}>
           <span className="nav-text">Agents</span>
