@@ -251,7 +251,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Prefer `replace_section` to change one section: small edits rarely clash with anyone else's. " +
       "A Report is the Document of findings you write on a Ticket you hold the Claim on, with `write_report`; it stays with the Ticket, " +
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
-      "You may update or replace_section a Report only while you hold its Ticket's Claim, and only a User may delete one.",
+      "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
