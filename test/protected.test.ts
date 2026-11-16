@@ -203,3 +203,41 @@ describe("a Protected Term", () => {
     expect((await agent.patch(`/api/terms/${term.id}`, { baseVersion: 2, definition: "An Agent's words." })).status).toBe(200);
   });
 });
+
+describe("a Protected Decision", () => {
+  it("is Protected once accepted, as marked by the User who accepted it, and a User may unmark it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ada = (await admin.get("/api/me")).body.user;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { decision } = (await admin.post("/api/projects/CRONK/decisions", { title: "Postgres for storage", body: "We use Postgres." })).body;
+    expect(decision.protected).toBe(false);
+
+    cronk.clock.advance(60_000);
+    const accepted = await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    expect(accepted.body.decision.protected).toBe(true);
+    expect((await admin.get("/api/projects/CRONK/decisions")).body.decisions[0].protected).toBe(true);
+    expect((await admin.get("/api/decisions/CRONK-D1/protection")).body.changes).toEqual([
+      { protected: true, at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
+    ]);
+
+    const unmarked = await admin.post("/api/decisions/CRONK-D1/protection", { protected: false });
+    expect(unmarked.status).toBe(200);
+    expect(unmarked.body.decision).toMatchObject({ protected: false, status: "accepted", version: 2 });
+    // Saving it again, still accepted, leaves the User's choice alone.
+    await admin.patch("/api/decisions/CRONK-D1", { baseVersion: 2, body: "We use Postgres 17." });
+    expect((await admin.get("/api/decisions/CRONK-D1")).body.decision.protected).toBe(false);
+  });
+
+  it("can be marked while proposed, and refuses Agents' edits with a pointer to Suggestions", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+    const agent = await agentOf(cronk, admin, "claude");
+
+    expect((await agent.post("/api/decisions/D1/protection", { protected: true })).status).toBe(403);
+    expect((await admin.post("/api/decisions/D1/protection", { protected: true })).body.decision).toMatchObject({ protected: true, status: "proposed" });
+
+    const edit = await agent.patch("/api/decisions/D1", { baseVersion: 1, body: "Rewritten." });
+    expect(edit.status).toBe(403);
+    expect(edit.body.error).toMatch(/^D1 is Protected.*Suggestion/);
+  });
+});

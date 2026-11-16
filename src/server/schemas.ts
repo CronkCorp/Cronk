@@ -139,6 +139,7 @@ const decisionSummaryFields = {
   status: decisionStatus,
   group: { ...nullable({ type: "string" }), description: "The group it is filed under; null for none." },
   version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when editing." },
+  protected: { type: "boolean", description: protectedDescription("a User marked it Protected, as accepting it does") },
   supersededBy: { ...nullable(decisionRef), description: "The accepted Decision that replaced it, if it is superseded." },
   createdAt: timestamp,
   updatedAt: timestamp,
