@@ -9,7 +9,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import tar from "tar-stream";
 import { parse, stringify } from "yaml";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { ARTIFACT_HOST, registerAgent, startInstalledCronk, startSession, tarGz, type Client } from "./harness.js";
+import { ARTIFACT_HOST, registerAgent, startInstalledCronk, startSession, tarGz, zip, type Client } from "./harness.js";
 
 /**
  * Exports and imports streamed, so Workspaces whose files add up to more than fits in memory round-trip (#209).
@@ -290,5 +290,55 @@ describe("a file larger than the import allows", () => {
     expect(res.status).toBe(413);
     expect(res.body.error).toContain("projects/CRONK/artifacts/1-limits/2/ holds 3 files, more than the 2");
     expect(await elsewhere.stored()).toEqual([]);
+  });
+});
+
+describe("an export archived again by hand", () => {
+  it.each([
+    ["a zip archive, deflated", (files: Map<string, Buffer>) => zip(Object.fromEntries([...files].map(([p, b]) => [`export/${p}`, b])))],
+    ["a zip archive, stored", (files: Map<string, Buffer>) => zip(Object.fromEntries([...files].map(([p, b]) => [`export/${p}`, b])), { stored: true })],
+    ["a plain tar archive", (files: Map<string, Buffer>) => tarFiles(new Map([...files].map(([p, b]) => [`export/${p}`, b])), { plain: true })],
+    ["a gzipped tar archive, its files in another order", (files: Map<string, Buffer>) => tarFiles(new Map([...files].reverse()))],
+  ])("imports as %s, every file kept byte for byte", async (_kind, archive) => {
+    const { admin, files } = await workspaceWithFiles();
+    const exported = await untarFiles((await admin.download("/api/export")).body);
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    const res = await elsewhere.admin.upload("/api/import", await archive(exported), "application/octet-stream");
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+
+    for (const file of files) expect((await elsewhere.admin.download(file.read)).body.equals(file.bytes), file.name).toBe(true);
+    expect((await elsewhere.admin.get("/api/workspace/storage")).body).toEqual((await admin.get("/api/workspace/storage")).body);
+    expect(await elsewhere.stored()).toHaveLength(4 + 4);
+  });
+});
+
+describe("an import whose connection drops partway", () => {
+  it("leaves no files behind, and the same export imports afterwards", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Recordings" });
+    await attach(admin, "/api/tickets/CRONK-1/attachments?name=first.bin", 1, 2 * MB);
+    await attach(admin, "/api/tickets/CRONK-1/attachments?name=second.bin", 2, 4 * MB);
+    const exported = (await admin.download("/api/export")).body;
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    // Sends the first file and half the second, then the connection drops.
+    const cut = exported.length - 2 * MB;
+    let sent = false;
+    const dropping = new Readable({
+      read() {
+        if (sent) return;
+        sent = true;
+        this.push(exported.subarray(0, cut));
+        setTimeout(() => this.destroy(new Error("connection dropped")), 200);
+      },
+    });
+    await expect(elsewhere.admin.send("/api/import", { method: "POST", body: dropping, headers: { "content-type": "application/gzip" } })).rejects.toThrow();
+
+    await expect.poll(() => elsewhere.stored(), { timeout: 5_000 }).toEqual([]);
+    expect((await elsewhere.admin.get("/api/workspace/storage")).body.attachments).toEqual({ files: 0, bytes: 0 });
+    expect((await elsewhere.admin.upload("/api/import", exported)).status).toBe(201);
+    expect(await elsewhere.stored()).toHaveLength(2);
   });
 });

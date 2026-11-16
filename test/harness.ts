@@ -663,16 +663,16 @@ export async function startSession(cronk: Cronk, secret: string): Promise<Client
 }
 
 /**
- * A zip archive holding `files` (path to text; a path ending in `/` is a folder entry), as a file manager's
+ * A zip archive holding `files` (path to text or bytes; a path ending in `/` is a folder entry), as a file manager's
  * "Compress" makes of a folder: each file deflated, or stored when `stored` is set.
  */
-export function zip(files: Record<string, string>, { stored = false } = {}): Buffer {
+export function zip(files: Record<string, string | Buffer>, { stored = false } = {}): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const [name, text] of Object.entries(files)) {
     const nameBytes = Buffer.from(name, "utf8");
-    const data = Buffer.from(text, "utf8");
+    const data = typeof text === "string" ? Buffer.from(text, "utf8") : text;
     const method = stored || name.endsWith("/") ? 0 : 8;
     const packed = method === 8 ? deflateRawSync(data) : data;
     const header = (signature: number, size: number) => {
