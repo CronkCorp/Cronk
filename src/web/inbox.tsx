@@ -24,6 +24,7 @@ const KIND_NAMES: Record<InboxKind, string> = {
   review: "To review",
   unverified: "Unverified",
   suggestion: "Suggestions",
+  discovered: "Discovered",
   decision: "Proposed Decisions",
 };
 
@@ -66,6 +67,7 @@ type UnverifiedItem = Extract<WaitingItem, { kind: "unverified" }>;
 type DecisionItem = Extract<WaitingItem, { kind: "decision" }>;
 type SuggestionItem = Extract<WaitingItem, { kind: "suggestion" }>;
 type UnattendedItem = Extract<WaitingItem, { kind: "unattended" }>;
+type DiscoveredItem = Extract<WaitingItem, { kind: "discovered" }>;
 
 /** An item's id in the address: stable across reloads, and readable for a review or a Decision. */
 export const itemId = (item: WaitingItem) =>
@@ -86,7 +88,7 @@ export interface Group {
 
 /**
  * The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews, then Unverified
- * completions, then Agents' Suggestions, then Decisions Agents proposed.
+ * completions, then Agents' Suggestions, then Tickets Agents discovered, then Decisions Agents proposed.
  */
 export const GROUPS: Group[] = [
   { name: "Blocking", kind: "question", holds: (item) => item.kind === "question" && item.question.blocking },
@@ -95,12 +97,13 @@ export const GROUPS: Group[] = [
   { name: "Unverified", kind: "unverified", holds: (item) => item.kind === "unverified" },
   { name: "Unattended", kind: "unattended", holds: (item) => item.kind === "unattended" },
   { name: "Suggestions", kind: "suggestion", holds: (item) => item.kind === "suggestion" },
+  { name: "Discovered", kind: "discovered", holds: (item) => item.kind === "discovered" },
   { name: "Proposed Decisions", kind: "decision", holds: (item) => item.kind === "decision" },
 ];
 
 /**
  * The signed-in User's Inbox: Tickets In Review they are Assignee of, Agents' Unverified completions of them, their Agents' open questions,
- * the Suggestions and Decisions Agents made that they review. It
+ * the Suggestions and Decisions Agents made that they review, and the Tickets Agents discovered for them. It
  * loads again whenever the server says it may have changed. The kind filter narrows what the API returned
  * for the Project and Agent filters, so each kind's chip can show its count.
  */
@@ -145,9 +148,9 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
             label="Inbox items"
             empty={{
               heading: NOTHING[filter.kind ?? "all"],
-              hint: "Agents' questions, Tickets handed over for review, Agents' Unverified completions, and the Suggestions and Decisions they propose show up here.",
+              hint: "Agents' questions, Tickets handed over for review, Agents' Unverified completions, the Suggestions and Decisions they propose, and the Tickets they discover show up here.",
             }}
-            keysHint="J / K moves through the list, A answers, C completes or Accepts, S sends back, reopens or rejects."
+            keysHint="J / K moves through the list, A answers, C completes, Accepts or delegates, S sends back, reopens or rejects."
             me={props.me}
             onChanged={reload}
           />
@@ -241,6 +244,7 @@ const NOTHING: Record<InboxKind | "all", string> = {
   review: "Nothing to review",
   unverified: "No Unverified completions",
   suggestion: "No Suggestions",
+  discovered: "No Discovered Tickets",
   decision: "No proposed Decisions",
 };
 
@@ -391,6 +395,8 @@ export function InboxSplit(props: SplitProps) {
             <UnattendedDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
           ) : selected.kind === "suggestion" ? (
             <SuggestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
+          ) : selected.kind === "discovered" ? (
+            <DiscoveredDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
           ) : (
             <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           )}
@@ -417,6 +423,7 @@ function kindOf(item: WaitingItem): { kind: Kind; label: string; full: string } 
   if (item.kind === "unattended") return { kind: "unattended", label: "Unattended", full: "Unattended Ticket" };
   if (item.kind === "decision") return { kind: "decision", label: "Decision", full: "Proposed Decision" };
   if (item.kind === "suggestion") return { kind: "suggestion", label: "Suggestion", full: "Suggestion" };
+  if (item.kind === "discovered") return { kind: "discovered", label: "Discovered", full: "Discovered Ticket" };
   return item.question.blocking
     ? { kind: "blocking", label: "Blocking", full: "Blocking question" }
     : { kind: "question", label: "Question", full: "Question" };
@@ -455,6 +462,8 @@ function ListItem(props: { item: WaitingItem; selected: boolean; arrived: boolea
           ? `${item.suggestion.proposedBy.name}: ${plainText(item.suggestion.reasoning)}`
           : item.kind === "unattended"
           ? unattendedBecause(item)
+          : item.kind === "discovered"
+            ? foundBy(item.ticket)
           : item.reports.length
           ? `Report: ${item.reports.map((r) => r.title).join(", ")}`
           : "No Report";
@@ -742,7 +751,7 @@ function DecisionDetail(props: DetailProps<DecisionItem>) {
           <p>{`Supersedes ${decision.supersedes.map((s) => `${s.key} ${s.title}`).join(", ")} once accepted`}</p>
         </Banner>
       )}
-      <div className="markdown inbox-decision-body">
+      <div className="markdown inbox-agent-text">
         <CronkMarkdown>{decision.body}</CronkMarkdown>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
@@ -864,6 +873,95 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
           {!suggestion.outdated && <span className="muted small">{creditNote(next, proposedBy, false)}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Who found a Discovered Ticket and where, as its list item says it: "By claude-laptop · from CRONK-12". */
+function foundBy(ticket: DiscoveredItem["ticket"]): string {
+  const { agent, sourceTicket } = ticket.discovered!;
+  return `By ${agent.name}${sourceTicket ? ` · from ${sourceTicket.key}` : ""}`;
+}
+
+/**
+ * A Ticket an Agent discovered (docs/ui.md § Inbox and Triage in Phase 2): who found it and while working on which Ticket, its
+ * description, and what to do with it. In the Inbox: Delegate to the Agent that found it, when it is one of the User's own, Delegate
+ * to… another of their Agents, Keep in Backlog, and Cancel. In Triage, where nobody who can act on it is Assignee: Take it, which assigns it to the
+ * User and moves it to their Inbox, and Cancel.
+ */
+function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
+  const { ticket } = props.item;
+  const { agent, session, sourceTicket } = ticket.discovered!;
+  // An Inbox holds only the User's own; Triage, those with no Assignee or one who can't act on them.
+  const inTriage = ticket.assignee?.id !== props.me.id;
+  const [agents] = useLoad(() => api.agents(), []);
+  // Delegating needs one of the Assignee's own Agents, and the Inbox shows the User only their own Tickets.
+  const own = agents.kind === "loaded" ? agents.value.filter((a) => a.owner.id === props.me.id) : [];
+  const finder = own.find((a) => a.id === agent.id);
+  const delegate = useAction((delegateId: string) => props.acting(() => api.updateTicket(ticket.key, { delegateId })), props.onDone);
+  const take = useAction(() => props.acting(() => api.updateTicket(ticket.key, { assigneeId: props.me.id })), props.onDone);
+  const keep = useAction(() => props.acting(() => api.keepInBacklog(ticket.key)), props.onDone);
+  const cancel = useAction(
+    () =>
+      props.acting(async () => {
+        const { statuses } = await api.project(ticket.projectKey);
+        const canceled = statuses.find((s) => s.category === "canceled");
+        if (!canceled) throw new Error(`${ticket.projectKey} has no Canceled Status`);
+        return api.updateTicket(ticket.key, { statusId: canceled.id });
+      }),
+    props.onDone,
+  );
+  const busy = delegate.busy || take.busy || keep.busy || cancel.busy;
+  const error = delegate.error ?? take.error ?? keep.error ?? cancel.error;
+  const primary = inTriage ? () => void take.run() : finder ? () => void delegate.run(finder.id) : undefined;
+  useDetailKeys(props.keys, props.resolved || !primary ? {} : { complete: () => !busy && primary() });
+  const others = own.filter((a) => a.id !== finder?.id);
+
+  return (
+    <div className="inbox-detail-body">
+      <DetailHead item={props.item} />
+      {props.resolved && <ResolvedElsewhere />}
+      <div className="inbox-detail-who">
+        <StatusPill status={ticket.status} />
+        <span className="muted">
+          by <Actor actor={agentActor(agent, session)} /> <RelativeTime at={props.item.at} />
+          {sourceTicket && (
+            <>
+              {" while working on "}
+              <Link to={`/tickets/${sourceTicket.key}`} className="link"><span className="mono">{sourceTicket.key}</span> {sourceTicket.title}</Link>
+            </>
+          )}
+        </span>
+      </div>
+      {ticket.description.trim() ? (
+        <div className="markdown inbox-agent-text">
+          <CronkMarkdown projectKey={ticket.projectKey}>{ticket.description}</CronkMarkdown>
+        </div>
+      ) : (
+        <p className="muted">No description.</p>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="actions">
+        {inTriage ? (
+          <Button onClick={() => void take.run()} disabled={props.resolved || busy}>Take it</Button>
+        ) : (
+          <>
+            {finder && <Button onClick={() => void delegate.run(finder.id)} disabled={props.resolved || busy}>{`Delegate to ${finder.name}`}</Button>}
+            <Menu
+              label="Delegate to"
+              trigger={<Button variant="secondary" disabled={props.resolved || busy || others.length === 0}>Delegate to…</Button>}
+              items={others.map((a) => ({ label: a.name, onSelect: () => void delegate.run(a.id) }))}
+            />
+            <Button variant="secondary" onClick={() => void keep.run()} disabled={props.resolved || busy}>Keep in Backlog</Button>
+          </>
+        )}
+        <Button variant="ghost" onClick={() => void cancel.run()} disabled={props.resolved || busy}>Cancel</Button>
+      </div>
+      <p className="muted small">
+        {inTriage
+          ? "Take it assigns it to you; it then waits in your Inbox to be delegated."
+          : `${agent.name} may edit it until you delegate it, but not work on it.`}
+      </p>
     </div>
   );
 }

@@ -952,4 +952,20 @@ export const migrations: Migration[] = [
       CREATE INDEX terms_search ON terms USING gin (to_tsvector('english', term_search_text(name, definition, avoid)));
     `,
   },
+  {
+    id: "0038_discovered_tickets",
+    sql: `
+      -- The Discovered marker (work/tickets.ts): the Agent that filed the Ticket and the Agent Session it filed it in, and
+      -- the Ticket it was working on, with that Claim, if any. Set only when an Agent creates a Ticket other than a
+      -- Sub-Ticket of its own Claimed Ticket. discovery_kept records a User's Keep in Backlog, which settles it.
+      ALTER TABLE tickets ADD COLUMN discovered_by_agent_id uuid REFERENCES agents(id);
+      ALTER TABLE tickets ADD COLUMN discovered_session_id uuid REFERENCES agent_sessions(id);
+      ALTER TABLE tickets ADD COLUMN discovered_source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      ALTER TABLE tickets ADD COLUMN discovered_source_claim_id uuid;
+      ALTER TABLE tickets ADD COLUMN discovery_kept boolean NOT NULL DEFAULT false;
+      ALTER TABLE tickets ADD CONSTRAINT tickets_discovered_marker
+        CHECK (discovered_by_agent_id IS NOT NULL OR (discovered_session_id IS NULL AND discovered_source_ticket_id IS NULL AND NOT discovery_kept));
+      CREATE INDEX tickets_discovered_source_claim ON tickets (discovered_source_claim_id) WHERE discovered_source_claim_id IS NOT NULL;
+    `,
+  },
 ];

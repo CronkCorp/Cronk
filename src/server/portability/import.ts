@@ -81,6 +81,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   for (const { dirKey, id } of projectIds) await importArtifacts(ctx, `projects/${dirKey}/`, id, tickets);
   await tickets.storeRelations(ctx);
   await tickets.storeDecisionSources(ctx);
+  await tickets.storeDiscoverySources(ctx);
   await storeSuggestionSources(ctx, tickets);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);

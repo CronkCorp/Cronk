@@ -37,6 +37,7 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   parent: fromTo("ticket", true),
   autonomous: fromTo("boolean"),
   verification: fromTo("verification", true),
+  kept: {},
   "relation added": relation,
   "relation removed": relation,
   "document linked": { document: { holds: "document" } },

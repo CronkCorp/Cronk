@@ -48,6 +48,8 @@ import {
   findTicketByKey,
   findTicketsByIds,
   insertTicket,
+  isWaitingDiscovery,
+  keepDiscovery,
   listChanges,
   listLabels,
   moveTicketsBetweenStatuses,
@@ -63,8 +65,9 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
+import { clearClaim, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
+import { sourceClaimOf } from "../coordination/sources.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleChanges, visibleRelations } from "./ticket-reads.js";
 import { waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
@@ -511,7 +514,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { title: string; description?: string } }>(
+    app.post<{ Params: { key: string }; Body: { title: string; description?: string; ticket?: string } }>(
       "/api/projects/:key/tickets",
       {
         schema: {
@@ -520,32 +523,58 @@ export function workRoutes(ctx: AppContext) {
             type: "object",
             required: ["title"],
             additionalProperties: false,
-            properties: { title, description },
+            properties: {
+              title,
+              description,
+              ticket: {
+                type: "string",
+                maxLength: 30,
+                description:
+                  "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds, which the Discovered Ticket came from; " +
+                  "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It must be of the same Project. " +
+                  "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
+              },
+            },
           },
           response: {
-            201: answer("The new Ticket, in the Project's first Status", savedHolding("ticket", "Ticket")),
-            ...errors(400, 401, 403, 404, 410),
+            201: answer(
+              "The new Ticket, in the Project's first Status. An Agent's is a Discovered Ticket, needing no Claim: in the first Backlog Status, undelegated, " +
+                "recording its source, and assigned to the source Ticket's Assignee, or else the Agent's Owner; left unassigned, for Triage, when that User can't see the Project.",
+              savedHolding("ticket", "Ticket"),
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
+        const now = ctx.clock.now();
         const { ticket, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
           await lockProject(tx, project.id);
-          const [firstStatus] = await listStatuses(tx, project.id);
-          const ticket = await insertTicket(tx, {
-            project,
-            title: request.body.title.trim(),
-            description: request.body.description ?? "",
-            status: firstStatus!,
-            actor: actor,
-            now: ctx.clock.now(),
-          });
+          const statuses = await listStatuses(tx, project.id);
+          const input = { project, title: request.body.title.trim(), description: request.body.description ?? "", actor, now };
+          let ticket: Ticket;
+          if (actor.kind === "agent") {
+            const source = await sourceClaimOf(tx, actor, project.id, request.body.ticket, now, "a Discovered Ticket");
+            const sourceTicket = source && (await findTicketsByIds(tx, [source.ticketId]))[0]!;
+            const created = await insertTicket(tx, {
+              ...input,
+              status: statuses.find((s) => s.category === "backlog")!,
+              discovered: { agentId: actor.agent.id, sessionId: actor.session?.id ?? null, source },
+            });
+            // Cronk routes it, not the Agent, which may not assign Tickets.
+            const assignee = await discoveryAssignee(tx, actor, sourceTicket?.assignee ?? actingUser(actor), project.id);
+            ticket = assignee ? await updateTicket(tx, created, { assignee }, { kind: "system" }, now) : created;
+          } else {
+            if (request.body.ticket !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Discovered Ticket came from, as the one it holds the Claim on");
+            ticket = await insertTicket(tx, { ...input, status: statuses[0]! });
+          }
           return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
         ticketsChanged(ctx.live, [ticket]);
+        if (ticket.discovered) waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         return reply.code(201).send({ ticket, avoidedWords });
       },
     );
@@ -718,7 +747,7 @@ export function workRoutes(ctx: AppContext) {
           },
           response: {
             200: answer(
-              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to change its fields or move it, and can't assign or delegate it.",
+              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to move it, and to change its fields unless it is the Agent's own Discovered Ticket no User has delegated or finished yet, and can't assign or delegate it.",
               savedHolding("ticket", "Ticket"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -737,7 +766,7 @@ export function workRoutes(ctx: AppContext) {
         const { before, ticket, alsoChanged, blockedIds, mayBecomeReady, readyBefore, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const editsFields = [title, description, priority, labels, parentKey].some((v) => v !== undefined);
-          if (actor.kind === "agent" && editsFields) await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "editing it");
+          if (actor.kind === "agent" && editsFields) await requireAgentMayChange(tx, actor, ticket, ctx.clock.now(), "editing it");
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
@@ -756,7 +785,7 @@ export function workRoutes(ctx: AppContext) {
               else if (status.category !== "completed") changes.verification = null;
             }
           }
-          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
+          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket.projectId, assigneeId);
           // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it,
           // unless the same request unassigns it, which `delegableAgent` refuses.
           if (delegateId !== undefined && delegateId !== null && assigneeId === undefined && ticket.assignee === null) {
@@ -832,6 +861,36 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
+    // An Inbox action: settles a Discovered Ticket in Backlog without delegating it.
+    app.post<{ Params: { key: string } }>(
+      "/api/tickets/:key/keep",
+      {
+        schema: {
+          params: ticketParams,
+          response: {
+            200: answer(
+              "The Discovered Ticket, kept in Backlog, which takes it out of the Inbox and Triage. Only Users with Write keep one, and only while it waits: " +
+                "in Backlog, undelegated and not kept already.",
+              holding("ticket", "Ticket"),
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "keep a Discovered Ticket in Backlog");
+        const ticket = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (!isWaitingDiscovery(ticket)) throw new HttpError(409, `${ticket.key} isn't a Discovered Ticket waiting in Backlog, so there is nothing to keep`);
+          return keepDiscovery(tx, ticket, actor, ctx.clock.now());
+        });
+        waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
+        ticketsChanged(ctx.live, [ticket]);
+        return { ticket };
+      },
+    );
+
     app.get<{ Params: { key: string } }>(
       "/api/tickets/:key/changes",
       {
@@ -855,12 +914,23 @@ export function workRoutes(ctx: AppContext) {
   };
 }
 
-/** The User `id`, as a Ticket shows them, if they are active and can see the Ticket's Project; otherwise a 400. */
-async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: string): Promise<UserRef> {
+/**
+ * Who a Discovered Ticket in `project` goes to: `user` (the source Ticket's Assignee, or else the Agent's Owner), if they
+ * are active and can see the Project; otherwise nobody, which leaves it to Triage.
+ */
+async function discoveryAssignee(db: Queryable, actor: Actor, user: UserRef, projectId: string): Promise<UserRef | null> {
+  return assignableUser(db, actor, projectId, user.id).catch((err: unknown) => {
+    if (err instanceof HttpError) return null;
+    throw err;
+  });
+}
+
+/** The User `id`, as a Ticket of the Project `projectId` shows them, if they are active and can see that Project; otherwise a 400. */
+async function assignableUser(db: Queryable, actor: Actor, projectId: string, id: string): Promise<UserRef> {
   const assignee = await findUserById(db, id);
   if (!assignee || assignee.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(400, "No such User");
   if (!assignee.active) throw new HttpError(400, `${assignee.name} is deactivated`);
-  const project = (await findProjectById(db, ticket.projectId))!;
+  const project = (await findProjectById(db, projectId))!;
   if ((await visibleProjects(db, userActor(assignee), [project])).length === 0) throw new HttpError(400, `${assignee.name} can't see this Project`);
   return { id: assignee.id, name: assignee.name };
 }

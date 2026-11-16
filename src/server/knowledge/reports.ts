@@ -1,6 +1,6 @@
 import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { ticketKeySql, type Ticket } from "../work/tickets.js";
+import { listDiscoveredIn, ticketKeySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { findDocument, insertDocumentRow, insertVersion, type Document } from "./documents.js";
 import { listDecisionsProposedIn, type DecisionRef } from "./decisions.js";
 
@@ -30,6 +30,8 @@ export interface Report {
    * Workspace, oldest first, as they stand now.
    */
   decisions: DecisionRef[];
+  /** The Discovered Tickets the Agent filed from its Ticket during the Claim it was written in, in key order, as they stand now. */
+  discovered: TicketRef[];
 }
 
 interface ReportRow {
@@ -49,7 +51,7 @@ interface ReportRow {
   project_id: string;
 }
 
-const toReport = (row: ReportRow, decisions: DecisionRef[]): Report => ({
+const toReport = (row: ReportRow, decisions: DecisionRef[], discovered: TicketRef[]): Report => ({
   id: row.id,
   ticketKey: row.ticket_key,
   ticketTitle: row.ticket_title,
@@ -60,15 +62,21 @@ const toReport = (row: ReportRow, decisions: DecisionRef[]): Report => ({
   agent: { id: row.agent_id, name: row.agent_name, owner: { id: row.owner_id, name: row.owner_name } },
   session: { id: row.session_id },
   decisions,
+  discovered,
 });
 
-/** The rows as Reports, each with the Decisions proposed during its Claim, of its Ticket's Project or the Workspace. */
+/**
+ * The rows as Reports, each with the Decisions proposed during its Claim, of its Ticket's Project or the Workspace,
+ * and the Discovered Tickets filed from its Ticket then.
+ */
 async function toReports(db: Queryable, rows: ReportRow[]): Promise<Report[]> {
   const proposed = await listDecisionsProposedIn(db, rows.map((r) => r.claim_id));
+  const discovered = await listDiscoveredIn(db, rows.map((r) => r.claim_id));
   return rows.map((row) =>
     toReport(
       row,
       (proposed.get(row.claim_id) ?? []).filter((d) => d.projectId === null || d.projectId === row.project_id).map(({ projectId: _, ...ref }) => ref),
+      discovered.get(row.claim_id) ?? [],
     ),
   );
 }

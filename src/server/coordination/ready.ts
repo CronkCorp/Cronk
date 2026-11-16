@@ -35,6 +35,7 @@ export async function readyScope(db: Queryable, agent: AgentActor): Promise<Read
  * to Claim it reads. Only explains: whether a Ticket is Ready is `isTicketReady`'s to say.
  */
 export async function whyNotReady(db: Queryable, agent: AgentActor, scope: ReadyScope, ticket: Ticket, now: Date): Promise<string> {
+  if (ticket.discovered && ticket.delegate === null) return `${ticket.key} is a Discovered Ticket waiting for a User to delegate it`;
   if (ticket.delegate?.id !== agent.agent.id) return `${ticket.key} isn't delegated to ${agent.agent.name}`;
   if (FINISHED_CATEGORIES.includes(ticket.status.category)) return `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`;
   if (ticket.status.category === "in_review") return `${ticket.key} is ${ticket.status.name}, waiting until a User Sends it back`;

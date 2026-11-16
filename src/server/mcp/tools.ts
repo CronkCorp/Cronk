@@ -114,13 +114,20 @@ function query(params: Record<string, string[] | undefined>): string {
 export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerGroupedTool(server, ctx, {
     name: "tickets",
-    description: "Tickets: the units of work tracked in a Project, keyed like CRONK-12.",
+    description:
+      "Tickets: the units of work tracked in a Project, keyed like CRONK-12. When you notice work outside the Ticket you are on, or while on none, " +
+      "file it as a Discovered Ticket: it waits in Backlog for a User, who delegates, keeps or cancels it. You may edit your own Discovered Tickets " +
+      "until a User delegates them, but not work on them.",
     parameters: {
-      project: z.string().optional().describe("Project key, such as CRONK (list)"),
+      project: z.string().optional().describe("Project key, such as CRONK (list, file)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12 (get, claim, release, move, create_sub_ticket, edit, relate, unrelate)"),
       to: z.string().optional().describe("The Status to move into, by name or id (move)"),
-      title: z.string().optional().describe("The new Sub-Ticket's title (create_sub_ticket), or the Ticket's new title (edit)"),
-      description: z.string().optional().describe("The new Sub-Ticket's Markdown description (create_sub_ticket), or the Ticket's new one (edit)"),
+      title: z.string().optional().describe("The new Sub-Ticket's or Discovered Ticket's title (create_sub_ticket, file), or the Ticket's new title (edit)"),
+      description: z.string().optional().describe("The new Sub-Ticket's or Discovered Ticket's Markdown description (create_sub_ticket, file), or the Ticket's new one (edit)"),
+      source: z
+        .string()
+        .optional()
+        .describe("The key of the Ticket of the same Project you hold the Claim on that you found it while working on; needed only when you hold more than one there (file)"),
       labels: z.array(z.string()).optional().describe("The Ticket's new Labels, replacing all of its current ones (edit)"),
       parent: z.string().optional().describe("The key of the Ticket's new parent in the same Project, or `none` to make it a top-level Ticket (edit)"),
       relation: z.enum(RELATION_KINDS).optional().describe("How the Ticket relates to the other, read from the Ticket's side (relate, unrelate)"),
@@ -192,8 +199,24 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           return api("POST", `/api/tickets/${encodeURIComponent(key)}/sub-tickets`, { title, ...(a.description !== undefined && { description: a.description }) });
         },
       },
+      file: {
+        description:
+          "file a Discovered Ticket in a Project, needing no Claim: it goes to Backlog, undelegated, for the Assignee of the Ticket you hold the Claim on, " +
+          "or else your Owner, and that Ticket's Reports from this Claim list it",
+        writes: true,
+        run: (api, a) => {
+          const project = required(a.project, "a project", "file");
+          const title = required(a.title, "a title", "file");
+          return api("POST", `/api/projects/${encodeURIComponent(project)}/tickets`, {
+            title,
+            ...(a.description !== undefined && { description: a.description }),
+            ...(a.source !== undefined && { ticket: a.source }),
+          });
+        },
+      },
       edit: {
-        description: "change the title, description, priority, labels or parent of a Ticket you hold the Claim on; fields left out stay as they are",
+        description:
+          "change the title, description, priority, labels or parent of a Ticket you hold the Claim on, or of your own Discovered Ticket no User has delegated or finished yet; fields left out stay as they are",
         writes: true,
         run: (api, a) => {
           const key = required(a.key, "a key", "edit");
@@ -208,7 +231,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         },
       },
       relate: {
-        description: "add a Relation from a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
+        description:
+          "add a Relation from a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "relate"))}/relations`, {
@@ -602,7 +626,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description:
       "Attachments: plain files on a Ticket, a Document or Report, or a Comment, such as screenshots, recordings, logs or PDFs, kept as " +
       "evidence with the work. Whoever can read the item can read them, and listing a Ticket's includes those in its Comments and Reports. " +
-      "Attach one to a Ticket you hold the Claim on, a Document that isn't Protected (a Report only while holding its Ticket's Claim), or " +
+      "Attach one to a Ticket you hold the Claim on or your own undelegated Discovered Ticket, a Document that isn't Protected (a Report only while holding its Ticket's Claim), or " +
       "a Comment you posted, as text (`content`) or as base64 (`contentBase64`) for anything else; each may be as large as the Workspace " +
       "allows (100 MB unless an Admin changed it), and at most 100 MB through this tool. For a larger file, POST it to " +
       "/api/tickets/{key}/attachments, /api/documents/{id}/attachments or /api/comments/{id}/attachments with ?name=<name> over the HTTP API. " +
@@ -631,7 +655,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         },
       },
       attach: {
-        description: "attach a file to a Ticket you hold the Claim on, a Document or Report, or a Comment you posted",
+        description: "attach a file to a Ticket you hold the Claim on or your own undelegated Discovered Ticket, a Document or Report, or a Comment you posted",
         writes: true,
         run: (api, a) => {
           const path = attachmentsPath(a, "attach");

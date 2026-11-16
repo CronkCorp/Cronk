@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Actor, agentActor, Avatar, type ActorLike } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
-import { Chip, DecisionStatusPill, KindLabel, PRIORITY_NAMES } from "./components/tags.js";
+import { Chip, DecisionStatusPill, KindLabel, PRIORITY_NAMES, StatusPill } from "./components/tags.js";
 import { formatDay, RelativeTime, sameDay, useNow } from "./components/time.js";
 import { api, type Activity, type ActivityKind, type Comment, type NewComment, type RecordedChange, type RelationKind, type Report } from "./api.js";
 import { InlineAttachments } from "./attachments.js";
@@ -213,6 +213,18 @@ export function ReportCard(props: { report: Report }) {
           </ul>
         </div>
       )}
+      {r.discovered.length > 0 && (
+        <div className="tl-report-discovered">
+          <h4>Tickets discovered during the work</h4>
+          <ul>
+            {r.discovered.map((t) => (
+              <li key={t.key}>
+                <Link to={`/tickets/${t.key}`} className="link"><span className="mono">{t.key}</span> {t.title}</Link> <StatusPill status={t.status} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -356,6 +368,8 @@ export function describeChange(change: RecordedChange): ReactNode {
       if (change.to === "unverified") return "completed it on its own, Unverified until a User Accepts it";
       if (change.to === "verified") return "Accepted the completion";
       return "ended its Verification";
+    case "kept":
+      return "kept it in Backlog";
   }
 }
 

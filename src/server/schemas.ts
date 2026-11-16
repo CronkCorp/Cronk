@@ -430,6 +430,19 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       description:
         "Where an Agent's completion under Autonomous Delegation stands: `unverified` until a User Accepts it, then `verified`. Null for any other Ticket.",
     },
+    discovered: {
+      ...nullable(
+        object({
+          agent: { ...named, description: "The Agent that filed it." },
+          session: { ...nullable(object({ id })), description: "The Agent Session it was filed in." },
+          sourceTicket: { ...nullable(ticketName), description: "The Ticket of the same Project the Agent was working on, holding its Claim; null for none." },
+          kept: { type: "boolean", description: "Whether a User chose Keep in Backlog for it, which takes it out of the Inbox." },
+        }),
+      ),
+      description:
+        "The Discovered marker: set on every Ticket an Agent created other than a Sub-Ticket of its own Claimed Ticket. Until a User delegates it, " +
+        "the Agent that filed it may edit it without a Claim, but can't work on it. Null for any other Ticket.",
+    },
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
@@ -458,7 +471,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification", "kept"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
         ],
@@ -480,6 +493,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
       object({ change: { const: "autonomous" }, from: { type: "boolean" }, to: { type: "boolean" } }),
       object({ change: { const: "verification" }, from: nullable({ type: "string", enum: VERIFICATIONS }), to: nullable({ type: "string", enum: VERIFICATIONS }) }),
+      { ...object({ change: { const: "kept" } }), description: "A User kept a Discovered Ticket in Backlog." },
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },
@@ -656,6 +670,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         type: "array",
         items: decisionRef,
         description: "The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the Workspace, oldest first.",
+      },
+      discovered: {
+        type: "array",
+        items: ref("TicketRef"),
+        description: "The Discovered Tickets the Agent filed from its Ticket during the Claim it was written in, in key order, as they stand now.",
       },
     }),
   },
