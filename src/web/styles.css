@@ -307,6 +307,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .form-hint { font-size: 12px; }
 .chip.warn { background: transparent; border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; }
 .chip.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 999px; }
+.chip.info { background: transparent; border: 1px solid var(--info); color: var(--info); border-radius: 999px; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
 .filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
@@ -553,7 +554,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 /* Terms: docs/ui.md § Terms. The page reads like a glossary; the definitions sit bare in their rows. */
 .small { font-size: 12px; }
 .terms-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-.filter-input { font: inherit; width: 360px; max-width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.filter-input { font: inherit; width: 360px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .filter-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .term-group { margin-bottom: 24px; }
 .term-group h2 { margin: 0 0 8px; }
@@ -561,7 +562,6 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .term-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .term-name { font-weight: 600; color: var(--text); }
 .term-name:hover { color: var(--accent); }
-.info-pill { font-size: 12px; padding: 0 8px; border: 1px solid var(--info); border-radius: 999px; color: var(--info); }
 .term-definition.markdown { background: none; border: 0; padding: 0; }
 .term-definition p, .rows.terms li.term p { margin: 0; }
 .avoid { margin: 0; }

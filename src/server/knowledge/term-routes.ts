@@ -17,6 +17,7 @@ import {
   saveTermVersion,
   withOverrides,
   type StoredTerm,
+  type Term,
   type TermFields,
   type TermPlace,
 } from "./terms.js";
@@ -92,12 +93,13 @@ export function termRoutes(ctx: AppContext) {
     /** Answers Terms with their overrides as the caller may see them. */
     const answerTerms = async (actor: Actor, terms: StoredTerm[]) =>
       withOverrides(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
+    const answerTerm = async (actor: Actor, term: StoredTerm): Promise<Term> => (await answerTerms(actor, [term]))[0]!;
 
     const create = async (actor: Actor, place: TermPlace, input: NewTerm) => {
       const fields: TermFields = { name: input.name, definition: input.definition, avoid: input.avoid ?? [], group: input.group ?? null };
       const created = await transaction(ctx.db, (tx) => insertTerm(tx, { place, fields, actor, now: ctx.clock.now() }));
       if (created === "name taken") throw nameTaken(input.name);
-      return (await answerTerms(actor, [created]))[0]!;
+      return answerTerm(actor, created);
     };
 
     const byName = (terms: StoredTerm[], wanted: string | undefined) =>
@@ -114,7 +116,7 @@ export function termRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "read");
-        const terms = await listTerms(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: null });
+        const terms = await listTerms(ctx.db, placeOf(actor, null));
         return { terms: await answerTerms(actor, byName(terms, request.query.name)) };
       },
     );
@@ -138,7 +140,7 @@ export function termRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
-        const place = { workspaceId: actingUser(actor).workspaceId, projectId: project.id };
+        const place = placeOf(actor, project.id);
         const terms = await listApplicableTerms(ctx.db, place, await canRead(ctx.db, actor, null));
         return { terms: await answerTerms(actor, byName(terms, request.query.name)) };
       },
@@ -155,7 +157,7 @@ export function termRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
-        const term = await create(actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body);
+        const term = await create(actor, placeOf(actor, null), request.body);
         return reply.code(201).send({ term });
       },
     );
@@ -175,7 +177,7 @@ export function termRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "write");
-        const term = await create(actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
+        const term = await create(actor, placeOf(actor, project.id), request.body);
         return reply.code(201).send({ term });
       },
     );
@@ -211,7 +213,7 @@ export function termRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
         const { title, intro } = glossaryHeading({ projectKey: project.key });
-        return sendGlossary(reply, title, intro, await listTerms(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }));
+        return sendGlossary(reply, title, intro, await listTerms(ctx.db, placeOf(actor, project.id)));
       },
     );
 
@@ -226,7 +228,7 @@ export function termRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const term = await termFor(ctx.db, actor, request.params.id, "read");
-        return { term: (await answerTerms(actor, [term]))[0]! };
+        return { term: await answerTerm(actor, term) };
       },
     );
 
@@ -264,7 +266,7 @@ export function termRoutes(ctx: AppContext) {
           if (saved === "name taken") throw nameTaken(fields.name);
           return saved;
         });
-        return { term: (await answerTerms(actor, [saved]))[0]! };
+        return { term: await answerTerm(actor, saved) };
       },
     );
 
@@ -319,6 +321,9 @@ async function requireCurrent(db: Queryable, term: StoredTerm, base: number, wri
   const current = (await listTermVersions(db, term.id))[0]!;
   throw new HttpError(409, `This ${write} is based on Version ${base}, but the Term is at Version ${term.version}; ${AFTER_STALE[write]}`, { current });
 }
+
+/** Where Terms belong for `actor`: a Project of their Workspace, or the Workspace itself when `projectId` is null. */
+const placeOf = <P extends string | null>(actor: Actor, projectId: P): TermPlace & { projectId: P } => ({ workspaceId: actingUser(actor).workspaceId, projectId });
 
 /**
  * The Term with this id, if `actor` has at least `need` where it belongs: in its Project (one they

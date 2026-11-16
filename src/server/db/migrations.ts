@@ -453,7 +453,7 @@ export const migrations: Migration[] = [
   {
     id: "0019_terms",
     sql: `
-      -- Terms (knowledge/terms.ts): glossary entries of the Workspace (project_id NULL) or a Project. Names
+      -- Terms (knowledge/terms.ts): the glossary of the Workspace (project_id NULL) or a Project. Names
       -- are unique per place ignoring case, so a Project Term overrides the Workspace Term of the same name.
       CREATE TABLE terms (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

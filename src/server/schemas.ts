@@ -473,7 +473,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Term: {
     description:
-      "A glossary entry naming one concept: its name, definition and the words to avoid for it. Belongs to the Workspace or a Project; " +
+      "One concept of the glossary: its name, definition and the words to avoid for it. Belongs to the Workspace or a Project; " +
       "within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case.",
     ...object({
       id,

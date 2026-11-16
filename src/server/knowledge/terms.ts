@@ -3,7 +3,7 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Readable } from "../identity/access.js";
 
 /**
- * Terms: glossary entries of the Workspace or a Project, each naming one concept with its definition
+ * Terms: the Workspace's or a Project's glossary, each Term naming one concept with its definition
  * and the words to avoid for it. Names are unique per place ignoring case, and within a Project a
  * Project Term replaces the Workspace Term of the same name. Every save is a new Version.
  */

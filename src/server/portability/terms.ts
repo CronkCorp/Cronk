@@ -99,7 +99,9 @@ export async function importTerms(ctx: ImportContext, dir: string, projectId: st
     }
     for (const [n, v] of versions.entries()) {
       const at = `${where} versions[${n}]`;
-      await insertTermVersion(ctx.db, id, { number: n + 1, ...readFields(v, at), at: date(v.at, `${at} at`), actor: await ctx.actor(v.by, `${at} by`) });
+      const saved = readFields(v, at);
+      if (n + 1 === version && JSON.stringify(saved) !== JSON.stringify(fields)) refuse(`${where} must say what its Version ${version} says`);
+      await insertTermVersion(ctx.db, id, { number: n + 1, ...saved, at: date(v.at, `${at} at`), actor: await ctx.actor(v.by, `${at} by`) });
     }
   }
 }

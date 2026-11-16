@@ -125,7 +125,7 @@ export type WaitingWork = Serialized<StoredWaitingWork>;
 export type Document = Serialized<StoredDocument>;
 /** One saved state of a Document. */
 export type Version = Serialized<StoredVersion>;
-/** A glossary entry of the Workspace or a Project, with what overrides it or what it overrides. */
+/** A Term of the Workspace or a Project, with what overrides it or what it overrides. */
 export type Term = Serialized<StoredTerm>;
 /** One saved state of a Term, with the Actor who saved it. */
 export type TermVersion = Serialized<StoredTermVersion>;

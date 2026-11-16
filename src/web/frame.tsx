@@ -4,7 +4,7 @@ import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { api, watchInbox, type Project, type User, type Workspace } from "./api.js";
 import { Link, navigate, useLocation } from "./router.js";
-import { routeOf, projectKeyOf, projectKeyOfTicket, type Route } from "./routes.js";
+import { routeOf, projectKeyOf, projectKeyOfTicket, termsAddress, type Route } from "./routes.js";
 import { SearchBox } from "./search.js";
 import { useLoad } from "./ui.js";
 
@@ -95,7 +95,7 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         <NavItem to="/documents" current={current === "documents"}>
           <span className="nav-text">Documents</span>
         </NavItem>
-        <NavItem to={cameFrom ? `/terms?project=${encodeURIComponent(cameFrom)}` : "/terms"} current={current === "terms"}>
+        <NavItem to={termsAddress(cameFrom)} current={current === "terms"}>
           <span className="nav-text">Terms</span>
         </NavItem>
         <NavItem to="/agents" current={current === "agents"}>

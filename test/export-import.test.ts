@@ -499,6 +499,10 @@ describe("an export edited by hand", () => {
     expect(missingVersion.status).toBe(400);
     expect(missingVersion.body.error).toMatch(/CRONK\/terms\.md terms\[0\] versions must be numbered 1, 2, 3/);
 
+    const disagrees = await admin.upload("/api/import", await edited(cronkTerms, (d) => (d.terms[0].definition = "Something else.")));
+    expect(disagrees.status).toBe(400);
+    expect(disagrees.body.error).toMatch(/CRONK\/terms\.md terms\[0\] must say what its Version 2 says/);
+
     expect((await admin.get("/api/projects")).body.projects).toEqual([]);
   });
 });

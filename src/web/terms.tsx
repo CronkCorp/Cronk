@@ -2,27 +2,26 @@ import { useState, type ReactNode } from "react";
 import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button, buttonClass } from "./components/button.js";
+import { Chip } from "./components/tags.js";
 import { ConfirmDialog, Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
-import { api, glossaryUrl, staleVersionOf, type Term, type TermInput, type TermVersion } from "./api.js";
-import { useCanWrite } from "./documents.js";
+import { api, glossaryUrl, type Term, type TermInput, type TermVersion } from "./api.js";
+import { explainStale, useCanWrite } from "./documents.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
+import { termsAddress } from "./routes.js";
 import { Field, Show, TextArea, useAction, useLoad } from "./ui.js";
 
 // The Terms page and a Term's page: docs/ui.md § Terms.
 
-/** The Terms page of a place: a Project's, or the Workspace's without a Project key. */
-const termsAddress = (projectKey: string | null | undefined) => (projectKey ? `/terms?project=${encodeURIComponent(projectKey)}` : "/terms");
-
-/** Where a Term belongs, as its row and page name it. */
-const placeName = (term: Term) => term.projectKey ?? "Workspace";
+/** Where a Term belongs, as its row, page and crumbs name it. */
+const placeName = (projectKey: string | null | undefined) => projectKey ?? "Workspace";
 
 /** The crumbs above a Terms heading: Terms, then the place. */
 function Crumbs(props: { projectKey: string | null | undefined }) {
   return (
     <div className="muted crumbs">
-      <Link to={termsAddress(props.projectKey)} className="link">Terms</Link> / {props.projectKey ?? "Workspace"}
+      <Link to={termsAddress(props.projectKey)} className="link">Terms</Link> / {placeName(props.projectKey)}
     </div>
   );
 }
@@ -88,7 +87,7 @@ export function TermsPage(props: { projectKey?: string | undefined }) {
             return (
               <div className="empty">
                 <h2>No Terms yet</h2>
-                <p className="muted">Terms name the concepts the team and its Agents share, with the words to avoid for each.</p>
+                <p className="muted">Create one with New Term: a name, its definition and the words to avoid for it.</p>
               </div>
             );
           }
@@ -132,8 +131,8 @@ export function TermsPage(props: { projectKey?: string | undefined }) {
 /** "Overrides the Workspace Term", or "Replaced in CRONK", as a pill after a Term's name. */
 function OverridePill(props: { term: Term }) {
   const { overrides, overriddenBy } = props.term;
-  if (overrides) return <span className="info-pill">Overrides the Workspace Term</span>;
-  if (overriddenBy.length > 0) return <span className="info-pill">Replaced in {overriddenBy.map((o) => o.projectKey).join(", ")}</span>;
+  if (overrides) return <Chip tone="info">Overrides the Workspace Term</Chip>;
+  if (overriddenBy.length > 0) return <Chip tone="info">{`Replaced in ${overriddenBy.map((o) => o.projectKey).join(", ")}`}</Chip>;
   return null;
 }
 
@@ -161,7 +160,7 @@ function TermRow(props: { term: Term }) {
       <div className="term-head">
         <Link to={`/terms/${t.id}`} className="term-name">{t.name}</Link>
         <OverridePill term={t} />
-        <span className="muted small">{placeName(t)}</span>
+        <span className="muted small">{placeName(t.projectKey)}</span>
         <span className="grow" />
         <span className="muted small">Version {t.version}</span>
       </div>
@@ -184,7 +183,7 @@ const firstLine = (markdown: string) => markdown.trim().split("\n")[0]!;
 /** Words to avoid as typed: separated by commas. */
 const wordsFrom = (text: string) => text.split(",").map((w) => w.trim()).filter((w) => w !== "");
 
-/** The fields of a Term to create or edit; `submit` gets them and says what to call the button. */
+/** The fields of a Term to create or edit, handed to `onSubmit`; `submitLabel` names the button. */
 function TermForm(props: { initial?: TermInput; submitLabel: string; busy: boolean; error: string | undefined; onSubmit: (input: TermInput) => void; onCancel: () => void }) {
   const [name, setName] = useState(props.initial?.name ?? "");
   const [definition, setDefinition] = useState(props.initial?.definition ?? "");
@@ -234,12 +233,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const save = useAction(
     (input: TermInput) =>
-      api.saveTerm(t.id, t.version, input).catch((err: unknown) => {
-        const current = staleVersionOf(err);
-        if (!current) throw err;
-        props.onReload();
-        throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before saving`);
-      }),
+      api.saveTerm(t.id, t.version, input).catch(explainStale(props.onReload, "saving")),
     (saved) => {
       setEditing(false);
       props.onChanged(saved);
@@ -298,7 +292,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
           <Avoid words={t.avoid} />
           <p className="muted small">
             {t.group && <>Group: {t.group} · </>}
-            {placeName(t)} · Version {t.version}, <RelativeTime at={t.updatedAt} />
+            {placeName(t.projectKey)} · Version {t.version}, <RelativeTime at={t.updatedAt} />
           </p>
         </section>
       )}

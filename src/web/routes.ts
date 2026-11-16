@@ -55,6 +55,9 @@ export function routeOf(path: string): Route {
 /** The Project a Ticket key belongs to: everything before its last "-", as Project keys hold none. */
 export const projectKeyOfTicket = (ticketKey: string) => ticketKey.slice(0, Math.max(0, ticketKey.lastIndexOf("-")));
 
+/** The Terms page of a place: a Project's, or the Workspace's without a Project key. */
+export const termsAddress = (projectKey: string | null | undefined) => (projectKey ? `/terms?project=${encodeURIComponent(projectKey)}` : "/terms");
+
 /** The Project a page belongs to, if any, so the Terms page can start on it: a Project's own pages, or a Ticket's. */
 export function projectKeyOf(route: Route): string | undefined {
   if (route.page === "project" || route.page === "projectDocuments") return route.key.toUpperCase();
