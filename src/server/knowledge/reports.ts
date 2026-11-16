@@ -2,6 +2,7 @@ import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { ticketKeySql, type Ticket } from "../work/tickets.js";
 import { findDocument, insertDocumentRow, insertVersion, type Document } from "./documents.js";
+import { decisionKey, type DecisionRef } from "./decisions.js";
 
 /**
  * Reports: Documents of findings an Agent Session writes on a Ticket while holding its Claim.
@@ -24,6 +25,11 @@ export interface Report {
   agent: { id: string; name: string; owner: { id: string; name: string } };
   /** The Agent Session it was written in. */
   session: { id: string };
+  /**
+   * The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the
+   * Workspace, oldest first, as they stand now.
+   */
+  decisions: DecisionRef[];
 }
 
 interface ReportRow {
@@ -39,9 +45,11 @@ interface ReportRow {
   owner_id: string;
   owner_name: string;
   session_id: string;
+  claim_id: string;
+  project_id: string;
 }
 
-const toReport = (row: ReportRow): Report => ({
+const toReport = (row: ReportRow, decisions: DecisionRef[]): Report => ({
   id: row.id,
   ticketKey: row.ticket_key,
   ticketTitle: row.ticket_title,
@@ -51,12 +59,32 @@ const toReport = (row: ReportRow): Report => ({
   updatedAt: row.updated_at,
   agent: { id: row.agent_id, name: row.agent_name, owner: { id: row.owner_id, name: row.owner_name } },
   session: { id: row.session_id },
+  decisions,
 });
+
+/** The rows as Reports, each with the Decisions proposed during its Claim. */
+async function toReports(db: Queryable, rows: ReportRow[]): Promise<Report[]> {
+  const { rows: proposed } = await db.query<{ claim_id: string; project_id: string | null; project_key: string | null; number: number; title: string; status: DecisionRef["status"] }>(
+    `SELECT d.source_claim_id AS claim_id, d.project_id, p.key AS project_key, d.number, d.title, d.status
+     FROM decisions d LEFT JOIN projects p ON p.id = d.project_id
+     WHERE d.source_claim_id = ANY($1::uuid[]) ORDER BY d.created_at, d.project_id IS NULL, d.number`,
+    [rows.map((r) => r.claim_id)],
+  );
+  return rows.map((row) =>
+    toReport(
+      row,
+      proposed
+        .filter((d) => d.claim_id === row.claim_id && (d.project_id === null || d.project_id === row.project_id))
+        .map((d) => ({ key: decisionKey(d.project_key, d.number), title: d.title, status: d.status })),
+    ),
+  );
+}
 
 /** Selects Reports as `d`, with their Ticket `t` and the Agent and Session of their first Version. */
 const SELECT_REPORTS = `
   SELECT d.id, ${ticketKeySql("p", "t")} AS ticket_key, t.title AS ticket_title, d.title, d.version, d.created_at, d.updated_at,
-    a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id
+    a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id,
+    d.claim_id, t.project_id
   FROM documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
     JOIN document_versions v ON v.document_id = d.id AND v.number = 1
     JOIN agents a ON a.id = v.actor_agent_id JOIN users u ON u.id = v.actor_user_id`;
@@ -90,19 +118,19 @@ export async function insertReport(
 /** The Report with this Document id, as listings show it. */
 export async function findReport(db: Queryable, id: string): Promise<Report | undefined> {
   const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE d.id = $1`, [id]);
-  return rows[0] && toReport(rows[0]);
+  return rows[0] && (await toReports(db, rows))[0];
 }
 
 /** A Ticket's Reports, oldest first. */
 export async function listTicketReports(db: Queryable, ticketId: string): Promise<Report[]> {
   const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticketId]);
-  return rows.map(toReport);
+  return toReports(db, rows);
 }
 
 /** A Project's Reports, newest first. */
 export async function listProjectReports(db: Queryable, projectId: string): Promise<Report[]> {
   const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE t.project_id = $1 ORDER BY d.created_at DESC, d.id`, [projectId]);
-  return rows.map(toReport);
+  return toReports(db, rows);
 }
 
 /** Whether a Report was written on the Ticket during the Claim `claimId`. */

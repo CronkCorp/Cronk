@@ -200,3 +200,25 @@ describe("rejecting an Agent's proposed Decision", () => {
     });
   });
 });
+
+describe("a Report", () => {
+  it("lists the Decisions its Agent Session proposed during the Claim it was written in", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/decisions", { title: "Before any Claim" });
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/CRONK/decisions", { title: "Markdown for Decisions" });
+    await agent.post("/api/workspace/decisions", { title: "Compose for installs" });
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "What I did", body: "Proposed two Decisions." });
+    await agent.post("/api/tickets/CRONK-2/claim");
+    await agent.post("/api/projects/CRONK/decisions", { title: "From the other Ticket", ticket: "CRONK-2" });
+    await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+
+    const [report] = (await admin.get("/api/tickets/CRONK-1/reports")).body.reports;
+    expect(report.decisions).toEqual([
+      { key: "CRONK-D2", title: "Markdown for Decisions", status: "accepted" },
+      { key: "D1", title: "Compose for installs", status: "proposed" },
+    ]);
+    expect((await admin.get("/api/projects/CRONK/reports")).body.reports[0].decisions).toHaveLength(2);
+  });
+});

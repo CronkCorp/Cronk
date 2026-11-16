@@ -509,6 +509,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       createdAt: timestamp,
       updatedAt: timestamp,
       ...writtenBy,
+      decisions: {
+        type: "array",
+        items: decisionRef,
+        description: "The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the Workspace, oldest first.",
+      },
     }),
   },
   LinkedDocument: {
