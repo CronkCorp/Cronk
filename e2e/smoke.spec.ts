@@ -359,19 +359,12 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await expect(page.getByRole("heading", { name: /What I found/ })).toContainText(`Report on ${ticket.key}`);
   await expect(page.getByTestId("document-body")).toContainText("It was the cache.");
 
-  // The Session hands the Ticket over; it waits in Ada's Inbox with its Report, and new questions arrive there live.
+  // New questions arrive in Ada's open Inbox live; then the Session hands the Ticket over, ending its Claim, and it waits there with its Report.
   const agentCall = { authorization: `Bearer ${token}`, "cronk-agent-session": session };
-  const statuses = (await (await request.get(`/api/projects/${ticket.key.split("-")[0]}`, { headers: agentCall })).json()).statuses;
-  const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
-  expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
   await page.getByRole("link", { name: "Inbox" }).click();
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
   const list = page.getByRole("region", { name: "Inbox items" });
   const detail = page.getByRole("region", { name: "Selected item" });
-  const review = list.getByRole("list", { name: "To review" }).getByRole("link", { name: new RegExp(ticket.key) });
-  await expect(review).toContainText("Report: What I found");
-  await review.click();
-  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
   await request.post(`/api/tickets/${ticket.key}/activities`, { headers: agentCall, data: { kind: "question", body: "Ship it **today**?", blocking: true } });
   const question = list.getByRole("list", { name: "Blocking" }).getByRole("link", { name: /Ship it today\?/ });
   await expect(question).toContainText(ticket.key);
@@ -379,6 +372,13 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await detail.getByLabel("Answer", { exact: true }).fill("Yes.");
   await detail.getByRole("button", { name: "Post answer" }).click();
   await expect(question).toHaveCount(0);
+  const statuses = (await (await request.get(`/api/projects/${ticket.key.split("-")[0]}`, { headers: agentCall })).json()).statuses;
+  const inReview = statuses.find((s: { category: string }) => s.category === "in_review").id;
+  expect((await request.patch(`/api/tickets/${ticket.key}`, { headers: agentCall, data: { statusId: inReview } })).status()).toBe(200);
+  const review = list.getByRole("list", { name: "To review" }).getByRole("link", { name: new RegExp(ticket.key) });
+  await expect(review).toContainText("Report: What I found");
+  await review.click();
+  await expect(detail.getByRole("strong").filter({ hasText: "cache" })).toBeVisible();
   // The Ticket opens from the Inbox.
   await review.click();
   await detail.getByRole("link", { name: "Open Ticket" }).click();

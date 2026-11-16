@@ -250,6 +250,19 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
   return (await findTicketById(db, ticket.id))!;
 }
 
+/**
+ * Clears the Delegate of every Ticket delegated to this Agent, whatever its Status or Project,
+ * recording each as `actor`'s change, as when the Agent is removed. Run inside a transaction.
+ * Returns the Tickets as changed.
+ */
+export async function clearDelegationsTo(db: Queryable, agentId: string, actor: Actor, now: Date): Promise<Ticket[]> {
+  // Locked in id order, so it queues behind concurrent edits of these Tickets rather than deadlocking with them.
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.delegate_id = $1 ORDER BY t.id FOR UPDATE OF t`, [agentId]);
+  const changed: Ticket[] = [];
+  for (const row of rows) changed.push(await updateTicket(db, toTicket(row), { delegate: null }, actor, now));
+  return changed;
+}
+
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /** Trims Labels and drops any that repeat an earlier one, ignoring case. */

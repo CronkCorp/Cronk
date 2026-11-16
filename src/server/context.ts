@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { userActor, type Actor } from "./actor.js";
+import { userActor, type Actor, type AgentActor } from "./actor.js";
 import type { Clock } from "./clock.js";
 import { findLiveAgentSession, touchAgentSession } from "./coordination/agent-sessions.js";
 import type { Database } from "./db/database.js";
@@ -40,7 +40,7 @@ export const bearerToken = (request: FastifyRequest): string | undefined =>
  * Who is making the request, or a 401: the Agent whose token is sent as
  * `Authorization: Bearer <token>`, or else the signed-in User. An Agent that also
  * sends the Cronk-Agent-Session header calls within that Agent Session, which the
- * call refreshes; a Session that isn't the Agent's or has ended answers 410. With
+ * call refreshes; a Session that this token didn't start, or that has ended, answers 410. With
  * `refreshSession: false` the Session is only checked, not refreshed, as when a live-update
  * stream of a Ticket re-checks who is watching: being told of others' changes isn't the Agent's own call.
  */
@@ -52,7 +52,7 @@ export async function requireActor(ctx: AppContext, request: FastifyRequest, opt
     const sessionId = request.headers[AGENT_SESSION_HEADER];
     if (typeof sessionId !== "string") return { kind: "agent", session: null, ...found };
     const lookUp = opts.refreshSession === false ? findLiveAgentSession : touchAgentSession;
-    const session = await lookUp(ctx.db, found.agent.id, sessionId, ctx.clock.now());
+    const session = await lookUp(ctx.db, { agentId: found.agent.id, tokenId: found.tokenId }, sessionId, ctx.clock.now());
     if (!session) throw new HttpError(410, "This Agent Session has ended; start a new one");
     return { kind: "agent", session, ...found };
   }
@@ -65,8 +65,13 @@ export async function requireActor(ctx: AppContext, request: FastifyRequest, opt
 /** The signed-in User making the request; a 401 if nobody is, a 403 for an Agent. */
 export async function requireUser(ctx: AppContext, request: FastifyRequest): Promise<User> {
   const actor = await requireActor(ctx, request);
-  if (actor.kind === "agent") throw new HttpError(403, "Only a User can do this, not an Agent");
+  requireUserActor(actor, "do this");
   return actor.user;
+}
+
+/** A 403 for an Agent: `what` completes "Only a User can …", as "manage Statuses". */
+export function requireUserActor(actor: Actor, what: string): asserts actor is Exclude<Actor, AgentActor> {
+  if (actor.kind === "agent") throw new HttpError(403, `Only a User can ${what}, not an Agent`);
 }
 
 /** Sets the sign-in cookie. Its lifetime is relative (Max-Age) so it doesn't depend on the browser's clock agreeing with ours. */

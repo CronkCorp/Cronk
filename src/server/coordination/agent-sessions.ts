@@ -55,7 +55,7 @@ export const isLiveAt = (nowParam: string, alias: { session: string; workspace: 
   `${alias.session}.ended_at IS NULL AND ${alias.session}.last_seen_at > ${nowParam}::timestamptz - make_interval(secs => ${alias.workspace}.silence_threshold_seconds)`;
 
 /** Starts a live Session for the Agent whose token `tokenId` is. */
-export async function startAgentSession(db: Queryable, input: { agentId: string; tokenId: string; now: Date }): Promise<AgentSession> {
+export async function startAgentSession(db: Queryable, input: SessionCaller & { now: Date }): Promise<AgentSession> {
   const { rows } = await db.query<AgentSessionRow>(
     `WITH s AS (INSERT INTO agent_sessions (agent_id, token_id, started_at, last_seen_at) VALUES ($1, $2, $3, $3) RETURNING *)
      SELECT s.*, w.silence_threshold_seconds FROM s ${WITH_WORKSPACE}`,
@@ -66,27 +66,34 @@ export async function startAgentSession(db: Queryable, input: { agentId: string;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Who is calling in a Session: an Agent, with the token it called with. Only the token that started a Session may call in it. */
+export interface SessionCaller {
+  agentId: string;
+  tokenId: string;
+}
+
 /**
- * Refreshes the Agent's live Session `id` and returns it; undefined if the Agent has no such
- * Session or it has ended, by disconnecting or by staying silent too long.
+ * Refreshes the caller's live Session `id` and returns it; undefined if the caller's token didn't
+ * start such a Session or it has ended, by disconnecting or by staying silent too long.
  */
-export async function touchAgentSession(db: Queryable, agentId: string, id: string, now: Date): Promise<AgentSession | undefined> {
+export async function touchAgentSession(db: Queryable, caller: SessionCaller, id: string, now: Date): Promise<AgentSession | undefined> {
   if (!UUID.test(id)) return undefined;
   const { rows } = await db.query<AgentSessionRow>(
-    `UPDATE agent_sessions s SET last_seen_at = $3 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
-     WHERE a.id = s.agent_id AND s.id = $1 AND s.agent_id = $2 AND ${isLiveAt("$3")}
+    `UPDATE agent_sessions s SET last_seen_at = $4 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
+     WHERE a.id = s.agent_id AND s.id = $1 AND s.agent_id = $2 AND s.token_id = $3 AND ${isLiveAt("$4")}
      RETURNING s.*, w.silence_threshold_seconds`,
-    [id, agentId, now],
+    [id, caller.agentId, caller.tokenId, now],
   );
   return rows[0] && toAgentSession(rows[0]);
 }
 
-/** The Agent's live Session `id`, without refreshing it; undefined if it has none such or it has ended. */
-export async function findLiveAgentSession(db: Queryable, agentId: string, id: string, now: Date): Promise<AgentSession | undefined> {
+/** The caller's live Session `id`, without refreshing it; undefined if the caller's token didn't start such a Session or it has ended. */
+export async function findLiveAgentSession(db: Queryable, caller: SessionCaller, id: string, now: Date): Promise<AgentSession | undefined> {
   if (!UUID.test(id)) return undefined;
   const { rows } = await db.query<AgentSessionRow>(
-    `SELECT s.*, w.silence_threshold_seconds FROM agent_sessions s ${WITH_WORKSPACE} WHERE s.id = $1 AND s.agent_id = $2 AND ${isLiveAt("$3")}`,
-    [id, agentId, now],
+    `SELECT s.*, w.silence_threshold_seconds FROM agent_sessions s ${WITH_WORKSPACE}
+     WHERE s.id = $1 AND s.agent_id = $2 AND s.token_id = $3 AND ${isLiveAt("$4")}`,
+    [id, caller.agentId, caller.tokenId, now],
   );
   return rows[0] && toAgentSession(rows[0]);
 }

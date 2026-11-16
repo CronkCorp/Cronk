@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
 /** The id of the User named `name`, as `client` sees the Workspace's Users. */
 async function userId(client: { get: (path: string) => Promise<{ body: any }> }, name: string): Promise<string> {
@@ -75,15 +75,61 @@ describe("Ticket Delegate", () => {
 });
 
 describe("Ticket Delegate, further", () => {
-  it("is kept on unrelated edits even after its Agent is removed", async () => {
-    const { admin } = await startInstalledCronk();
-    await projectWithTickets(admin, "CRONK", 1);
-    const claude = await registerAgent(admin, "claude-laptop");
-    await admin.patch("/api/tickets/CRONK-1", { assigneeId: await userId(admin, "Ada"), delegateId: claude.agentId });
+  it("is cleared when its Agent is removed, recorded as a change by whoever removed it", async () => {
+    const { admin, claude } = await delegatedSetup(2);
+    expect((await admin.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
+
+    for (const key of ["CRONK-1", "CRONK-2"]) {
+      expect((await admin.get(`/api/tickets/${key}`)).body.ticket.delegate).toBeNull();
+      const { changes } = (await admin.get(`/api/tickets/${key}/history`)).body;
+      expect(changes.at(-1)).toMatchObject({
+        actor: { kind: "user", name: "Ada" },
+        change: "delegate",
+        from: { id: claude.agentId, name: "claude-laptop" },
+        to: null,
+      });
+      expect(changes.at(-2)).toMatchObject({ change: "delegate", to: { id: claude.agentId } });
+    }
+  });
+
+  it("is cleared on finished and archived-Project Tickets too when its Agent is removed, leaving other Agents' Delegations alone", async () => {
+    const { cronk, admin, claude, adaId } = await delegatedSetup(3);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const otherOfAdas = await registerAgent(admin, "claude-desktop");
+    const bobsAgent = await registerAgent(bob, "bob-bot");
+    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
+    await admin.patch("/api/tickets/CRONK-1", { statusId: statuses.find((s) => s.category === "completed")!.id });
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: otherOfAdas.agentId });
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: await userId(admin, "bob"), delegateId: bobsAgent.agentId });
+    await projectWithTickets(admin, "OLD", 1);
+    await admin.patch("/api/tickets/OLD-1", { assigneeId: adaId, delegateId: claude.agentId });
+    await admin.patch("/api/projects/OLD", { archived: true });
+    const historyLength = async (key: string) => (await admin.get(`/api/tickets/${key}/history`)).body.changes.length;
+    const before = { "CRONK-2": await historyLength("CRONK-2"), "CRONK-3": await historyLength("CRONK-3") };
+
     await admin.delete(`/api/agents/${claude.agentId}`);
 
-    const edited = await admin.patch("/api/tickets/CRONK-1", { title: "Renamed" });
-    expect(edited.body.ticket.delegate).toEqual({ id: claude.agentId, name: "claude-laptop" });
+    for (const key of ["CRONK-1", "OLD-1"]) {
+      expect((await admin.get(`/api/tickets/${key}`)).body.ticket.delegate).toBeNull();
+      expect((await admin.get(`/api/tickets/${key}/history`)).body.changes.at(-1)).toMatchObject({ change: "delegate", to: null });
+    }
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.delegate).toEqual({ id: otherOfAdas.agentId, name: "claude-desktop" });
+    expect((await admin.get("/api/tickets/CRONK-3")).body.ticket.delegate).toEqual({ id: bobsAgent.agentId, name: "bob-bot" });
+    for (const [key, length] of Object.entries(before)) expect(await historyLength(key)).toBe(length);
+  });
+
+  it("stays, with the Agent, when clearing it fails partway through the removal", async () => {
+    const { cronk, admin, claude } = await delegatedSetup(1);
+    let removal!: Promise<{ status: number }>;
+    // Recording the cleared Delegate fails, as on a database blip.
+    await cronk.interruptQueriesOn("ticket_changes", async () => {
+      removal = admin.delete(`/api/agents/${claude.agentId}`);
+    });
+    expect((await removal).status).toBe(500);
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.delegate).toEqual({ id: claude.agentId, name: "claude-laptop" });
+    expect((await admin.get("/api/agents")).body.agents.map((a: { id: string }) => a.id)).toContain(claude.agentId);
+    expect((await cronk.client(claude.secret).get("/api/tickets/CRONK-1")).status).toBe(200);
   });
 
   it("refuses an Agent as Assignee", async () => {
