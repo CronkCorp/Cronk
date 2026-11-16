@@ -90,7 +90,7 @@ export class LiveUpdates {
   }
 
   /**
-   * Answers the request with a server-sent event stream of the events on `topic`. It opens
+   * Answers the request with a server-sent event stream of the events on `topic`, or on each of several. It opens
    * with a `ready` event once it is watching. Before each event, and on each heartbeat, it
    * calls `canSee`, which re-checks that the caller may still see the topic; the stream ends
    * once it says no (or throws), so a caller who loses access stops hearing about it. Check
@@ -113,7 +113,7 @@ export class LiveUpdates {
    */
   stream(
     reply: FastifyReply,
-    topic: string,
+    topic: string | string[],
     canSee: () => Promise<boolean>,
     catchUp?: () => Promise<CatchUp>,
     admits: (event: LiveEvent) => boolean = () => true,
@@ -150,11 +150,15 @@ export class LiveUpdates {
     const fresh = (event: LiveEvent) => event.id === undefined || !sent.has(event.id);
     // While catching up, live events wait here instead, to be sent before `ready`.
     let held: LiveEvent[] | null = catchUp ? [] : null;
-    const unsubscribe = this.subscribe(topic, (event) => {
-      if (!admits(event)) return;
-      if (held) held.push(event);
-      else checked(() => fresh(event) && write(event));
-    });
+    const topics = [topic].flat();
+    const unsubscribes = topics.map((t) =>
+      this.subscribe(t, (event) => {
+        if (!admits(event)) return;
+        if (held) held.push(event);
+        else checked(() => fresh(event) && write(event));
+      }),
+    );
+    const unsubscribe = () => unsubscribes.forEach((u) => u());
     const beat = () => {
       checked(() => res.write(": keep-alive\n\n"));
       return queue;
@@ -172,7 +176,7 @@ export class LiveUpdates {
         const { missed, readyId } = await catchUp();
         let furthest = BigInt(readyId);
         // Read once `catchUp` has: whatever committed before it read `readyId` is either still pending or was published, and so held.
-        for (const position of this.pending.get(topic) ?? []) if (position <= furthest) furthest = position - 1n;
+        for (const t of topics) for (const position of this.pending.get(t) ?? []) if (position <= furthest) furthest = position - 1n;
         // Sends `event` unless it was sent already; false once the stream has ended.
         const send = async (event: LiveEvent) => {
           if (!fresh(event)) return true;

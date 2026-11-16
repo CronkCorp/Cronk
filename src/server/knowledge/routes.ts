@@ -4,7 +4,7 @@ import { requireClaimHolder } from "../coordination/claims.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { waitingItemsChanged } from "../inbox/inbox.js";
 import { documentTopic } from "../live/topics.js";
 import {
   answer,
@@ -287,7 +287,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           const avoidedWords = await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body));
           return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
-        inboxesChanged(ctx.live, [assignee]);
+        waitingItemsChanged(ctx.live, [assignee]);
         if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document, avoidedWords };
       },
@@ -345,7 +345,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           const avoidedWords = await avoidedWordsIn(tx, actor, current.projectId, titleAndBody({ body: request.body.body }));
           return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
-        inboxesChanged(ctx.live, [assignee]);
+        waitingItemsChanged(ctx.live, [assignee]);
         if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document, avoidedWords };
       },
@@ -458,7 +458,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         });
         // Only once their records are gone, so a failed delete never leaves a record without its file.
         for (const attachmentId of attachmentIds) await ctx.files.delete(attachmentKey(attachmentId));
-        inboxesChanged(ctx.live, [assignee]);
+        waitingItemsChanged(ctx.live, [assignee]);
         // Its watchers, no longer able to see it, stop watching.
         ctx.live.publish(documentTopic(id), { event: "deleted", data: {} });
         return reply.code(204).send();
@@ -559,7 +559,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           const saved = await saveVersion(tx, current, { title: earlier.title, body: earlier.body, actor, now: ctx.clock.now(), restoredFrom: earlier.number });
           return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
-        inboxesChanged(ctx.live, [assignee]);
+        waitingItemsChanged(ctx.live, [assignee]);
         if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document };
       },

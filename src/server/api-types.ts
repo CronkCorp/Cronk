@@ -187,6 +187,10 @@ export type Suggestion = Serialized<StoredSuggestion>;
 export type { SuggestedContent };
 export type InboxKind = InboxItem["kind"];
 
+/** One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, or a Suggestion nobody reviews. */
+export type TriageItem = Serialized<UnverifiedItem> | Serialized<SuggestionInboxItem>;
+export type TriageKind = TriageItem["kind"];
+
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
 export type { AvoidedWord };
 /** A recorded choice with its reasoning and status, at its current Version. */

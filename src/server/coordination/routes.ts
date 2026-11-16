@@ -18,7 +18,7 @@ import { findTicketById, findTicketsByIds } from "../work/tickets.js";
 import { ACTIVITY_KINDS, PRIORITIES, type ActivityKind } from "../../shared/values.js";
 import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } from "./waiting-work.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { waitingItemsChanged } from "../inbox/inbox.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { claimsEnded, readyScope, readyTicket, whyNotReady } from "./ready.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
@@ -267,7 +267,7 @@ export function coordinationRoutes(ctx: AppContext) {
           return { activity, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody({ body })) };
         });
         ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
-        if (kind === "question") inboxesChanged(ctx.live, [actor.owner.id]);
+        if (kind === "question") waitingItemsChanged(ctx.live, [actor.owner.id]);
         return reply.code(201).send({ activity: publicActivity(activity), avoidedWords });
       },
     );
@@ -321,7 +321,7 @@ export function coordinationRoutes(ctx: AppContext) {
           return { ticket, report, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody(request.body)) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "report", data: { report: (await findReport(ctx.db, report.id))! } });
-        inboxesChanged(ctx.live, [ticket.assignee?.id]);
+        waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         return reply.code(201).send({ report, avoidedWords });
       },
     );
