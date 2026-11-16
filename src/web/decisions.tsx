@@ -3,7 +3,9 @@ import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
-import { DECISION_STATUS_NAMES, DecisionStatusPill } from "./components/tags.js";
+import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip } from "./components/tags.js";
+import { RelativeTime } from "./components/time.js";
+import { DECISION_STATUSES } from "../shared/values.js";
 import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionSummary } from "./api.js";
 import { useCanWrite } from "./documents.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -25,12 +27,10 @@ export interface DecisionFilter {
   group?: string | undefined;
 }
 
-const STATUSES: DecisionStatus[] = ["proposed", "accepted", "superseded", "rejected", "deprecated"];
-
 /** The register's filter from its address. */
 export function decisionFilterFrom(search: URLSearchParams): DecisionFilter {
   const status = search.get("status");
-  return { status: STATUSES.find((s) => s === status), group: search.get("group") ?? undefined };
+  return { status: DECISION_STATUSES.find((s) => s === status), group: search.get("group") ?? undefined };
 }
 
 /** The Project a Decision key belongs to: everything before its last "-D", or none for a Workspace key such as D7. */
@@ -38,8 +38,6 @@ const projectKeyOfDecision = (key: string): string | undefined => {
   const at = key.toUpperCase().lastIndexOf("-D");
   return at > 0 ? key.slice(0, at).toUpperCase() : undefined;
 };
-
-const day = (at: string) => new Date(at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
 /**
  * The register of a Project's Decisions, or the Workspace's, with its scope switch and filters;
@@ -114,7 +112,7 @@ function Register(props: { projectKey: string | undefined; decisions: DecisionSu
     <>
       <div className="filter-chips" role="group" aria-label="Filter by status">
         <FilterChip to={decisionsAddress(props.projectKey, { group: filter.group })} current={!filter.status}>{`All ${count()}`}</FilterChip>
-        {STATUSES.filter((s) => count(s) > 0 || filter.status === s).map((s) => (
+        {DECISION_STATUSES.filter((s) => count(s) > 0 || filter.status === s).map((s) => (
           <FilterChip key={s} to={decisionsAddress(props.projectKey, { status: s, group: filter.group })} current={filter.status === s}>
             {`${DECISION_STATUS_NAMES[s]} ${count(s)}`}
           </FilterChip>
@@ -150,7 +148,7 @@ function Register(props: { projectKey: string | undefined; decisions: DecisionSu
                 </span>
                 <span className="register-status"><DecisionStatusPill status={d.status} /></span>
                 <span className="register-group">{d.group ?? ""}</span>
-                <span className="register-date">{day(d.createdAt)}</span>
+                <RelativeTime at={d.createdAt} className="register-date" />
               </Link>
             </li>
           ))}
@@ -158,14 +156,6 @@ function Register(props: { projectKey: string | undefined; decisions: DecisionSu
         {shown.length === 0 && <p className="muted register-none">No Decisions match these filters.</p>}
       </div>
     </>
-  );
-}
-
-function FilterChip(props: { to: string; current: boolean; children: string }) {
-  return (
-    <Link to={props.to} className={`filter-chip${props.current ? " active" : ""}`} {...(props.current ? { "aria-current": "true" as const } : {})}>
-      {props.children}
-    </Link>
   );
 }
 
@@ -292,7 +282,7 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           <div className="side-group">
             <h4>Status</h4>
             <div><DecisionStatusPill status={d.status} /></div>
-            <span className="muted small">by {d.statusChangedBy.name}, {day(d.statusChangedAt)}</span>
+            <span className="muted small">by {d.statusChangedBy.name}, <RelativeTime at={d.statusChangedAt} /></span>
           </div>
           <div className="side-group">
             <h4>Group</h4>
@@ -304,7 +294,7 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           </div>
           <div className="side-group">
             <h4>Version</h4>
-            <span>Version {d.version}, {day(d.updatedAt)}</span>
+            <span>Version {d.version}, <RelativeTime at={d.updatedAt} /></span>
           </div>
         </div>
       </aside>

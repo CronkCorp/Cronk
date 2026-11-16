@@ -570,7 +570,7 @@ a.register-row:hover { background: var(--bg); }
 .register-title { flex: 1; min-width: 0; }
 .register-status { width: 120px; flex: none; }
 .register-group { width: 120px; flex: none; color: var(--muted); }
-.register-date { width: 104px; flex: none; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.register-date { width: 120px; flex: none; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 .register-none { padding: 8px 14px; margin: 0; border-top: 1px solid var(--border); }
 .superseded-by { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 .decision-layout { display: flex; align-items: flex-start; gap: 16px; }

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "../router.js";
 import type { DecisionStatus, Priority, Status } from "../api.js";
 
 // Small labels set into rows and headings: docs/ui.md § Component conventions.
@@ -70,4 +71,13 @@ export const DECISION_STATUS_NAMES: Record<DecisionStatus, string> = {
 /** A Decision's status as an 11px uppercase pill, styled by status (docs/ui.md § Component conventions). */
 export function DecisionStatusPill(props: { status: DecisionStatus }) {
   return <span className={`decision-status ${props.status}`}>{DECISION_STATUS_NAMES[props.status]}</span>;
+}
+
+/** A filter as a pill linking to the view it filters to, such as "Accepted 3"; the filter in force is marked current. */
+export function FilterChip(props: { to: string; current: boolean; children: string }) {
+  return (
+    <Link to={props.to} className={`filter-chip${props.current ? " active" : ""}`} {...(props.current ? { "aria-current": "true" as const } : {})}>
+      {props.children}
+    </Link>
+  );
 }

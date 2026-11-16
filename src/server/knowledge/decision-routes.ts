@@ -74,7 +74,7 @@ const newDecisionBody = {
   additionalProperties: false,
   properties: {
     title,
-    body: { ...body, description: "Markdown; the ADR sections (the decision and its reasons, Consequences, Considered Options) to fill in if left out." },
+    body: { ...body, description: "Markdown; if left out, the sections of a decision record to fill in: the decision and its reasons, Consequences, and Considered Options." },
     group,
     supersedes,
   },
