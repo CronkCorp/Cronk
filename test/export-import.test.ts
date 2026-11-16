@@ -472,3 +472,19 @@ describe("a User an import brought in", () => {
     expect((await cronk.client().post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
   });
 });
+
+describe("a change Cronk made itself", () => {
+  it("is exported as by no one and imported as Cronk's again", async () => {
+    const { cronk, admin, adaId } = await delegatedSetup(1);
+    await cronk.undoMigration("0018_assign_delegated_tickets", "UPDATE tickets SET assignee_id = NULL");
+    await cronk.restart();
+    const exported = await admin.download("/api/projects/CRONK/export");
+    const history = markdown((await untarGz(exported.body))["projects/CRONK/tickets/CRONK-1.history.md"]).data.changes;
+    expect(history.at(-1)).toMatchObject({ by: null, change: "assignee", from: null, to: { id: adaId, name: "Ada" } });
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", exported.body)).status).toBe(201);
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/history")).body;
+    expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: { name: "Ada" } });
+  });
+});
