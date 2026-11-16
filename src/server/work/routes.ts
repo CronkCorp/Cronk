@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import {
   accessSchema,
@@ -190,7 +190,8 @@ export function workRoutes(ctx: AppContext) {
         const { project, access } = await projectFor(ctx.db, actor, request.params.key, "write");
         const { name, archived, visibility, agentAccess } = request.body;
         if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
-        if (agentAccess !== undefined && actor.kind === "agent") throw new HttpError(403, "Only a User can change Agent Access");
+        if (agentAccess !== undefined) requireUserActor(actor, "change Agent Access");
+        if (name !== undefined || archived !== undefined) requireUserActor(actor, "rename or archive a Project");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
@@ -305,6 +306,7 @@ export function workRoutes(ctx: AppContext) {
         const name = request.body.name.trim();
         const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          requireUserActor(actor, "manage Statuses");
           await lockProject(tx, project.id);
           return { projectId: project.id, status: await insertStatus(tx, project.id, { name, category: request.body.category }) };
         });
@@ -333,6 +335,7 @@ export function workRoutes(ctx: AppContext) {
         const name = request.body.name?.trim();
         const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          requireUserActor(actor, "manage Statuses");
           await lockProject(tx, project.id);
           let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
           if (name !== undefined) {
@@ -367,6 +370,7 @@ export function workRoutes(ctx: AppContext) {
         const { moveTo } = request.query;
         const { projectId, moved, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          requireUserActor(actor, "manage Statuses");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
           const status = statusOr404(statuses, request.params.statusId);
