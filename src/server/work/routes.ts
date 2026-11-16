@@ -65,7 +65,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
+import { clearClaim, isOwnDiscoveryAwaitingDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleChanges, visibleRelations } from "./ticket-reads.js";
@@ -80,6 +80,9 @@ const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as co
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
 /** A Ticket's Markdown description. */
 const description = { type: "string", maxLength: 100_000 } as const;
+
+/** Why an Agent's Discovered Ticket blocks another: non-blank, at most 1000 characters. */
+const blockReason = { type: "string", minLength: 1, maxLength: 1000, pattern: "\\S" } as const;
 
 /** A Label: non-blank, at most 50 characters. */
 const label = { type: "string", minLength: 1, maxLength: 50, pattern: "\\S" } as const;
@@ -649,7 +652,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string } }>(
+    app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string; reason?: string } }>(
       "/api/tickets/:key/relations",
       {
         schema: {
@@ -658,24 +661,42 @@ export function workRoutes(ctx: AppContext) {
             type: "object",
             required: ["kind", "ticketKey"],
             additionalProperties: false,
-            properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
+            properties: {
+              kind: { type: "string", enum: RELATION_KINDS },
+              ticketKey: { type: "string", maxLength: 30 },
+              reason: {
+                ...blockReason,
+                description:
+                  "Why the Ticket blocks the other: needed, and only allowed, when an Agent adds a block from its own Discovered Ticket, which the blocked Ticket shows.",
+              },
+            },
           },
           response: {
-            201: answer("The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            201: answer(
+              "The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim, except to add a block, with a reason, from its own Discovered Ticket " +
+                "no User has delegated or finished yet: that may block any Ticket the Agent can read.",
+              holding("relations", "Relations"),
+            ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
+        const { kind, reason } = request.body;
         const { ends, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, ctx.clock.now());
+          const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now());
+          if (discoveredBlock && reason === undefined) throw new HttpError(400, `Say why ${ticket.key} blocks ${other.key} with a reason`);
+          if (!discoveredBlock && reason !== undefined) {
+            throw new HttpError(400, "Only an Agent gives a reason, for a block from its own Discovered Ticket no User has delegated or finished yet");
+          }
           const added = await addRelation(tx, actingUser(actor).workspaceId, {
             ticket,
-            kind: request.body.kind,
+            kind,
             other,
             actor: actor,
             now: ctx.clock.now(),
+            block: discoveredBlock ? { agentId: (actor as AgentActor).agent.id, reason: reason!.trim() } : undefined,
           });
           if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
@@ -709,7 +730,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, ctx.clock.now());
+          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, request.params.kind, ctx.clock.now());
           // Removing a blocking relation may unblock either end.
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
@@ -998,17 +1019,27 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
 /**
  * The two Tickets of a Relation being changed, if `actor` has Write in both Projects,
  * since the change shows on both. A missing or hidden `key` answers 404; a missing or
- * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409).
+ * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409), except for a
+ * block from its own Discovered Ticket no User has delegated or finished yet (`discoveredBlock`), which
+ * may block any Ticket the Agent can read.
  */
-async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: string, now: Date): Promise<{ ticket: Ticket; other: Ticket }> {
+async function relationEnds(
+  tx: Queryable,
+  actor: Actor,
+  key: string,
+  otherKey: string,
+  kind: RelationKind,
+  now: Date,
+): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: boolean }> {
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
-  if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
-  const other = await ticketFor(tx, actor, otherKey, "write").catch((err: unknown) => {
+  const discoveredBlock = actor.kind === "agent" && kind === "blocks" && (await isOwnDiscoveryAwaitingDelegation(tx, actor, ticket));
+  if (actor.kind === "agent" && !discoveredBlock) await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
+  const other = await ticketFor(tx, actor, otherKey, discoveredBlock ? "read" : "write").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
   });
   if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
-  return { ticket, other };
+  return { ticket, other, discoveredBlock };
 }
 
 /** The Status with this id among a Project's Statuses. */
