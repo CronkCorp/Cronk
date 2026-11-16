@@ -13,7 +13,10 @@ export interface Workspace {
 }
 
 /** The shape of the Workspace the API returns. */
-export const publicWorkspace = (w: Workspace) => ({ name: w.name, agentAccess: w.agentAccess, silenceThresholdSeconds: w.silenceThresholdSeconds,
+export const publicWorkspace = (w: Workspace) => ({
+  name: w.name,
+  agentAccess: w.agentAccess,
+  silenceThresholdSeconds: w.silenceThresholdSeconds,
   transcriptMaxBytes: w.transcriptMaxBytes,
 });
 

@@ -83,7 +83,7 @@ const transcriptFields = {
   id,
   chatId: { type: "string", description: "The client's id for the chat, such as Claude Code's `session_id`; one Transcript per Agent and chat." },
   agent: {
-    ...object({ id, name: { type: "string" }, owner: object({ id, name: { type: "string" } }) }),
+    ...object({ id, name: { type: "string" }, owner: named }),
     description: "The Agent that uploaded it, with its Owner.",
   },
   sessions: { type: "array", items: object({ id }), description: "The uploading Agent's Agent Sessions it names, in the order they started." },
@@ -574,8 +574,8 @@ const ERROR_MEANINGS = {
     "an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions), or a signed-in write sent from another site",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
-  413: "The upload is larger than the Workspace allows",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",
+  413: "The upload is larger than the Workspace allows",
   422: "The request is well formed but can't be kept as it is",
 } as const;
 

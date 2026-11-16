@@ -1,5 +1,5 @@
 import { agentAccessSchema } from "../schemas.js";
-import { MAX_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
+import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, updateWorkspace } from "../workspace/workspaces.js";
 import type { ExportContext } from "./export-context.js";
 import { integer, oneOf, refuse, text } from "./fields.js";
@@ -33,6 +33,8 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
 /** The Transcript limit `workspace.md` sets, within the bounds the API allows. */
 function transcriptMaxBytes(value: unknown): number {
   const bytes = integer(value, "workspace.md transcriptMaxBytes");
-  if (bytes < 1024 || bytes > MAX_TRANSCRIPT_BYTES) refuse(`workspace.md transcriptMaxBytes must be from 1024 to ${MAX_TRANSCRIPT_BYTES}`);
+  if (bytes < MIN_TRANSCRIPT_BYTES || bytes > MAX_TRANSCRIPT_BYTES) {
+    refuse(`workspace.md transcriptMaxBytes must be from ${MIN_TRANSCRIPT_BYTES} to ${MAX_TRANSCRIPT_BYTES}`);
+  }
   return bytes;
 }

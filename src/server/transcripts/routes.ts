@@ -22,6 +22,9 @@ import {
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
 
+/** The refusal of an upload that would make the Transcript hold `size` bytes, over the Workspace's `limit`. */
+const tooBig = (size: number, limit: number) => new HttpError(413, `This Transcript would hold ${size} bytes; the Workspace allows at most ${limit}`);
+
 const transcriptParams = pathParams({ id: { type: "string", format: "uuid", description: "The Transcript's id." } });
 
 /** Transcripts (ADR 0013): uploading a chat from the client side, reading it, and its Owner deleting it. */
@@ -61,16 +64,16 @@ export function transcriptRoutes(ctx: AppContext) {
         const markdown = request.body.toString("utf8");
         const { chatId } = request.params;
         const workspaceId = actor.owner.workspaceId;
+        const limit = (await getWorkspace(ctx.db, workspaceId)).transcriptMaxBytes;
+        // Refused before anything is scanned when the text alone is too big.
+        if (request.body.length > limit) throw tooBig(request.body.length, limit);
         const id = await transaction(ctx.db, async (tx) => {
           // One upload of a chat at a time, so neither loses the other's text or Sessions.
           await lockUntilCommit(tx, `transcript:${actor.agent.id}:${chatId}`);
           const existing = await findForUpdate(tx, actor.agent.id, chatId);
           const upload = afterUpload(existing, markdown, await sessionsNamedIn(tx, { id: actor.agent.id, workspaceId }, markdown));
-          const limit = (await getWorkspace(tx, workspaceId)).transcriptMaxBytes;
           const size = sizeOf(upload);
-          if (size > limit) {
-            throw new HttpError(413, `This Transcript would hold ${size} bytes; the Workspace allows at most ${limit}`);
-          }
+          if (size > limit) throw tooBig(size, limit);
           if (!(await changedAnything(tx, upload.sessionIds))) {
             throw new HttpError(
               422,
@@ -95,7 +98,7 @@ export function transcriptRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const transcripts = [];
-        for (const stored of await listTranscripts(ctx.db, actingUser(actor).workspaceId)) {
+        for (const stored of await listTranscripts(ctx.db, actingUser(actor).workspaceId, "newest")) {
           const transcript = await readTranscript(ctx.db, actor, stored);
           if (transcript) transcripts.push(transcriptSummary(transcript));
         }

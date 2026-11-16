@@ -1,4 +1,4 @@
-import { afterUpload, changedItems, findForUpdate, storeTranscript, type Upload } from "../transcripts/transcripts.js";
+import { afterUpload, changedItems, findForUpdate, listTranscripts, storeTranscript, type Upload } from "../transcripts/transcripts.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -11,37 +11,21 @@ import type { ImportContext } from "./import-context.js";
  * them again through the Sessions.
  */
 
-interface TranscriptRow {
-  id: string;
-  agent_id: string;
-  chat_id: string;
-  markdown: string;
-  earlier: string[];
-  created_at: Date;
-  updated_at: Date;
-  session_ids: string[];
-}
-
 /** Writes every Transcript of the Workspace. Run after the Documents, so it can name them by path, and before `people.md`. */
 export async function exportTranscripts(ctx: ExportContext): Promise<void> {
-  const { rows } = await ctx.db.query<TranscriptRow>(
-    `SELECT tr.*, coalesce((SELECT array_agg(s.id ORDER BY s.started_at, s.id) FROM transcript_sessions ts
-                            JOIN agent_sessions s ON s.id = ts.session_id WHERE ts.transcript_id = tr.id), '{}') AS session_ids
-     FROM transcripts tr WHERE tr.workspace_id = $1 ORDER BY tr.created_at, tr.id`,
-    [ctx.scope.workspaceId],
-  );
-  for (const [i, t] of rows.entries()) {
+  const transcripts = await listTranscripts(ctx.db, ctx.scope.workspaceId, "oldest");
+  for (const [i, t] of transcripts.entries()) {
     const n = i + 1;
-    for (const id of t.session_ids) ctx.usedSessions.add(id);
-    const items = await changedItems(ctx.db, t.session_ids);
+    for (const id of t.sessionIds) ctx.usedSessions.add(id);
+    const items = await changedItems(ctx.db, t.sessionIds);
     ctx.add(
       `transcripts/${n}.md`,
       {
-        agent: ctx.agent(t.agent_id),
-        chatId: t.chat_id,
-        createdAt: iso(t.created_at),
-        updatedAt: iso(t.updated_at),
-        sessions: t.session_ids,
+        agent: ctx.agent(t.agentId),
+        chatId: t.chatId,
+        createdAt: iso(t.createdAt),
+        updatedAt: iso(t.updatedAt),
+        sessions: t.sessionIds,
         tickets: items.tickets.map((ticket) => ticket.key),
         documents: items.documents.flatMap((d) => ctx.documentPaths.get(d.id) ?? []),
       },

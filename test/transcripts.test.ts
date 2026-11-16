@@ -123,6 +123,21 @@ describe("Uploading the same chat again", () => {
     });
   });
 
+  it("changes nothing for a late retry of a text it already keeps", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "One" });
+    const hook = cronk.client(claude.secret);
+    const first = chat("First", agent.sessionId);
+    const rewritten = chat("Rewritten", agent.sessionId);
+    const id = (await upload(hook, "chat-1", first)).body.transcript.id;
+    await upload(hook, "chat-1", rewritten);
+
+    expect((await upload(hook, "chat-1", first)).status).toBe(200);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({ markdown: rewritten, earlier: [first] });
+  });
+
   it("keeps one Transcript per Agent and chat id", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();

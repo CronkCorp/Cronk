@@ -3,7 +3,7 @@ import { actingUser } from "../actor.js";
 import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
 import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.js";
-import { MAX_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
+import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
 
 export function workspaceRoutes(ctx: AppContext) {
@@ -36,7 +36,7 @@ export function workspaceRoutes(ctx: AppContext) {
               },
               transcriptMaxBytes: {
                 type: "integer",
-                minimum: 1024,
+                minimum: MIN_TRANSCRIPT_BYTES,
                 maximum: MAX_TRANSCRIPT_BYTES,
                 description: "The most a Transcript may hold, all its texts together, in bytes: 1 KB to 100 MB; 10 MB unless changed.",
               },

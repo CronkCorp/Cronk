@@ -13,6 +13,9 @@ import { ticketKeySql } from "../work/tickets.js";
 /** The largest Transcript limit a Workspace may set, and so the largest upload read at all: 100 MB. */
 export const MAX_TRANSCRIPT_BYTES = 100 * 1024 * 1024;
 
+/** The smallest Transcript limit a Workspace may set: 1 KB. */
+export const MIN_TRANSCRIPT_BYTES = 1024;
+
 /** A Transcript as the API returns it to someone who may read it. */
 export interface Transcript {
   id: string;
@@ -80,7 +83,6 @@ const toStored = (row: TranscriptRow): StoredTranscript => ({
 
 /** The Transcript with this id in the Workspace, if there is one, whoever may read it. */
 export async function findTranscript(db: Queryable, workspaceId: string, id: string): Promise<StoredTranscript | undefined> {
-  if (!UUID.test(id)) return undefined;
   const { rows } = await db.query<TranscriptRow>(`${SELECT_TRANSCRIPTS} WHERE tr.id = $1 AND tr.workspace_id = $2`, [id, workspaceId]);
   return rows[0] && toStored(rows[0]);
 }
@@ -150,19 +152,22 @@ export interface Upload {
 
 /**
  * What uploading `markdown`, naming `named` Sessions, makes of `existing`: the new text replaces the current one when it
- * continues it (starts with it), is dropped when the current one already continues it (a stale re-upload), and otherwise
- * goes beside it, keeping the current one as an earlier text. Sessions only add up.
+ * continues it (starts with it), is dropped when a text it keeps already continues it (a late retry of an older upload),
+ * and otherwise goes beside it, keeping the current one as an earlier text. Sessions only add up.
  */
 export function afterUpload(existing: Upload | undefined, markdown: string, named: string[]): Upload {
   if (!existing) return { markdown, earlier: [], sessionIds: named };
   const sessionIds = [...new Set([...existing.sessionIds, ...named])];
   if (markdown.startsWith(existing.markdown)) return { markdown, earlier: existing.earlier, sessionIds };
-  if (existing.markdown.startsWith(markdown)) return { markdown: existing.markdown, earlier: existing.earlier, sessionIds };
+  // A late retry of what it already keeps, current or earlier, changes no text.
+  if ([existing.markdown, ...existing.earlier].some((kept) => kept.startsWith(markdown))) {
+    return { markdown: existing.markdown, earlier: existing.earlier, sessionIds };
+  }
   return { markdown, earlier: [...existing.earlier, existing.markdown], sessionIds };
 }
 
 /** The bytes a Transcript's texts take, as the Workspace's limit counts them. */
-export const sizeOf = (texts: Upload): number => [texts.markdown, ...texts.earlier].reduce((n, t) => n + Buffer.byteLength(t, "utf8"), 0);
+export const sizeOf = (upload: Upload): number => [upload.markdown, ...upload.earlier].reduce((n, t) => n + Buffer.byteLength(t, "utf8"), 0);
 
 /** Stores the upload of the Agent's chat `chatId`, creating its Transcript or changing `existing`. Returns the Transcript's id. */
 export async function storeTranscript(
@@ -221,6 +226,7 @@ export async function changedItems(db: Queryable, sessionIds: string[]) {
   return { tickets, documents };
 }
 
+/** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
 function placesOf(items: Awaited<ReturnType<typeof changedItems>>): Places {
   const projectIds = new Set<string>(items.tickets.map((t) => t.project_id));
   let workspace = false;
@@ -247,12 +253,12 @@ export async function readTranscript(
   const places = placesOf(items);
   const readable = await readablePlaces(db, actor);
   const canReadIn = (projectId: string | null) => (projectId === null ? readable.workspaceId !== null : readable.projectIds.includes(projectId));
-  const isOwner = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
+  const readsAnyway = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
   const somewhere = places.projectIds.length > 0 || places.workspace;
   const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
   if (actingUser(actor).workspaceId !== stored.workspaceId) return undefined;
   // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
-  if (!isOwner && !(somewhere && everywhere)) return undefined;
+  if (!readsAnyway && !(somewhere && everywhere)) return undefined;
   const { rows } = await db.query<{ agent_name: string; owner_name: string }>(
     "SELECT a.name AS agent_name, u.name AS owner_name FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1",
     [stored.agentId],
@@ -271,11 +277,12 @@ export async function readTranscript(
   };
 }
 
-/** Every Transcript of the Workspace, most recently uploaded first, whoever may read them. */
-export async function listTranscripts(db: Queryable, workspaceId: string): Promise<StoredTranscript[]> {
-  const { rows } = await db.query<TranscriptRow>(`${SELECT_TRANSCRIPTS} WHERE tr.workspace_id = $1 ORDER BY tr.updated_at DESC, tr.created_at DESC, tr.id`, [
-    workspaceId,
-  ]);
+/** How `listTranscripts` orders them: most recently uploaded first, or in the order they were first uploaded. */
+const ORDERS = { newest: "tr.updated_at DESC, tr.created_at DESC, tr.id", oldest: "tr.created_at, tr.id" } as const;
+
+/** Every Transcript of the Workspace, in `order`, whoever may read them. */
+export async function listTranscripts(db: Queryable, workspaceId: string, order: keyof typeof ORDERS): Promise<StoredTranscript[]> {
+  const { rows } = await db.query<TranscriptRow>(`${SELECT_TRANSCRIPTS} WHERE tr.workspace_id = $1 ORDER BY ${ORDERS[order]}`, [workspaceId]);
   return rows.map(toStored);
 }
 
