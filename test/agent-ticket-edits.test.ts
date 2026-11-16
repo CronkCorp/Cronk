@@ -101,3 +101,24 @@ describe("An Agent commenting on a Ticket", () => {
     expect((await other.post("/api/tickets/CRONK-1/comments", { body: "While another Session holds it" })).status).toBe(201);
   });
 });
+
+describe("An Agent linking a Document to a Ticket", () => {
+  it("is refused, saying why, unless its Agent Session holds the Ticket's Claim", async () => {
+    const { admin, session } = await delegatedSetup();
+    const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan" })).body.document.id;
+    const holder = await session();
+    const other = await session();
+
+    const unclaimed = await holder.post(`/api/tickets/CRONK-1/documents/${plan}`);
+    expect(unclaimed.status).toBe(409);
+    expect(unclaimed.body.error).toBe("Claim CRONK-1 in your Agent Session before changing its linked Documents: it isn't Claimed");
+
+    await holder.post("/api/tickets/CRONK-1/claim");
+    expect((await other.post(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(409);
+    expect((await holder.post(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(201);
+    const unlinked = await other.delete(`/api/tickets/CRONK-1/documents/${plan}`);
+    expect(unlinked.status).toBe(409);
+    expect(unlinked.body.error).toBe("Claim CRONK-1 in your Agent Session before changing its linked Documents: it is Claimed by claude-laptop in another Agent Session");
+    expect((await holder.delete(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(200);
+  });
+});
