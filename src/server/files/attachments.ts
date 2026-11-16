@@ -18,7 +18,9 @@ export interface Attachment {
   documentId: string | null;
   /** The Comment it is on. */
   commentId: string | null;
-  /** The Project it is in; null for a Workspace Document's. */
+  /** The Artifact it is on, in one of its Comments. */
+  artifactId: string | null;
+  /** The Project it is in; null for a Workspace Document's or Artifact's. */
   projectId: string | null;
   name: string;
   contentType: string;
@@ -43,6 +45,7 @@ interface AttachmentRow extends RecordedActorRow {
   ticket_key: string | null;
   document_id: string | null;
   comment_id: string | null;
+  artifact_id: string | null;
   project_id: string | null;
   name: string;
   content_type: string;
@@ -50,15 +53,16 @@ interface AttachmentRow extends RecordedActorRow {
   at: Date;
 }
 
-/** Selects Attachments as `x`, with the Comment `c`, Document `d` and Ticket `t` they are on or in. */
+/** Selects Attachments as `x`, with the Comment `c`, Document `d`, Ticket `t` and Artifact `ax` they are on or in. */
 const SELECT = `
   SELECT x.id, CASE WHEN x.ticket_id IS NOT NULL THEN 'ticket' WHEN x.document_id IS NOT NULL THEN 'document' ELSE 'comment' END AS attached_to,
-    t.id AS ticket_id, p.key || '-' || t.number AS ticket_key, d.id AS document_id, x.comment_id,
-    coalesce(t.project_id, d.project_id) AS project_id, x.name, x.content_type, x.size, x.at,
+    t.id AS ticket_id, p.key || '-' || t.number AS ticket_key, d.id AS document_id, x.comment_id, ax.id AS artifact_id,
+    coalesce(t.project_id, d.project_id, ax.project_id) AS project_id, x.name, x.content_type, x.size, x.at,
     u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, x.actor_session_id AS session_id
   FROM attachments x LEFT JOIN comments c ON c.id = x.comment_id
     LEFT JOIN documents d ON d.id = coalesce(x.document_id, c.document_id)
     LEFT JOIN tickets t ON t.id = coalesce(x.ticket_id, c.ticket_id, d.ticket_id) LEFT JOIN projects p ON p.id = t.project_id
+    LEFT JOIN artifacts ax ON ax.id = c.artifact_id
     JOIN users u ON u.id = x.actor_user_id LEFT JOIN agents a ON a.id = x.actor_agent_id`;
 
 const toAttachment = (row: AttachmentRow): Attachment => ({
@@ -68,6 +72,7 @@ const toAttachment = (row: AttachmentRow): Attachment => ({
   ticketKey: row.ticket_key,
   documentId: row.document_id,
   commentId: row.comment_id,
+  artifactId: row.artifact_id,
   projectId: row.project_id,
   name: row.name,
   contentType: row.content_type,

@@ -432,7 +432,8 @@ export function conversationRoutes(ctx: AppContext) {
             200: {
               description:
                 "A server-sent event stream of the Artifact's changes as they happen, for as long as the caller can see it. It opens with a " +
-                "`ready` event; each new Comment arrives as a `comment` event whose data is `{ comment }`, a Comment as JSON.",
+                "`ready` event; each new Comment arrives as a `comment` event whose data is `{ comment }`, a Comment as JSON, and an `attachments` event " +
+                "with no data says files attached to its Comments changed.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(401, 404, 410),

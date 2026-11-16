@@ -152,3 +152,21 @@ describe("A Comment on an Artifact that names a Decision", () => {
     expect(mentions).toEqual([expect.objectContaining({ kind: "comment", id: posted.id, title: "Limits", projectKey: "CRONK", ticketKey: null, documentId: null, artifactId: artifact.id })]);
   });
 });
+
+describe("Files attached to a Comment on an Artifact", () => {
+  it("are attached by whoever posted it, and readable by whoever can read the Artifact, and no one else", async () => {
+    const { cronk, admin, artifact } = await setup();
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const comment = (await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "This is how it looks on my phone." })).body.comment;
+
+    const attached = await admin.upload(`/api/comments/${comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain");
+    expect(attached.status).toBe(201);
+    expect(attached.body.attachment).toMatchObject({ on: "comment", commentId: comment.id, name: "phone.txt" });
+
+    const file = await admin.download(`/api/attachments/${attached.body.attachment.id}/file`);
+    expect(file.status).toBe(200);
+    expect(file.body.toString()).toBe("legend wraps");
+    expect((await bob.download(`/api/attachments/${attached.body.attachment.id}/file`)).status).toBe(404);
+  });
+});
