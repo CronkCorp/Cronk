@@ -187,7 +187,10 @@ function TicketView(props: {
   );
 }
 
-/** Status, Priority, Assignee, Delegate and Labels, each edited in place. A change shows once the Ticket's stream tells of it. */
+/**
+ * Status, Priority, Assignee, Delegate, Autonomous Delegation and Labels, each edited in place, and an Agent's completion's
+ * Verification when it has one. A change shows once the Ticket's stream tells of it.
+ */
 function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Ticket["status"][] }) {
   const t = props.ticket;
   const update = useAction((changes: TicketChanges) => api.updateTicket(t.key, changes), () => {});
@@ -216,6 +219,10 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
   const assigneeOptions: PickerOption[] = [
     { value: "", label: "Unassigned", content: none("Unassigned") },
     ...assignees.map((u) => ({ value: u.id, label: u.name, content: <Actor actor={userActor(u.name)} /> })),
+  ];
+  const autonomyOptions: PickerOption[] = [
+    { value: "off", label: "Stops at In Review", content: none("Stops at In Review") },
+    { value: "on", label: "Autonomous", content: <Chip>Autonomous</Chip> },
   ];
   const delegateOptions: PickerOption[] = [
     { value: "", label: "Not delegated", content: none("Not delegated") },
@@ -257,6 +264,16 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
         empty={t.assignee ? "None of the Assignee's Agents match" : "None of your Agents match"}
         onPick={(id) => id !== (t.delegate?.id ?? "") && void update.run({ delegateId: id || null })}
       />
+      {/* Always shown, so the User knows what the Delegate may do; delegating pre-fills it from the Project's default. */}
+      <FieldPicker
+        label="Autonomy"
+        value={t.autonomous ? <Chip>Autonomous</Chip> : none("Stops at In Review")}
+        options={autonomyOptions}
+        selected={[t.autonomous ? "on" : "off"]}
+        disabled={disabled}
+        onPick={(value) => (value === "on") !== t.autonomous && void update.run({ autonomous: value === "on" })}
+      />
+      {t.verification && <VerificationField ticket={t} canWrite={props.canWrite} />}
       <FieldPicker
         label="Labels"
         multiple
@@ -284,6 +301,22 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
       />
       {update.error && <p className="error" role="alert">{update.error}</p>}
     </section>
+  );
+}
+
+/** An Agent's completion's Verification: Unverified, with Accept, until a User Accepts it, then Verified. */
+function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
+  const accept = useAction(() => api.accept(props.ticket.key), () => {});
+  const unverified = props.ticket.verification === "unverified";
+  return (
+    <div className="side-field">
+      <span className="side-field-label">Verification</span>
+      <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
+      {unverified && props.canWrite && (
+        <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+      )}
+      {accept.error && <p className="error" role="alert">{accept.error}</p>}
+    </div>
   );
 }
 

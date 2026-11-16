@@ -1,5 +1,5 @@
 import { insertActivity, markAnswered, type Activity } from "../coordination/activities.js";
-import { ACTIVITY_KINDS, PRIORITIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, VERIFICATIONS } from "../../shared/values.js";
 import { recordChange, ticketKeySql } from "../work/tickets.js";
 import { findUserById } from "../identity/users.js";
 import { storeRelation } from "../work/relations.js";
@@ -29,6 +29,8 @@ interface TicketRow {
   assignee_id: string | null;
   delegate_id: string | null;
   parent_number: number | null;
+  autonomous: boolean;
+  verification: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -87,6 +89,9 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
         assignee: ctx.user(t.assignee_id),
         delegate: ctx.agent(t.delegate_id),
         parent: t.parent_number === null ? null : `${projectKey}-${t.parent_number}`,
+        // Written only when set, as a Ticket from before Autonomous Delegation has neither.
+        autonomous: t.autonomous || undefined,
+        verification: t.verification ?? undefined,
         blocks: sorted(related("blocks", "from")),
         blockedBy: sorted(related("blocks", "to")),
         relatesTo: sorted([...related("relates_to", "from"), ...related("relates_to", "to")]),
@@ -228,9 +233,11 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
   const assignedToOwner = delegate && assignee === null ? delegate.ownerId : undefined;
   const labels = t.data.labels ?? [];
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === "string")) refuse(`${t.path} labels must be a list of text`);
+  if (t.data.autonomous !== undefined && typeof t.data.autonomous !== "boolean") refuse(`${t.path} autonomous must be true or false`);
+  const verification = t.data.verification === undefined || t.data.verification === null ? null : oneOf(t.data.verification, VERIFICATIONS, `${t.path} verification`);
   const { rows } = await ctx.db.query<{ id: string }>(
-    `INSERT INTO tickets (project_id, number, title, description, status_id, priority, labels, assignee_id, delegate_id, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    `INSERT INTO tickets (project_id, number, title, description, status_id, priority, labels, assignee_id, delegate_id, autonomous, verification, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
     [
       project.id,
       number,
@@ -241,6 +248,8 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
       labels,
       assignee ?? assignedToOwner ?? null,
       delegate?.id ?? null,
+      t.data.autonomous === true,
+      verification,
       date(t.data.createdAt, `${t.path} createdAt`),
       date(t.data.updatedAt, `${t.path} updatedAt`),
     ],

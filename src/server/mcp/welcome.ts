@@ -29,7 +29,14 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
   lines.push(...termLines(welcome));
   lines.push("", "## Your Ready Tickets", "");
   if (welcome.readyTickets.length === 0) lines.push("None right now.");
-  else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.", "");
+  else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.");
+  if (welcome.readyTickets.some((t) => t.autonomous)) {
+    lines.push(
+      "Those marked autonomous are under Autonomous Delegation: when the work is done, write a Report and move the Ticket to a Completed Status " +
+        "yourself instead of stopping at In Review; a User verifies it afterwards. Your questions on them never block: record your best guess and carry on.",
+    );
+  }
+  if (welcome.readyTickets.length > 0) lines.push("");
   for (const t of welcome.readyTickets) lines.push(readyLine(t));
   lines.push("", "## Work waiting for you", "");
   if (welcome.waitingWork.length === 0) lines.push("Nothing new since your last Agent Session.");
@@ -56,9 +63,10 @@ export function waitingLines({ reason, comment, ticket, document }: WaitingWork)
   return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quoted];
 }
 
-/** One Ready Ticket as a welcome line: its key, title, Status and any Priority. */
+/** One Ready Ticket as a welcome line: its key, title, Status, any Priority, and whether it is autonomous. */
 export function readyLine(t: Welcome["readyTickets"][number]): string {
-  return `- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`;
+  const autonomous = t.autonomous ? ", autonomous: complete it yourself with a Report" : "";
+  return `- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`}${autonomous})`;
 }
 
 /** The welcome's Terms section: the Workspace's Term names, then each Project's own, marking those that replace a Workspace Term. */
