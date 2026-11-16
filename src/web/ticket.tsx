@@ -309,6 +309,7 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
         onPick={(value) => (value === "on") !== t.autonomous && void update.run({ autonomous: value === "on" })}
       />
       {t.verification && <VerificationField ticket={t} canWrite={props.canWrite} />}
+      {t.discovered && <DiscoveredField ticket={t} />}
       <FieldPicker
         label="Labels"
         multiple
@@ -336,6 +337,26 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
       />
       {update.error && <p className="error" role="alert">{update.error}</p>}
     </section>
+  );
+}
+
+/** A Discovered Ticket's marker: the Agent that filed it, the Ticket it was working on, and whether a User kept it in Backlog. */
+function DiscoveredField(props: { ticket: Ticket }) {
+  const { agent, sourceTicket, kept } = props.ticket.discovered!;
+  return (
+    <div className="side-field">
+      <span className="side-field-label">Discovered</span>
+      <span>
+        by <Actor actor={agentActor(agent)} owner={false} />
+        {sourceTicket && (
+          <>
+            {" from "}
+            <Link to={`/tickets/${sourceTicket.key}`} className="link mono">{sourceTicket.key}</Link>
+          </>
+        )}
+      </span>
+      {kept && <Chip>Kept</Chip>}
+    </div>
   );
 }
 

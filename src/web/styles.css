@@ -334,9 +334,9 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .tl-report-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--agent-soft); font-size: 13px; }
 .tl-report-title { margin: 0; font-size: 14px; }
 .tl-report-body { padding: 8px 12px; }
-.tl-report-decisions { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
-.tl-report-decisions h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-.tl-report-decisions ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.tl-report-decisions, .tl-report-discovered { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.tl-report-decisions h4, .tl-report-discovered h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.tl-report-decisions ul, .tl-report-discovered ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .inbox-decision-body { border-left: 3px solid var(--agent); padding: 4px 12px; background: var(--surface); }
 
 /* Suggestions: docs/ui.md § Reasoning, § Diff and § Inbox and Triage in Phase 2. */
@@ -550,7 +550,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .kind-label.progress, .kind-label.review, .kind-label.unverified { color: var(--info); }
 .kind-label.finding { color: var(--ok); }
-.kind-label.question { color: var(--warn); }
+.kind-label.question, .kind-label.discovered { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
 .kind-label.report, .kind-label.decision, .kind-label.suggestion { color: var(--agent); }
 .kind-label.comment { color: var(--accent); }

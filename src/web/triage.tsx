@@ -14,7 +14,7 @@ export interface TriageAddress {
 }
 
 /** The kinds Triage holds, by the names its chips give them. */
-const TRIAGE_KIND_NAMES: Record<TriageKind, string> = { unverified: "Unverified", suggestion: "Suggestions" };
+const TRIAGE_KIND_NAMES: Record<TriageKind, string> = { unverified: "Unverified", suggestion: "Suggestions", discovered: "Discovered" };
 
 /** Triage's groups, in the order they are shown: the Inbox's groups that hold its kinds. */
 const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.kind in TRIAGE_KIND_NAMES);
@@ -67,9 +67,10 @@ export function TriagePage(props: { address: TriageAddress; me: User }) {
             label="Triage items"
             empty={{
               heading: "Nothing in Triage",
-              hint: "Agents' Unverified completions of Tickets with no Assignee, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
+              hint:
+                "Agents' Unverified completions and Discovered Tickets with no Assignee, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
             }}
-            keysHint="J / K moves through the list, C Accepts, S reopens or rejects."
+            keysHint="J / K moves through the list, C Accepts or takes it, S reopens or rejects."
             me={props.me}
             onChanged={reload}
           />

@@ -505,6 +505,8 @@ export const api = {
 
   /** Accepts an Agent's Unverified completion, recording the User's Verification. */
   accept: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/accept`).then((r) => r.ticket),
+  /** Keeps a Discovered Ticket in Backlog, settling it without delegating it. */
+  keepInBacklog: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/keep`).then((r) => r.ticket),
 
   ticketChanges: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/changes`).then((r) => r.changes),
