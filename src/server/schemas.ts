@@ -430,6 +430,19 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       description:
         "Where an Agent's completion under Autonomous Delegation stands: `unverified` until a User Accepts it, then `verified`. Null for any other Ticket.",
     },
+    discovered: {
+      ...nullable(
+        object({
+          agent: { ...named, description: "The Agent that filed it." },
+          session: { ...nullable(object({ id })), description: "The Agent Session it was filed in." },
+          sourceTicket: { ...nullable(ticketName), description: "The Ticket of the same Project the Agent was working on, holding its Claim; null for none." },
+          kept: { type: "boolean", description: "Whether a User chose Keep in Backlog for it, which takes it out of the Inbox." },
+        }),
+      ),
+      description:
+        "The Discovered marker: set on every Ticket an Agent created other than a Sub-Ticket of its own Claimed Ticket. Until a User delegates it, " +
+        "the Agent that filed it may edit it without a Claim, but can't work on it. Null for any other Ticket.",
+    },
     createdAt: timestamp,
     updatedAt: timestamp,
   }),

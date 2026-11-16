@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { findCommentsByIds, type Comment } from "../conversation/comments.js";
-import { requireClaimHolder } from "../coordination/claims.js";
+import { requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import type { Document } from "../knowledge/documents.js";
@@ -253,10 +253,13 @@ function attachmentsChanged(ctx: AppContext, attachment: Attachment): void {
   if (attachment.documentId) ctx.live.publish(documentTopic(attachment.documentId), { event: "attachments", data: {} });
 }
 
-/** The Ticket with this key, if `actor` may attach files to it: Write in its Project and, for an Agent, its Claim. Run inside a transaction. */
+/**
+ * The Ticket with this key, if `actor` may attach files to it: Write in its Project and, for an Agent, its Claim, unless it is
+ * the Agent's own undelegated Discovered Ticket. Run inside a transaction.
+ */
 async function ticketToAttachTo(tx: Queryable, actor: Actor, key: string, now: Date): Promise<Ticket> {
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
-  if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its Attachments");
+  if (actor.kind === "agent") await requireAgentMayChange(tx, actor, ticket, now, "changing its Attachments");
   return ticket;
 }
 

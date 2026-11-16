@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { requireClaimHolder } from "../coordination/claims.js";
+import { requireAgentMayChange } from "../coordination/claims.js";
 import { readablePlaces } from "../identity/access.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { listLinkedDocuments, type Document } from "../knowledge/documents.js";
@@ -69,11 +69,11 @@ export function documentLinkRoutes(ctx: AppContext) {
 /**
  * The Ticket and Document of a link being changed, if `actor` has Write on the Ticket and can read
  * the Document. A missing or hidden Ticket answers 404; a missing or hidden Document, 400. An Agent
- * must also hold the Ticket's Claim (a 409), checked against the locked row.
+ * must also hold the Ticket's Claim (a 409), checked against the locked row, unless it is its own undelegated Discovered Ticket.
  */
 async function linkEnds(tx: Queryable, actor: Actor, key: string, documentId: string, now: Date): Promise<{ ticket: Ticket; document: Document }> {
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
-  if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its linked Documents");
+  if (actor.kind === "agent") await requireAgentMayChange(tx, actor, ticket, now, "changing its linked Documents");
   const document = await documentFor(tx, actor, documentId, "read").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, "No such Document") : err;
   });

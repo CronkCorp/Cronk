@@ -59,8 +59,21 @@ export interface Ticket {
   autonomous: boolean;
   /** An Agent's completion: Unverified until a User Accepts it (Verified). Null for any other Ticket. */
   verification: Verification | null;
+  /** The Discovered marker, on a Ticket an Agent filed other than a Sub-Ticket of its own Claimed Ticket; null on any other. */
+  discovered: Discovery | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket of
+ * its Project it was working on then, holding its Claim, if any. `kept` records a User's Keep in Backlog.
+ */
+export interface Discovery {
+  agent: AgentRef;
+  session: { id: string } | null;
+  sourceTicket: TicketName | null;
+  kept: boolean;
 }
 
 interface TicketRow {
@@ -83,6 +96,12 @@ interface TicketRow {
   parent_title: string | null;
   autonomous: boolean;
   verification: Verification | null;
+  discovered_by_agent_id: string | null;
+  discovered_by_agent_name: string | null;
+  discovered_session_id: string | null;
+  source_number: number | null;
+  source_title: string | null;
+  discovery_kept: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -103,6 +122,15 @@ const toTicket = (row: TicketRow): Ticket => ({
   parent: row.parent_number === null ? null : { key: `${row.project_key}-${row.parent_number}`, title: row.parent_title! },
   autonomous: row.autonomous,
   verification: row.verification,
+  discovered:
+    row.discovered_by_agent_id === null
+      ? null
+      : {
+          agent: { id: row.discovered_by_agent_id, name: row.discovered_by_agent_name! },
+          session: row.discovered_session_id === null ? null : { id: row.discovered_session_id },
+          sourceTicket: row.source_number === null ? null : { key: `${row.project_key}-${row.source_number}`, title: row.source_title! },
+          kept: row.discovery_kept,
+        },
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -110,27 +138,49 @@ const toTicket = (row: TicketRow): Ticket => ({
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
-         a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title
+         a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title,
+         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.number AS source_number, st.title AS source_title, t.discovery_kept
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
-  LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id`;
+  LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id
+  LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id`;
+
+/** What a Discovered Ticket records of where it came from, as `insertTicket` takes it. */
+export interface NewDiscovery {
+  agentId: string;
+  sessionId: string | null;
+  /** The Ticket it came from and the Claim on it, of the same Project; null for none. */
+  source: { ticketId: string; claimId: string } | null;
+}
 
 /**
- * Creates a Ticket with the Project's next number and records it in the history.
- * Taking the number locks the Project row until the transaction ends, so
- * concurrent creations queue up. Run inside a transaction.
+ * Creates a Ticket with the Project's next number and records it in the history, with
+ * its Discovered marker if given. Taking the number locks the Project row until the
+ * transaction ends, so concurrent creations queue up. Run inside a transaction.
  */
 export async function insertTicket(
   db: Queryable,
-  input: { project: Project; title: string; description: string; status: Status; actor: Actor; now: Date },
+  input: { project: Project; title: string; description: string; status: Status; actor: Actor; now: Date; discovered?: NewDiscovery },
 ): Promise<Ticket> {
   const { rows: numbered } = await db.query<{ number: number }>(
     "UPDATE projects SET next_ticket_number = next_ticket_number + 1 WHERE id = $1 RETURNING next_ticket_number - 1 AS number",
     [input.project.id],
   );
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO tickets (project_id, number, title, description, status_id, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id`,
-    [input.project.id, numbered[0]!.number, input.title, input.description, input.status.id, input.now],
+    `INSERT INTO tickets (project_id, number, title, description, status_id, created_at, updated_at,
+       discovered_by_agent_id, discovered_session_id, discovered_source_ticket_id, discovered_source_claim_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10) RETURNING id`,
+    [
+      input.project.id,
+      numbered[0]!.number,
+      input.title,
+      input.description,
+      input.status.id,
+      input.now,
+      input.discovered?.agentId ?? null,
+      input.discovered?.sessionId ?? null,
+      input.discovered?.source?.ticketId ?? null,
+      input.discovered?.source?.claimId ?? null,
+    ],
   );
   const id = rows[0]!.id;
   await recordChange(db, id, input.actor, input.now, {
@@ -227,7 +277,7 @@ export interface TicketEdit {
  * its history. Pass a Ticket locked with `forUpdate`, inside a transaction.
  * Returns the Ticket as changed, or `ticket` itself when nothing differs.
  */
-export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketEdit, actor: Actor, now: Date): Promise<Ticket> {
+export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketEdit, actor: Actor | SystemActor, now: Date): Promise<Ticket> {
   const recorded: TicketChange[] = [];
   const columns: [column: string, value: unknown][] = [];
   if (changes.title !== undefined && changes.title !== ticket.title) {

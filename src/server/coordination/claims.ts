@@ -262,6 +262,23 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
 }
 
 /**
+ * Whether the Agent filed `ticket` as a Discovered Ticket that no User has delegated yet: the Agent may then
+ * change it without a Claim, from any of its Agent Sessions, though not work on it.
+ */
+export const isOwnUndelegatedDiscovery = (agent: AgentActor, ticket: Ticket): boolean =>
+  ticket.discovered?.agent.id === agent.agent.id && ticket.delegate === null;
+
+/**
+ * Refuses an Agent's change to a Ticket (its fields, Relations, linked Documents or Attachments) as
+ * `requireClaimHolder` does, unless it is the Agent's own undelegated Discovered Ticket. Pass a Ticket
+ * locked with `forUpdate`, so the Claim or Delegation can't change before the change commits.
+ */
+export async function requireAgentMayChange(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<void> {
+  if (isOwnUndelegatedDiscovery(agent, ticket)) return;
+  await requireClaimHolder(db, agent, ticket, now, refusedAction);
+}
+
+/**
  * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409),
  * and returns that Claim's id. `refusedAction` completes the refusal "Claim CRONK-1 in your Agent
  * Session before …", such as "moving it", which goes on to say who holds the Claim or that no one does.
