@@ -2,6 +2,7 @@ import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type Rec
 import type { Queryable } from "../db/database.js";
 import { PROJECT_KEY_PATTERN } from "../work/projects.js";
 import type { DecisionStatus } from "../../shared/values.js";
+import { recordMentions } from "./mentions.js";
 
 /**
  * Decisions: recorded choices with their reasoning and a status, belonging to a Project or the
@@ -199,6 +200,7 @@ export async function insertDecision(db: Queryable, scope: DecisionScope, conten
   );
   const id = rows[0]!.id;
   await insertDecisionVersion(db, id, { ...content, number: 1, actor, now });
+  await recordMentions(db, { kind: "decision", id });
   return (await findDecisionById(db, id))!;
 }
 
@@ -242,6 +244,7 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
      WHERE id = $1`,
     [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now],
   );
+  await recordMentions(db, { kind: "decision", id: decision.id });
   return (await findDecisionById(db, decision.id))!;
 }
 

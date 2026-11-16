@@ -1,5 +1,6 @@
 import type { Queryable } from "./database.js";
 import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
+import { recordAllMentions } from "../knowledge/mentions.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -579,5 +580,33 @@ export const migrations: Migration[] = [
       -- Verification of an Agent's completion: Unverified until a User Accepts it (Verified). Null for any other Ticket.
       ALTER TABLE tickets ADD COLUMN verification text CHECK (verification IN ('unverified', 'verified'));
     `,
+  },
+  {
+    id: "0024_mentions",
+    sql: `
+      -- What mentions each Decision and Term (knowledge/mentions.ts): the Ticket, Document, Comment, Term or
+      -- Decision whose current text names a Decision's key (kept as written, so a mention counts once a Decision
+      -- with that key exists) or a Term's name (the Term it names where the text lies). Rewritten on every change
+      -- to the text, and for every text naming a Term's name when a Term takes or gives up that name.
+      CREATE TABLE mentions (
+        ticket_id uuid REFERENCES tickets(id) ON DELETE CASCADE,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        decision_key text,
+        mentioned_term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        CHECK (num_nonnulls(ticket_id, document_id, comment_id, term_id, decision_id) = 1),
+        CHECK (num_nonnulls(decision_key, mentioned_term_id) = 1)
+      );
+      CREATE INDEX mentions_decision_key ON mentions (decision_key);
+      CREATE INDEX mentions_mentioned_term ON mentions (mentioned_term_id);
+      CREATE INDEX mentions_ticket ON mentions (ticket_id);
+      CREATE INDEX mentions_document ON mentions (document_id);
+      CREATE INDEX mentions_comment ON mentions (comment_id);
+      CREATE INDEX mentions_term ON mentions (term_id);
+      CREATE INDEX mentions_decision ON mentions (decision_id);
+    `,
+    backfill: (db) => recordAllMentions(db),
   },
 ];

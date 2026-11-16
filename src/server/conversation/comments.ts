@@ -1,5 +1,6 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
+import { recordMentions } from "../knowledge/mentions.js";
 
 /**
  * Comments: conversation any Actor posts on a Ticket or a Document, as opposed to an Agent's
@@ -124,6 +125,7 @@ export async function insertComment(
       ...actorColumns(actor),
     ],
   );
+  await recordMentions(db, { kind: "comment", id: rows[0]!.id });
   return toComment(rows[0]!);
 }
 

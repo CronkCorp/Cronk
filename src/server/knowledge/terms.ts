@@ -1,6 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Readable } from "../identity/access.js";
+import { recordMentions } from "./mentions.js";
 
 /**
  * Terms: the Workspace's or a Project's glossary, each Term naming one concept with its definition
@@ -107,6 +108,7 @@ export async function insertTerm(
   if (await nameTaken(db, input.place, fields.name, null)) return "name taken";
   const id = await insertTermRow(db, { ...input.place, ...fields, version: 1, createdAt: input.now, updatedAt: input.now });
   await insertTermVersion(db, id, { number: 1, ...fields, at: input.now, actor: input.actor });
+  await recordMentions(db, { kind: "term", id });
   return (await findTerm(db, input.place.workspaceId, id))!;
 }
 
@@ -236,6 +238,7 @@ export async function saveTermVersion(
     number,
     save.now,
   ]);
+  await recordMentions(db, { kind: "term", id: term.id });
   return { ...term, ...fields, version: number, updatedAt: save.now };
 }
 

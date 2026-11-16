@@ -44,6 +44,10 @@ export type WaitingReason = (typeof WAITING_REASONS)[number];
 export const LINK_REASONS = ["report", "linked", "mention"] as const;
 export type LinkReason = (typeof LINK_REASONS)[number];
 
+/** What can mention a Decision or a Term: its text names the Decision's key or the Term's name. */
+export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision"] as const;
+export type MentionKind = (typeof MENTION_KINDS)[number];
+
 /** How a Comment @mentions an Agent, for the API's and the MCP tools' descriptions. */
 export const MENTION_SYNTAX =
   "`@name` mentions the writer's own Agent of that name (for an Agent, its Owner's), or else every other Owner's Agent " +
