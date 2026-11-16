@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, type Client } from "./harness.js";
 
 describe("Autonomous Delegation", () => {
   it("is off on a Ticket until a User turns it on, recorded as a Change", async () => {
@@ -360,3 +360,126 @@ describe("Reopen", () => {
     expect(verified.body.error).toMatch(/isn't an Unverified completion/);
   });
 });
+
+/**
+ * Ada's CRONK-1, completed by claude-laptop on its own, blocking CRONK-2 to CRONK-5 (of `tickets`), which continued on it:
+ * CRONK-2 and CRONK-3 Started under the Agent's Claims, CRONK-4 and CRONK-5 completed by it, Unverified.
+ */
+async function continuedSetup(tickets = 5) {
+  const setup = await delegatedSetup(tickets);
+  const { admin, session } = setup;
+  for (let i = 2; i <= tickets; i++) await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: `CRONK-${i}` });
+  const agent = await session();
+  await completeAutonomously(admin, agent);
+  const started = await statusIn(admin, "started");
+  for (const key of ["CRONK-2", "CRONK-3"]) {
+    await agent.post(`/api/tickets/${key}/claim`);
+    await agent.patch(`/api/tickets/${key}`, { statusId: started });
+  }
+  for (const key of ["CRONK-4", "CRONK-5"]) await completeAutonomously(admin, agent, key);
+  return { ...setup, agent };
+}
+
+describe("Reopen with dependents that continued", () => {
+  it("needs a fitting choice for each one, and none for the others", async () => {
+    const { admin } = await continuedSetup(6);
+    const reopen = (dependents: Record<string, string>) => admin.post("/api/tickets/CRONK-1/reopen", { comment: "Not right.", dependents });
+    const all = { "CRONK-2": "keep", "CRONK-3": "pause", "CRONK-4": "keep", "CRONK-5": "reopen" };
+
+    const missing = await reopen({ "CRONK-2": "keep", "CRONK-3": "pause", "CRONK-4": "keep" });
+    expect(missing.status).toBe(409);
+    expect(missing.body.error).toMatch(/CRONK-5/);
+    expect((await reopen({ ...all, "CRONK-2": "reopen" })).status).toBe(400);
+    expect((await reopen({ ...all, "CRONK-4": "pause" })).status).toBe(400);
+    // CRONK-6 is in Backlog: it hasn't continued, so it takes no choice.
+    expect((await reopen({ ...all, "cronk-6": "keep" })).status).toBe(400);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.verification).toBe("unverified");
+
+    expect((await reopen({ ...all, "cronk-2": "keep" } as Record<string, string>)).status).toBe(400);
+    expect((await reopen(all)).status).toBe(200);
+  });
+
+  it("blocks them again: a dependent not yet taken up is no longer Ready", async () => {
+    const { admin, session } = await continuedSetup(6);
+    const agent = await session();
+    await admin.post("/api/tickets/CRONK-1/reopen", {
+      comment: "Not right.",
+      dependents: { "CRONK-2": "keep", "CRONK-3": "keep", "CRONK-4": "keep", "CRONK-5": "keep" },
+    });
+    const refused = await agent.post("/api/tickets/CRONK-6/claim");
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/blocked by CRONK-1/);
+  });
+});
+
+describe("Reopen's choice for each dependent", () => {
+  const dependents = { "CRONK-2": "keep", "CRONK-3": "pause", "CRONK-4": "keep", "CRONK-5": "reopen" };
+
+  it("keeps a Started one going under its Claim, or pauses it: Claim released, back in Unstarted", async () => {
+    const { admin, agent } = await continuedSetup();
+    expect((await admin.post("/api/tickets/CRONK-1/reopen", { comment: "Not right.", dependents })).status).toBe(200);
+
+    const kept = (await admin.get("/api/tickets/CRONK-2")).body;
+    expect(kept.ticket.status.category).toBe("started");
+    expect(kept.claim).toMatchObject({ session: { id: agent.sessionId } });
+    const paused = (await admin.get("/api/tickets/CRONK-3")).body;
+    expect(paused.ticket.status.category).toBe("unstarted");
+    expect(paused.claim).toBeNull();
+    expect((await admin.get("/api/tickets/CRONK-3/changes")).body.changes.at(-1)).toMatchObject({
+      actor: { kind: "user", name: "Ada" },
+      change: "status",
+      from: { category: "started" },
+      to: { category: "unstarted" },
+    });
+    // Paused behind the Reopened Ticket, it waits until that is finished again.
+    const claimed = await agent.post("/api/tickets/CRONK-3/claim");
+    expect(claimed.status).toBe(409);
+    expect(claimed.body.error).toMatch(/blocked by CRONK-1/);
+  });
+
+  it("keeps an Unverified one as it is, or Reopens it too, back to its Delegate", async () => {
+    const { admin, claude } = await continuedSetup();
+    await admin.post("/api/tickets/CRONK-1/reopen", { comment: "Not right.", dependents });
+
+    expect((await admin.get("/api/tickets/CRONK-4")).body.ticket).toMatchObject({ status: { category: "completed" }, verification: "unverified" });
+    expect((await admin.get("/api/tickets/CRONK-5")).body.ticket).toMatchObject({
+      status: { category: "started" },
+      verification: null,
+      delegate: { id: claude.agentId },
+    });
+    expect((await admin.get("/api/tickets/CRONK-5/changes")).body.changes.at(-2)).toMatchObject({ change: "status", reopened: true });
+    expect((await admin.get("/api/inbox")).body.items).toMatchObject([{ kind: "unverified", ticket: { key: "CRONK-4" } }]);
+  });
+
+  it("tells every dependent's Agent about it as Waiting Work, with the reason and what it means there", async () => {
+    const { cronk, admin, adaId, claude } = await continuedSetup(7);
+    // CRONK-6 hasn't started; CRONK-7, with no Delegate, has no Agent to tell.
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-7" });
+    await admin.patch("/api/tickets/CRONK-7", { delegateId: null });
+    // CRONK-5's own dependent belonged to another Agent, which learns of it too.
+    const codex = await registerAgent(admin, "codex");
+    const next = (await admin.post("/api/projects/CRONK/tickets", { title: "After 5" })).body.ticket.key;
+    await admin.patch(`/api/tickets/${next}`, { assigneeId: adaId, delegateId: codex.agentId });
+    await admin.post("/api/tickets/CRONK-5/relations", { kind: "blocks", ticketKey: next });
+    await cronk.client(codex.secret).post("/api/agent-sessions");
+
+    await admin.post("/api/tickets/CRONK-1/reopen", { comment: "Moves don't clear the cache.", dependents });
+
+    const waiting = (await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork as WaitingItem[];
+    const byTicket = Object.fromEntries(waiting.map((w) => [w.ticket.key, w.comment.body]));
+    expect(Object.keys(byTicket).sort()).toEqual(["CRONK-1", "CRONK-2", "CRONK-3", "CRONK-4", "CRONK-5", "CRONK-6"]);
+    expect(byTicket["CRONK-1"]).toBe("Moves don't clear the cache.");
+    expect(byTicket["CRONK-2"]).toBe("CRONK-1 was Reopened, and this Ticket builds on it. You may keep going; check whether your work is affected.\n\n> Moves don't clear the cache.");
+    expect(byTicket["CRONK-3"]).toMatch(/^CRONK-1 was Reopened, and this Ticket builds on it\. It is paused: its Claim is released and it is back in Todo/);
+    expect(byTicket["CRONK-4"]).toMatch(/Check whether the work here is affected\./);
+    expect(byTicket["CRONK-5"]).toMatch(/It is Reopened along with it\./);
+    expect(byTicket["CRONK-6"]).toMatch(/^CRONK-1 was Reopened/);
+    const codexWaiting = (await cronk.client(codex.secret).post("/api/agent-sessions")).body.welcome.waitingWork as WaitingItem[];
+    expect(codexWaiting.map((w) => [w.ticket.key, w.comment.body])).toEqual([[next, expect.stringMatching(/^CRONK-5 was Reopened, and this Ticket builds on it/)]]);
+  });
+});
+
+interface WaitingItem {
+  ticket: { key: string };
+  comment: { body: string };
+}

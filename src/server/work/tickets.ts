@@ -150,6 +150,13 @@ export async function findTicketsByIds(db: Queryable, ids: string[]): Promise<Ti
   return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
+/** The Tickets with these ids, locked for update in id order, so concurrent lockers queue rather than deadlock. Run inside a transaction. */
+export async function lockTicketsByIds(db: Queryable, ids: string[]): Promise<Ticket[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ANY($1::uuid[]) ORDER BY t.id FOR UPDATE OF t`, [ids]);
+  return rows.map(toTicket);
+}
+
 export async function findTicketById(db: Queryable, id: string): Promise<Ticket | undefined> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = $1`, [id]);
   return rows[0] && toTicket(rows[0]);

@@ -4,6 +4,8 @@ import { HttpError, requireActor, requireUser, type AppContext } from "../contex
 import { userActor } from "../actor.js";
 import { findStatusToMoveInto, listStatuses, type Status } from "../work/projects.js";
 import { updateTicket, type Ticket } from "../work/tickets.js";
+import { checkChoices, dependentNote, dependentsOf, REOPEN_CHOICES, type Dependent, type ReopenChoice } from "../work/reopen.js";
+import { clearClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
 import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
@@ -32,10 +34,6 @@ interface NewComment {
 }
 
 const id = { type: "string", format: "uuid" } as const;
-
-/** What a Reopen does to a Ticket it blocks that already continued on the work. */
-const REOPEN_CHOICES = ["keep", "pause", "reopen"] as const;
-type ReopenChoice = (typeof REOPEN_CHOICES)[number];
 
 interface ReopenBody {
   comment: string;
@@ -195,7 +193,7 @@ export function conversationRoutes(ctx: AppContext) {
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
             if (ticket.status.category !== "in_review") throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, not In Review`);
-            const status = await startedStatus(tx, ticket, request.body.statusId);
+            const status = await statusOf(tx, ticket, "started", request.body.statusId);
             const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
             return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
@@ -253,16 +251,58 @@ export function conversationRoutes(ctx: AppContext) {
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
             if (ticket.verification !== "unverified") throw new HttpError(409, `${ticket.key} isn't an Unverified completion, so there is nothing to Reopen`);
-            const status = await startedStatus(tx, ticket, request.body.statusId);
-            const moved = await updateTicket(tx, ticket, { status, reopen: true, verification: null }, actor, ctx.clock.now());
-            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment }) };
+            const now = ctx.clock.now();
+            const reason = request.body.comment;
+            const dependents = await dependentsOf(tx, actor, ticket);
+            const chosen = checkChoices(dependents, request.body.dependents);
+            const reopen = async (t: Ticket, statusId?: string) =>
+              updateTicket(tx, t, { status: await statusOf(tx, t, "started", statusId), reopen: true, verification: null }, actor, now);
+            const reopened = await reopen(ticket, request.body.statusId);
+            const posts: { ticket: Ticket; posted: Posted }[] = [];
+            const comment = async (t: Ticket, body: string) => {
+              const place = { projectId: t.projectId, delegateId: t.delegate?.id ?? null };
+              const posted = await post(tx, positioned, actor, { ticketId: t.id }, place, { body });
+              posts.push({ ticket: t, posted });
+              return posted;
+            };
+            const posted = await comment(reopened, reason);
+            // Each dependent's Agent is told what the Reopen means for it, where the User may write.
+            const told = new Set([ticket.id, ...dependents.map((d) => d.ticket.id)]);
+            const tell = async ({ ticket: t, access }: Dependent, body: string) => {
+              if (t.delegate && access === "write" && t.status.category !== "canceled") await comment(t, body);
+            };
+            const changed: Ticket[] = [reopened];
+            for (const dependent of dependents) {
+              const d = dependent.ticket;
+              const choice = chosen.get(d.id) ?? "keep";
+              if (choice === "pause") {
+                await clearClaim(tx, d.id);
+                const paused = await updateTicket(tx, d, { status: await statusOf(tx, d, "unstarted") }, actor, now);
+                changed.push(paused);
+                await tell({ ...dependent, ticket: paused }, dependentNote(ticket, reason, { pausedTo: paused.status.name }));
+              } else if (choice === "reopen") {
+                const too = await reopen(d);
+                changed.push(too);
+                await tell({ ...dependent, ticket: too }, dependentNote(ticket, reason, { reopenedToo: true }));
+                // What builds on a Ticket Reopened too is blocked again as well, so its Agents are told; it keeps going.
+                for (const next of await dependentsOf(tx, actor, d)) {
+                  if (told.has(next.ticket.id)) continue;
+                  told.add(next.ticket.id);
+                  await tell(next, dependentNote(too, reason, { kept: next.ticket }));
+                }
+              } else {
+                await tell(dependent, dependentNote(ticket, reason, { kept: d }));
+              }
+            }
+            return { ticket: reopened, posted, posts, changed };
           },
-          ({ ticket, posted }) => {
-            ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
-            pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
-            inboxesChanged(ctx.live, [ticket.assignee?.id]);
-            ticketsChanged(ctx.live, [ticket]);
+          ({ posts, changed }) => {
+            for (const { ticket, posted } of posts) {
+              ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
+              pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+            }
+            inboxesChanged(ctx.live, changed.map((t) => t.assignee?.id));
+            ticketsChanged(ctx.live, changed);
           },
         );
         // Reopening it makes it Ready again; Completed, it wasn't Ready before.
@@ -328,11 +368,16 @@ export function conversationRoutes(ctx: AppContext) {
   };
 }
 
-/** The Started Status of `ticket`'s Project with `statusId`, or its first one; locked so it can't be removed before the move commits. */
-async function startedStatus(tx: Queryable, ticket: Ticket, statusId: string | undefined): Promise<Status> {
-  const started = (await listStatuses(tx, ticket.projectId)).filter((s) => s.category === "started");
-  const chosen = statusId === undefined ? started[0] : started.find((s) => s.id === statusId);
+/**
+ * The Status of `ticket`'s Project in `category` with `statusId`, or its first one there; locked so it can't be removed
+ * before the move commits.
+ */
+async function statusOf(tx: Queryable, ticket: Ticket, category: "started" | "unstarted", statusId?: string): Promise<Status> {
+  const inCategory = (await listStatuses(tx, ticket.projectId)).filter((s) => s.category === category);
+  const chosen = statusId === undefined ? inCategory[0] : inCategory.find((s) => s.id === statusId);
   const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
-  if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
-  return status;
+  if (status) return status;
+  const name = category === "started" ? "Started" : "Unstarted";
+  if (statusId === undefined) throw new HttpError(409, `${ticket.projectKey} has no ${name} Status to move ${ticket.key} into`);
+  throw new HttpError(400, `That isn't a ${name} Status of this Ticket's Project`);
 }
