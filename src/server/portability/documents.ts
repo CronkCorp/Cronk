@@ -5,6 +5,7 @@ import { iso, type ActorColumns, type ExportContext } from "./export-context.js"
 import { date, integer, isUuid, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
+import { importSuggestions, suggestionsToExport } from "./suggestions.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -41,6 +42,7 @@ export async function exportDocument(ctx: ExportContext, base: string, d: Docume
       claim: d.claim_id ?? undefined,
       version: d.version,
       ...(await protectionToExport(ctx, { kind: "document", id: d.id }, d.protected)),
+      ...(await suggestionsToExport(ctx, { kind: "document", id: d.id })),
       createdAt: iso(d.created_at),
       createdBy: ctx.actor(first),
       updatedAt: iso(d.updated_at),
@@ -120,6 +122,7 @@ export async function importDocument(ctx: ImportContext, base: string, place: Do
       restoredFrom,
     });
   }
+  await importSuggestions(ctx, { kind: "document", id }, place.projectId, d.data, d.path);
   await importComments(ctx, `${base}.comments`, { documentId: id }, undefined, version);
   return id;
 }

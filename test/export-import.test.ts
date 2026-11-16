@@ -202,6 +202,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     documents: await tree("/api/workspace/documents"),
     decisions: await decisions("/api/workspace/decisions"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
+    inbox: await get("/api/inbox"),
   };
   const ids = new Map<string, string>();
   return JSON.parse(JSON.stringify(raw).replace(UUID, (id) => ids.get(id) ?? (ids.set(id, `#${ids.size + 1}`), `#${ids.size}`)));
@@ -209,7 +210,7 @@ async function snapshot(admin: Client): Promise<unknown> {
 
 /** A Workspace with some of everything in it, made by Ada, Grace and Ada's Agent claude-laptop. */
 async function busyWorkspace() {
-  const { cronk, admin, session } = await delegatedSetup(3);
+  const { cronk, admin, session, claude } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
   await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024 });
@@ -305,6 +306,30 @@ async function busyWorkspace() {
   await admin.post(`/api/terms/${ticketTerm.id}/protection`, { protected: true });
   await admin.post("/api/decisions/CRONK-D2/protection", { protected: false });
 
+  // Suggestions by claude-laptop while it holds CRONK-4's Claim: on the Guide, accepted as is; on the Ticket Term, accepted with Ada's
+  // edits; on CRONK-D4, from CRONK-4, rejected; and open ones on the Workspace's Guidance, in Triage, and CRONK's, which Ada reviews.
+  await admin.post("/api/projects/CRONK/tickets", { title: "Tidy the docs" });
+  await admin.patch("/api/tickets/CRONK-4", { assigneeId: (await admin.get("/api/me")).body.user.id, delegateId: claude.agentId });
+  const suggester = await session();
+  expect((await suggester.post("/api/tickets/CRONK-4/claim")).status).toBe(200);
+  const suggest = async (item: object, baseVersion: number, content: object) => {
+    const made = await suggester.post("/api/suggestions", { item, baseVersion, content, reasoning: "Clearer, *I think*." });
+    expect(made.status).toBe(201);
+    return made.body.suggestion.id as string;
+  };
+  const suggestions = [
+    await suggest({ kind: "document", id: guide.id }, 3, { body: "# Guide\n\nStart here.\n---\nThen read on." }),
+    await suggest({ kind: "term", id: ticketTerm.id }, 2, { avoid: ["Issue"] }),
+    await suggest({ kind: "decision", key: "CRONK-D4" }, 2, { title: "Per-email sign-in limits", group: "Security" }),
+    await suggest({ kind: "guidance" }, 2, { markdown: "Be kind and brief." }),
+    await suggest({ kind: "guidance", project: "CRONK" }, 1, { markdown: "Run the tests first." }),
+  ];
+  cronk.clock.advance(60_000);
+  await admin.post(`/api/suggestions/${suggestions[0]}/accept`);
+  await admin.post(`/api/suggestions/${suggestions[1]}/accept`, { content: { avoid: ["Issue", "job"] } });
+  await grace.post(`/api/suggestions/${suggestions[2]}/reject`, { reason: "Keep the title." });
+  await suggester.delete("/api/agent-sessions/current");
+
   // A second, archived Project; a removed Agent.
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
   await admin.post("/api/projects/OLD/tickets", { title: "Legacy" });
@@ -323,7 +348,7 @@ async function busyWorkspace() {
   await admin.patch("/api/projects/OLD", { archived: true });
   const gone = (await admin.post("/api/agents", { name: "old-bot" })).body.agent;
   await admin.delete(`/api/agents/${gone.id}`);
-  return { cronk, admin, grace };
+  return { cronk, admin, grace, suggestions };
 }
 
 describe("importing an export", () => {
@@ -349,6 +374,16 @@ describe("importing an export", () => {
       value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
+    // Suggestions keep their ids, as Agents may have noted them, and all they hold.
+    const own = ({ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason, item, reviewer }: any) => ({
+      ...{ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason },
+      item: { kind: item.kind, key: item.key, title: item.title, projectKey: item.projectKey, version: item.version },
+      reviewer: reviewer?.name ?? null,
+    });
+    for (const id of before.suggestions) {
+      const read = async (client: Client) => own((await client.get(`/api/suggestions/${id}`)).body.suggestion);
+      expect(await read(admin)).toEqual(await read(before.admin));
+    }
     // Decision numbers carry on where the export left off.
     expect((await admin.post("/api/projects/CRONK/decisions", { title: "Next" })).body.decision.key).toBe("CRONK-D5");
     expect((await admin.post("/api/workspace/decisions", { title: "Next" })).body.decision.key).toBe("D2");
@@ -388,7 +423,7 @@ describe("importing a Project export", () => {
     expect(linked.map((d: { title: string; reason: string }) => [d.title, d.reason])).toEqual([["Setup / Docker", "linked"]]);
     expect((await grace.get("/api/projects/CRONK/members")).status).toBe(200);
     // Tickets go on numbering where they left off.
-    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-4");
+    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-5");
   });
 
   it("keeps the names history recorded for Users, Agents and Tickets the export leaves out", async () => {
@@ -584,7 +619,7 @@ describe("Terms in an export", () => {
       "# Acme Labs glossary\n\n" +
         "**Customer**:\nA paying organization.\n\n" +
         "## Work\n\n" +
-        "**Ticket**:\nA unit of work\n---\ntracked within a *Project*.\n_Avoid_: Issue, task\n",
+        "**Ticket**:\nA unit of work\n---\ntracked within a *Project*.\n_Avoid_: Issue, job\n",
     );
     expect(files["projects/CRONK/GLOSSARY.md"]).toBe(
       "# CRONK glossary\n\nWithin CRONK, these Terms replace the Workspace's of the same name.\n\n" +
@@ -626,6 +661,50 @@ describe("Terms in an export", () => {
     expect((await admin.get(`/api/terms/${customer.id}/versions`)).body.versions).toMatchObject([
       { number: 1, avoid: ["Client", "account"], actor: { kind: "agent", name: "claude-laptop" } },
     ]);
+  });
+});
+
+describe("Suggestions in an export", () => {
+  it("are written in the frontmatter of the items they belong to", async () => {
+    const { admin, suggestions } = await busyWorkspace();
+    const files = await untarGz((await admin.download("/api/export")).body);
+
+    const guide = markdown(files[Object.keys(files).find((path) => /projects\/CRONK\/documents\/\d+-guide\.md$/.test(path))!]).data;
+    expect(guide.suggestions).toEqual([
+      {
+        id: suggestions[0],
+        baseVersion: 3,
+        content: { title: "Guide", body: "# Guide\n\nStart here.\n---\nThen read on." },
+        reasoning: "Clearer, *I think*.",
+        at: expect.any(String),
+        by: { agent: expect.any(String), session: expect.any(String) },
+        sourceTicket: "CRONK-4",
+        state: "accepted",
+        acceptedWithEdits: false,
+        resultVersion: 4,
+        decidedAt: expect.any(String),
+        decidedBy: "ada@example.com",
+      },
+    ]);
+    const rejected = markdown(files[Object.keys(files).find((path) => path.startsWith("projects/CRONK/docs/adr/0004-"))!]).data;
+    expect(rejected.suggestions).toMatchObject([{ id: suggestions[2], state: "rejected", reason: "Keep the title.", decidedBy: "grace@example.com" }]);
+    expect(markdown(files["guidance.md"]).data.suggestions).toMatchObject([{ id: suggestions[3], state: "open" }]);
+    expect(markdown(files["terms.md"]).data.terms.find((t: { name: string }) => t.name === "Ticket").suggestions).toMatchObject([{ state: "accepted", acceptedWithEdits: true }]);
+  });
+});
+
+describe("a Suggestion on Guidance nobody has written", () => {
+  it("is exported with that Guidance at Version 0, and imported leaving it unwritten", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const made = await agent.post("/api/suggestions", { item: { kind: "guidance" }, baseVersion: 0, content: { markdown: "Be kind." }, reasoning: "A start." });
+    const exported = await admin.download("/api/export");
+    expect(markdown((await untarGz(exported.body))["guidance.md"])).toMatchObject({ data: { version: 0 }, body: "" });
+
+    const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    expect((await elsewhere.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "", version: 0 });
+    expect((await elsewhere.get(`/api/suggestions/${made.body.suggestion.id}`)).body.suggestion).toMatchObject({ state: "open", baseVersion: 0, content: { markdown: "Be kind." } });
   });
 });
 

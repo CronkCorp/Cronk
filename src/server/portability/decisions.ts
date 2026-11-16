@@ -4,6 +4,7 @@ import { iso, type ActorColumns, type ExportContext } from "./export-context.js"
 import { date, integer, isUuid, oneOf, refuse, text, type File } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
+import { importSuggestions, suggestionsToExport } from "./suggestions.js";
 import type { ImportContext } from "./import-context.js";
 import type { ImportedTickets } from "./tickets.js";
 
@@ -60,6 +61,7 @@ export async function exportDecisions(ctx: ExportContext, dir: string, projectId
         supersededBy: d.superseded_by === null ? undefined : decisionKey(projectKey, d.superseded_by),
         version: d.version,
         ...(await protectionToExport(ctx, { kind: "decision", id: d.id }, d.protected)),
+        ...(await suggestionsToExport(ctx, { kind: "decision", id: d.id })),
         createdAt: iso(d.created_at),
         createdBy: ctx.actor(versions[0]!),
         updatedAt: iso(d.updated_at),
@@ -153,6 +155,7 @@ export async function importDecisions(
     for (const [n, v] of versions) {
       await insertDecisionVersion(ctx.db, id, { ...contentIn(v, projectKey), number: n, actor: await ctx.actor(v.data.by, `${v.path} by`), now: date(v.data.at, `${v.path} at`) });
     }
+    await importSuggestions(ctx, { kind: "decision", id }, projectId, d.data, path);
   }
   await continueNumbering(ctx.db, scope);
 }

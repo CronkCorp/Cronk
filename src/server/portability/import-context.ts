@@ -27,6 +27,8 @@ export class ImportContext {
   readonly renamedIds: RenamedId[] = [];
   /** Documents and Reports imported so far, by the path of their file in the export. */
   readonly documentIds = new Map<string, string>();
+  /** Suggestions imported so far that came from a Ticket, by its key, to link once the Tickets are in. */
+  readonly suggestionSources: { suggestionId: string; ticketKey: string }[] = [];
 
   constructor(
     readonly db: Queryable,
