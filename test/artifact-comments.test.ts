@@ -140,3 +140,15 @@ describe("The comments MCP tool", () => {
     });
   });
 });
+
+describe("A Comment on an Artifact that names a Decision", () => {
+  it("is listed among what mentions the Decision, with its Artifact's title and id", async () => {
+    const { admin, artifact } = await setup();
+    await admin.post("/api/projects/CRONK/decisions", { title: "Sign-in limits per IP" });
+
+    const posted = (await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "This follows CRONK-D1." })).body.comment;
+
+    const { mentions } = (await admin.get("/api/decisions/CRONK-D1/mentions")).body;
+    expect(mentions).toEqual([expect.objectContaining({ kind: "comment", id: posted.id, title: "Limits", projectKey: "CRONK", ticketKey: null, documentId: null, artifactId: artifact.id })]);
+  });
+});

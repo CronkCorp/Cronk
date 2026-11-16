@@ -663,7 +663,8 @@ export const migrations: Migration[] = [
       CREATE INDEX mentions_term ON mentions (term_id);
       CREATE INDEX mentions_decision ON mentions (decision_id);
     `,
-    backfill: (db) => recordAllMentions(db),
+    // Artifacts came later (0032_comments_on_artifacts), so this reads Comments as they were then.
+    backfill: (db) => recordAllMentions(db, null, { artifacts: false }),
   },
   {
     id: "0027_proposed_decisions",
