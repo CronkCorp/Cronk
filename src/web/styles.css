@@ -337,7 +337,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .tl-report-decisions, .tl-report-discovered { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
 .tl-report-decisions h4, .tl-report-discovered h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .tl-report-decisions ul, .tl-report-discovered ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
-.inbox-decision-body { border-left: 3px solid var(--agent); padding: 4px 12px; background: var(--surface); }
+.inbox-agent-text { border-left: 3px solid var(--agent); padding: 4px 12px; background: var(--surface); }
 
 /* Suggestions: docs/ui.md § Reasoning, § Diff and § Inbox and Triage in Phase 2. */
 .reasoning { background: var(--agent-soft); border-left: 3px solid var(--agent); border-radius: 6px; padding: 8px 12px; font-size: 14px; }

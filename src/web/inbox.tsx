@@ -688,7 +688,7 @@ function DecisionDetail(props: DetailProps<DecisionItem>) {
           <p>{`Supersedes ${decision.supersedes.map((s) => `${s.key} ${s.title}`).join(", ")} once accepted`}</p>
         </Banner>
       )}
-      <div className="markdown inbox-decision-body">
+      <div className="markdown inbox-agent-text">
         <CronkMarkdown>{decision.body}</CronkMarkdown>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
@@ -870,7 +870,7 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
         </span>
       </div>
       {ticket.description.trim() ? (
-        <div className="markdown inbox-decision-body">
+        <div className="markdown inbox-agent-text">
           <CronkMarkdown projectKey={ticket.projectKey}>{ticket.description}</CronkMarkdown>
         </div>
       ) : (
@@ -891,7 +891,7 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
             <Button variant="secondary" onClick={() => void keep.run()} disabled={props.resolved || busy}>Keep in Backlog</Button>
           </>
         )}
-        <Button variant="ghost" onClick={() => void cancel.run()} disabled={props.resolved || busy}>Cancel Ticket</Button>
+        <Button variant="ghost" onClick={() => void cancel.run()} disabled={props.resolved || busy}>Cancel</Button>
       </div>
       <p className="muted small">
         {inTriage

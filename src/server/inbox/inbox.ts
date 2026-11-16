@@ -6,7 +6,7 @@ import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
-import { findTicketsByIds, isAwaitingDecisionSql, type Ticket, type TicketRef } from "../work/tickets.js";
+import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -15,7 +15,7 @@ import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge
  * A User's Inbox: everything waiting on them: the Tickets in an In Review Status they are Assignee of,
  * the Unverified completions of Tickets they are Assignee of, the open questions of the Agents they own, and
  * the Decisions Agents proposed that they review (see `PROPOSED_DECISIONS`), the open Suggestions on
- * Project items that they review (see `reviewerSql`), and the Discovered Tickets waiting for them (see `isAwaitingDecision`).
+ * Project items that they review (see `reviewerSql`), and the Discovered Tickets waiting for them (see `isWaitingDiscovery`).
  * Suggestions on Workspace items, and unassigned Discovered Tickets, go to Triage instead.
  */
 
@@ -182,7 +182,7 @@ function unverified(db: Queryable, user: User, projectIds: string[]): Promise<Un
 }
 
 /** What makes a Ticket each kind of Ticket item, as SQL on the Ticket `t` and its Status `s`. */
-const TICKET_KINDS = { review: "s.category = 'in_review'", unverified: "t.verification = 'unverified'", discovered: isAwaitingDecisionSql("t", "s") } as const;
+const TICKET_KINDS = { review: "s.category = 'in_review'", unverified: "t.verification = 'unverified'", discovered: isWaitingDiscoverySql("t", "s") } as const;
 
 /**
  * The Tickets waiting as `kind` items in the Projects `projectIds`, whose Assignee is `assigneeId` (none, with null), each with
@@ -227,7 +227,7 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
   const [column, id] = "projectId" in scope ? ["t.project_id", scope.projectId] : ["t.status_id", scope.statusId];
   const { rows } = await db.query<{ id: string }>(
     `SELECT t.assignee_id AS id FROM tickets t JOIN statuses s ON s.id = t.status_id
-     WHERE ${column} = $1 AND (s.category = 'in_review' OR t.verification = 'unverified' OR ${isAwaitingDecisionSql("t", "s")}) AND t.assignee_id IS NOT NULL
+     WHERE ${column} = $1 AND (s.category = 'in_review' OR t.verification = 'unverified' OR ${isWaitingDiscoverySql("t", "s")}) AND t.assignee_id IS NOT NULL
      UNION
      SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
      WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL

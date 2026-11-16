@@ -146,13 +146,13 @@ const SELECT_TICKETS = `
 
 /**
  * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated and not kept there.
- * Delegating, keeping, cancelling or moving it out of Backlog settles it. `isAwaitingDecisionSql` says the same in SQL.
+ * Delegating, keeping, cancelling or moving it out of Backlog settles it. `isWaitingDiscoverySql` says the same in SQL.
  */
-export const isAwaitingDecision = (ticket: Ticket): boolean =>
+export const isWaitingDiscovery = (ticket: Ticket): boolean =>
   ticket.discovered !== null && !ticket.discovered.kept && ticket.delegate === null && ticket.status.category === "backlog";
 
-/** SQL condition: the Ticket `t`, in the Status `s`, is a Discovered Ticket waiting for a User (see `isAwaitingDecision`). */
-export const isAwaitingDecisionSql = (t: string, s: string) =>
+/** SQL condition: the Ticket `t`, in the Status `s`, is a Discovered Ticket waiting for a User (see `isWaitingDiscovery`). */
+export const isWaitingDiscoverySql = (t: string, s: string) =>
   `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog')`;
 
 /** Whether a User ever delegated the Ticket, as its history records. */

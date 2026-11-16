@@ -163,6 +163,14 @@ async function exportActivitiesAndComments(ctx: ExportContext, base: string, tic
   }
 }
 
+/** The Ticket a Discovered Ticket's file names as its source, by key, with that Claim's id, to link once every Ticket is in. */
+interface PendingDiscoverySource {
+  sourceKey: string;
+  claimId: string | null;
+  /** Where the Ticket file names it, for refusing a key the export doesn't hold. */
+  where: string;
+}
+
 /** A relation a Ticket file names, to store once every Ticket it may name is in. */
 interface PendingRelation {
   from: string;
@@ -187,7 +195,7 @@ export class ImportedTickets {
   /** Agents' proposed Decisions, by the key of the Ticket each came from, to link once the Tickets are in. */
   readonly decisionSources: { decisionId: string; ticketKey: string; claimId: string | null }[] = [];
   /** Discovered Tickets, by the key of the Ticket each came from, to link once the Tickets are in. */
-  readonly discoverySources: { ticketId: string; sourceKey: string; claimId: string | null; where: string }[] = [];
+  readonly discoverySources: (PendingDiscoverySource & { ticketId: string })[] = [];
   /** Delegated Tickets the export left without an Assignee, which this import assigned to the Delegate's Owner. */
   readonly assignedToOwner: { ticketId: string; ownerId: string }[] = [];
 
@@ -281,7 +289,7 @@ async function importTicket(
   ctx: ImportContext,
   t: File,
   project: ImportedProject,
-): Promise<{ key: string; id: string; assignedToOwner?: string; discoverySource?: { sourceKey: string; claimId: string | null; where: string } }> {
+): Promise<{ key: string; id: string; assignedToOwner?: string; discoverySource?: PendingDiscoverySource }> {
   const key = text(t.data.key, `${t.path} key`).toUpperCase();
   const number = Number(new RegExp(`^${project.key}-([1-9][0-9]{0,8})$`).exec(key)?.[1]);
   if (!number) refuse(`${t.path} key must be a key of ${project.key}, such as ${project.key}-1`);

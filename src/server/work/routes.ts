@@ -48,7 +48,7 @@ import {
   findTicketByKey,
   findTicketsByIds,
   insertTicket,
-  isAwaitingDecision,
+  isWaitingDiscovery,
   keepDiscovery,
   listChanges,
   listLabels,
@@ -565,10 +565,10 @@ export function workRoutes(ctx: AppContext) {
               discovered: { agentId: actor.agent.id, sessionId: actor.session?.id ?? null, source },
             });
             // Cronk routes it, not the Agent, which may not assign Tickets.
-            const assignee = await discoveryAssignee(tx, sourceTicket?.assignee ?? actingUser(actor), project);
+            const assignee = await discoveryAssignee(tx, actor, sourceTicket?.assignee ?? actingUser(actor), project.id);
             ticket = assignee ? await updateTicket(tx, created, { assignee }, { kind: "system" }, now) : created;
           } else {
-            if (request.body.ticket !== undefined) await sourceClaimOf(tx, actor, project.id, request.body.ticket, now, "a Discovered Ticket");
+            if (request.body.ticket !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Discovered Ticket came from, as the one it holds the Claim on");
             ticket = await insertTicket(tx, { ...input, status: statuses[0]! });
           }
           return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
@@ -785,7 +785,7 @@ export function workRoutes(ctx: AppContext) {
               else if (status.category !== "completed") changes.verification = null;
             }
           }
-          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
+          if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket.projectId, assigneeId);
           // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it,
           // unless the same request unassigns it, which `delegableAgent` refuses.
           if (delegateId !== undefined && delegateId !== null && assigneeId === undefined && ticket.assignee === null) {
@@ -882,7 +882,7 @@ export function workRoutes(ctx: AppContext) {
         requireUserActor(actor, "keep a Discovered Ticket in Backlog");
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          if (!isAwaitingDecision(ticket)) throw new HttpError(409, `${ticket.key} isn't a Discovered Ticket waiting in Backlog, so there is nothing to keep`);
+          if (!isWaitingDiscovery(ticket)) throw new HttpError(409, `${ticket.key} isn't a Discovered Ticket waiting in Backlog, so there is nothing to keep`);
           return keepDiscovery(tx, ticket, actor, ctx.clock.now());
         });
         waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
@@ -918,18 +918,19 @@ export function workRoutes(ctx: AppContext) {
  * Who a Discovered Ticket in `project` goes to: `user` (the source Ticket's Assignee, or else the Agent's Owner), if they
  * are active and can see the Project; otherwise nobody, which leaves it to Triage.
  */
-async function discoveryAssignee(db: Queryable, user: UserRef, project: Project): Promise<UserRef | null> {
-  const found = await findUserById(db, user.id);
-  if (!found?.active) return null;
-  return (await visibleProjects(db, userActor(found), [project])).length > 0 ? { id: found.id, name: found.name } : null;
+async function discoveryAssignee(db: Queryable, actor: Actor, user: UserRef, projectId: string): Promise<UserRef | null> {
+  return assignableUser(db, actor, projectId, user.id).catch((err: unknown) => {
+    if (err instanceof HttpError) return null;
+    throw err;
+  });
 }
 
-/** The User `id`, as a Ticket shows them, if they are active and can see the Ticket's Project; otherwise a 400. */
-async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: string): Promise<UserRef> {
+/** The User `id`, as a Ticket of the Project `projectId` shows them, if they are active and can see that Project; otherwise a 400. */
+async function assignableUser(db: Queryable, actor: Actor, projectId: string, id: string): Promise<UserRef> {
   const assignee = await findUserById(db, id);
   if (!assignee || assignee.workspaceId !== actingUser(actor).workspaceId) throw new HttpError(400, "No such User");
   if (!assignee.active) throw new HttpError(400, `${assignee.name} is deactivated`);
-  const project = (await findProjectById(db, ticket.projectId))!;
+  const project = (await findProjectById(db, projectId))!;
   if ((await visibleProjects(db, userActor(assignee), [project])).length === 0) throw new HttpError(400, `${assignee.name} can't see this Project`);
   return { id: assignee.id, name: assignee.name };
 }
