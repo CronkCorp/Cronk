@@ -451,7 +451,22 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0019_decisions",
+    id: "0019_password_resets",
+    sql: `
+      -- A one-time link letting a User choose a new password (identity/password-resets.ts), issued by an Admin
+      -- or, with no issuer, by the server command. Only the token's hash is stored; issuing again replaces it.
+      CREATE TABLE password_resets (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        issued_by uuid REFERENCES users(id),
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL
+      );
+    `,
+  },
+  {
+    id: "0020_decisions",
     sql: `
       -- The number the next Decision of a Project, or of the Workspace outside any Project, gets;
       -- taken and bumped in one UPDATE so numbers never repeat.

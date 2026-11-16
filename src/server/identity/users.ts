@@ -1,5 +1,6 @@
 import { endAgentSessionsOfOwner, type ClaimHolders } from "../coordination/agent-sessions.js";
 import type { Queryable } from "../db/database.js";
+import { endSignIns } from "./sign-ins.js";
 
 export type Role = "admin" | "member";
 
@@ -35,6 +36,23 @@ export interface UserRow {
  * so they can't sign in until they accept an invitation.
  */
 export const NO_PASSWORD = "!";
+
+/**
+ * The password hash of a User an Admin (or the server command) issued a password reset link for: no password
+ * matches it, so only the link gets them back in. Unlike `NO_PASSWORD`, they have joined.
+ */
+export const PASSWORD_RESET_PENDING = "!reset";
+
+/** The User's password hash, to check a password against. */
+export async function passwordHashOf(db: Queryable, userId: string): Promise<string | undefined> {
+  const { rows } = await db.query<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = $1", [userId]);
+  return rows[0]?.password_hash;
+}
+
+/** Replaces a User's password hash. */
+export async function setPasswordHash(db: Queryable, userId: string, passwordHash: string): Promise<void> {
+  await db.query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, passwordHash]);
+}
 
 export function toUser(row: UserRow): User {
   return {
@@ -119,7 +137,7 @@ export async function listUsers(db: Queryable, workspaceId: string): Promise<Use
 
 /**
  * Changes a User's role and/or deactivates or reactivates them, refusing to leave
- * the Workspace without an active Admin. Deactivating ends all their sign-ins and their
+ * the Workspace without an active Admin. Deactivating ends all their sign-ins, password reset link and
  * Agents' Sessions, so the Claims those held lapse at once.
  * Making them an Admin drops their Project listings, since Admins have Write everywhere;
  * demoting them later starts them with only the open Projects.
@@ -153,7 +171,8 @@ export async function updateUser(
   if (!rows[0]) return undefined;
   let endedClaims: ClaimHolders = { ticketIds: [] };
   if (changes.active === false) {
-    await db.query("DELETE FROM sign_ins WHERE user_id = $1", [id]);
+    await endSignIns(db, id);
+    await db.query("DELETE FROM password_resets WHERE user_id = $1", [id]);
     endedClaims = await endAgentSessionsOfOwner(db, id, now);
   }
   if (changes.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [id]);

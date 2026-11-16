@@ -246,6 +246,13 @@ export const api = {
     request<{ email: string; role: Role; workspaceName: string }>("GET", `/api/invitations/by-token/${encodeURIComponent(token)}`),
   acceptInvitation: (token: string, input: { name: string; password: string }) =>
     request<{ user: User }>("POST", `/api/invitations/by-token/${encodeURIComponent(token)}/accept`, input).then((r) => r.user),
+  issuePasswordReset: (userId: string) =>
+    request<{ token: string; expiresAt: string }>("POST", `/api/users/${encodeURIComponent(userId)}/password-reset`),
+  passwordReset: (token: string) =>
+    request<{ email: string; name: string; workspaceName: string }>("GET", `/api/password-resets/by-token/${encodeURIComponent(token)}`),
+  resetPassword: (token: string, password: string) =>
+    request<{ user: User }>("POST", `/api/password-resets/by-token/${encodeURIComponent(token)}`, { password }).then((r) => r.user),
+  changePassword: (currentPassword: string, password: string) => request<void>("PUT", "/api/me/password", { currentPassword, password }),
 
   projects: (archived = false) =>
     request<{ projects: Project[] }>("GET", `/api/projects${archived ? "?archived=true" : ""}`).then((r) => r.projects),

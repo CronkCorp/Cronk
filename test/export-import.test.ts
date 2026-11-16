@@ -517,6 +517,15 @@ describe("a User an import brought in", () => {
     expect((await grace.get(`/api/projects/CRONK/tickets?assignee=${imported.id}`)).body.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1"]);
   });
 
+  it("can't be given a password reset link, even once reactivated: they join by invitation", async () => {
+    const { admin, imported } = await importedGrace();
+    expect((await admin.post(`/api/users/${imported.id}/password-reset`)).status).toBe(409);
+    await admin.patch(`/api/users/${imported.id}`, { active: true });
+    const refused = await admin.post(`/api/users/${imported.id}/password-reset`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/invite them/);
+  });
+
   it("can't be invited again once they have a password, so no invitation can take their account", async () => {
     const { cronk, admin } = await importedGrace();
     const first = (await admin.post("/api/invitations", { email: "grace@example.com" })).body.token;
