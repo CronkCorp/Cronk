@@ -869,3 +869,56 @@ describe("the attachments tool", () => {
     expect(tools.find((t) => t.name === "attachments")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
   });
 });
+
+describe("the artifacts tool", () => {
+  it("publishes a folder of files as an Artifact and new Versions of it, answering its address and its Version's", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+
+    const created = await callTool(mcp, "artifacts", {
+      action: "publish",
+      project: "CRONK",
+      title: "Sign-in limits",
+      files: [
+        { path: "index.html", content: '<img src="chart.png"><script src="app.js"></script>' },
+        { path: "app.js", content: "console.log(1)" },
+        { path: "chart.png", contentBase64: png.toString("base64") },
+      ],
+    });
+    expect(created.isError).toBe(false);
+    const { artifact } = created.body;
+    expect(artifact).toMatchObject({ title: "Sign-in limits", version: 1, sourceTicket: { key: "CRONK-1" }, publishedBy: { session: { id: mcp.transport.sessionId } } });
+    const origin = new URL(await cronk.url()).origin;
+    expect(artifact.url).toBe(`${origin}/artifacts/${artifact.id}`);
+    expect(artifact.versionUrl).toBe(`${origin}/artifacts/${artifact.id}?version=1`);
+
+    const next = await callTool(mcp, "artifacts", { action: "publish", id: artifact.id, baseVersion: 1, files: [{ path: "index.html", content: "<p>v2</p>" }] });
+    expect(next.body.artifact).toMatchObject({ version: 2, versionUrl: `${origin}/artifacts/${artifact.id}?version=2` });
+    const stale = await callTool(mcp, "artifacts", { action: "publish", id: artifact.id, baseVersion: 1, files: [{ path: "index.html", content: "<p>v2</p>" }] });
+    expect(stale.isError).toBe(true);
+    expect(stale.body).toMatch(/Version 2/);
+
+    const got = await callTool(mcp, "artifacts", { action: "get", id: artifact.id });
+    expect(got.body.artifact).toMatchObject({ id: artifact.id, version: 2, url: artifact.url });
+    expect(got.body.artifact.versions).toHaveLength(2);
+    const files = (await admin.get(`/api/artifacts/${artifact.id}/versions/1`)).body.version.files;
+    expect(files).toEqual([
+      { path: "app.js", contentType: "text/javascript; charset=utf-8", size: 14 },
+      { path: "chart.png", contentType: "image/png", size: 8 },
+      expect.objectContaining({ path: "index.html" }),
+    ]);
+
+    const listed = await callTool(mcp, "artifacts", { action: "list", project: "CRONK" });
+    expect(listed.body.artifacts.map((a: { id: string }) => a.id)).toEqual([artifact.id]);
+    expect(await callTool(mcp, "artifacts", { action: "publish", project: "CRONK", files: [] })).toEqual({ isError: true, body: "The publish action needs a title" });
+  });
+
+  it("offers a read-only token only get and list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "artifacts")?.inputSchema.properties?.action).toMatchObject({ enum: ["list", "get"] });
+  });
+});

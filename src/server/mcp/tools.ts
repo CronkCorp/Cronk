@@ -5,6 +5,7 @@ import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION
 import type { AvoidedWord } from "../api-types.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
+import { packFolder, type Folder } from "../portability/archive.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
 export interface ToolContext {
@@ -551,6 +552,77 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
               ? new FileBody(Buffer.from(a.content, "utf8"), a.contentType ?? "text/plain")
               : new FileBody(Buffer.from(a.contentBase64!, "base64"), a.contentType ?? "application/octet-stream");
           return api("POST", `/api/tickets/${encodeURIComponent(key)}/attachments?name=${encodeURIComponent(name)}`, file);
+        },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "artifacts",
+    description:
+      "Artifacts: things you build to be seen, such as an HTML prototype, a dashboard or a report page, published as a folder of files with " +
+      "`index.html` at its top. Each belongs to a Project or, without a project, the Workspace, and records the Ticket whose Claim you held. " +
+      "Every publish is the whole folder again, as a new Version; publishing a new Version names the Version you based it on (`baseVersion`, " +
+      "the Artifact's `version`) and is refused if a later one was published meanwhile, so merge with it first. `url` always shows the latest " +
+      "Version and `versionUrl` the one just published: link that one where your words describe it, such as in a Report. The page runs " +
+      "sandboxed on a hostname of its own: it may load scripts, styles and fonts only from its own files, cdnjs, jsDelivr, unpkg and Google " +
+      "Fonts, and may make no network requests, so put its data in its files. A Version may hold 500 files and 25 MB unless an Admin changed " +
+      "the limits. You can't publish a new Version of an Artifact a User marked `protected`.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (list, publish a new Artifact)"),
+      id: z.string().optional().describe("The Artifact's id (get; publish, for a new Version of it)"),
+      title: z.string().optional().describe("The Artifact's title (publish a new Artifact), or its new one (publish a new Version)"),
+      files: z
+        .array(
+          z.object({
+            path: z.string().describe("The file's path in the folder, such as index.html or js/app.js"),
+            content: z.string().optional().describe("The file's text, stored as UTF-8"),
+            contentBase64: z.string().optional().describe("The file's bytes as base64, instead of content, for an image or font"),
+          }),
+        )
+        .optional()
+        .describe("Every file of the folder, index.html among them (publish)"),
+      baseVersion: z.number().int().optional().describe("The Version a new Version is based on: the Artifact's `version` when you read it (publish with an id)"),
+      ticket: z
+        .string()
+        .optional()
+        .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (publish)"),
+    },
+    actions: {
+      list: {
+        description: "a Project's (or the Workspace's) Artifacts, most recently published first",
+        writes: false,
+        run: (api, a) => api("GET", `${scopePath(a.project)}/artifacts`),
+      },
+      get: {
+        description: "one Artifact with its Versions, newest first",
+        writes: false,
+        run: (api, a) => api("GET", `/api/artifacts/${encodeURIComponent(required(a.id, "an id", "get"))}`),
+      },
+      publish: {
+        description: "publish a folder as a new Artifact in a Project (or the Workspace), or, given an id and baseVersion, as that Artifact's next Version",
+        writes: true,
+        run: async (api, a) => {
+          const files = required(a.files, "files", "publish");
+          const folder: Folder = new Map();
+          for (const file of files) {
+            if ((file.content === undefined) === (file.contentBase64 === undefined)) {
+              throw new ToolError(`The publish action needs either content or contentBase64 for ${file.path}, not both`);
+            }
+            folder.set(file.path, file.content ?? Buffer.from(file.contentBase64!, "base64"));
+          }
+          const query = (params: Record<string, string | undefined>) =>
+            `?${new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined)).toString()}`;
+          if (a.id === undefined) {
+            const title = required(a.title, "a title", "publish");
+            return api("POST", `${scopePath(a.project)}/artifacts${query({ title, ticket: a.ticket })}`, new FileBody(await packFolder(folder), "application/gzip"));
+          }
+          const baseVersion = required(a.baseVersion, "a baseVersion with an id", "publish");
+          return api(
+            "POST",
+            `/api/artifacts/${encodeURIComponent(a.id)}/versions${query({ baseVersion: String(baseVersion), title: a.title, ticket: a.ticket })}`,
+            new FileBody(await packFolder(folder), "application/gzip"),
+          );
         },
       },
     },
