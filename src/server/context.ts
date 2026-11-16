@@ -16,10 +16,10 @@ export const AGENT_SESSION_HEADER = "cronk-agent-session";
 /** Whether an HTTP method only reads; every other method changes something. */
 export const isReading = (method: string): boolean => ["GET", "HEAD", "OPTIONS"].includes(method);
 
-/** Why an Agent's change without an Agent Session is refused, and how to start one. */
+/** Why an Agent's write without an Agent Session is refused, and how to start one. */
 export const SESSION_NEEDED =
   "An Agent changes things only within an Agent Session: start one with POST /api/agent-sessions, send its id as the " +
-  "Cronk-Agent-Session header on every change, and end it with DELETE /api/agent-sessions/current when done. " +
+  "Cronk-Agent-Session header on every write, and end it with DELETE /api/agent-sessions/current when done. " +
   "Reads work without one.";
 
 /** What every route module needs from the running application. */
@@ -50,7 +50,7 @@ export const bearerToken = (request: FastifyRequest): string | undefined =>
  * `Authorization: Bearer <token>`, or else the signed-in User. An Agent that also
  * sends the Cronk-Agent-Session header calls within that Agent Session, which the
  * call refreshes; a Session that this token didn't start, or that has ended, answers 410. An Agent that
- * doesn't send it may only read: any other method answers 403, except where `outsideSession` is set, as
+ * doesn't send it may only read: any other method answers 403 (saying the token is read-only, if it is), except where `outsideSession` is set, as
  * when starting an Agent Session, or for a route only a User may call, which refuses Agents anyway. With
  * `refreshSession: false` the Session is only checked, not refreshed, as when a live-update
  * stream of a Ticket re-checks who is watching: being told of others' changes isn't the Agent's own call.
@@ -62,7 +62,10 @@ export async function requireActor(ctx: AppContext, request: FastifyRequest, opt
     if (!found) throw new HttpError(401, "This token is unknown or was revoked");
     const sessionId = request.headers[AGENT_SESSION_HEADER];
     if (typeof sessionId !== "string") {
-      if (!opts.outsideSession && !isReading(request.method)) throw new HttpError(403, SESSION_NEEDED);
+      if (!opts.outsideSession && !isReading(request.method)) {
+        // A Session wouldn't help a read-only token, so it hears the reason that would still stand.
+        throw new HttpError(403, found.readOnly ? "This Agent's token is read-only, so it can't change anything" : SESSION_NEEDED);
+      }
       return { kind: "agent", session: null, ...found };
     }
     const lookUp = opts.refreshSession === false ? findLiveAgentSession : touchAgentSession;
