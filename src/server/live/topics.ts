@@ -20,3 +20,12 @@ export const projectTopic = (projectId: string) => `project:${projectId}`;
 
 /** The topic of one Document's changes: its new Comments and Versions. */
 export const documentTopic = (documentId: string) => `document:${documentId}`;
+
+/**
+ * The topic of changes to one place's own Terms: the Workspace's when `projectId` is null, or one Project's.
+ * A Project's Terms stream also watches the Workspace's, for a caller who can read it, as a Project lists the Workspace's Terms it doesn't override.
+ */
+export const termsTopic = (workspaceId: string, projectId: string | null) => `terms:${workspaceId}:${projectId ?? "workspace"}`;
+
+/** The topic of changes to any Project's Terms in one Workspace, which the Workspace's Terms stream watches, as its Terms are answered with their overrides. */
+export const projectTermsTopic = (workspaceId: string) => `project-terms:${workspaceId}`;

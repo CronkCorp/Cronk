@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("A Project's live updates", () => {
   it("tell its watchers which Ticket changed when one is edited", async () => {
@@ -308,3 +308,166 @@ describe("A Document's live updates", () => {
     expect(await stream.next()).toBeNull();
   });
 });
+
+describe("The Workspace's Terms' live updates", () => {
+  it("tell their watchers when a Workspace Term is created, saved, (un)protected or deleted", async () => {
+    const { admin } = await startInstalledCronk();
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await admin.patch(`/api/terms/${term.id}`, { baseVersion: 1, definition: "A unit of tracked work." });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: false });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    expect((await admin.delete(`/api/terms/${term.id}?baseVersion=2`)).status).toBe(204);
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+  });
+
+  it("tell nothing of a write that is refused or rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ticket = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." });
+    await admin.post(`/api/terms/${ticket.id}/protection`, { protected: true });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post("/api/workspace/terms", { name: "ticket", definition: "Again." })).status).toBe(409);
+    expect((await admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, name: "Claim" })).status).toBe(409);
+    expect((await admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 7, definition: "Stale." })).status).toBe(409);
+    expect((await admin.delete(`/api/terms/${ticket.id}?baseVersion=7`)).status).toBe(409);
+    expect((await claude.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "Protected." })).status).toBe(403);
+    expect((await claude.post(`/api/terms/${ticket.id}/protection`, { protected: false })).status).toBe(403);
+
+    await admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "A unit of tracked work." });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await expect(stream.next(500)).rejects.toThrow("No server-sent event came in time");
+  });
+
+  it("tell their watchers when a Project Term changes, as it may override a Workspace Term", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const term = (await admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    expect((await admin.delete(`/api/terms/${term.id}?baseVersion=1`)).status).toBe(204);
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+  });
+
+  it("are refused to whoever can't read the Workspace, and end once the watcher no longer can", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const stream = await claude.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/workspace", { agentAccess: "none" });
+    expect((await claude.events("/api/workspace/terms/events")).status).toBe(403);
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
+    expect(await stream.next()).toBeNull();
+  });
+});
+
+describe("A Project's Terms' live updates", () => {
+  it("tell their watchers when one of its Terms, or a Workspace Term, is created, saved, (un)protected or deleted", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const stream = await admin.events("/api/projects/CRONK/terms/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    const own = (await admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await admin.patch(`/api/terms/${own.id}`, { baseVersion: 1, definition: "A unit of tracked work." });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await admin.post(`/api/terms/${own.id}/protection`, { protected: true });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    expect((await admin.delete(`/api/terms/${own.id}?baseVersion=2`)).status).toBe(204);
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+
+    const shared = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." })).body.term;
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await admin.patch(`/api/terms/${shared.id}`, { baseVersion: 1, definition: "An Agent Session's hold on a Ticket." });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+  });
+
+  it("tell nothing of another Project's Terms", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Website", key: "SITE" });
+    const stream = await admin.events("/api/projects/CRONK/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.post("/api/projects/SITE/terms", { name: "Page", definition: "A web page." });
+    await admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of work." });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await expect(stream.next(500)).rejects.toThrow("No server-sent event came in time");
+  });
+
+  it("tell of Workspace Terms only a watcher who can read the Workspace", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.patch("/api/workspace", { agentAccess: "none" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const stream = await claude.events("/api/projects/CRONK/terms/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." });
+    await admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of work." });
+    expect(await stream.next()).toEqual({ event: "changed", data: {} });
+    await expect(stream.next(500)).rejects.toThrow("No server-sent event came in time");
+  });
+
+  it("are refused to whoever can't see the Project, and end once the watcher no longer can", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const stream = await bob.events("/api/projects/CRONK/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect((await bob.events("/api/projects/CRONK/terms/events")).status).toBe(404);
+    await admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of work." });
+    expect(await stream.next()).toBeNull();
+  });
+
+  it("end once the watcher can no longer read the Workspace whose Terms they hear of", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const stream = await claude.events("/api/projects/CRONK/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/workspace", { agentAccess: "none" });
+    await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." });
+    expect(await stream.next()).toBeNull();
+  });
+
+  it("tell their watchers, and the Workspace's, when a Suggestion on one of its Terms is accepted", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const term = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const made = await claude.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition: "A temporary hold." }, reasoning: "Say it ends." });
+    expect(made.status).toBe(201);
+    const project = await admin.events("/api/projects/CRONK/terms/events");
+    const workspace = await admin.events("/api/workspace/terms/events");
+    expect((await project.next())?.event).toBe("ready");
+    expect((await workspace.next())?.event).toBe("ready");
+
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`)).status).toBe(200);
+    expect(await project.next()).toEqual({ event: "changed", data: {} });
+    expect(await workspace.next()).toEqual({ event: "changed", data: {} });
+  });
+});
+
