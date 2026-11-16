@@ -71,6 +71,18 @@ export async function recordEmbeds(db: Queryable, source: EmbedSource): Promise<
   return rows[0] ? record(db, rows[0]) : [];
 }
 
+/**
+ * Records again what each source of the Workspace embeds whose text names Artifact `artifactId`, as after it gains a
+ * Version an address may have named before it existed. Run in the transaction that publishes it.
+ */
+export async function recordEmbedsNaming(db: Queryable, workspaceId: string, artifactId: string): Promise<void> {
+  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${SOURCES} WHERE s.workspace_id = $1 AND strpos(lower(s.body), $2) > 0 ORDER BY s.kind, s.id`, [
+    workspaceId,
+    artifactId.toLowerCase(),
+  ]);
+  for (const row of rows) await record(db, row);
+}
+
 /** How many sources a full recording reads at a time, so a large Workspace isn't held in memory at once. */
 const BATCH = 200;
 

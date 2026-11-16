@@ -169,3 +169,31 @@ describe("Publishing tells how to embed", () => {
     expect(next.body.embedding).toContain(`${OWN_ORIGIN}/artifacts/${artifact.id}?version=2`);
   });
 });
+
+describe("Where an address embeds", () => {
+  it("embeds an address alone on a line in a list item, a quote or after a hard break, but not one sharing its line", async () => {
+    const { admin, artifact } = await setup();
+    const second = (await admin.upload("/api/projects/CRONK/artifacts?title=Second", await tarGz({ "index.html": "<p>2</p>" }))).body.artifact;
+    const third = (await admin.upload("/api/projects/CRONK/artifacts?title=Third", await tarGz({ "index.html": "<p>3</p>" }))).body.artifact;
+    const body = [`- ${artifact.url}`, "", `> Quoted:`, `> ${second.versionUrl}`, "", `Before\\`, third.url, "", `Two on a line: ${artifact.versionUrl} ${second.url}`].join("\n");
+
+    const created = await admin.post("/api/projects/CRONK/documents", { title: "Limits", body });
+    expect(created.body.document.embeds).toEqual([
+      { artifactId: artifact.id, version: null },
+      { artifactId: second.id, version: 1 },
+      { artifactId: third.id, version: null },
+    ]);
+  });
+
+  it("embeds an address naming a Version once that Version is published", async () => {
+    const { admin, artifact } = await setup();
+    const address = `${OWN_ORIGIN}/artifacts/${artifact.id}?version=2`;
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Limits", body: address })).body.document;
+    expect(doc.embeds).toEqual([]);
+
+    await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "<p>v2</p>" }));
+
+    expect((await admin.get(`/api/documents/${doc.id}`)).body.document.embeds).toEqual([{ artifactId: artifact.id, version: 2 }]);
+    expect((await admin.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn).toEqual([expect.objectContaining({ id: doc.id, version: 2 })]);
+  });
+});

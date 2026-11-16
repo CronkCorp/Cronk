@@ -11,7 +11,7 @@ import { answer, errors, holding, listing, pathParams, projectKeyParam, protecti
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
-import { listEmbeddedIn } from "./artifact-embeds.js";
+import { listEmbeddedIn, recordEmbedsNaming } from "./artifact-embeds.js";
 import { formatBytes } from "./sizes.js";
 import {
   artifactFileKey,
@@ -203,7 +203,10 @@ export function artifactRoutes(ctx: AppContext) {
           const now = ctx.clock.now();
           const source = await sourceClaimOf(tx, actor, current.projectId, request.query.ticket, now, "an Artifact");
           const title = request.query.title?.trim() ?? current.title;
-          return insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
+          const next = await insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
+          // Text may have named this Version before it existed.
+          await recordEmbedsNaming(tx, current.workspaceId, current.id);
+          return next;
         });
         return reply.code(201).send(await published(request, artifact));
       },
