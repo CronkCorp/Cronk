@@ -68,6 +68,7 @@ export type SharedSchemaName =
   | "TermVersion"
   | "StaleTermVersion"
   | "RenamedId"
+  | "ProtectionChange"
   | "AvoidedWord";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
@@ -109,6 +110,10 @@ const recordedActor = {
     ["owner", "session"],
   ),
 };
+
+/** Describes an item's `protected` flag: true when `when`. */
+const protectedDescription = (when: string) =>
+  `Whether Agents may read but not change it, whatever their Agent Access: true when ${when}. An Agent proposes a change to it as a Suggestion.`;
 
 /** A Version's fields, all but its body. */
 const versionFields = {
@@ -451,8 +456,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       title: { type: "string" },
       body: { type: "string", description: "Markdown." },
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      protected: { type: "boolean", description: protectedDescription("it is marked Protected, or sits under a Document that is") },
+      protectedBy: {
+        ...nullable(object({ id, title: { type: "string" } })),
+        description: "The Document whose Protected mark covers it: itself if marked, else the nearest marked Document above it; null if none.",
+      },
+      covers: { type: "integer", description: "When it is itself marked Protected, how many Documents under it the mark covers; 0 otherwise." },
       createdAt: timestamp,
       updatedAt: timestamp,
+    }),
+  },
+  ProtectionChange: {
+    description: "One marking or unmarking of an item as Protected, with the User who did it.",
+    ...object({
+      protected: { type: "boolean", description: "True when it was marked, false when unmarked." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "The User who did it; only Users mark and unmark." },
     }),
   },
   Decision: {
@@ -513,6 +532,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       parentId: { ...nullable(id), description: "The Document it sits under; null at the top." },
       title: { type: "string" },
       depth: { type: "integer", description: "How deep it sits: 0 at the top." },
+      protected: { type: "boolean", description: protectedDescription("it, or a Document above it, is marked Protected") },
     }),
   },
   Version: {
@@ -705,3 +725,19 @@ export const termIdParam = { type: "string", format: "uuid", description: "The T
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
+
+/** The body of a request marking an item Protected or unmarking it. */
+export const protectionBody = {
+  type: "object",
+  required: ["protected"],
+  additionalProperties: false,
+  properties: {
+    protected: { type: "boolean", description: "True to mark it Protected, so Agents may read but not change it; false to unmark it." },
+  },
+} as const;
+
+/** An item's protection history, newest first. */
+export const protectionHistoryAnswer = answer(
+  "Each time a User marked it Protected or unmarked it, newest first",
+  listing("changes", ref("ProtectionChange")),
+);

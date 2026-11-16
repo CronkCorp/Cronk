@@ -6,12 +6,26 @@ import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { documentTopic } from "../live/topics.js";
-import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref, savedHolding } from "../schemas.js";
+import {
+  answer,
+  documentIdParam,
+  errors,
+  holding,
+  listing,
+  noContent,
+  pathParams,
+  projectKeyParam,
+  protectionBody,
+  protectionHistoryAnswer,
+  ref,
+  savedHolding,
+} from "../schemas.js";
 import { findTicketByKey } from "../work/tickets.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { documentFor } from "./document-reads.js";
-import { deleteDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
+import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
@@ -66,9 +80,21 @@ export function knowledgeRoutes(ctx: AppContext) {
     /** Creates a Document in `tree`, which the caller has Write in. */
     const create = async (tx: Queryable, actor: Actor, tree: Tree, input: NewDocument) => {
       const parentId = input.parentId ?? null;
+      await requireOpenToAgentsUnder(tx, actor, parentId, "add Documents under it");
       const created = await insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
       if (created === "no such parent") throw notInTree();
       return { document: created, avoidedWords: await avoidedWordsIn(tx, actor, tree.projectId, titleAndBody(input)) };
+    };
+
+    /**
+     * Refuses an Agent's putting a Document under `parentId` when the branch there is Protected, so
+     * Agents can't add to a protected branch, or move a Document into one. A parent that isn't
+     * a Document of the tree is left for the caller to refuse.
+     */
+    const requireOpenToAgentsUnder = async (tx: Queryable, actor: Actor, parentId: string | null, change: string) => {
+      if (actor.kind !== "agent" || parentId === null) return;
+      const parent = await findDocument(tx, actingUser(actor).workspaceId, parentId);
+      if (parent) requireUnprotected(actor, parent, parent.title, change);
     };
 
     /**
@@ -93,6 +119,7 @@ export function knowledgeRoutes(ctx: AppContext) {
      */
     const lockForDelete = async (tx: Queryable, actor: Actor, id: string) => {
       const document = await documentFor(tx, actor, id, "write");
+      requireUnprotected(actor, document, document.title, "delete it");
       requireUserActor(actor, "delete a Document");
       if (document.ticketKey === null) return documentFor(tx, actor, id, "write", { forUpdate: true });
       await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey, { forUpdate: true });
@@ -247,6 +274,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { document, assignee, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, current, current.title);
           await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           const saved = await saveVersion(tx, current, {
@@ -307,6 +335,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { document, assignee, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, current, current.title);
           await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           const replaced = replaceSection(current.body, request.body.heading, request.body.body);
@@ -377,6 +406,8 @@ export function knowledgeRoutes(ctx: AppContext) {
         const { parentId, position } = request.body;
         const document = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
+          requireUnprotected(actor, document, document.title, "move it");
+          await requireOpenToAgentsUnder(tx, actor, parentId, "move Documents under it");
           const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
           if (moved === "a report") throw new HttpError(400, "A Report lives with its Ticket, outside the page tree, so it can't be moved");
           if (moved === "no such parent") throw notInTree();
@@ -423,6 +454,43 @@ export function knowledgeRoutes(ctx: AppContext) {
         // Its watchers, no longer able to see it, stop watching.
         ctx.live.publish(documentTopic(id), { event: "deleted", data: {} });
         return reply.code(204).send();
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: { protected: boolean } }>(
+      "/api/documents/:id/protection",
+      {
+        schema: {
+          params: documentParams,
+          body: protectionBody,
+          response: {
+            200: answer(
+              "The Document marked Protected or unmarked, at the same Version. Its mark covers every Document under it, including ones added later; " +
+                "unmarking it leaves it covered by any marked Document above it",
+              holding("document", "Document"),
+            ),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const document = await transaction(ctx.db, async (tx) => {
+          const document = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUserActor(actor, "mark a Document Protected or unmark it");
+          await setProtected(tx, { kind: "document", id: document.id }, request.body.protected, actor.user.id, ctx.clock.now());
+          return documentFor(tx, actor, document.id, "write");
+        });
+        return { document };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/documents/:id/protection",
+      { schema: { params: documentParams, response: { 200: protectionHistoryAnswer, ...errors(400, 401, 403, 404, 410) } } },
+      async (request) => {
+        const document = await documentFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        return { changes: await listProtectionChanges(ctx.db, { kind: "document", id: document.id }) };
       },
     );
 
@@ -476,6 +544,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { document, assignee } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, current, current.title);
           await requireClaimToChangeReport(tx, actor, current);
           const earlier = await requireVersion(tx, current, request.params.number);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
