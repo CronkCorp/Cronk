@@ -3,7 +3,7 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectTermsTopic, termsTopic } from "../live/topics.js";
-import type { LiveUpdates } from "../live/live-updates.js";
+import type { LiveEvent, LiveUpdates } from "../live/live-updates.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
@@ -178,7 +178,7 @@ export function termRoutes(ctx: AppContext) {
       {
         schema: {
           response: {
-            ...changesStream("the Workspace's Terms, and to any Project's Terms, which may override them"),
+            ...changesStream("the Workspace's Terms, and to the Terms of each Project the caller can see, which may override them"),
             ...errors(401, 403, 410),
           },
         },
@@ -187,8 +187,11 @@ export function termRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "read");
         const workspaceId = actingUser(actor).workspaceId;
-        const canSee = async () => canRead(ctx.db, await requireActor(ctx, request, { refreshSession: false }), null);
-        ctx.live.stream(reply, [termsTopic(workspaceId, null), projectTermsTopic(workspaceId)], canSee);
+        const now = () => requireActor(ctx, request, { refreshSession: false });
+        const canSee = async () => canRead(ctx.db, await now(), null);
+        // A Project's Term changes reach only those who can see that Project.
+        const admits = async (event: LiveEvent) => event.projectId === undefined || canRead(ctx.db, await now(), event.projectId);
+        ctx.live.stream(reply, [termsTopic(workspaceId, null), projectTermsTopic(workspaceId)], canSee, undefined, admits);
       },
     );
 
@@ -460,7 +463,7 @@ async function requireCurrent(db: Queryable, term: StoredTerm, base: number, wri
 export function termsChanged(live: LiveUpdates, place: TermPlace): void {
   const event = { event: "changed", data: {} };
   live.publish(termsTopic(place.workspaceId, place.projectId), event);
-  if (place.projectId !== null) live.publish(projectTermsTopic(place.workspaceId), event);
+  if (place.projectId !== null) live.publish(projectTermsTopic(place.workspaceId), { ...event, projectId: place.projectId });
 }
 
 /** Where Terms belong for `actor`: a Project of their Workspace, or the Workspace itself when `projectId` is null. */

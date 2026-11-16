@@ -8,6 +8,8 @@ export interface LiveEvent {
   data: object;
   /** Its id, if it has one: where a stream reopened from it (with `Last-Event-ID`) picks up. */
   id?: string;
+  /** The Project the change is in, for a stream's `admits` on a topic that spans Projects; never sent. */
+  projectId?: string;
 }
 
 /** What a stream reopened from an event's id missed, and the id its `ready` carries, to reopen from if nothing else arrives. */
@@ -110,13 +112,15 @@ export class LiveUpdates {
    * `expect`ed before its change committed.
    *
    * `admits` picks the events published on `topic` that this stream sends; it sends all of them by default.
+   * It is asked just before an event would be sent, after the access check; unlike `canSee`, saying no
+   * (or throwing) only skips that event, so it suits events about something only some watchers may see.
    */
   stream(
     reply: FastifyReply,
     topic: string | string[],
     canSee: () => Promise<boolean>,
     catchUp?: () => Promise<CatchUp>,
-    admits: (event: LiveEvent) => boolean = () => true,
+    admits: (event: LiveEvent) => boolean | Promise<boolean> = () => true,
   ): void {
     reply.hijack();
     const res = reply.raw;
@@ -137,11 +141,13 @@ export class LiveUpdates {
     };
     // Whether the stream is still open and the caller may still see the topic; it may have closed during the check.
     const allowed = async () => open && (await canSee().catch(() => false)) && open;
+    // Whether this stream sends `event`; one it can't tell about is skipped.
+    const admitted = async (event: LiveEvent) => (await Promise.resolve(admits(event)).catch(() => false)) && open;
     // Runs `send` after the access check, or ends the stream if the caller may no longer see the topic.
-    const checked = (send: () => void) => {
+    const checked = (send: () => unknown) => {
       queue = queue.then(async () => {
         if (!open) return;
-        if (await allowed()) send();
+        if (await allowed()) await send();
         else end();
       });
     };
@@ -153,9 +159,8 @@ export class LiveUpdates {
     const topics = [topic].flat();
     const unsubscribes = topics.map((t) =>
       this.subscribe(t, (event) => {
-        if (!admits(event)) return;
         if (held) held.push(event);
-        else checked(() => fresh(event) && write(event));
+        else checked(async () => fresh(event) && (await admitted(event)) && write(event));
       }),
     );
     const unsubscribe = () => unsubscribes.forEach((u) => u());
@@ -190,7 +195,7 @@ export class LiveUpdates {
         };
         for (const event of missed) if (!(await send(event))) return end();
         // Then what was published meanwhile, including while these are being sent.
-        for (let event = held!.shift(); event; event = held!.shift()) if (!(await send(event))) return end();
+        for (let event = held!.shift(); event; event = held!.shift()) if ((await admitted(event)) && !(await send(event))) return end();
         held = null;
         if (open) write({ event: "ready", id: String(furthest), data: {} });
       } catch {
