@@ -1,3 +1,4 @@
+import { bareOrigins } from "../files/origins.js";
 import { agentAccessSchema } from "../schemas.js";
 import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, updateWorkspace } from "../workspace/workspaces.js";
@@ -18,6 +19,8 @@ export async function exportWorkspaceSettings(ctx: ExportContext): Promise<void>
     transcriptMaxBytes: w.transcriptMaxBytes,
     artifactMaxBytes: w.artifactMaxBytes,
     artifactMaxFiles: w.artifactMaxFiles,
+    artifactAllowedOrigins: w.artifactAllowedOrigins,
+    artifactExtraOriginsAllowed: w.artifactExtraOriginsAllowed,
   });
 }
 
@@ -35,6 +38,17 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
     // Exports from before Artifacts leave their limits out, keeping the defaults.
     ...(w.data.artifactMaxBytes !== undefined && { artifactMaxBytes: positive(w.data.artifactMaxBytes, "workspace.md artifactMaxBytes") }),
     ...(w.data.artifactMaxFiles !== undefined && { artifactMaxFiles: positive(w.data.artifactMaxFiles, "workspace.md artifactMaxFiles") }),
+    // ...and so do those from before the Admin's allow-list.
+    ...(w.data.artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: bareOrigins(
+        Array.isArray(w.data.artifactAllowedOrigins) && w.data.artifactAllowedOrigins.every((v) => typeof v === "string")
+          ? (w.data.artifactAllowedOrigins as string[])
+          : refuse("workspace.md artifactAllowedOrigins must be a list of origins"),
+        "workspace.md artifactAllowedOrigins",
+      ) }),
+    ...(w.data.artifactExtraOriginsAllowed !== undefined && {
+      artifactExtraOriginsAllowed:
+        typeof w.data.artifactExtraOriginsAllowed === "boolean" ? w.data.artifactExtraOriginsAllowed : refuse("workspace.md artifactExtraOriginsAllowed must be true or false"),
+    }),
   });
 }
 

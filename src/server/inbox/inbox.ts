@@ -1,6 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { LiveUpdates } from "../live/live-updates.js";
-import { inboxTopic } from "../live/topics.js";
+import { inboxTopic, TRIAGE_TOPIC } from "../live/topics.js";
 import { visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
@@ -168,27 +168,31 @@ async function openQuestions(db: Queryable, user: User, projectIds: string[]): P
 }
 
 function reviews(db: Queryable, user: User, projectIds: string[]): Promise<ReviewItem[]> {
-  return assignedTickets(db, user, projectIds, "s.category = 'in_review'", "review");
+  return ticketItems(db, "review", { assigneeId: user.id, projectIds });
 }
 
 function unverified(db: Queryable, user: User, projectIds: string[]): Promise<UnverifiedItem[]> {
-  return assignedTickets(db, user, projectIds, "t.verification = 'unverified'", "unverified");
+  return ticketItems(db, "unverified", { assigneeId: user.id, projectIds });
 }
 
-/** The Tickets `user` is Assignee of that match `where`, each with its Reports, at when it entered its Status. */
-async function assignedTickets<K extends "review" | "unverified">(
+/** What makes a Ticket each kind of Ticket item, as SQL on the Ticket `t` and its Status `s`. */
+const TICKET_KINDS = { review: "s.category = 'in_review'", unverified: "t.verification = 'unverified'" } as const;
+
+/**
+ * The Tickets waiting as `kind` items in the Projects `projectIds`, whose Assignee is `assigneeId` (none, with null), each with
+ * its Reports, at when it entered its Status, oldest first.
+ */
+export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
   db: Queryable,
-  user: User,
-  projectIds: string[],
-  where: string,
   kind: K,
+  which: { assigneeId: string | null; projectIds: string[] },
 ): Promise<TicketItem<K>[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
     `SELECT t.id, COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at) AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id
-     WHERE t.assignee_id = $1 AND ${where} AND t.project_id = ANY($2::uuid[])
+     WHERE t.assignee_id IS NOT DISTINCT FROM $1::uuid AND ${TICKET_KINDS[kind]} AND t.project_id = ANY($2::uuid[])
      ORDER BY at, p.key, t.number`,
-    [user.id, projectIds],
+    [which.assigneeId, which.projectIds],
   );
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
   const at = new Map(rows.map((r) => [r.id, r.at]));
@@ -198,9 +202,13 @@ async function assignedTickets<K extends "review" | "unverified">(
 /**
  * Tells each of these Users that their Inbox may have changed, so open Inbox views fetch it
  * again. Skips missing ids and repeats. Call once the change is committed.
+ *
+ * Whatever changes a waiting item may also send it to Triage or take it out, as may a change of access,
+ * so this tells Triage too, even with no User given: a change to an item with no clear User names none.
  */
-export function inboxesChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
+export function waitingItemsChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
   for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
+  live.publish(TRIAGE_TOPIC, { event: "triage", data: {} });
 }
 
 /**

@@ -7,25 +7,30 @@ import { updateTicket, type Ticket } from "../work/tickets.js";
 import { checkChoices, dependentNote, dependentsOf, REOPEN_CHOICES, type Dependent, type ReopenChoice } from "../work/reopen.js";
 import { clearClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
-import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
+import { answer, artifactIdParam, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
-import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
+import { agentTopic, artifactTopic, documentTopic, ticketTopic } from "../live/topics.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { tellNewlyReady } from "../coordination/ready.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { waitingItemsChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
-import { markWaiting, waitingEvent, withWaitingWork, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
+import { markWaiting, waitingEvent, withWaitingWork, type CommentPlace, type CommentWork, type Positioned, type WaitingFor } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
+import { artifactFor } from "../files/artifact-routes.js";
+import { findArtifactVersion } from "../files/artifacts.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
 const documentParams = pathParams({ id: documentIdParam });
+const artifactParams = pathParams({ id: artifactIdParam });
 
 interface NewComment {
   body: string;
+  /** Only on an Artifact: the Version being viewed. */
+  version?: number;
   replyToCommentId?: string;
   replyToActivityId?: string;
   anchor?: { passage: string };
@@ -64,6 +69,21 @@ const newCommentBody = {
       additionalProperties: false,
       description: "Only on a Document: the passage of its current Version the Comment is about. It stays anchored while later Versions still hold it.",
       properties: { passage: { type: "string", minLength: 1, maxLength: 10_000, pattern: "\\S", description: "Text the Document holds, exactly." } },
+    },
+  },
+} as const;
+
+/** What a Comment on an Artifact takes: a Comment's fields, but no anchor nor Activity to reply to, and the Version being viewed. */
+const { anchor: _anchor, replyToActivityId: _activity, ...commentFields } = newCommentBody.properties;
+const newArtifactCommentBody = {
+  ...newCommentBody,
+  properties: {
+    ...commentFields,
+    replyToCommentId: { ...id, description: "The Comment this one replies to, on the same Artifact." },
+    version: {
+      type: "integer",
+      minimum: 1,
+      description: "The number of the Version being viewed, which the Comment records; the latest Version if left out.",
     },
   },
 } as const;
@@ -125,7 +145,7 @@ export function conversationRoutes(ctx: AppContext) {
      * answers, without touching the database again, while the later one, which waited on that
      * COMMIT, still has round trips to make before it can push.
      */
-    const pushWaiting = (posted: Posted, on: Omit<WaitingWork, "reason" | "comment">) => {
+    const pushWaiting = (posted: Posted, on: Pick<CommentWork, "ticket" | "document" | "artifact">) => {
       for (const { agentId, reason, seq } of posted.waiting) {
         ctx.live.publish(agentTopic(agentId), waitingEvent(seq, { reason, comment: publicComment(posted.comment), ...on }));
       }
@@ -145,7 +165,7 @@ export function conversationRoutes(ctx: AppContext) {
         const { ticket, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write");
-            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null, publisherId: null };
             const posted = await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body);
             return { ticket, posted, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody({ body: request.body.body })) };
           },
@@ -153,9 +173,9 @@ export function conversationRoutes(ctx: AppContext) {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             if (posted.answered) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
-              inboxesChanged(ctx.live, [posted.answered.agent.owner.id]);
+              waitingItemsChanged(ctx.live, [posted.answered.agent.owner.id]);
             }
-            pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+            pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
           },
         );
         return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
@@ -195,13 +215,13 @@ export function conversationRoutes(ctx: AppContext) {
             if (ticket.status.category !== "in_review") throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, not In Review`);
             const status = await statusOf(tx, ticket, "started", request.body.statusId);
             const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
-            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null, publisherId: null };
             return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
           },
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
-            pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
-            inboxesChanged(ctx.live, [ticket.assignee?.id]);
+            pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
+            waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
             ticketsChanged(ctx.live, [ticket]);
           },
         );
@@ -260,7 +280,7 @@ export function conversationRoutes(ctx: AppContext) {
             const reopened = await reopen(ticket, request.body.statusId);
             const posts: { ticket: Ticket; posted: Posted }[] = [];
             const comment = async (t: Ticket, body: string) => {
-              const place = { projectId: t.projectId, delegateId: t.delegate?.id ?? null };
+              const place = { projectId: t.projectId, delegateId: t.delegate?.id ?? null, publisherId: null };
               const posted = await post(tx, positioned, actor, { ticketId: t.id }, place, { body });
               posts.push({ ticket: t, posted });
               return posted;
@@ -303,9 +323,9 @@ export function conversationRoutes(ctx: AppContext) {
           ({ posts, changed, blockedAgain }) => {
             for (const { ticket, posted } of posts) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
-              pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+              pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
             }
-            inboxesChanged(ctx.live, changed.map((t) => t.assignee?.id));
+            waitingItemsChanged(ctx.live, changed.map((t) => t.assignee?.id));
             ticketsChanged(ctx.live, [...changed, ...blockedAgain]);
           },
         );
@@ -343,16 +363,90 @@ export function conversationRoutes(ctx: AppContext) {
         const { document, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const document = await documentFor(tx, actor, request.params.id, "write");
-            const place = { projectId: document.projectId, delegateId: null };
+            const place = { projectId: document.projectId, delegateId: null, publisherId: null };
             const posted = await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document);
             return { document, posted, avoidedWords: await avoidedWordsIn(tx, actor, document.projectId, titleAndBody({ body: request.body.body })) };
           },
           ({ document, posted }) => {
             ctx.live.publish(documentTopic(document.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
-            pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } });
+            pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title }, artifact: null });
           },
         );
         return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: NewComment }>(
+      "/api/artifacts/:id/comments",
+      {
+        schema: {
+          description:
+            "Posts a Comment on an Artifact, recording the Version being viewed. It waits for the Agent that published that Version, " +
+            "as well as any Agent it @mentions or whose question it answers. Needs Write where the Artifact belongs; Protected or not, anyone with Write may comment.",
+          params: artifactParams,
+          body: newArtifactCommentBody,
+          response: { 201: answer("The Comment, posted on the Artifact", savedHolding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const { posted, avoidedWords } = await posting(
+          async (tx, positioned) => {
+            const artifact = await artifactFor(tx, actor, request.params.id, "write");
+            const { version: number = artifact.version, ...input } = request.body;
+            const version = await findArtifactVersion(tx, artifact.id, number);
+            if (!version) throw new HttpError(400, `"${artifact.title}" has no Version ${number}; its latest is Version ${artifact.version}`);
+            const place = { projectId: artifact.projectId, delegateId: null, publisherId: version.actor.kind === "agent" ? version.actor.id : null };
+            const posted = await post(tx, positioned, actor, { artifactId: artifact.id, version: number }, place, input);
+            return { artifact, posted, avoidedWords: await avoidedWordsIn(tx, actor, artifact.projectId, titleAndBody({ body: input.body })) };
+          },
+          ({ artifact, posted }) => {
+            ctx.live.publish(artifactTopic(artifact.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
+            pushWaiting(posted, { ticket: null, document: null, artifact: { id: artifact.id, title: artifact.title, version: posted.comment.artifactVersion! } });
+          },
+        );
+        return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/comments",
+      {
+        schema: {
+          params: artifactParams,
+          response: { 200: answer("The Artifact's Comments on all its Versions, oldest first", listing("comments", ref("Comment"))), ...errors(401, 404, 410) },
+        },
+      },
+      async (request) => {
+        const artifact = await artifactFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        return { comments: (await listComments(ctx.db, { artifactId: artifact.id })).map(publicComment) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/events",
+      {
+        schema: {
+          params: artifactParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of the Artifact's changes as they happen, for as long as the caller can see it. It opens with a " +
+                "`ready` event; each new Comment arrives as a `comment` event whose data is `{ comment }`, a Comment as JSON, and an `attachments` event " +
+                "with no data says files attached to its Comments changed.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const artifact = await artifactFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await artifactFor(ctx.db, actor, artifact.id, "read"));
+        };
+        ctx.live.stream(reply, artifactTopic(artifact.id), canSee);
       },
     );
 

@@ -4,6 +4,8 @@ import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
 import { recordTicketMentions } from "./ticket-mentions.js";
 import { recordMentions } from "./mentions.js";
+import { embedsIn, embedsSql, recordEmbeds } from "../files/artifact-embeds.js";
+import type { ArtifactAt } from "../../shared/artifact-embeds.js";
 import type { LinkReason } from "../../shared/values.js";
 import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
@@ -32,6 +34,8 @@ export interface Document {
   protectedBy: { id: string; title: string } | null;
   /** How many Documents sit under it, all covered by its mark, when it is itself marked Protected; 0 otherwise. */
   covers: number;
+  /** The Artifacts its body embeds, in order (files/artifact-embeds.ts). */
+  embeds: ArtifactAt[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +54,7 @@ interface DocumentRow {
   protected_by_id: string | null;
   protected_by_title: string | null;
   covers: number;
+  embeds: ArtifactAt[];
   created_at: Date;
   updated_at: Date;
 }
@@ -66,6 +71,7 @@ const toDocument = (row: DocumentRow): Document => ({
   protected: row.protected_by_id !== null,
   protectedBy: row.protected_by_id === null ? null : { id: row.protected_by_id, title: row.protected_by_title! },
   covers: row.covers,
+  embeds: row.embeds,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -91,7 +97,7 @@ const SELECT_DOCUMENT_WITH_PROTECTION = `
   ),
   cover AS (SELECT id, title FROM above WHERE protected ORDER BY depth LIMIT 1)
   SELECT found.*, (SELECT id FROM cover) AS protected_by_id, (SELECT title FROM cover) AS protected_by_title,
-         (SELECT count(*)::int FROM below) AS covers
+         (SELECT count(*)::int FROM below) AS covers, ${embedsSql("document", "found")} AS embeds
   FROM found`;
 
 /** The page tree a Document sits in: a Project's, or the Workspace's when `projectId` is null. */
@@ -152,7 +158,7 @@ async function isParentIn(db: Queryable, tree: Tree, parentId: string | null): P
  */
 export async function insertDocument(
   db: Queryable,
-  input: { tree: Tree; parentId: string | null; title: string; body: string; actor: Actor; now: Date },
+  input: { tree: Tree; parentId: string | null; title: string; body: string; actor: Actor | StoredActor; now: Date },
 ): Promise<Document | "no such parent"> {
   await lockTree(db, input.tree);
   if (!(await isParentIn(db, input.tree, input.parentId))) return "no such parent";
@@ -167,6 +173,7 @@ export async function insertDocument(
   await insertVersion(db, id, { number: 1, title: input.title, body: input.body, actor: input.actor, now: input.now, restoredFrom: null });
   await recordTicketMentions(db, id, input);
   await recordMentions(db, { kind: "document", id });
+  await recordEmbeds(db, { kind: "document", id });
   return (await findDocument(db, input.tree.workspaceId, id))!;
 }
 
@@ -195,6 +202,7 @@ export async function insertDocumentRow(db: Queryable, d: DocumentRowInput): Pro
   const id = rows[0]!.id;
   await recordTicketMentions(db, id, d);
   await recordMentions(db, { kind: "document", id });
+  await recordEmbeds(db, { kind: "document", id });
   return id;
 }
 
@@ -237,6 +245,8 @@ export interface Version {
   restoredFrom: number | null;
   /** The Suggestion a User accepted to make it, unchanged or edited; null for a Version saved otherwise. */
   suggestion: VersionSuggestion | null;
+  /** The Artifacts its body embeds, in order (files/artifact-embeds.ts). */
+  embeds: ArtifactAt[];
 }
 
 interface VersionRow extends RecordedActorRow {
@@ -247,7 +257,7 @@ interface VersionRow extends RecordedActorRow {
   restored_from: number | null;
 }
 
-const toVersion = (row: VersionRow): Omit<Version, "suggestion"> => ({
+const toVersion = (row: VersionRow): Omit<Version, "suggestion" | "embeds"> => ({
   number: row.number,
   title: row.title,
   body: row.body,
@@ -264,11 +274,14 @@ const SELECT_VERSIONS = `
 /** One of a Document's Versions, by number. */
 export async function findVersion(db: Queryable, documentId: string, number: number): Promise<Version | undefined> {
   const { rows } = await db.query<VersionRow>(`${SELECT_VERSIONS} WHERE v.document_id = $1 AND v.number = $2`, [documentId, number]);
-  return rows[0] && (await withSuggestions(db, { kind: "document", id: documentId }, [toVersion(rows[0])]))[0];
+  if (!rows[0]) return undefined;
+  const [version] = await withSuggestions(db, { kind: "document", id: documentId }, [toVersion(rows[0])]);
+  const { rows: place } = await db.query<{ workspace_id: string }>("SELECT workspace_id FROM documents WHERE id = $1", [documentId]);
+  return { ...version!, embeds: await embedsIn(db, place[0]!.workspace_id, rows[0].body) };
 }
 
 /** A Document's Versions, newest first, without their bodies. */
-export async function listVersions(db: Queryable, documentId: string): Promise<Omit<Version, "body">[]> {
+export async function listVersions(db: Queryable, documentId: string): Promise<Omit<Version, "body" | "embeds">[]> {
   const { rows } = await db.query<VersionRow>(`${SELECT_VERSIONS} WHERE v.document_id = $1 ORDER BY v.number DESC`, [documentId]);
   return withSuggestions(db, { kind: "document", id: documentId }, rows.map(toVersion).map(({ body: _, ...summary }) => summary));
 }
@@ -294,7 +307,8 @@ export async function saveVersion(
   ]);
   await recordTicketMentions(db, document.id, save);
   await recordMentions(db, { kind: "document", id: document.id });
-  return { ...document, title: save.title, body: save.body, version: number, updatedAt: save.now };
+  const embeds = await recordEmbeds(db, { kind: "document", id: document.id });
+  return { ...document, title: save.title, body: save.body, version: number, embeds, updatedAt: save.now };
 }
 
 /**

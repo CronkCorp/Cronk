@@ -215,6 +215,7 @@ describe("rejecting an Agent's proposed Decision", () => {
         },
         ticket: { key: "CRONK-1", title: "Ticket 1" },
         document: null,
+        artifact: null,
       },
     ]);
     expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);

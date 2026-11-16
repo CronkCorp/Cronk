@@ -33,6 +33,7 @@ import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
 import type { Mention as StoredMention } from "./knowledge/mentions.js";
+import type { EmbeddedIn as StoredEmbeddedIn } from "./files/artifact-embeds.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
@@ -125,6 +126,8 @@ export type Claim = Serialized<StoredClaim>;
 export type LinkedDocument = Serialized<StoredLinkedDocument>;
 /** Something whose text mentions a Decision or Term. */
 export type Mention = Serialized<StoredMention>;
+/** A Document, Report or Comment embedding an Artifact, as the Artifact's Version menu lists it. */
+export type EmbeddedIn = Serialized<StoredEmbeddedIn>;
 
 /** A Ticket with the Tickets and Documents around it and its live Claim, as its page shows it. */
 export interface TicketDetail {
@@ -160,7 +163,7 @@ export type TermVersion = Serialized<StoredTermVersion>;
 /** One marking of a Document, Term, Decision or Artifact as Protected, or unmarking, with the User who did it. */
 export type ProtectionMarking = Serialized<StoredProtectionMarking>;
 /** A Version without its body, as a Document's Version list shows it. */
-export type VersionSummary = Omit<Version, "body">;
+export type VersionSummary = Omit<Version, "body" | "embeds">;
 /** A Document as its page tree lists it. */
 export type DocumentTreeEntry = TreeEntry;
 /** A Report as its Ticket and Project list it, without its body; read it as a Document by its id. */
@@ -186,6 +189,10 @@ export type InboxItem =
 export type Suggestion = Serialized<StoredSuggestion>;
 export type { SuggestedContent };
 export type InboxKind = InboxItem["kind"];
+
+/** One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, or a Suggestion nobody reviews. */
+export type TriageItem = Serialized<UnverifiedItem> | Serialized<SuggestionInboxItem>;
+export type TriageKind = TriageItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
 export type { AvoidedWord };

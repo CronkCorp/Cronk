@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { api, ApiError, type Artifact, type ArtifactVersion } from "./api.js";
+import { useEffect, useState } from "react";
+import { api, ApiError, watchArtifact, type Artifact, type ArtifactVersion, type Attachment, type EmbeddedIn, type Workspace } from "./api.js";
+import { AttachmentViewer, PageAttachments } from "./attachments.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { ArtifactCommentsDrawer } from "./timeline.js";
 import { Actor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { formatBytes } from "./components/files.js";
@@ -23,6 +26,62 @@ export const versionOf = (param: string | null): number | undefined => (param &&
 
 /** The `sandbox` an Artifact's frame gets: its scripts run, but in an origin of their own, away from Cronk's. */
 const FRAME_SANDBOX = "allow-scripts allow-modals allow-downloads";
+
+/** What an embed shows of an Artifact: the Version it names, or else its latest. */
+interface Embedded {
+  title: string;
+  number: number;
+  latest: boolean;
+  frameUrl: string;
+  /** Its page in Cronk, at that Version when the embed names one. */
+  page: string;
+}
+
+/** Loads what an embed of Artifact `id` shows: Version `version`, or else the latest. */
+async function loadEmbedded(id: string, version: number | null): Promise<Embedded> {
+  if (version === null) {
+    const a = await api.artifact(id);
+    return { title: a.title, number: a.version, latest: true, frameUrl: a.frameUrl ?? "", page: `/artifacts/${id}` };
+  }
+  const v = await api.artifactVersion(id, version);
+  return { title: v.title, number: v.number, latest: false, frameUrl: v.frameUrl ?? "", page: `/artifacts/${id}?version=${v.number}` };
+}
+
+/**
+ * An Artifact embedded in a Document, Report or Comment (docs/ui.md § Artifact): a bordered block with a bar (kind label,
+ * title, Version chip, Open full size) above the sandboxed frame. One the reader can't open shows as its address, a link.
+ */
+export function ArtifactEmbed(props: { artifactId: string; version: number | null; address: string }) {
+  const [state] = useLoad(() => loadEmbedded(props.artifactId, props.version), [props.artifactId, props.version]);
+  if (state.kind === "failed") {
+    return (
+      <p>
+        <a href={props.address} className="link">{props.address}</a>
+      </p>
+    );
+  }
+  const shown = state.kind === "loaded" ? state.value : undefined;
+  return (
+    <figure className="artifact-embed">
+      <div className="artifact-embed-bar">
+        <span className="kind-label">Artifact</span>
+        {shown ? (
+          <Link to={shown.page} className="artifact-embed-title link">{shown.title}</Link>
+        ) : (
+          <span className="artifact-embed-title muted">Loading…</span>
+        )}
+        {shown && <Chip>{`Version ${shown.number}${shown.latest ? " · latest" : ""}`}</Chip>}
+        <span className="grow" />
+        {shown && (
+          <a className={buttonClass("secondary")} href={shown.frameUrl} target="_blank" rel="noopener noreferrer">Open full size</a>
+        )}
+      </div>
+      {shown && (
+        <iframe key={shown.frameUrl} className="artifact-embed-frame" title={`${shown.title}, Version ${shown.number}`} src={shown.frameUrl} sandbox={FRAME_SANDBOX} />
+      )}
+    </figure>
+  );
+}
 
 /** The Artifacts of a Project, or of the Workspace without `projectKey`, with Publish for those who may write there. */
 export function ArtifactsPage(props: { projectKey?: string }) {
@@ -83,7 +142,7 @@ export function ArtifactsPage(props: { projectKey?: string }) {
  * An Artifact's page: a thin bar over the Artifact in a sandboxed frame, full bleed. `version` shows that Version
  * instead of the latest.
  */
-export function ArtifactPage(props: { id: string; version?: number | undefined }) {
+export function ArtifactPage(props: { id: string; version?: number | undefined; workspace: Workspace | undefined }) {
   const [artifact, reload, setArtifact] = useLoad(() => api.artifact(props.id), [props.id]);
   const [pinned] = useLoad(
     () => (props.version === undefined ? Promise.resolve(undefined) : api.artifactVersion(props.id, props.version)),
@@ -93,21 +152,48 @@ export function ArtifactPage(props: { id: string; version?: number | undefined }
     <Show state={artifact}>
       {(a) => (
         <Show state={pinned}>
-          {(version) => <ArtifactView artifact={a} version={version} onChanged={setArtifact} reload={reload} />}
+          {(version) => <ArtifactView artifact={a} version={version} workspace={props.workspace} onChanged={setArtifact} reload={reload} />}
         </Show>
       )}
     </Show>
   );
 }
 
-function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | undefined; onChanged: (a: Artifact) => void; reload: () => void }) {
+function ArtifactView(props: {
+  artifact: Artifact;
+  version: ArtifactVersion | undefined;
+  workspace: Workspace | undefined;
+  onChanged: (a: Artifact) => void;
+  reload: () => void;
+}) {
   const a = props.artifact;
   const shown = props.version ?? a.versions?.find((v) => v.number === a.version);
   const number = shown?.number ?? a.version;
   const frameUrl = props.version?.frameUrl ?? a.frameUrl ?? "";
+  const extras = shown?.extraOrigins ?? a.extraOrigins;
+  const extrasApply = props.workspace?.artifactExtraOriginsAllowed ?? true;
   const canWrite = useCanWrite(a.projectKey);
   const [publishing, setPublishing] = useState(false);
   const protect = useAction((value: boolean) => api.protectArtifact(a.id, value), (changed) => props.onChanged({ ...a, protected: changed.protected }));
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [comments, reloadComments] = useLoad(() => api.artifactComments(a.id), [a.id]);
+  const [attachments, reloadAttachments] = useLoad(() => api.artifactAttachments(a.id), [a.id]);
+  const [opened, setOpened] = useState<Attachment>();
+  const [live, onLive] = useLiveState();
+  useEffect(
+    () =>
+      watchArtifact(a.id, {
+        onLive,
+        // On (re)connecting, catch up on what was posted meanwhile.
+        ready: () => {
+          reloadComments();
+          reloadAttachments();
+        },
+        on: { comment: () => reloadComments(), attachments: () => reloadAttachments() },
+      }),
+    [a.id],
+  );
+  const loadedComments = comments.kind === "loaded" ? comments.value : [];
   return (
     <section className="artifact-page">
       {a.projectKey ? (
@@ -135,9 +221,13 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
               by <Actor actor={shown.actor} />
             </span>
           )}
+          {extras.length > 0 && <ExtraOrigins extras={extras} apply={extrasApply} />}
           <span className="grow" />
           <CopyLink url={shown?.url ?? a.versionUrl} label={`Copy link to Version ${number}`} />
           <a className={buttonClass("secondary")} href={frameUrl} target="_blank" rel="noopener noreferrer">Open full size</a>
+          <Button variant="secondary" aria-pressed={drawerOpen} aria-controls="artifact-comments" onClick={() => setDrawerOpen((o) => !o)}>
+            Comments {loadedComments.length}
+          </Button>
           {canWrite && (
             <Menu
               label="More actions"
@@ -150,11 +240,41 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
           )}
         </div>
         {protect.error && <p className="error" role="alert">{protect.error}</p>}
-        <iframe key={frameUrl} className="artifact-frame" title={`${a.title}, Version ${number}`} src={frameUrl} sandbox={FRAME_SANDBOX} />
+        <div className="artifact-body">
+          <iframe key={frameUrl} className="artifact-frame" title={`${a.title}, Version ${number}`} src={frameUrl} sandbox={FRAME_SANDBOX} />
+          {drawerOpen && (
+            <PageAttachments.Provider value={{ attachments: attachments.kind === "loaded" ? attachments.value : [], onOpen: setOpened }}>
+              <div id="artifact-comments" className="artifact-drawer-slot">
+                <Show state={comments}>
+                  {(all) => (
+                    <ArtifactCommentsDrawer
+                      artifactId={a.id}
+                      version={number}
+                      publisher={shown?.actor}
+                      comments={all}
+                      canWrite={canWrite}
+                      onPosted={() => reloadComments()}
+                      live={<LiveIndicator state={live} />}
+                    />
+                  )}
+                </Show>
+              </div>
+            </PageAttachments.Provider>
+          )}
+        </div>
       </div>
+      <AttachmentViewer
+        attachment={opened}
+        canWrite={canWrite}
+        onClose={() => setOpened(undefined)}
+        onDeleted={() => {
+          setOpened(undefined);
+          reloadAttachments();
+        }}
+      />
       <p className="muted hint artifact-note">
-        {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame. It loads
-        scripts only from itself and a few CDNs, and network requests are blocked.
+        {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame.{" "}
+        {servingNote(props.workspace?.artifactAllowedOrigins, extrasApply ? extras : [])}
       </p>
       <PublishDialog
         open={publishing}
@@ -169,6 +289,50 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
       />
       <ProtectionHistory load={() => api.artifactProtection(a.id)} reloadOn={[a.id, a.protected]} />
     </section>
+  );
+}
+
+/** What a page may load, as the note under the frame says it: the Workspace's allow-list and the Version's extras in force. */
+function servingNote(allowed: string[] | undefined, extras: Artifact["extraOrigins"]): string {
+  const hosts = (origins: string[]) => origins.map((o) => o.replace(/^https:\/\//, "")).join(", ");
+  const from = allowed === undefined ? "the Workspace's allow-list" : allowed.length === 0 ? "nowhere else" : hosts(allowed);
+  const requests = extras.filter((e) => e.uses.includes("connect")).map((e) => e.origin);
+  return (
+    `It loads scripts, styles and fonts only from itself and ${from}` +
+    `${extras.length > 0 ? ", and whatever else only from the extra origins this Version declared, for what each was declared for" : ""}. ` +
+    (requests.length > 0 ? `Network requests go only to ${hosts(requests)}.` : "Network requests are blocked.")
+  );
+}
+
+/** The extra origins the shown Version declared, as a `--warn` pill that opens each with what it loads and why. */
+function ExtraOrigins(props: { extras: Artifact["extraOrigins"]; apply: boolean }) {
+  const count = props.extras.length;
+  return (
+    <Popover
+      label="Extra origins"
+      trigger={
+        <button type="button" className="chip warn extra-origins-chip">
+          {count} extra {count === 1 ? "origin" : "origins"}
+          {props.apply ? "" : " · off"} ▾
+        </button>
+      }
+    >
+      <div className="extra-origins">
+        <div className="menu-label">Extra origins this Version declared</div>
+        {!props.apply && (
+          <p className="muted extra-origins-off">Not applied: this Workspace doesn't allow extra origins, so the Version is served without them.</p>
+        )}
+        <ul className="extra-origin-list" aria-label="Extra origins">
+          {props.extras.map((e) => (
+            <li key={e.origin} className="extra-origin">
+              <span className="extra-origin-name">{e.origin}</span>
+              <span className="muted">for {e.uses.map((u) => (u === "connect" ? "network requests" : u)).join(", ")}</span>
+              <span>{e.reason}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Popover>
   );
 }
 
@@ -204,9 +368,57 @@ function VersionMenu(props: { artifact: Artifact; shown: number }) {
         </ul>
         <CopyLink url={a.url} label="Copy link to latest" />
         <div className="menu-label">Embedded in</div>
-        <p className="muted version-empty">Not embedded anywhere yet.</p>
+        <EmbeddedInList artifactId={a.id} version={a.version} />
       </div>
     </Popover>
+  );
+}
+
+/** Where a place embedding an Artifact is read: a Document or Report, or the Ticket, Document or Artifact a Comment is on. */
+const embeddedInPage = (e: EmbeddedIn) =>
+  e.kind !== "comment"
+    ? `/documents/${e.id}`
+    : e.ticketKey
+      ? `/tickets/${e.ticketKey}`
+      : e.artifactId
+        ? `/artifacts/${e.artifactId}`
+        : `/documents/${e.documentId}`;
+
+/** Each kind of place's label, with the class its kind label takes. */
+const EMBED_KINDS: Record<EmbeddedIn["kind"], { label: string; className: string }> = {
+  document: { label: "Document", className: "kind-label" },
+  report: { label: "Report", className: "kind-label report" },
+  comment: { label: "Comment", className: "kind-label comment" },
+};
+
+/** The Documents, Reports and Comments embedding an Artifact, each with the Version it shows; loaded again on each publish. */
+function EmbeddedInList(props: { artifactId: string; version: number }) {
+  const [places] = useLoad(() => api.artifactEmbeddedIn(props.artifactId), [props.artifactId, props.version]);
+  return (
+    <Show state={places}>
+      {(list) =>
+        list.length === 0 ? (
+          <p className="muted version-empty">Not embedded anywhere yet.</p>
+        ) : (
+          <ul className="version-list" aria-label="Embedded in">
+            {list.map((e) => (
+              <li key={`${e.kind}:${e.id}:${e.version ?? ""}`}>
+                <Link to={embeddedInPage(e)} className="version-row">
+                  <span className="embedded-in-head">
+                    <span className={EMBED_KINDS[e.kind].className}>{EMBED_KINDS[e.kind].label}</span>
+                    {e.ticketKey && <span className="key">{e.ticketKey}</span>}
+                  </span>
+                  <span>{e.title}</span>
+                  <span className="muted">
+                    {e.version === null ? "Latest Version" : `Version ${e.version}`} · <RelativeTime at={e.at} />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </Show>
   );
 }
 

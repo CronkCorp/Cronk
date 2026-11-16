@@ -24,11 +24,14 @@ import type {
   GuidanceVersion,
   InboxItem,
   InboxKind,
+  TriageItem,
+  TriageKind,
   IssuedAgentToken,
   Invitation,
   LinkedDocument,
   Member,
   Mention,
+  EmbeddedIn,
   Merge,
   MergedSection,
   Conflict,
@@ -89,11 +92,14 @@ export type {
   GuidanceVersion,
   InboxItem,
   InboxKind,
+  TriageItem,
+  TriageKind,
   IssuedAgentToken,
   Invitation,
   LinkedDocument,
   Member,
   Mention,
+  EmbeddedIn,
   Merge,
   MergedSection,
   Conflict,
@@ -259,6 +265,8 @@ export const api = {
     attachmentMaxBytes?: number;
     artifactMaxBytes?: number;
     artifactMaxFiles?: number;
+    artifactAllowedOrigins?: string[];
+    artifactExtraOriginsAllowed?: boolean;
   }) =>
     request<Workspace>("PATCH", "/api/workspace", changes),
   /** How much storage the Workspace's files take; Admins only. */
@@ -302,6 +310,8 @@ export const api = {
   /** One Version of an Artifact, with its files and where to frame it. */
   artifactVersion: (id: string, number: number) =>
     request<{ version: ArtifactVersion }>("GET", `${artifactPath(id)}/versions/${number}`).then((r) => r.version),
+  /** Where an Artifact is embedded that the caller can read, most recently changed first. */
+  artifactEmbeddedIn: (id: string) => request<{ embeddedIn: EmbeddedIn[] }>("GET", `${artifactPath(id)}/embedded-in`).then((r) => r.embeddedIn),
   /** Publishes a folder, packed as an archive, as a new Artifact. */
   publishArtifact: (projectKey: string | undefined, title: string, archive: Blob) =>
     upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${new URLSearchParams({ title })}`, archive, "application/gzip").then((r) => r.artifact),
@@ -462,11 +472,23 @@ export const api = {
   /** Posts a Comment on a Document, optionally anchored to a passage its current Version holds. */
   postDocumentComment: (id: string, input: NewComment & { anchor?: { passage: string } }) =>
     request<{ comment: Comment }>("POST", `${documentPath(id)}/comments`, input).then((r) => r.comment),
+  /** The Comments on an Artifact, on all its Versions, oldest first. */
+  artifactComments: (id: string) => request<{ comments: Comment[] }>("GET", `${artifactPath(id)}/comments`).then((r) => r.comments),
+  /** Posts a Comment on an Artifact, on the Version being viewed. */
+  postArtifactComment: (id: string, version: number, input: NewComment) =>
+    request<{ comment: Comment }>("POST", `${artifactPath(id)}/comments`, { ...input, version }).then((r) => r.comment),
+  /** The files in an Artifact's Comments. */
+  artifactAttachments: (id: string) => request<{ attachments: Attachment[] }>("GET", `${artifactPath(id)}/attachments`).then((r) => r.attachments),
 
   /** The signed-in User's Inbox, narrowed by any of the filters given. */
   inbox: (filter: InboxFilter = {}) => {
     const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
     return request<{ items: InboxItem[] }>("GET", `/api/inbox${query.size ? `?${query}` : ""}`).then((r) => r.items);
+  },
+  /** The items in Triage the signed-in User could act on, narrowed by any of the filters given. */
+  triage: (filter: TriageFilter = {}) => {
+    const query = new URLSearchParams(Object.entries(filter).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    return request<{ items: TriageItem[] }>("GET", `/api/triage${query.size ? `?${query}` : ""}`).then((r) => r.items);
   },
   /** Sends a Ticket under review back to a Started Status (the Project's first, unless named), with a Comment. */
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
@@ -502,6 +524,12 @@ export interface InboxFilter {
   agent?: string;
 }
 
+/** Narrows Triage: an item kind, a Project key. */
+export interface TriageFilter {
+  kind?: TriageKind;
+  project?: string;
+}
+
 /** A Comment to post: its Markdown, and what it replies to, if anything. */
 export interface NewComment {
   body: string;
@@ -534,6 +562,13 @@ export interface DocumentEvents {
   attachments: Record<string, never>;
 }
 
+/** The events an Artifact's live-update stream pushes, by name, with their data. */
+export interface ArtifactEvents {
+  comment: { comment: Comment };
+  /** A file was attached to one of its Comments, or one was deleted. */
+  attachments: Record<string, never>;
+}
+
 /** Where a live-update stream is: in place, away and reconnecting, or closed for good. */
 export type StreamState = "live" | "away" | "closed";
 
@@ -563,6 +598,13 @@ function watch<Events>(
 /** Watches the signed-in User's Inbox; `changed` arrives whenever it may have changed (see `watch`). */
 export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/inbox/events", handlers);
 
+/**
+ * Watches the signed-in User's Inbox and Triage on one stream, as browsers allow only a few per site: `changed` arrives whenever
+ * the Inbox may have changed, and `triage` whenever Triage may have, for anyone (see `watch`).
+ */
+export const watchInboxAndTriage = (handlers: Parameters<typeof watch<{ changed: object; triage: object }>>[1]) =>
+  watch<{ changed: object; triage: object }>("/api/inbox/events?triage=true", handlers);
+
 /** Watches the signed-in User's own Agents; `changed` arrives every few seconds while their live Agent Sessions change (see `watch`). */
 export const watchAgents = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/agents/events", handlers);
 
@@ -577,3 +619,7 @@ export const watchProject = (key: string, handlers: Parameters<typeof watch<Proj
 /** Watches one Document's new Comments and Versions as they happen (see `watch`). */
 export const watchDocument = (id: string, handlers: Parameters<typeof watch<DocumentEvents>>[1]) =>
   watch<DocumentEvents>(`${documentPath(id)}/events`, handlers);
+
+/** Watches one Artifact's new Comments as they happen (see `watch`). */
+export const watchArtifact = (id: string, handlers: Parameters<typeof watch<ArtifactEvents>>[1]) =>
+  watch<ArtifactEvents>(`${artifactPath(id)}/events`, handlers);

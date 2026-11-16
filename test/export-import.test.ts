@@ -205,7 +205,8 @@ async function snapshot(admin: Client): Promise<unknown> {
             return { version, served };
           }),
         );
-        return { artifact, versions, protection: await get(`/api/artifacts/${a.id}/protection`) };
+        const { comments } = await get(`/api/artifacts/${a.id}/comments`);
+        return { artifact, versions, protection: await get(`/api/artifacts/${a.id}/protection`), comments, attachments: await attachments(`/api/artifacts/${a.id}/attachments`) };
       }),
     );
   const projects = [...(await get("/api/projects")).projects, ...(await get("/api/projects?archived=true")).projects];
@@ -232,7 +233,7 @@ async function busyWorkspace() {
   const { cronk, admin, session, claude } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
-  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024, artifactMaxBytes: 30 * 1024 * 1024, artifactMaxFiles: 800 });
+  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024, artifactMaxBytes: 30 * 1024 * 1024, artifactMaxFiles: 800, artifactAllowedOrigins: ["https://esm.sh"] });
   await admin.put("/api/workspace/guidance", { baseVersion: 0, markdown: "Be kind." });
   await admin.put("/api/workspace/guidance", { baseVersion: 1, markdown: "Be kind. Be brief." });
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
@@ -263,8 +264,15 @@ async function busyWorkspace() {
   const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
   // An Artifact the Agent published from CRONK-1, then Ada's second Version of it, with a binary file; she marks it Protected.
   const prototype = (await agent.upload("/api/projects/CRONK/artifacts?title=Cache%20prototype", await tarGz({ "index.html": "<p>v1</p>", "img/chart.png": "\u0089PNG" }))).body.artifact;
-  await admin.upload(`/api/artifacts/${prototype.id}/versions?baseVersion=1&title=Cache%20dashboard`, await tarGz({ "index.html": "<p>v2</p>", "data.json": "[1,2]" }));
+  // Ada's declares an extra origin; then she turns extra origins off for the Workspace.
+  const extraOrigins = encodeURIComponent(JSON.stringify([{ origin: "https://cdn.plot.ly", uses: ["scripts", "connect"], reason: "Plotly draws it" }]));
+  await admin.upload(`/api/artifacts/${prototype.id}/versions?baseVersion=1&title=Cache%20dashboard&extraOrigins=${extraOrigins}`, await tarGz({ "index.html": "<p>v2</p>", "data.json": "[1,2]" }));
   await admin.post(`/api/artifacts/${prototype.id}/protection`, { protected: true });
+  // Ada comments on its first Version, with a file, and the Agent replies on the second.
+  const onPrototype = (await admin.post(`/api/artifacts/${prototype.id}/comments`, { body: "The chart needs a legend.", version: 1 })).body.comment;
+  await admin.upload(`/api/comments/${onPrototype.id}/attachments?name=legend.txt`, Buffer.from("legend"), "text/plain");
+  await agent.post(`/api/artifacts/${prototype.id}/comments`, { body: "Version 2 has one.", replyToCommentId: onPrototype.id, version: 2 });
+  await admin.patch("/api/workspace", { artifactExtraOriginsAllowed: false });
   // Attachments: the Agent's binary screenshot, and two of Ada's, one named as a hidden file would be.
   await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
   await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");
@@ -749,6 +757,71 @@ describe("a Suggestion on Guidance nobody has written", () => {
   });
 });
 
+describe("Suggestions of new Documents in an export", () => {
+  it("are written under the Document they go under until accepted, then with the Document they created, and imported as they were", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "Start here." })).body.document;
+    await admin.post(`/api/documents/${guide.id}/protection`, { protected: true });
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const suggest = async (title: string) => {
+      cronk.clock.advance(60_000);
+      const content = { title, body: `About ${title}.` };
+      return (await agent.post("/api/suggestions", { item: { kind: "document", parentId: guide.id }, baseVersion: 0, content, reasoning: "Missing." })).body.suggestion.id as string;
+    };
+    const [accepted, rejected, open] = [await suggest("Setup"), await suggest("Deploys"), await suggest("Backups")];
+    await admin.post(`/api/suggestions/${accepted}/accept`);
+    await admin.post(`/api/suggestions/${rejected}/reject`, { reason: "Not yet." });
+
+    const exported = await admin.download("/api/export");
+    const files = await untarGz(exported.body);
+    const pathOf = (pattern: RegExp) => Object.keys(files).find((path) => pattern.test(path))!;
+    const guideData = markdown(files[pathOf(/projects\/CRONK\/documents\/\d+-guide\.md$/)]).data;
+    expect(guideData.suggestions).toBeUndefined();
+    expect(guideData.suggestedDocuments).toMatchObject([
+      { id: rejected, baseVersion: 0, content: { title: "Deploys", body: "About Deploys." }, state: "rejected", reason: "Not yet." },
+      { id: open, baseVersion: 0, content: { title: "Backups", body: "About Backups." }, state: "open" },
+    ]);
+    expect(markdown(files[pathOf(/guide\/\d+-setup\.md$/)]).data.suggestions).toMatchObject([{ id: accepted, baseVersion: 0, state: "accepted", resultVersion: 1 }]);
+
+    const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    const newGuide = (await elsewhere.get("/api/projects/CRONK/documents")).body.documents[0];
+    for (const id of [accepted, rejected, open]) {
+      const [before, after] = [(await admin.get(`/api/suggestions/${id}`)).body.suggestion, (await elsewhere.get(`/api/suggestions/${id}`)).body.suggestion];
+      expect(after).toMatchObject({ state: before.state, baseVersion: 0, base: { title: "", body: "" }, content: before.content, parent: { id: newGuide.id, title: "Guide" } });
+      expect(after.item).toMatchObject({ title: before.item.title, version: before.item.version, protected: true });
+    }
+    expect((await elsewhere.post(`/api/suggestions/${open}/accept`)).body.suggestion).toMatchObject({ state: "accepted", item: { title: "Backups", version: 1 } });
+  });
+
+  it("is refused on import when it claims to be accepted without its Document, or to start from a Version", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "Start here." })).body.document;
+    await admin.post(`/api/documents/${guide.id}/protection`, { protected: true });
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    await agent.post("/api/suggestions", { item: { kind: "document", parentId: guide.id }, baseVersion: 0, content: { title: "Setup" }, reasoning: "Missing." });
+    const files = await untarGz((await admin.download("/api/export")).body);
+    const path = Object.keys(files).find((p) => /\d+-guide\.md$/.test(p))!;
+    const tampered = (change: (entry: Record<string, unknown>) => void) => {
+      const { data, body } = markdown(files[path]!);
+      change(data.suggestedDocuments[0]);
+      return tarGz({ ...files, [path]: `---\n${stringify(data)}---\n${body}` });
+    };
+
+    for (const [change, error] of [
+      [(e: Record<string, unknown>) => Object.assign(e, { state: "accepted", acceptedWithEdits: false, resultVersion: 1, decidedAt: e.at, decidedBy: "ada@example.com" }), /is accepted, so it belongs with the Document it created/],
+      [(e: Record<string, unknown>) => Object.assign(e, { baseVersion: 1 }), /baseVersion must be 0/],
+    ] as const) {
+      const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+      const refused = await elsewhere.upload("/api/import", await tampered(change));
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(error);
+    }
+  });
+});
+
 describe("Protected marks in an export", () => {
   it("are written in the frontmatter of the items they belong to, with who marked and unmarked them", async () => {
     const { admin } = await busyWorkspace();
@@ -977,7 +1050,9 @@ describe("Artifacts in an export", () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     const { artifact } = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<p>v1</p>" }))).body;
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Too dark.", version: 1 });
     await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "<p>v2</p>" }));
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Better.", version: 2 });
 
     const files = await untarGz((await admin.download("/api/export?versions=false")).body);
     expect(markdown(files["projects/CRONK/artifacts/1-limits.md"]).data).toMatchObject({ id: artifact.id, title: "Limits", version: 2, versions: [{ number: 2 }] });
@@ -988,6 +1063,11 @@ describe("Artifacts in an export", () => {
     const moved = (await elsewhere.get(`/api/artifacts/${artifact.id}`)).body.artifact;
     expect(moved).toMatchObject({ version: 2, url: `${OWN_ORIGIN}/artifacts/${artifact.id}` });
     expect(moved.versions.map((v: { number: number }) => v.number)).toEqual([2]);
+    // A Comment on a Version the export left out comes along on the oldest Version it holds after it.
+    expect((await elsewhere.get(`/api/artifacts/${artifact.id}/comments`)).body.comments).toEqual([
+      expect.objectContaining({ body: "Too dark.", artifactVersion: 2 }),
+      expect.objectContaining({ body: "Better.", artifactVersion: 2 }),
+    ]);
     const page = await elsewhere.download(`${new URL(moved.frameUrl).pathname}index.html`, { host: ARTIFACT_HOST });
     expect(page.body.toString()).toBe("<p>v2</p>");
   });

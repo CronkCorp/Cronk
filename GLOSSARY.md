@@ -89,7 +89,7 @@ One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or 
 _Avoid_: Event, history entry, field change
 
 **Comment**:
-A message any Actor posts on a Ticket or Document, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. Conversation, as opposed to an Agent's own Activities.
+A message any Actor posts on a Ticket, Document or Artifact, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. On an Artifact it records the Version being viewed. Conversation, as opposed to an Agent's own Activities.
 _Avoid_: Reply, note, message, discussion
 
 **Waiting Work**:
@@ -229,5 +229,5 @@ Said of a Document, Term, Decision or Artifact that Agents may read but never ed
 _Avoid_: Locked, read-only, human-only
 
 **Suggestion**:
-A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version.
+A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version. An Agent also suggests a new Document under a protected branch this way, from nothing; accepting it creates the Document there.
 _Avoid_: Proposal, change request, draft

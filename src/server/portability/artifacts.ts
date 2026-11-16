@@ -1,18 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { artifactFileKey, insertArtifactRow, insertArtifactVersion, type ArtifactFile } from "../files/artifacts.js";
 import { mediaTypeOf } from "../files/artifact-routes.js";
+import { extraOrigins, type ExtraOrigin } from "../files/origins.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { bytesOf } from "./archive.js";
 import { date, integer, isUuid, list, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
+import { exportComments, importComments } from "./comments.js";
 import type { ImportContext } from "./import-context.js";
 import type { ImportedTickets } from "./tickets.js";
 
 /**
  * Artifacts: `artifacts/<n>-<title>.md` for the Workspace's, and `projects/<KEY>/artifacts/` for a Project's, numbered in
  * the order they were created. Its frontmatter holds the Artifact and its Versions; each Version's files are in
- * `<n>-<title>/<version>/` as they were published. Every Version is exported when the export includes Versions, otherwise
+ * `<n>-<title>/<version>/` as they were published, and its Comments in `<n>-<title>.comments/`. Every Version is exported when the export includes Versions, otherwise
  * only the latest, keeping its number so links to it keep working.
  */
 
@@ -29,6 +31,7 @@ interface VersionRow extends ActorColumns {
   title: string;
   at: Date;
   source_ticket: string | null;
+  extra_origins: ExtraOrigin[];
 }
 
 /** Writes the Artifacts of the Workspace (projectId null) or a Project into `${dir}artifacts/`. */
@@ -58,6 +61,7 @@ export async function exportArtifacts(ctx: ExportContext, dir: string, projectId
         at: iso(v.at),
         by: ctx.actor(v),
         sourceTicket: v.source_ticket ?? undefined,
+        ...(v.extra_origins.length > 0 && { extraOrigins: v.extra_origins }),
         files: files.map((f) => ({ path: f.path, contentType: f.content_type })),
       });
     }
@@ -69,6 +73,7 @@ export async function exportArtifacts(ctx: ExportContext, dir: string, projectId
       createdAt: iso(a.created_at),
       versions: written,
     });
+    await exportComments(ctx, `${base}.comments`, "artifact_id", a.id);
   }
 }
 
@@ -112,12 +117,22 @@ export async function importArtifacts(ctx: ImportContext, dir: string, projectId
       const published = await insertArtifactVersion(
         ctx.db,
         artifact,
-        { title, actor: await ctx.actor(v.by, at("by")), sourceTicketId: sourceTicket, files, now: date(v.at, at("at")) },
+        {
+          title,
+          actor: await ctx.actor(v.by, at("by")),
+          sourceTicketId: sourceTicket,
+          files,
+          // Exports from before declared extras have none.
+          extraOrigins: v.extraOrigins === undefined ? [] : extraOrigins(v.extraOrigins, at("extraOrigins")),
+          now: date(v.at, at("at")),
+        },
         number,
       );
       artifact = { id: published.id, workspaceId: published.workspaceId, version: published.version };
     }
     await importProtection(ctx, { kind: "artifact", id }, file.data, path);
+    const imported = versions.map((v, i) => integer(v.number, where(`versions[${i}] number`)));
+    await importComments(ctx, `${base}.comments`, { artifactId: id }, undefined, undefined, imported);
   }
 }
 

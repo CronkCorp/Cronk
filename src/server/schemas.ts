@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -75,7 +75,9 @@ export type SharedSchemaName =
   | "Attachment"
   | "Artifact"
   | "ArtifactVersion"
+  | "ExtraOrigin"
   | "StaleArtifact"
+  | "EmbeddedIn"
   | "AvoidedWord"
   | "Suggestion";
 
@@ -136,6 +138,18 @@ const writtenBy = {
 const ticketName = object({ key: { type: "string" }, title: { type: "string" } });
 const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
+
+/** The Artifacts a Markdown body embeds: their addresses standing alone on a line. */
+const embeds = (whose: string) => ({
+  type: "array",
+  items: object({
+    artifactId: id,
+    version: { ...nullable({ type: "integer" }), description: "The Version the address names, which the embed keeps showing; null for the latest." },
+  }),
+  description:
+    `The Artifacts ${whose} embeds, in order, each once: an Artifact's address (\`url\` or \`versionUrl\`) standing alone on a line, bare, shows the ` +
+    "Artifact in place. An address inside a sentence, or naming no Artifact of the Workspace, stays a link.",
+});
 
 /** Who did something, as history records it. */
 const recordedActor = {
@@ -296,6 +310,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
     artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
     artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
+    artifactAllowedOrigins: {
+      type: "array",
+      items: { type: "string" },
+      description: "The origins every Artifact may load scripts, styles and fonts from, besides its own files.",
+    },
+    artifactExtraOriginsAllowed: {
+      type: "boolean",
+      description: "Whether a publish may declare extra origins for its Version; turned off, Versions are served without those they declared.",
+    },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
@@ -489,11 +512,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   Comment: {
-    description: "A message an Actor posted on a Ticket or a Document: conversation, as opposed to an Agent's own Activities.",
+    description: "A message an Actor posted on a Ticket, a Document or an Artifact: conversation, as opposed to an Agent's own Activities.",
     ...object({
       id,
-      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null on a Document." },
-      documentId: { ...nullable(id), description: "The Document it is on; null on a Ticket." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null otherwise." },
+      documentId: { ...nullable(id), description: "The Document it is on; null otherwise." },
+      artifactId: { ...nullable(id), description: "The Artifact it is on; null otherwise." },
+      artifactVersion: { ...nullable({ type: "integer" }), description: "On an Artifact: the Version whoever posted it was viewing; null otherwise." },
       replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
       replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
       anchor: {
@@ -507,6 +532,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The passage of its Document it is anchored to; null when it isn't anchored.",
       },
       body: { type: "string", description: "Markdown." },
+      embeds: embeds("its body"),
       sendBack: { type: "boolean", description: "True for the Comment a User sent its Ticket back from review with." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },
@@ -523,6 +549,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           enum: WAITING_REASONS,
           description:
             "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`published`: it is on an Artifact Version the Agent published. " +
             "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why. " +
             "`suggestion_rejected`: a User rejected a Suggestion the Agent made; `suggestion` says which and why.",
         },
@@ -555,6 +582,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         },
         ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision or Suggestion came from; null otherwise." },
         document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
+        artifact: {
+          ...nullable(object({ id, title: { type: "string" }, version: { type: "integer", description: "The Version the Comment is on." } })),
+          description: "The Artifact the Comment is on, with the Version whoever posted it was viewing; null otherwise.",
+        },
       },
       ["decision", "suggestion"],
     ),
@@ -576,6 +607,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The Document whose Protected mark covers it: itself if marked, else the nearest marked Document above it; null if none.",
       },
       covers: { type: "integer", description: "When it is itself marked Protected, how many Documents under it the mark covers; 0 otherwise." },
+      embeds: embeds("its body"),
       createdAt: timestamp,
       updatedAt: timestamp,
     }),
@@ -644,6 +676,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
     }),
   },
+  EmbeddedIn: {
+    description: "A Document, Report or Comment whose current text embeds an Artifact: its address standing alone on a line.",
+    ...object({
+      kind: { type: "string", enum: ["document", "report", "comment"], description: "What embeds it." },
+      id: { ...id, description: "The Document's, Report's or Comment's id; read a Report as a Document." },
+      title: { type: "string", description: "Its title; for a Comment, the title of the Ticket, Document or Artifact it is on." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "For a Report, or a Comment on a Ticket: the Ticket's key." },
+      documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      artifactId: { ...nullable(id), description: "For a Comment on an Artifact: that Artifact's id." },
+      version: { ...nullable({ type: "integer" }), description: "The Version it embeds; null for the latest." },
+      at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
+    }),
+  },
   Mention: {
     description:
       "Something whose current text mentions a Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term or Decision.",
@@ -651,10 +697,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       kind: { type: "string", enum: MENTION_KINDS, description: "What mentions it." },
       id: { ...id, description: "Its id; read a Ticket or Decision by its key instead." },
       key: { ...nullable({ type: "string" }), description: "A Ticket's or Decision's key; null for the others." },
-      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket or Document it is on." },
+      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on." },
       projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, or a Report: the Ticket's key." },
       documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      artifactId: { ...nullable(id), description: "For a Comment on an Artifact: the Artifact's id." },
       at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
     }),
   },
@@ -670,7 +717,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Version: {
     description: "One saved state of a Document, recording which Actor produced it. Never changes.",
-    ...object({ ...versionFields, body: { type: "string", description: "Markdown." } }),
+    ...object({ ...versionFields, body: { type: "string", description: "Markdown." }, embeds: embeds("its body") }),
   },
   VersionSummary: { description: "A Version without its body, as a Document's Version list shows it.", ...object(versionFields) },
   StaleVersion: {
@@ -809,6 +856,18 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       actor: { ...recordedActor, description: "Who attached it." },
     }),
   },
+  ExtraOrigin: {
+    description: "An origin a publish declared for its Version beyond the Workspace's allow-list: what the page loads from there, and why.",
+    ...object({
+      origin: { type: "string", description: "A bare origin, such as `https://cdn.plot.ly`." },
+      uses: {
+        type: "array",
+        items: { type: "string", enum: EXTRA_ORIGIN_USES },
+        description: "What the page may load from it; `connect` lets it send requests there.",
+      },
+      reason: { type: "string", description: "Why the page needs it, as the publisher wrote it." },
+    }),
+  },
   Artifact: {
     description:
       "A folder of files with `index.html`, such as a prototype or dashboard, published by a User or an Agent and served in isolation " +
@@ -830,6 +889,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: {
           ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
           description: "The Ticket the latest Version came from: the one whose Claim the publishing Agent Session held.",
+        },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins the latest Version's publish declared; served with it only while the Workspace allows extra origins.",
         },
         createdAt: timestamp,
         updatedAt: { ...timestamp, description: "When its latest Version was published." },
@@ -853,6 +917,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: { ...nullable(object({ key: { type: "string" }, title: { type: "string" } })), description: "The Ticket it came from, if any." },
         fileCount: { type: "integer", description: "How many files it holds." },
         size: { type: "integer", description: "How many bytes its files take." },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins its publish declared, never carried over from an earlier Version; served with it only while the Workspace allows extra origins.",
+        },
         url: { type: "string", description: "Its address in Cronk." },
         frameUrl: { type: "string", description: "Where it is served on the Artifact hostname, signed for the caller and valid for 12 hours; only when one Version is asked for." },
         files: {
@@ -888,7 +957,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Suggestion: {
     description:
-      "A new Version of a Protected Document, Term or Decision, or of Guidance, that an Agent proposes (ADR 0014): the item's whole new content, the Version it " +
+      "A new Version of a Protected Document, Term or Decision, or of Guidance, or a new Document under a protected branch, that an Agent proposes (ADR 0014): " +
+      "the item's whole new content, the Version it " +
       "started from and the Agent's reasoning. It takes effect only when a User accepts it: unchanged, as the item's next Version credited to the Agent; " +
       "edited first, credited to the User and linked to the Suggestion. Rejecting it needs a reason, which reaches the Agent as Waiting Work.",
     ...object({
@@ -897,20 +967,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The item it would change, as it stands now.",
         ...object({
           kind: { type: "string", enum: SUGGESTION_KINDS },
-          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance." },
+          id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance, and for a new Document until it is accepted." },
           key: { ...nullable({ type: "string" }), description: "A Decision's key; null for the other kinds." },
-          title: { type: "string", description: "A Document's or Decision's title, a Term's name, or `Guidance`." },
+          title: { type: "string", description: "A Document's or Decision's title (a new Document's as suggested), a Term's name, or `Guidance`." },
           status: { ...nullable(decisionStatus), description: "A Decision's status; null for the other kinds." },
           projectId: { ...nullable(id), description: "Null for a Workspace item." },
           projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace item." },
           protected: { type: "boolean", description: protectedDescription("it is marked Protected (Guidance always is)") },
-          version: { type: "integer", description: "Its current Version." },
+          version: { type: "integer", description: "Its current Version; 0 for a new Document until it is accepted." },
         }),
       },
       baseVersion: { type: "integer", description: "The Version of the item the Suggestion started from." },
       base: { ...suggestedContent, description: "What the item held at the base Version, in the same shape as `content`." },
       content: suggestedContent,
       reasoning: { type: "string", description: "Why the Agent suggests the change, in Markdown." },
+      parent: {
+        ...nullable(object({ id, title: { type: "string" } })),
+        description:
+          "For a Suggestion of a new Document under a protected branch (`baseVersion` 0, `item.id` null until accepted): the Document it goes under; " +
+          "once accepted, the one the new Document sits under now, null at the top. Null for a Suggestion changing an existing item.",
+      },
       proposedBy: { ...recordedActor, description: "The Agent that made it, with its Owner and Agent Session." },
       at: timestamp,
       sourceTicket: { ...nullable(ticketName), description: "The Ticket whose Claim the Agent held when making it; null for none." },
@@ -998,6 +1074,9 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 /** A Comment's id. */
 export const commentIdParam = { type: "string", format: "uuid", description: "The Comment's id." } as const;
+
+/** An Artifact's id. */
+export const artifactIdParam = { type: "string", format: "uuid", description: "The Artifact's id." } as const;
 
 /** An Attachment's id. */
 export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;

@@ -1,6 +1,7 @@
 import type { Queryable } from "./database.js";
 import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
+import { recordAllEmbeds } from "../files/artifact-embeds.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -663,7 +664,8 @@ export const migrations: Migration[] = [
       CREATE INDEX mentions_term ON mentions (term_id);
       CREATE INDEX mentions_decision ON mentions (decision_id);
     `,
-    backfill: (db) => recordAllMentions(db),
+    // Artifacts came later (0035_comments_on_artifacts), so this reads Comments as they were then.
+    backfill: (db) => recordAllMentions(db, null, { artifacts: false }),
   },
   {
     id: "0027_proposed_decisions",
@@ -852,7 +854,78 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0032_transcript_redactions",
+    id: "0032_suggested_new_documents",
+    sql: `
+      -- A Suggestion can propose a new Document under a protected branch (knowledge/suggestions.ts): until a User accepts it
+      -- there is no Document yet, so it names the parent instead, with base Version 0. Accepting it creates the Document,
+      -- which the Suggestion then names in document_id like any other, the parent cleared.
+      ALTER TABLE suggestions ADD COLUMN parent_document_id uuid REFERENCES documents(id) ON DELETE CASCADE;
+      ALTER TABLE suggestions DROP CONSTRAINT suggestions_check;
+      ALTER TABLE suggestions DROP CONSTRAINT suggestions_check1;
+      ALTER TABLE suggestions ADD CONSTRAINT suggestions_one_item
+        CHECK (num_nonnulls(document_id, parent_document_id, term_id, decision_id) = CASE WHEN kind = 'guidance' THEN 0 ELSE 1 END);
+      ALTER TABLE suggestions ADD CONSTRAINT suggestions_item_of_kind
+        CHECK ((kind = 'document') = (num_nonnulls(document_id, parent_document_id) = 1) AND (kind = 'term') = (term_id IS NOT NULL)
+          AND (kind = 'decision') = (decision_id IS NOT NULL));
+      ALTER TABLE suggestions ADD CONSTRAINT suggestions_new_document CHECK (parent_document_id IS NULL OR (base_version = 0 AND state <> 'accepted'));
+      CREATE INDEX suggestions_parent_document ON suggestions (parent_document_id) WHERE parent_document_id IS NOT NULL;
+    `,
+  },
+  {
+    id: "0033_artifact_origins",
+    sql: `
+      -- The origins every Artifact of the Workspace may load scripts, styles and fonts from, which an Admin may change,
+      -- and whether a publish may declare extra origins for its Version.
+      ALTER TABLE workspaces ADD COLUMN artifact_allowed_origins text[] NOT NULL
+        DEFAULT ARRAY['https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://unpkg.com', 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'];
+      ALTER TABLE workspaces ADD COLUMN artifact_extra_origins_allowed boolean NOT NULL DEFAULT true;
+      -- The extra origins a publish declared for its Version, each with what it may load from there and why:
+      -- [{"origin": "https://cdn.plot.ly", "uses": ["scripts"], "reason": "..."}]. Never carried over to the next Version.
+      ALTER TABLE artifact_versions ADD COLUMN extra_origins jsonb NOT NULL DEFAULT '[]';
+    `,
+  },
+  {
+    id: "0034_artifact_embeds",
+    sql: `
+      -- Where each Artifact is embedded (files/artifact-embeds.ts): the Document (a Report too) or Comment whose current
+      -- text holds its address alone on a line, with the Version the address names (null for the latest) and where it
+      -- comes in the text. Rewritten on every change to the text.
+      CREATE TABLE artifact_embeds (
+        artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        version integer,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        position integer NOT NULL,
+        CHECK (num_nonnulls(document_id, comment_id) = 1)
+      );
+      CREATE INDEX artifact_embeds_artifact ON artifact_embeds (artifact_id);
+      CREATE INDEX artifact_embeds_document ON artifact_embeds (document_id);
+      CREATE INDEX artifact_embeds_comment ON artifact_embeds (comment_id);
+    `,
+    // Comments on Artifacts came later (0035_comments_on_artifacts), so this reads Comments as they were then.
+    backfill: (db) => recordAllEmbeds(db, null, { artifacts: false }),
+  },
+  {
+    id: "0035_comments_on_artifacts",
+    sql: `
+      -- A Comment may be on an Artifact instead of a Ticket or Document, recording the Version whoever posted it was viewing.
+      ALTER TABLE comments ADD COLUMN artifact_id uuid REFERENCES artifacts(id) ON DELETE CASCADE;
+      ALTER TABLE comments ADD COLUMN artifact_version integer;
+      ALTER TABLE comments ADD CONSTRAINT comments_artifact_version FOREIGN KEY (artifact_id, artifact_version)
+        REFERENCES artifact_versions(artifact_id, number) ON DELETE CASCADE;
+      ALTER TABLE comments DROP CONSTRAINT comments_check;
+      ALTER TABLE comments ADD CONSTRAINT comments_on_one CHECK (num_nonnulls(ticket_id, document_id, artifact_id) = 1);
+      ALTER TABLE comments ADD CONSTRAINT comments_artifact_version_given CHECK ((artifact_id IS NULL) = (artifact_version IS NULL));
+      CREATE INDEX comments_artifact ON comments (artifact_id, seq) WHERE artifact_id IS NOT NULL;
+
+      -- A Comment on an Artifact Version an Agent published waits for that Agent.
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check
+        CHECK (reason IN ('answer', 'mention', 'comment', 'published', 'rejected', 'suggestion_rejected'));
+    `,
+  },
+  {
+    id: "0036_transcript_redactions",
     sql: `
       -- Passages a Transcript's Owner redacted by hand (transcripts/redact.ts), in the order they were made. The passage is
       -- never kept, only what finds it again in a later upload: its length, rolling fingerprint and SHA-256 digest.

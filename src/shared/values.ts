@@ -35,10 +35,10 @@ export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
 /**
  * Why work waits for an Agent. A Comment, in order of precedence: it answers the Agent's question,
- * @mentions it, or is on a Ticket delegated to it. Or `rejected`: a User rejected a Decision the Agent proposed;
+ * @mentions it, is on a Ticket delegated to it, or is on an Artifact Version it published (`published`). Or `rejected`: a User rejected a Decision the Agent proposed;
  * or `suggestion_rejected`: a User rejected a Suggestion the Agent made.
  */
-export const WAITING_REASONS = ["answer", "mention", "comment", "rejected", "suggestion_rejected"] as const;
+export const WAITING_REASONS = ["answer", "mention", "comment", "published", "rejected", "suggestion_rejected"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
 
 /** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
@@ -84,3 +84,6 @@ export type SuggestionState = (typeof SUGGESTION_STATES)[number];
 /** A Decision's lifecycle status. Only Users change it; a Decision becomes superseded when one superseding it is accepted. */
 export const DECISION_STATUSES = ["proposed", "accepted", "rejected", "deprecated", "superseded"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
+
+/** What a declared extra origin of an Artifact Version may be loaded from for, each opening one directive of its content policy. */
+export const EXTRA_ORIGIN_USES = ["scripts", "styles", "fonts", "images", "media", "connect"] as const;

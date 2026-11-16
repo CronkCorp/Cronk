@@ -198,7 +198,7 @@ export function ReportCard(props: { report: Report }) {
         <Link to={`/documents/${r.id}`} className="link">Open Report</Link>
       </div>
       <div className="tl-report-body">
-        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+        <Show state={document}>{(d) => <CronkMarkdown embeds={d.embeds}>{d.body}</CronkMarkdown>}</Show>
         <InlineAttachments documentId={r.id} />
       </div>
       {r.decisions.length > 0 && (
@@ -230,7 +230,7 @@ function CommentEntry(props: { comment: Comment; className: string } & Thread) {
       </div>
       <div className="tl-bubble">
         <div className="tl-body">
-          <CronkMarkdown>{c.body}</CronkMarkdown>
+          <CronkMarkdown embeds={c.embeds}>{c.body}</CronkMarkdown>
           <InlineAttachments commentId={c.id} />
         </div>
         {replies.length > 0 && <ReplyList replies={replies} thread={props} />}
@@ -251,7 +251,7 @@ function ReplyList(props: { replies: Comment[]; thread: Thread }) {
             <RelativeTime at={r.at} clock />
           </div>
           <div className="tl-body">
-            <CronkMarkdown>{r.body}</CronkMarkdown>
+            <CronkMarkdown embeds={r.embeds}>{r.body}</CronkMarkdown>
             <InlineAttachments commentId={r.id} />
           </div>
           {props.thread.comments.some((c) => c.replyToCommentId === r.id) && (
@@ -361,7 +361,7 @@ export function describeChange(change: RecordedChange): ReactNode {
 
 /** What an Activity or Comment item needs to show its replies and post new ones. */
 interface Thread {
-  /** Every Comment on the Ticket or Document, to find the replies among. */
+  /** Every Comment on the Ticket, Document or Artifact, to find the replies among. */
   comments: Comment[];
   canWrite: boolean;
   post: (input: NewComment) => Promise<Comment>;
@@ -400,9 +400,10 @@ function CommentItem(props: { comment: Comment; card?: Card } & Thread) {
         <KindLabel kind="comment">Comment</KindLabel>
         <Actor actor={c.actor} />
         <RelativeTime at={c.at} />
+        {c.artifactVersion !== null && <span className="muted comment-version">on Version {c.artifactVersion}</span>}
       </div>
       <div className="comment-body">
-        <CronkMarkdown>{c.body}</CronkMarkdown>
+        <CronkMarkdown embeds={c.embeds}>{c.body}</CronkMarkdown>
         <InlineAttachments commentId={c.id} />
       </div>
       <Replies comments={props.comments} canWrite={props.canWrite} post={props.post} onPosted={props.onPosted} replies={replies} replyTo={{ replyToCommentId: c.id }} replyLabel="Reply" />
@@ -621,6 +622,50 @@ export function DocumentMargin(props: {
         ) : (
           <Button variant="secondary" className="whole-document" onClick={() => setWriting(true)}>Comment on the whole Document</Button>
         ))}
+    </aside>
+  );
+}
+
+/**
+ * The Comments drawer beside an Artifact (docs/ui.md § Artifact): every Comment on any of its Versions, oldest first, each
+ * saying which Version it was on, and a box to comment on `version`, the Version shown, which reaches `publisher` when an
+ * Agent published it.
+ */
+export function ArtifactCommentsDrawer(props: {
+  artifactId: string;
+  version: number;
+  publisher: Comment["actor"] | undefined;
+  comments: Comment[];
+  canWrite: boolean;
+  onPosted: () => void;
+  live: ReactNode;
+}) {
+  const threads = props.comments.filter((c) => !c.replyToCommentId);
+  const post = (input: NewComment) => api.postArtifactComment(props.artifactId, props.version, input);
+  const reaches = props.publisher?.kind === "agent" ? ` (reaches ${props.publisher.name})` : "";
+  return (
+    <aside className="artifact-drawer" aria-label="Comments on this Artifact">
+      <div className="artifact-drawer-head">
+        <h2 className="artifact-drawer-title">Comments</h2>
+        {props.live}
+      </div>
+      <ol className="timeline drawer-comments" aria-label="Comments">
+        {threads.length === 0 ? (
+          <li className="muted">No Comments yet.</li>
+        ) : (
+          threads.map((c) => <CommentItem key={c.id} comment={c} comments={props.comments} canWrite={props.canWrite} post={post} onPosted={props.onPosted} />)
+        )}
+      </ol>
+      {props.canWrite && (
+        <CommentForm
+          label={`Comment on Version ${props.version}`}
+          placeholder={`Comment on Version ${props.version}…${reaches}`}
+          submitLabel="Comment"
+          attachable
+          post={post}
+          onPosted={props.onPosted}
+        />
+      )}
     </aside>
   );
 }

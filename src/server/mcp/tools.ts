@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
-import type { AvoidedWord } from "../api-types.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, EXTRA_ORIGIN_USES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import type { AvoidedWord, Welcome } from "../api-types.js";
+import { formatBytes } from "../files/sizes.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 import { packFolder, type Folder } from "../portability/archive.js";
@@ -11,6 +12,8 @@ import { packFolder, type Folder } from "../portability/archive.js";
 export interface ToolContext {
   readOnly: boolean;
   api: (caller: Caller) => ApiCall;
+  /** What an Artifact may load and hold in the Workspace when the Agent Session started, which the artifacts tool describes. */
+  artifacts: Welcome["artifacts"];
 }
 
 /** One `action` of a grouped tool: whether it writes, and the API call it maps onto. */
@@ -269,26 +272,29 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerGroupedTool(server, ctx, {
     name: "comments",
     description:
-      "Comments: conversation any User or Agent posts on a Ticket or a Document, kept apart from Activities. Reply to a Comment " +
+      "Comments: conversation any User or Agent posts on a Ticket, a Document or an Artifact, kept apart from Activities. Reply to a Comment " +
       "to thread under it. A User answers your question by replying to its Activity. On a Document, a Comment can anchor to a " +
-      "passage it is about. Comments that @mention you, answer your questions or land on Tickets delegated to you wait for you " +
+      "passage it is about; on an Artifact, it records the Version it is on. Comments that @mention you, answer your questions, " +
+      "land on Tickets delegated to you or on Artifact Versions you published wait for you " +
       `in your welcome. ${MENTION_SYNTAX}`,
     parameters: {
       key: z.string().optional().describe("Ticket key, such as CRONK-12, for its Comments (list, post)"),
       documentId: z.string().optional().describe("Document id, for its Comments, instead of a key (list, post)"),
+      artifactId: z.string().optional().describe("Artifact id, for its Comments on all its Versions, instead of a key (list, post)"),
+      version: z.number().int().optional().describe("On an Artifact: the number of the Version the Comment is about; the latest if left out (post)"),
       body: z.string().optional().describe("Markdown text of the Comment; @name, @owner/name or @\"quoted name\" mentions an Agent (post)"),
-      replyToCommentId: z.string().optional().describe("The Comment to reply to, on the same Ticket or Document (post)"),
+      replyToCommentId: z.string().optional().describe("The Comment to reply to, on the same Ticket, Document or Artifact (post)"),
       replyToActivityId: z.string().optional().describe("The Activity on the same Ticket to reply to (post)"),
       passage: z.string().optional().describe("On a Document: the exact text of its current Version the Comment is about (post)"),
     },
     actions: {
       list: {
-        description: "the Comments on a Ticket or a Document, oldest first",
+        description: "the Comments on a Ticket, a Document or an Artifact, oldest first",
         writes: false,
         run: (api, a) => api("GET", commentsPath(a, "list")),
       },
       post: {
-        description: "post a Comment on a Ticket or a Document, optionally replying to a Comment or an Activity",
+        description: "post a Comment on a Ticket, a Document or an Artifact Version, optionally replying to a Comment or an Activity",
         writes: true,
         run: (api, a) =>
           api("POST", commentsPath(a, "post"), {
@@ -296,6 +302,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             ...(a.replyToCommentId !== undefined && { replyToCommentId: a.replyToCommentId }),
             ...(a.replyToActivityId !== undefined && { replyToActivityId: a.replyToActivityId }),
             ...(a.passage !== undefined && { anchor: { passage: a.passage } }),
+            ...(a.version !== undefined && { version: a.version }),
           }),
       },
     },
@@ -312,7 +319,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
-      "move, or create Documents under; propose a change to it with the `suggestions` tool instead.",
+      "move, or create Documents under; propose a change to it, or a new Document under it, with the `suggestions` tool instead.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
@@ -486,13 +493,16 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Protected), or Guidance, which only Users write. Send the item's new content based on the Version you read (`baseVersion`, the item's `version`; " +
       "Guidance at 0 when nobody has written it) with your reasoning; fields you leave out keep what that Version holds. A User reviews it (the Assignee " +
       "of the Ticket you hold the Claim on, or else your Owner; a Workspace item goes to Triage) and accepts it as is, credited to you, edits and accepts " +
-      "it, credited to them, or rejects it with a reason, which reaches you as waiting work. Check where yours stand with `list`.",
+      "it, credited to them, or rejects it with a reason, which reaches you as waiting work. Check where yours stand with `list`. " +
+      "To add a Document under a protected branch, suggest the new Document: kind `document`, the Document it goes under as `parentId`, `baseVersion` 0, " +
+      "and its `title` and `body`; accepting it creates the Document there.",
     parameters: {
       kind: z.enum(["document", "term", "decision", "guidance"]).optional().describe("What kind of item to change (create)"),
       itemId: z.string().optional().describe("The Document's or Term's id (create)"),
+      parentId: z.string().optional().describe("For a new Document, instead of an itemId: the Document under the protected branch it goes under (create)"),
       key: z.string().optional().describe("The Decision's key, such as CRONK-D7 (create)"),
       project: z.string().optional().describe("For Guidance, the Project key whose Guidance to change; leave out for the Workspace's (create)"),
-      baseVersion: z.number().int().optional().describe("The item's `version` you read and are changing (create)"),
+      baseVersion: z.number().int().optional().describe("The item's `version` you read and are changing; 0 for a new Document (create)"),
       title: z.string().optional().describe("A Document's or Decision's new title (create)"),
       body: z.string().optional().describe("A Document's or Decision's new Markdown body (create)"),
       name: z.string().optional().describe("A Term's new name (create)"),
@@ -510,16 +520,21 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     actions: {
       create: {
-        description: "suggest a new Version of a Protected Document, Term or Decision, or of Guidance",
+        description: "suggest a new Version of a Protected Document, Term or Decision, or of Guidance, or a new Document under a protected branch",
         writes: true,
         run: (api, a) => {
           const kind = required(a.kind, "a kind", "create");
+          if (a.itemId !== undefined && a.parentId !== undefined) {
+            throw new ToolError("The create action takes an itemId to change a Document, or a parentId to suggest a new one, not both");
+          }
           const item =
             kind === "decision"
               ? { kind, key: required(a.key, "a key for a Decision", "create") }
               : kind === "guidance"
                 ? { kind, project: a.project ?? null }
-                : { kind, id: required(a.itemId, `an itemId for a ${kind === "document" ? "Document" : "Term"}`, "create") };
+                : kind === "document" && a.itemId === undefined
+                  ? { kind, parentId: required(a.parentId, "an itemId for a Document, or a parentId for a new one", "create") }
+                  : { kind, id: required(a.itemId, `an itemId for a ${kind === "document" ? "Document" : "Term"}`, "create") };
           const fields = { title: a.title, body: a.body, name: a.name, definition: a.definition, avoid: a.avoid, group: a.group, markdown: a.markdown };
           const content = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
           return api("POST", "/api/suggestions", {
@@ -639,10 +654,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "`index.html` at its top. Each belongs to a Project or, without a project, the Workspace, and records the Ticket whose Claim you held. " +
       "Every publish is the whole folder again, as a new Version; publishing a new Version names the Version you based it on (`baseVersion`, " +
       "the Artifact's `version`) and is refused if a later one was published meanwhile, so merge with it first. `url` always shows the latest " +
-      "Version and `versionUrl` the one just published: link that one where your words describe it, such as in a Report. The page runs " +
-      "sandboxed on a hostname of its own: it may load scripts, styles and fonts only from its own files, cdnjs, jsDelivr, unpkg and Google " +
-      "Fonts, and may make no network requests, so put its data in its files. A Version may hold 500 files and 25 MB unless an Admin changed " +
-      "the limits. You can't publish a new Version of an Artifact a User marked `protected`.",
+      "Version and `versionUrl` the one just published. An address alone on a line of a Report, Document or Comment embeds the Artifact there; " +
+      "in a Report, embed `versionUrl`, so the evidence stays as reviewed (the publish answer says so in `embedding`). " +
+      artifactRules(ctx.artifacts) +
+      " You can't publish a new Version of an Artifact a User marked `protected`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (list, publish a new Artifact)"),
       id: z.string().optional().describe("The Artifact's id (get; publish, for a new Version of it)"),
@@ -662,6 +677,16 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         .string()
         .optional()
         .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (publish)"),
+      extraOrigins: z
+        .array(
+          z.object({
+            origin: z.string().describe("A bare origin, such as https://cdn.plot.ly"),
+            uses: z.array(z.enum(EXTRA_ORIGIN_USES)).describe("What the page loads from it; connect lets it send requests there"),
+            reason: z.string().describe("Why the page needs it, shown to Users on the Artifact"),
+          }),
+        )
+        .optional()
+        .describe("Origins this Version needs beyond the allow-list, each with a reason; for this Version only, so declare them again on the next (publish)"),
     },
     actions: {
       list: {
@@ -686,16 +711,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             }
             folder.set(file.path, file.content ?? Buffer.from(file.contentBase64!, "base64"));
           }
+          const extraOrigins = a.extraOrigins && a.extraOrigins.length > 0 ? JSON.stringify(a.extraOrigins) : undefined;
           const query = (params: Record<string, string | undefined>) =>
             `?${new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined)).toString()}`;
           if (a.id === undefined) {
             const title = required(a.title, "a title", "publish");
-            return api("POST", `${scopePath(a.project)}/artifacts${query({ title, ticket: a.ticket })}`, new FileBody(await packFolder(folder), "application/gzip"));
+            return api("POST", `${scopePath(a.project)}/artifacts${query({ title, ticket: a.ticket, extraOrigins })}`, new FileBody(await packFolder(folder), "application/gzip"));
           }
           const baseVersion = required(a.baseVersion, "a baseVersion with an id", "publish");
           return api(
             "POST",
-            `/api/artifacts/${encodeURIComponent(a.id)}/versions${query({ baseVersion: String(baseVersion), title: a.title, ticket: a.ticket })}`,
+            `/api/artifacts/${encodeURIComponent(a.id)}/versions${query({ baseVersion: String(baseVersion), title: a.title, ticket: a.ticket, extraOrigins })}`,
             new FileBody(await packFolder(folder), "application/gzip"),
           );
         },
@@ -704,6 +730,21 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerSearchTool(server, ctx);
+}
+
+/** What an Artifact's page may load and a Version may hold, as the artifacts tool tells it: the Workspace's settings in force. */
+function artifactRules(rules: Welcome["artifacts"]): string {
+  const allowed =
+    rules.allowedOrigins.length > 0 ? `its own files and ${rules.allowedOrigins.join(", ")}` : "its own files (the Workspace allows no other origins)";
+  const extras = rules.extraOriginsAllowed
+    ? "If it truly needs another origin, such as a library from elsewhere or a data source it sends requests to, declare it in `extraOrigins` " +
+      "with what it loads from there and why; Users see them on the Version, and they are never carried over, so declare them again on the next one. " +
+      "Declare as few as you can."
+    : "This Workspace doesn't allow extra origins, so a publish declaring `extraOrigins` is refused.";
+  return (
+    `The page runs sandboxed on a hostname of its own: it may load scripts, styles and fonts only from ${allowed}, and may make no network ` +
+    `requests, so put its data in its files. ${extras} A Version may hold ${rules.maxFiles} files and ${formatBytes(rules.maxBytes)}.`
+  );
 }
 
 /** Registers the `search` tool: one operation, so it takes no `action`. It only reads, so every token is offered it. */
@@ -726,10 +767,14 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
   );
 }
 
-/** Where the Comments on the Ticket `key` or the Document `documentId` live; exactly one must be given. */
-function commentsPath(a: { key?: string | undefined; documentId?: string | undefined }, action: string): string {
-  if ((a.key === undefined) === (a.documentId === undefined)) throw new ToolError(`The ${action} action needs a key or a documentId`);
-  return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
+/** Where the Comments on the Ticket `key`, the Document `documentId` or the Artifact `artifactId` live; exactly one must be given. */
+function commentsPath(a: { key?: string | undefined; documentId?: string | undefined; artifactId?: string | undefined }, action: string): string {
+  if ([a.key, a.documentId, a.artifactId].filter((v) => v !== undefined).length !== 1) {
+    throw new ToolError(`The ${action} action needs one of key, documentId or artifactId`);
+  }
+  if (a.key !== undefined) return `/api/tickets/${encodeURIComponent(a.key)}/comments`;
+  if (a.documentId !== undefined) return `/api/documents/${encodeURIComponent(a.documentId)}/comments`;
+  return `/api/artifacts/${encodeURIComponent(a.artifactId!)}/comments`;
 }
 
 /** Where the Attachments of the one Ticket (`key`), Document or Comment the arguments name are. */

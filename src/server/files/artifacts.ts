@@ -1,6 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
+import type { ExtraOrigin } from "./origins.js";
 
 /**
  * Artifacts: folders of files with `index.html`, published by Users and Agents and served in isolation on the
@@ -47,6 +48,8 @@ export interface ArtifactVersion {
   /** How many files it holds, and how many bytes they take. */
   files: number;
   size: number;
+  /** The origins its publish declared beyond the Workspace's allow-list; never carried over from an earlier Version. */
+  extraOrigins: ExtraOrigin[];
 }
 
 /** One file of a Version, by its path in the folder. */
@@ -71,10 +74,11 @@ interface VersionRow extends RecordedActorRow {
   source_ticket_title: string | null;
   files: number;
   size: string;
+  extra_origins: ExtraOrigin[];
 }
 
 const VERSION_SELECT = `
-  SELECT v.artifact_id, v.number, v.title, v.at, ${ticketKeySql("tp", "t")} AS source_ticket_key, t.title AS source_ticket_title,
+  SELECT v.artifact_id, v.number, v.title, v.at, v.extra_origins, ${ticketKeySql("tp", "t")} AS source_ticket_key, t.title AS source_ticket_title,
     (SELECT count(*)::int FROM artifact_files f WHERE f.artifact_id = v.artifact_id AND f.version = v.number) AS files,
     (SELECT coalesce(sum(size), 0)::bigint FROM artifact_files f WHERE f.artifact_id = v.artifact_id AND f.version = v.number) AS size,
     u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, v.actor_session_id AS session_id
@@ -89,6 +93,7 @@ const toVersion = (row: VersionRow): ArtifactVersion => ({
   sourceTicket: row.source_ticket_key === null ? null : { key: row.source_ticket_key, title: row.source_ticket_title! },
   files: row.files,
   size: Number(row.size),
+  extraOrigins: row.extra_origins,
 });
 
 interface ArtifactRow {
@@ -188,12 +193,16 @@ export async function findArtifactFile(db: Queryable, artifactId: string, versio
   return rows[0] && toFile(rows[0]);
 }
 
-/** What a publish records: the Version's title, who published it and from which Ticket, and its files, whose bytes are already stored. */
+/**
+ * What a publish records: the Version's title, who published it and from which Ticket, its files, whose bytes are
+ * already stored, and the extra origins it declared.
+ */
 export interface Publish {
   title: string;
   actor: Actor | StoredActor;
   sourceTicketId: string | null;
   files: ArtifactFile[];
+  extraOrigins: ExtraOrigin[];
   now: Date;
 }
 
@@ -225,9 +234,9 @@ export async function insertArtifactVersion(
   number = artifact.version + 1,
 ): Promise<Artifact> {
   await db.query(
-    `INSERT INTO artifact_versions (artifact_id, number, title, source_ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [artifact.id, number, publish.title, publish.sourceTicketId, publish.now, ...actorColumns(publish.actor)],
+    `INSERT INTO artifact_versions (artifact_id, number, title, source_ticket_id, at, extra_origins, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [artifact.id, number, publish.title, publish.sourceTicketId, publish.now, JSON.stringify(publish.extraOrigins), ...actorColumns(publish.actor)],
   );
   for (const file of publish.files) {
     await db.query("INSERT INTO artifact_files (id, artifact_id, version, path, content_type, size) VALUES ($1, $2, $3, $4, $5, $6)", [

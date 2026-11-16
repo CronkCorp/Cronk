@@ -7,8 +7,11 @@ import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/trans
 import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
 import { attachmentStorage } from "../files/attachments.js";
 import { artifactStorage } from "../files/artifacts.js";
+import { bareOrigins } from "../files/origins.js";
 
 const MB = 1024 * 1024;
+/** The most origins the Workspace's allow-list may hold. */
+const MAX_ALLOWED_ORIGINS = 50;
 
 /** What an Admin may change about the Workspace. */
 interface WorkspaceChanges {
@@ -19,6 +22,8 @@ interface WorkspaceChanges {
   transcriptMaxBytes?: number;
   artifactMaxBytes?: number;
   artifactMaxFiles?: number;
+  artifactAllowedOrigins?: string[];
+  artifactExtraOriginsAllowed?: boolean;
 }
 
 export function workspaceRoutes(ctx: AppContext) {
@@ -73,6 +78,20 @@ export function workspaceRoutes(ctx: AppContext) {
                 maximum: 10_000,
                 description: "The most files one Version of an Artifact may hold: 1 to 10,000; 500 unless changed.",
               },
+              artifactAllowedOrigins: {
+                type: "array",
+                maxItems: MAX_ALLOWED_ORIGINS,
+                items: { type: "string", maxLength: 300 },
+                description:
+                  "The origins every Artifact may load scripts, styles and fonts from, besides its own files, as bare http or https origins such as " +
+                  "`https://cdn.jsdelivr.net`; at most 50. Cronk starts with cdnjs, jsDelivr, unpkg and Google Fonts. Network requests stay blocked whatever it holds.",
+              },
+              artifactExtraOriginsAllowed: {
+                type: "boolean",
+                description:
+                  "Whether a publish may declare extra origins for its Version, with a reason. Turned off, such publishes are refused and Versions that declared some " +
+                  "are served without them.",
+              },
             },
           },
           response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403, 410) },
@@ -81,7 +100,17 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change the Workspace");
-        const { name, agentAccess, silenceThresholdSeconds, attachmentMaxBytes, transcriptMaxBytes, artifactMaxBytes, artifactMaxFiles } = request.body;
+        const {
+          name,
+          agentAccess,
+          silenceThresholdSeconds,
+          attachmentMaxBytes,
+          transcriptMaxBytes,
+          artifactMaxBytes,
+          artifactMaxFiles,
+          artifactAllowedOrigins,
+          artifactExtraOriginsAllowed,
+        } = request.body;
         const workspace = await updateWorkspace(ctx.db, user.workspaceId, {
           ...(name !== undefined && { name: name.trim() }),
           ...(agentAccess !== undefined && { agentAccess }),
@@ -90,6 +119,8 @@ export function workspaceRoutes(ctx: AppContext) {
           ...(transcriptMaxBytes !== undefined && { transcriptMaxBytes }),
           ...(artifactMaxBytes !== undefined && { artifactMaxBytes }),
           ...(artifactMaxFiles !== undefined && { artifactMaxFiles }),
+          ...(artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: bareOrigins(artifactAllowedOrigins, "artifactAllowedOrigins") }),
+          ...(artifactExtraOriginsAllowed !== undefined && { artifactExtraOriginsAllowed }),
         });
         return publicWorkspace(workspace);
       },

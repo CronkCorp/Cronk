@@ -2,14 +2,17 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { HttpError, type AppContext } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { artifactFileKey, artifactSigningKey, findArtifactAnywhere, findArtifactFile } from "./artifacts.js";
+import { getWorkspace } from "../workspace/workspaces.js";
+import { artifactFileKey, artifactSigningKey, findArtifactAnywhere, findArtifactFile, findArtifactVersion } from "./artifacts.js";
+import type { ExtraOrigin, ExtraOriginUse } from "./origins.js";
 
 /**
  * The Artifact hostname (ADR 0007): where Artifacts' files are served, apart from Cronk's own hostname so code in them
  * can't act with a User's sign-in. Nothing there reads the sign-in cookie. A Version is served at an address Cronk hands
  * out to whoever may read the Artifact, signed and valid for a while, so the address alone lets a frame show it:
  * `/a/<artifact id>.<version>.<expiry>.<signature>/<path>`. Every file is served under a strict content policy: scripts,
- * styles and fonts only from the Artifact itself and a short allow-list of CDNs, and no network requests.
+ * styles and fonts only from the Artifact itself and the Workspace's allow-list, and no network requests, unless the
+ * Version's publish declared extra origins and the Workspace allows them.
  */
 
 /** Where Artifacts' files are served, on whichever hostname serves them. */
@@ -18,26 +21,35 @@ export const ARTIFACT_PATH = "/a/";
 /** How long a frame address Cronk hands out stays valid. */
 const FRAME_VALIDITY_MS = 12 * 60 * 60 * 1000;
 
-/** The CDNs an Artifact may load scripts, styles and fonts from by default. */
-export const DEFAULT_ALLOWED_ORIGINS = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com"];
-/** Google Fonts: its stylesheets and the fonts they load. */
-const FONT_ORIGINS = ["https://fonts.googleapis.com", "https://fonts.gstatic.com"];
+/** The directive each use of a declared extra origin opens. */
+const DIRECTIVE_OF: Record<ExtraOriginUse, string> = {
+  scripts: "script-src",
+  styles: "style-src",
+  fonts: "font-src",
+  images: "img-src",
+  media: "media-src",
+  connect: "connect-src",
+};
 
 /**
  * The content policy every Artifact file is served with. `sandbox` gives the page an origin of its own even when opened
  * outside Cronk's frame, so it can read no cookie or storage of any site, and `connect-src 'none'` stops its requests.
- * `own` is the origin serving the file, named beside `'self'`, which a sandboxed page's origin doesn't match in every browser.
+ * `own` is the origin serving the file, named beside `'self'`, which a sandboxed page's origin doesn't match in every
+ * browser. Scripts, styles and fonts may also come from the Workspace's `allowed` origins, and each of the Version's
+ * `extras` opens what it was declared for, requests included; none of them adds anything to the sandbox.
  */
-export function artifactContentPolicy(own: string, cronk: string | undefined): string {
-  const from = (...origins: string[]) => ["'self'", own, ...origins].join(" ");
+export function artifactContentPolicy(own: string, cronk: string | undefined, allowed: string[], extras: ExtraOrigin[]): string {
+  const declared = (directive: string) => extras.filter((e) => e.uses.some((u) => DIRECTIVE_OF[u] === directive)).map((e) => e.origin);
+  const from = (directive: string, ...origins: string[]) => [directive, "'self'", own, ...new Set([...origins, ...declared(directive)])].join(" ");
+  const requests = declared("connect-src");
   return [
     "default-src 'none'",
-    `script-src ${from(...DEFAULT_ALLOWED_ORIGINS)} 'unsafe-inline' 'unsafe-eval'`,
-    `style-src ${from(...DEFAULT_ALLOWED_ORIGINS, ...FONT_ORIGINS)} 'unsafe-inline'`,
-    `font-src ${from(...DEFAULT_ALLOWED_ORIGINS, ...FONT_ORIGINS)} data:`,
-    `img-src ${from()} data: blob:`,
-    `media-src ${from()} data: blob:`,
-    "connect-src 'none'",
+    `${from("script-src", ...allowed)} 'unsafe-inline' 'unsafe-eval'`,
+    `${from("style-src", ...allowed)} 'unsafe-inline'`,
+    `${from("font-src", ...allowed)} data:`,
+    `${from("img-src")} data: blob:`,
+    `${from("media-src")} data: blob:`,
+    `connect-src ${requests.length > 0 ? requests.join(" ") : "'none'"}`,
     "form-action 'none'",
     "base-uri 'none'",
     ...(cronk ? [`frame-ancestors ${cronk}`] : []),
@@ -90,13 +102,19 @@ export function artifactHostRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     app.get<{ Params: { token: string; "*": string } }>(`${ARTIFACT_PATH}:token/*`, { schema: { hide: true } }, async (request, reply) => {
       const served = await versionAt(ctx, request.params.token);
+      const workspace = await getWorkspace(ctx.db, served.workspaceId);
+      // Declared extras apply only while the Workspace allows them; turned off, every Version is served without its own.
+      const extras = workspace.artifactExtraOriginsAllowed ? (await findArtifactVersion(ctx.db, served.artifactId, served.version))!.extraOrigins : [];
       const path = request.params["*"] === "" || request.params["*"].endsWith("/") ? `${request.params["*"]}index.html` : request.params["*"];
       const file = await findArtifactFile(ctx.db, served.artifactId, served.version, path);
       if (!file) throw new HttpError(404, "Not found");
       return reply
         .header("content-type", file.contentType)
         .header("content-length", file.size)
-        .header("content-security-policy", artifactContentPolicy(artifactOrigin(ctx, request), ctx.publicUrl && new URL(ctx.publicUrl).origin))
+        .header(
+          "content-security-policy",
+          artifactContentPolicy(artifactOrigin(ctx, request), ctx.publicUrl && new URL(ctx.publicUrl).origin, workspace.artifactAllowedOrigins, extras),
+        )
         .header("x-content-type-options", "nosniff")
         .header("referrer-policy", "no-referrer")
         .header("cache-control", "private, max-age=3600")
@@ -111,7 +129,7 @@ export function artifactHostRoutes(ctx: AppContext) {
 }
 
 /** The Version a frame address names, if Cronk signed it and it is still valid; otherwise a 404, as for any address that isn't one. */
-async function versionAt(ctx: AppContext, token: string): Promise<{ artifactId: string; version: number }> {
+async function versionAt(ctx: AppContext, token: string): Promise<{ artifactId: string; workspaceId: string; version: number }> {
   const notFound = new HttpError(404, "Not found");
   const match = /^([0-9a-f-]{36})\.([1-9][0-9]{0,8})\.([0-9]{1,12})\.([A-Za-z0-9_-]{43})$/.exec(token);
   if (!match) throw notFound;
@@ -121,5 +139,5 @@ async function versionAt(ctx: AppContext, token: string): Promise<{ artifactId: 
   const expected = Buffer.from(sign(await artifactSigningKey(ctx.db, artifact.workspaceId), `${artifactId}.${version}.${expires}`));
   if (!timingSafeEqual(expected, Buffer.from(signature))) throw notFound;
   if (Number(expires) * 1000 < ctx.clock.now().getTime()) throw notFound;
-  return { artifactId, version: Number(version) };
+  return { artifactId, workspaceId: artifact.workspaceId, version: Number(version) };
 }

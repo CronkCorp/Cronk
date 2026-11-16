@@ -4,14 +4,17 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "../knowledge/protection.js";
 import { ARCHIVE_TYPES, archiveBody, unpackFolder, unwrapFolder, bytesOf, type Folder } from "../portability/archive.js";
-import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
+import { answer, artifactIdParam, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
+import { listEmbeddedIn, recordEmbedsNaming } from "./artifact-embeds.js";
 import { formatBytes } from "./sizes.js";
+import { EXTRA_ORIGIN_USES } from "../../shared/values.js";
+import { parseExtraOrigins, type ExtraOrigin } from "./origins.js";
 import {
   artifactFileKey,
   findArtifact,
@@ -35,10 +38,37 @@ const ticketParam = {
     "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds; the Version records it as where it came from. " +
     "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
 } as const;
-const artifactIdParam = { type: "string", format: "uuid", description: "The Artifact's id." } as const;
 const artifactParams = pathParams({ id: artifactIdParam });
 const versionParams = pathParams({ id: artifactIdParam, number: { type: "string", pattern: "^[1-9][0-9]{0,8}$", description: "The Version's number, counting from 1." } });
 const projectParams = pathParams({ key: projectKeyParam });
+const extraOriginsParam = {
+  type: "string",
+  maxLength: 20_000,
+  description:
+    "Origins the page needs beyond the Workspace's allow-list, as a JSON list of `{origin, uses, reason}`, such as " +
+    '`[{"origin": "https://cdn.plot.ly", "uses": ["scripts"], "reason": "Plotly draws the chart"}]`. `uses` names what the page loads from there: ' +
+    `${EXTRA_ORIGIN_USES.map((u) => `\`${u}\``).join(", ")} (\`connect\` lets it send requests there). They apply to this Version only, are shown ` +
+    "openly on it, and are never carried over to the next. Refused when the Workspace doesn't allow extra origins; declare as few as the page needs.",
+} as const;
+
+/** What a publish answers on how to embed the Artifact it published. */
+const howToEmbed = (artifact: { url: string; versionUrl: string; version: number }) =>
+  `To show it in a Report, Document or Comment, put its address alone on a line. In a Report, embed this Version's address, ${artifact.versionUrl}, ` +
+  `so the evidence stays as reviewed: it keeps showing Version ${artifact.version}. ${artifact.url} always shows the latest Version.`;
+
+/** The answer to a publish: the Artifact, and how to embed it. */
+const publishAnswer = (description: string) =>
+  answer(
+    description,
+    {
+      type: "object",
+      required: ["artifact", "embedding"],
+      properties: {
+        artifact: ref("Artifact"),
+        embedding: { type: "string", description: "How to embed it: its address alone on a line; a Report should embed `versionUrl`, which keeps showing this Version." },
+      },
+    },
+  );
 
 /** The largest archive a publish takes; the Workspace's limits on what it unpacks to are usually far lower. */
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
@@ -47,14 +77,16 @@ const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const publishRules =
   "The request body is the whole folder as a zip archive, or a tar archive gzipped (`tar czf`) or not, sent as `application/zip`, `application/gzip`, " +
   "`application/x-tar` or `application/octet-stream`. It must hold `index.html` at its top; a single folder holding everything (as archiving a folder adds) " +
-  "is unwrapped and hidden files are skipped. A Version may hold as many files and bytes as the Workspace allows (500 files and 25 MB unless an Admin changed them). " +
-  "Its page may load scripts, styles and fonts only from itself, cdnjs, jsDelivr, unpkg and Google Fonts, and may make no network requests. " +
+  "is unwrapped and hidden files are skipped. A Version may hold as many files and bytes as the Workspace allows (`artifactMaxFiles` and `artifactMaxBytes` " +
+  "in `GET /api/workspace`). Its page may load scripts, styles and fonts only from itself and the Workspace's `artifactAllowedOrigins`, and may make no " +
+  "network requests, unless the publish declares `extraOrigins`. " +
   "Needs Write where it belongs; Agents publish within an Agent Session.";
 
 interface PublishQuery {
   title?: string;
   ticket?: string;
   baseVersion?: number;
+  extraOrigins?: string;
 }
 
 /** Artifacts: publishing folders as Versions, and reading them. Their files are served on the Artifact hostname (artifact-host.ts). */
@@ -75,9 +107,27 @@ export function artifactRoutes(ctx: AppContext) {
       };
     };
 
-    /** Stores the folder of a publish and records it with `record`, which runs in a transaction; nothing stays stored if it fails. */
-    const publish = async (actor: Actor, body: unknown, record: (tx: Queryable, files: ArtifactFile[]) => Promise<Artifact>): Promise<Artifact> => {
+    /** What a publish answers: the Artifact, and how to embed it. */
+    const published = async (request: FastifyRequest, artifact: Artifact) => {
+      const answered = await shown(request, artifact);
+      return { artifact: answered, embedding: howToEmbed(answered) };
+    };
+
+    /**
+     * Stores the folder of a publish and records it with `record`, which runs in a transaction, with the extra origins
+     * it declares; nothing stays stored if it fails.
+     */
+    const publish = async (
+      actor: Actor,
+      body: unknown,
+      query: PublishQuery,
+      record: (tx: Queryable, files: ArtifactFile[], extraOrigins: ExtraOrigin[]) => Promise<Artifact>,
+    ): Promise<Artifact> => {
       const workspace = await getWorkspace(ctx.db, actingUser(actor).workspaceId);
+      const extraOrigins = parseExtraOrigins(query.extraOrigins);
+      if (extraOrigins.length > 0 && !workspace.artifactExtraOriginsAllowed) {
+        throw new HttpError(400, "This Workspace doesn't allow extra origins on Artifacts; publish without extraOrigins, loading only from its allow-list");
+      }
       const folder = checkedFolder(await unpackFolder(archiveBody(body)), workspace);
       const files: ArtifactFile[] = [];
       try {
@@ -87,7 +137,7 @@ export function artifactRoutes(ctx: AppContext) {
           files.push(file);
           file.size = await ctx.files.put(artifactFileKey(file.id), bytesOf(contents));
         }
-        return await transaction(ctx.db, (tx) => record(tx, files));
+        return await transaction(ctx.db, (tx) => record(tx, files, extraOrigins));
       } catch (err) {
         for (const file of files) await ctx.files.delete(artifactFileKey(file.id));
         throw err;
@@ -96,13 +146,13 @@ export function artifactRoutes(ctx: AppContext) {
 
     /** Publishes a new Artifact in a Project, or the Workspace when `projectId` is null, which `actor` may write in. */
     const create = (actor: Actor, projectId: string | null, body: unknown, query: PublishQuery) =>
-      publish(actor, body, async (tx, files) => {
+      publish(actor, body, query, async (tx, files, extraOrigins) => {
         const now = ctx.clock.now();
         const source = await sourceClaimOf(tx, actor, projectId, query.ticket, now, "an Artifact");
         return insertArtifact(
           tx,
           { workspaceId: actingUser(actor).workspaceId, projectId },
-          { title: query.title!.trim(), actor, sourceTicketId: source?.ticketId ?? null, files, now },
+          { title: query.title!.trim(), actor, sourceTicketId: source?.ticketId ?? null, files, extraOrigins, now },
         );
       });
 
@@ -110,8 +160,8 @@ export function artifactRoutes(ctx: AppContext) {
       description: `Publishes a folder as a new Artifact of ${where}, at Version 1. ${publishRules}`,
       consumes: ARCHIVE_TYPES,
       body: { description: "The folder as a zip archive, or a tar archive gzipped or not." },
-      querystring: { type: "object", required: ["title"], properties: { title: titleParam, ticket: ticketParam } },
-      response: { 201: answer("The new Artifact", holding("artifact", "Artifact")), ...errors(400, 401, 403, 404, 409, 410, 413) },
+      querystring: { type: "object", required: ["title"], properties: { title: titleParam, ticket: ticketParam, extraOrigins: extraOriginsParam } },
+      response: { 201: publishAnswer("The new Artifact"), ...errors(400, 401, 403, 404, 409, 410, 413) },
     });
 
     app.post<{ Params: { key: string }; Querystring: PublishQuery }>(
@@ -121,7 +171,7 @@ export function artifactRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "write");
         const artifact = await create(actor, project.id, request.body, request.query);
-        return reply.code(201).send({ artifact: await shown(request, artifact) });
+        return reply.code(201).send(await published(request, artifact));
       },
     );
 
@@ -129,7 +179,7 @@ export function artifactRoutes(ctx: AppContext) {
       const actor = await requireActor(ctx, request);
       await requireWorkspaceAccess(ctx.db, actor, "write");
       const artifact = await create(actor, null, request.body, request.query);
-      return reply.code(201).send({ artifact: await shown(request, artifact) });
+      return reply.code(201).send(await published(request, artifact));
     });
 
     app.post<{ Params: { id: string }; Querystring: PublishQuery }>(
@@ -149,10 +199,11 @@ export function artifactRoutes(ctx: AppContext) {
               baseVersion: { type: "integer", minimum: 1, description: "The number of the Version this publish is based on; it must be the latest." },
               title: { ...titleParam, description: "The Artifact's new title; it keeps its title if left out." },
               ticket: ticketParam,
+              extraOrigins: extraOriginsParam,
             },
           },
           response: {
-            201: answer("The Artifact at its new Version", holding("artifact", "Artifact")),
+            201: publishAnswer("The Artifact at its new Version"),
             ...errors(400, 401, 403, 404, 410, 413),
             409: {
               description: "The publish is based on a Version that is no longer the latest (the answer names the latest), or names a Ticket whose Claim the Agent Session doesn't hold",
@@ -164,7 +215,7 @@ export function artifactRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await artifactFor(ctx.db, actor, request.params.id, "write");
-        const artifact = await publish(actor, request.body, async (tx, files) => {
+        const artifact = await publish(actor, request.body, request.query, async (tx, files, extraOrigins) => {
           const current = await artifactFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, current, current.title, "publish new Versions of it");
           if (request.query.baseVersion !== current.version) {
@@ -177,9 +228,12 @@ export function artifactRoutes(ctx: AppContext) {
           const now = ctx.clock.now();
           const source = await sourceClaimOf(tx, actor, current.projectId, request.query.ticket, now, "an Artifact");
           const title = request.query.title?.trim() ?? current.title;
-          return insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
+          const next = await insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, extraOrigins, now });
+          // Text may have named this Version before it existed.
+          await recordEmbedsNaming(tx, current.workspaceId, current.id);
+          return next;
         });
-        return reply.code(201).send({ artifact: await shown(request, artifact) });
+        return reply.code(201).send(await published(request, artifact));
       },
     );
 
@@ -235,6 +289,24 @@ export function artifactRoutes(ctx: AppContext) {
             files: files.map((f) => ({ path: f.path, contentType: f.contentType, size: f.size })),
           },
         };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/embedded-in",
+      {
+        schema: {
+          description:
+            "Where the Artifact is embedded: the Documents, Reports and Comments whose current text holds its address alone on a line, most recently " +
+            "changed first (at most 50), each with the Version it embeds, leaving out those you can't read.",
+          params: artifactParams,
+          response: { 200: answer("Where the Artifact is embedded", listing("embeddedIn", ref("EmbeddedIn"))), ...errors(401, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const artifact = await artifactFor(ctx.db, actor, request.params.id, "read");
+        return { embeddedIn: await listEmbeddedIn(ctx.db, artifact.id, await readablePlaces(ctx.db, actor)) };
       },
     );
 
@@ -297,6 +369,7 @@ export function publicArtifact(a: Artifact, origin: string) {
     versionUrl: artifactAddress(origin, a.id, a.version),
     publishedBy: a.latest.actor,
     sourceTicket: a.latest.sourceTicket,
+    extraOrigins: a.latest.extraOrigins,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
   };
@@ -312,6 +385,7 @@ export function publicVersion(a: Artifact, v: ArtifactVersion, origin: string) {
     sourceTicket: v.sourceTicket,
     fileCount: v.files,
     size: v.size,
+    extraOrigins: v.extraOrigins,
     url: artifactAddress(origin, a.id, v.number),
   };
 }
