@@ -184,3 +184,21 @@ describe("Discovered Tickets in Triage", () => {
     expect(await waiting(bob)).toEqual(["discovered CRONK-2"]);
   });
 });
+
+describe("A Report", () => {
+  it("lists the Discovered Tickets filed from its Ticket during the Claim it was written in", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Before the Claim" });
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/CRONK/tickets", { title: "Stale cache" });
+    await agent.post("/api/projects/CRONK/tickets", { title: "Slow query" });
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed." });
+
+    const reports = (await admin.get("/api/tickets/CRONK-1/reports")).body.reports;
+    expect(reports[0].discovered).toEqual([
+      { key: "CRONK-3", title: "Stale cache", status: expect.objectContaining({ category: "backlog" }) },
+      { key: "CRONK-4", title: "Slow query", status: expect.objectContaining({ category: "backlog" }) },
+    ]);
+  });
+});

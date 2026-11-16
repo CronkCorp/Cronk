@@ -538,6 +538,22 @@ export function listSubTickets(db: Queryable, ticketId: string): Promise<TicketR
   return listTicketRefs(db, "t.parent_id = $1", [ticketId]);
 }
 
+/** The Discovered Tickets filed during each of these Claims, from the Claim's Ticket, in key order, as a map from Claim id. */
+export async function listDiscoveredIn(db: Queryable, claimIds: string[]): Promise<Map<string, TicketRef[]>> {
+  const { rows } = await db.query<{ id: string; claim_id: string }>(
+    `SELECT t.id, t.discovered_source_claim_id AS claim_id FROM tickets t JOIN projects p ON p.id = t.project_id
+     WHERE t.discovered_source_claim_id = ANY($1::uuid[]) ORDER BY p.key, t.number`,
+    [claimIds],
+  );
+  const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
+  const byClaim = new Map<string, TicketRef[]>();
+  rows.forEach((row, i) => {
+    const { key, title, status } = tickets[i]!;
+    byClaim.set(row.claim_id, [...(byClaim.get(row.claim_id) ?? []), { key, title, status }]);
+  });
+  return byClaim;
+}
+
 /** The Tickets matching an SQL condition on `t`, in key order across Projects. */
 export async function listTicketRefs(db: Queryable, where: string, params: unknown[]): Promise<TicketRef[]> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${where} ORDER BY p.key, t.number`, params);

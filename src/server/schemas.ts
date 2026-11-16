@@ -663,6 +663,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         items: decisionRef,
         description: "The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the Workspace, oldest first.",
       },
+      discovered: {
+        type: "array",
+        items: ref("TicketRef"),
+        description: "The Discovered Tickets the Agent filed from its Ticket during the Claim it was written in, in key order, as they stand now.",
+      },
     }),
   },
   LinkedDocument: {
