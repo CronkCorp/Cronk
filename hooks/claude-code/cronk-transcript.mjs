@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 
 /**
  * @typedef {{ type: string, text?: string, content?: string | Block[], name?: string, input?: unknown, is_error?: boolean }} Block
- * @typedef {{ type?: string, isSidechain?: boolean, isMeta?: boolean, message?: { role?: string, content?: string | Block[] } }} Entry
+ * @typedef {{ type?: string, isSidechain?: boolean, isMeta?: boolean, isCompactSummary?: boolean, message?: { role?: string, content?: string | Block[] } }} Entry
  */
 
 /**
@@ -23,27 +23,30 @@ function toMarkdown(jsonl) {
   /** @type {string[]} */
   const parts = [];
   /** @type {string | undefined} */
-  let turn;
-  /** @param {string} role @param {string} text */
-  const add = (role, text) => {
-    if (role !== turn) {
+  let currentRole;
+  /** Appends `text` to the chat, in a new turn when it isn't `role`'s. @param {string} role @param {string} text */
+  const append = (role, text) => {
+    if (role !== currentRole) {
       parts.push(`## ${role}\n`);
-      turn = role;
+      currentRole = role;
     }
     parts.push(text);
   };
   for (const line of jsonl.split("\n")) {
-    const entry = parse(line);
-    if (!entry?.message || entry.isSidechain || entry.isMeta) continue;
+    const entry = parseEntry(line);
+    // Left out: subagents' chats, and what Claude Code adds itself, such as the summary that continues a compacted chat.
+    if (!entry?.message || entry.isSidechain || entry.isMeta || entry.isCompactSummary) continue;
     const blocks = typeof entry.message.content === "string" ? [{ type: "text", text: entry.message.content }] : (entry.message.content ?? []);
     const role = entry.type === "assistant" ? "Assistant" : entry.type === "user" ? "User" : undefined;
     if (!role) continue;
     for (const block of blocks) {
-      if (block.type === "text" && block.text) add(role, block.text);
-      else if (block.type === "image") add(role, IMAGE);
-      else if (block.type === "tool_use") add("Assistant", fenced(`tool-call ${block.name}`, trimmed(JSON.stringify(block.input ?? {}, null, 2))));
+      if (block.type === "text") {
+        const text = role === "User" ? typedByUser(block.text ?? "") : block.text;
+        if (text) append(role, text);
+      } else if (block.type === "image") append(role, IMAGE);
+      else if (block.type === "tool_use") append("Assistant", fenced(`tool-call ${block.name}`, trimmed(JSON.stringify(block.input ?? {}, null, 2))));
       // A tool's result comes back in a user entry, but belongs to the Assistant's turn that called it.
-      else if (block.type === "tool_result") add("Assistant", fenced(block.is_error ? "tool-result error" : "tool-result", trimmed(resultText(block.content))));
+      else if (block.type === "tool_result") append("Assistant", fenced(block.is_error ? "tool-result error" : "tool-result", trimmed(resultText(block.content))));
     }
   }
   return parts.map((part) => `${part.trimEnd()}\n`).join("\n");
@@ -67,6 +70,21 @@ function trimmed(text) {
   return `${start}${start.endsWith("\n") ? "" : "\n"}${marker}${end.startsWith("\n") ? "" : "\n"}${end}`;
 }
 
+/**
+ * What the User typed, from a user entry's `text`: a slash or shell command as typed, and nothing for what Claude Code
+ * itself adds as the User, such as a command's output or a background task's notification.
+ * @param {string} text
+ * @returns {string | undefined}
+ */
+function typedByUser(text) {
+  const command = /^<command-name>([^<]*)<\/command-name>/.exec(text);
+  if (command) return [command[1], /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]].filter(Boolean).join(" ");
+  const shell = /^<bash-input>([\s\S]*)<\/bash-input>$/.exec(text);
+  if (shell) return `! ${shell[1]?.trim()}`;
+  if (/^<(local-command-stdout|bash-stdout|bash-stderr|task-notification)>/.test(text)) return undefined;
+  return text;
+}
+
 /** What stands in for an image, which a Transcript doesn't carry. */
 const IMAGE = "[image]";
 
@@ -87,7 +105,7 @@ function fenced(info, text) {
 }
 
 /** @param {string} line @returns {Entry | undefined} */
-function parse(line) {
+function parseEntry(line) {
   try {
     const entry = JSON.parse(line);
     return entry && typeof entry === "object" ? entry : undefined;

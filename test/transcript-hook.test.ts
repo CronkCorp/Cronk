@@ -44,9 +44,13 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(await convert(fixture("long-output.jsonl"))).toBe(await readFile(fixture("long-output.md"), "utf8"));
   });
 
+  it("shows slash and shell commands as the User typed them, leaving out what Claude Code adds: their output, notifications and summaries", async () => {
+    expect(await convert(fixture("claude-code-entries.jsonl"))).toBe(await readFile(fixture("claude-code-entries.md"), "utf8"));
+  });
+
   it("converts the same chat to the same text every run, and a chat that grows to text that continues it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
-    for (const name of ["text-only.jsonl", "tools.jsonl", "long-output.jsonl"]) {
+    for (const name of ["text-only.jsonl", "tools.jsonl", "long-output.jsonl", "claude-code-entries.jsonl"]) {
       const whole = await convert(fixture(name));
       expect(await convert(fixture(name)), name).toBe(whole);
       // Claude Code appends to the chat file as the chat goes on, so each earlier upload saw only its first lines.
