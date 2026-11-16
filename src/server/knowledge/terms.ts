@@ -154,6 +154,15 @@ export async function listTerms(db: Queryable, place: TermPlace): Promise<Stored
   return rows.map(toTerm);
 }
 
+/** The names of each of these Projects' own Terms, by name. */
+export async function termNamesByProject(db: Queryable, projectIds: string[]): Promise<Map<string, string[]>> {
+  const { rows } = await db.query<{ project_id: string; name: string }>(
+    "SELECT t.project_id, t.name FROM terms t WHERE t.project_id = ANY($1::uuid[]) ORDER BY lower(t.name), t.name",
+    [projectIds],
+  );
+  return new Map(projectIds.map((id) => [id, rows.filter((r) => r.project_id === id).map((r) => r.name)]));
+}
+
 /**
  * The Terms that apply in a Project: its own, and the Workspace's it has none of the same name for
  * (ignoring case), in glossary order. The Workspace's are left out when `withWorkspace` is false.

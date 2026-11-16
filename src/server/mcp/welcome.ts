@@ -26,6 +26,7 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
     for (const p of guided) lines.push("", `### ${p.key}: ${p.name}`, "", p.guidance.trim());
   }
   lines.push("", "Fetch Guidance again at any time with the `guidance` tool.");
+  lines.push(...termLines(welcome));
   lines.push("", "## Your Ready Tickets", "");
   if (welcome.readyTickets.length === 0) lines.push("None right now.");
   else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.", "");
@@ -58,4 +59,26 @@ export function waitingLines({ reason, comment, ticket, document }: WaitingWork)
 /** One Ready Ticket as a welcome line: its key, title, Status and any Priority. */
 export function readyLine(t: Welcome["readyTickets"][number]): string {
   return `- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`;
+}
+
+/** The welcome's Terms section: the Workspace's Term names, then each Project's own, marking those that replace a Workspace Term. */
+function termLines({ workspace, projects }: Welcome): string[] {
+  const workspaceNames = new Set((workspace?.terms ?? []).map((n) => n.toLowerCase()));
+  const lines: string[] = [];
+  if (workspace && workspace.terms.length > 0) lines.push(`- Workspace: ${workspace.terms.join(", ")}`);
+  for (const p of projects) {
+    if (p.terms.length === 0) continue;
+    const names = p.terms.map((n) => (workspaceNames.has(n.toLowerCase()) ? `${n} (replaces the Workspace's)` : n));
+    lines.push(`- ${p.key}: ${names.join(", ")}`);
+  }
+  if (lines.length === 0) return [];
+  return [
+    "",
+    "## Terms",
+    "",
+    "The glossary's Term names. Use them, and avoid the words each Term lists; within a Project, its own Terms replace the Workspace's of the same name. " +
+      "Look a Term up with the `terms` tool.",
+    "",
+    ...lines,
+  ];
 }
