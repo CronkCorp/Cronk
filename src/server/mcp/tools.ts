@@ -149,7 +149,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
       move: {
         description:
-          "move a Ticket you hold the Claim on into another Status (Unstarted, Started or In Review only); In Review needs a Report written during your current Claim (documents, write_report)",
+          "move a Ticket you hold the Claim on into another Status: Unstarted, Started or In Review, or Completed when the Ticket is `autonomous` (Autonomous Delegation); " +
+          "In Review and Completed need a Report written during your current Claim (documents, write_report). A completion stays Unverified until a User Accepts it",
         writes: true,
         run: async (api, a) => {
           const key = required(a.key, "a key", "move");
@@ -237,7 +238,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           }),
       },
       ask: {
-        description: "ask a question on a Ticket you hold the Claim on; blocking if you wait for the answer",
+        description: "ask a question on a Ticket you hold the Claim on; blocking if you wait for the answer, except on an `autonomous` Ticket, where questions never block",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "ask"))}/activities`, {

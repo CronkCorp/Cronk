@@ -69,8 +69,14 @@ const welcomeSchema = {
       description: `The Agent's Ready Tickets in the order \`next\` offers them, at most ${WELCOME_READY_LIMIT}.`,
       items: {
         type: "object",
-        required: ["key", "title", "priority", "status"],
-        properties: { key: { type: "string" }, title: { type: "string" }, priority: { type: "string", enum: PRIORITIES }, status: ref("Status") },
+        required: ["key", "title", "priority", "status", "autonomous"],
+        properties: {
+          key: { type: "string" },
+          title: { type: "string" },
+          priority: { type: "string", enum: PRIORITIES },
+          status: ref("Status"),
+          autonomous: { type: "boolean", description: "Under Autonomous Delegation: the Agent completes it itself, with a Report, rather than stopping at In Review." },
+        },
       },
     },
     waitingWork: {
