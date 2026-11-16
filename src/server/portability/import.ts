@@ -8,6 +8,7 @@ import { importTree } from "./documents.js";
 import { ImportContext } from "./import-context.js";
 import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
+import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
 import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
@@ -16,6 +17,8 @@ import { importWorkspaceSettings } from "./workspace.js";
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
  * nothing yet, or a Project export as a new Project. Users are matched by email and Agents by
  * Owner and name; those not found are created, Users deactivated since they have no password here.
+ * Agents and Agent Sessions keep their ids unless one is taken here; then they get a new one, and
+ * `renamed-ids.ts` keeps which became which.
  * Each kind of record has its own module beside this one.
  */
 
@@ -24,6 +27,8 @@ export interface Imported {
   scope: "workspace" | "project";
   /** The keys of the Projects it created. */
   projects: string[];
+  /** The Agents and Agent Sessions it gave new ids, because the ids they had in the export were taken. */
+  renamedIds: RenamedId[];
 }
 
 /** Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. */
@@ -59,7 +64,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await tickets.importHistories(ctx);
   // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
   if (scope === "workspace") await importTranscripts(ctx);
-  return { scope, projects: created };
+  return { scope, projects: created, renamedIds: ctx.renamedIds };
 }
 
 /** What the export's README says it holds; refuses anything but a Cronk export in this format. */

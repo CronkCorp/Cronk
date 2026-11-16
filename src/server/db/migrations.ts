@@ -466,7 +466,25 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0020_transcripts",
+    id: "0020_renamed_ids",
+    sql: `
+      -- An Agent or Agent Session an import (portability/people.ts) couldn't give the id it had in the
+      -- export, because the id was taken here: the id it had there and the one it got. Transcripts name
+      -- Agent Sessions by id, so linking one written before the import looks its ids up here too.
+      -- from_id is text: an export edited by hand may name them by anything.
+      CREATE TABLE renamed_ids (
+        seq bigserial PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        kind text NOT NULL CHECK (kind IN ('agent', 'agent_session')),
+        from_id text NOT NULL,
+        to_id uuid NOT NULL,
+        at timestamptz NOT NULL
+      );
+      CREATE INDEX renamed_ids_from ON renamed_ids (workspace_id, from_id);
+    `,
+  },
+  {
+    id: "0021_transcripts",
     sql: `
       -- The most a Transcript may hold, all its texts together, in bytes: 10 MB unless an Admin changes it.
       ALTER TABLE workspaces ADD COLUMN transcript_max_bytes integer NOT NULL DEFAULT 10485760 CHECK (transcript_max_bytes > 0);
