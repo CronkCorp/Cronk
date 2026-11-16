@@ -465,4 +465,13 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    id: "0020_autonomous_delegation",
+    sql: `
+      -- Autonomous Delegation (work/routes.ts): whether the Delegate may complete the Ticket itself. Only Users set it.
+      ALTER TABLE tickets ADD COLUMN autonomous boolean NOT NULL DEFAULT false;
+      -- What delegating one of the Project's Tickets sets Autonomous Delegation to, unless the User says otherwise.
+      ALTER TABLE projects ADD COLUMN autonomous_by_default boolean NOT NULL DEFAULT false;
+    `,
+  },
 ];

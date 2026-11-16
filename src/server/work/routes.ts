@@ -52,6 +52,7 @@ import {
   wouldNestUnderItself,
   normalizeLabels,
   listTickets,
+  setAutonomousBelow,
   updateTicket,
   type Ticket,
   type TicketChanges,
@@ -166,7 +167,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.patch<{
       Params: { key: string };
-      Body: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess };
+      Body: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess; autonomousByDefault?: boolean };
     }>(
       "/api/projects/:key",
       {
@@ -180,6 +181,7 @@ export function workRoutes(ctx: AppContext) {
               archived: { type: "boolean" },
               visibility: { type: "string", enum: ["open", "private"] },
               agentAccess: agentAccessSchema,
+              autonomousByDefault: { type: "boolean", description: "Only Users change it." },
             },
           },
           response: { 200: answer("The changed Project", holding("project", "Project")), ...errors(400, 401, 403, 404, 410) },
@@ -188,15 +190,17 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { project, access } = await projectFor(ctx.db, actor, request.params.key, "write");
-        const { name, archived, visibility, agentAccess } = request.body;
+        const { name, archived, visibility, agentAccess, autonomousByDefault } = request.body;
         if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
         if (agentAccess !== undefined) requireUserActor(actor, "change Agent Access");
+        if (autonomousByDefault !== undefined) requireUserActor(actor, "change the Autonomous Delegation default");
         if (name !== undefined || archived !== undefined) requireUserActor(actor, "rename or archive a Project");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
           ...(visibility !== undefined && { visibility }),
           ...(agentAccess !== undefined && { agentAccess }),
+          ...(autonomousByDefault !== undefined && { autonomousByDefault }),
         };
         // Unarchiving, opening, or raising Agent Access can make the Project's delegated Tickets Ready.
         const opensUp = archived === false || visibility === "open" || agentAccess === "write";
@@ -556,7 +560,7 @@ export function workRoutes(ctx: AppContext) {
           },
           response: {
             201: answer(
-              "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee and Delegate. An Agent must hold the parent's Claim.",
+              "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee, Delegate and Autonomous Delegation. An Agent must hold the parent's Claim.",
               holding("ticket", "Ticket"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -581,7 +585,8 @@ export function workRoutes(ctx: AppContext) {
             actor,
             now,
           });
-          return { parent, ticket: await updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now) };
+          const inherited = { parent, assignee: parent.assignee, delegate: parent.delegate, autonomous: parent.autonomous };
+          return { parent, ticket: await updateTicket(tx, created, inherited, actor, now) };
         });
         // The parent lists its Sub-Tickets.
         ticketsChanged(ctx.live, [ticket, parent]);
@@ -701,6 +706,10 @@ export function workRoutes(ctx: AppContext) {
               assigneeId: { type: ["string", "null"], format: "uuid" },
               delegateId: { type: ["string", "null"], format: "uuid", description: "One of the Assignee's own Agents. Only Users assign and delegate." },
               parentKey: { type: ["string", "null"], maxLength: 30 },
+              autonomous: {
+                type: "boolean",
+                description: "Autonomous Delegation: whether the Delegate may complete the Ticket itself. Only Users set it.",
+              },
             },
           },
           response: {
@@ -711,9 +720,12 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { title, description, statusId, priority, labels, assigneeId, delegateId, parentKey } = request.body;
+        const { title, description, statusId, priority, labels, assigneeId, delegateId, parentKey, autonomous } = request.body;
         if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
           throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
+        }
+        if (actor.kind === "agent" && autonomous !== undefined) {
+          throw new HttpError(403, "Only a User can turn Autonomous Delegation on or off, not an Agent");
         }
         const { before, ticket, parents, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
@@ -724,6 +736,7 @@ export function workRoutes(ctx: AppContext) {
             ...(description !== undefined && { description }),
             ...(priority !== undefined && { priority }),
             ...(labels !== undefined && { labels: normalizeLabels(labels) }),
+            ...(autonomous !== undefined && { autonomous }),
           };
           if (statusId !== undefined) {
             const status = await findStatusToMoveInto(tx, ticket.projectId, statusId);
@@ -741,6 +754,10 @@ export function workRoutes(ctx: AppContext) {
           const assignee = changes.assignee === undefined ? ticket.assignee : changes.assignee;
           if (delegateId !== undefined) {
             changes.delegate = delegateId === null ? null : await delegableAgent(tx, actingUser(actor).workspaceId, assignee, delegateId);
+            // A new Delegation starts from the Project's default, unless the User says otherwise.
+            if (changes.delegate && changes.delegate.id !== ticket.delegate?.id && autonomous === undefined) {
+              changes.autonomous = (await findProjectById(tx, ticket.projectId))!.autonomousByDefault;
+            }
           } else if (assignee?.id !== ticket.assignee?.id && ticket.delegate && !(await ownsAgent(tx, actingUser(actor).workspaceId, assignee, ticket.delegate.id))) {
             // A new Assignee doesn't take over someone else's Agent.
             changes.delegate = null;
@@ -756,7 +773,9 @@ export function workRoutes(ctx: AppContext) {
           const mayBecomeReady = [ticket.id, ...blockedIds];
           const readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
           const updated = await updateTicket(tx, ticket, changes, actor, ctx.clock.now());
-          return { before: ticket, ticket: updated, parents, blockedIds, mayBecomeReady, readyBefore };
+          // Sub-Tickets follow their parent's Autonomous Delegation, so a User sets it once for a whole piece of work.
+          const below = updated.autonomous !== ticket.autonomous ? await setAutonomousBelow(tx, ticket.id, updated.autonomous, actor, ctx.clock.now()) : [];
+          return { before: ticket, ticket: updated, parents: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
         if (ticket !== before) {

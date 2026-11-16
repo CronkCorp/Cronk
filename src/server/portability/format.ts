@@ -15,9 +15,10 @@ export type ActorRef = string | { agent: string; session: string | null };
 /**
  * What a field of a Ticket change holds in `<KEY>.history.md`. Records are written as Cronk recorded them, with the
  * names they had at the time, plus what an import finds them by: a `user` by its `email`, an `agent` by its id in
- * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true.
+ * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true;
+ * a `boolean` always.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag" | "boolean";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -34,6 +35,7 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   assignee: fromTo("user", true),
   delegate: fromTo("agent", true),
   parent: fromTo("ticket", true),
+  autonomous: fromTo("boolean"),
   "relation added": relation,
   "relation removed": relation,
   "document linked": { document: { holds: "document" } },
