@@ -3,7 +3,7 @@ import { requireUser, type AppContext } from "../context.js";
 import { answer, errors, ref } from "../schemas.js";
 import { INBOX_KINDS, listInbox, type InboxItem } from "./inbox.js";
 import { publicActivity } from "../coordination/activities.js";
-import { inboxTopic } from "../live/topics.js";
+import { inboxTopic, TRIAGE_TOPIC } from "../live/topics.js";
 
 const timestamp = { type: "string", format: "date-time" } as const;
 
@@ -103,15 +103,20 @@ export function inboxRoutes(ctx: AppContext) {
       },
     );
 
-    app.get(
+    app.get<{ Querystring: { triage?: boolean } }>(
       "/api/inbox/events",
       {
         schema: {
+          querystring: {
+            type: "object",
+            properties: { triage: { type: "boolean", description: "Also send a `triage` event whenever Triage may have changed." } },
+          },
           response: {
             200: {
               description:
                 "A server-sent event stream for the signed-in User's Inbox, for as long as they stay signed in. It opens with a `ready` " +
-                "event, then sends a `changed` event, with empty data, whenever the Inbox may have changed; fetch it again then.",
+                "event, then sends a `changed` event, with empty data, whenever the Inbox may have changed; fetch it again then. " +
+                "With `triage`, it also sends a `triage` event, with empty data, whenever Triage may have changed for anyone; fetch `/api/triage` again then.",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
             ...errors(401, 403, 410),
@@ -121,7 +126,8 @@ export function inboxRoutes(ctx: AppContext) {
       async (request, reply) => {
         const user = await requireUser(ctx, request);
         const canSee = async () => (await requireUser(ctx, request)).id === user.id;
-        ctx.live.stream(reply, inboxTopic(user.id), canSee);
+        // Triage rides on the same stream, so the app needs no second one, as browsers allow only a few per site.
+        ctx.live.stream(reply, request.query.triage ? [inboxTopic(user.id), TRIAGE_TOPIC] : inboxTopic(user.id), canSee);
       },
     );
   };

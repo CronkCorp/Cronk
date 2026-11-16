@@ -15,7 +15,7 @@ import { findActivity, markAnswered, publicActivity, type Activity } from "../co
 import { agentTopic, artifactTopic, documentTopic, ticketTopic } from "../live/topics.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { tellNewlyReady } from "../coordination/ready.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { waitingItemsChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, withWaitingWork, type CommentPlace, type CommentWork, type Positioned, type WaitingFor } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
@@ -173,7 +173,7 @@ export function conversationRoutes(ctx: AppContext) {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             if (posted.answered) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "activity", data: { activity: publicActivity(posted.answered) } });
-              inboxesChanged(ctx.live, [posted.answered.agent.owner.id]);
+              waitingItemsChanged(ctx.live, [posted.answered.agent.owner.id]);
             }
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
           },
@@ -221,7 +221,7 @@ export function conversationRoutes(ctx: AppContext) {
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
-            inboxesChanged(ctx.live, [ticket.assignee?.id]);
+            waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
             ticketsChanged(ctx.live, [ticket]);
           },
         );
@@ -325,7 +325,7 @@ export function conversationRoutes(ctx: AppContext) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
               pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
             }
-            inboxesChanged(ctx.live, changed.map((t) => t.assignee?.id));
+            waitingItemsChanged(ctx.live, changed.map((t) => t.assignee?.id));
             ticketsChanged(ctx.live, [...changed, ...blockedAgain]);
           },
         );

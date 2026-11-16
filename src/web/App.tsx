@@ -7,6 +7,7 @@ import { decisionFilterFrom, DecisionsPage } from "./decisions.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
 import { inboxAddressFrom, InboxPage } from "./inbox.js";
+import { triageAddressFrom, TriagePage } from "./triage.js";
 import { AcceptInvitationPage, ChangePasswordPage, ResetPasswordPage, UsersPage } from "./people.js";
 import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
@@ -173,6 +174,8 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
       return <SearchPage filter={searchFilterFrom(search)} />;
     case "inbox":
       return <InboxPage address={inboxAddressFrom(search)} me={props.me} />;
+    case "triage":
+      return <TriagePage address={triageAddressFrom(search)} me={props.me} />;
     case "documents":
       return <DocumentsPage />;
     case "projectDocuments":

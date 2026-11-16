@@ -229,5 +229,5 @@ Said of a Document, Term, Decision or Artifact that Agents may read but never ed
 _Avoid_: Locked, read-only, human-only
 
 **Suggestion**:
-A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version.
+A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version. An Agent also suggests a new Document under a protected branch this way, from nothing; accepting it creates the Document there.
 _Avoid_: Proposal, change request, draft

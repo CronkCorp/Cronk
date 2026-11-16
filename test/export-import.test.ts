@@ -754,6 +754,71 @@ describe("a Suggestion on Guidance nobody has written", () => {
   });
 });
 
+describe("Suggestions of new Documents in an export", () => {
+  it("are written under the Document they go under until accepted, then with the Document they created, and imported as they were", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "Start here." })).body.document;
+    await admin.post(`/api/documents/${guide.id}/protection`, { protected: true });
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const suggest = async (title: string) => {
+      cronk.clock.advance(60_000);
+      const content = { title, body: `About ${title}.` };
+      return (await agent.post("/api/suggestions", { item: { kind: "document", parentId: guide.id }, baseVersion: 0, content, reasoning: "Missing." })).body.suggestion.id as string;
+    };
+    const [accepted, rejected, open] = [await suggest("Setup"), await suggest("Deploys"), await suggest("Backups")];
+    await admin.post(`/api/suggestions/${accepted}/accept`);
+    await admin.post(`/api/suggestions/${rejected}/reject`, { reason: "Not yet." });
+
+    const exported = await admin.download("/api/export");
+    const files = await untarGz(exported.body);
+    const pathOf = (pattern: RegExp) => Object.keys(files).find((path) => pattern.test(path))!;
+    const guideData = markdown(files[pathOf(/projects\/CRONK\/documents\/\d+-guide\.md$/)]).data;
+    expect(guideData.suggestions).toBeUndefined();
+    expect(guideData.suggestedDocuments).toMatchObject([
+      { id: rejected, baseVersion: 0, content: { title: "Deploys", body: "About Deploys." }, state: "rejected", reason: "Not yet." },
+      { id: open, baseVersion: 0, content: { title: "Backups", body: "About Backups." }, state: "open" },
+    ]);
+    expect(markdown(files[pathOf(/guide\/\d+-setup\.md$/)]).data.suggestions).toMatchObject([{ id: accepted, baseVersion: 0, state: "accepted", resultVersion: 1 }]);
+
+    const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    const newGuide = (await elsewhere.get("/api/projects/CRONK/documents")).body.documents[0];
+    for (const id of [accepted, rejected, open]) {
+      const [before, after] = [(await admin.get(`/api/suggestions/${id}`)).body.suggestion, (await elsewhere.get(`/api/suggestions/${id}`)).body.suggestion];
+      expect(after).toMatchObject({ state: before.state, baseVersion: 0, base: { title: "", body: "" }, content: before.content, parent: { id: newGuide.id, title: "Guide" } });
+      expect(after.item).toMatchObject({ title: before.item.title, version: before.item.version, protected: true });
+    }
+    expect((await elsewhere.post(`/api/suggestions/${open}/accept`)).body.suggestion).toMatchObject({ state: "accepted", item: { title: "Backups", version: 1 } });
+  });
+
+  it("is refused on import when it claims to be accepted without its Document, or to start from a Version", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "Start here." })).body.document;
+    await admin.post(`/api/documents/${guide.id}/protection`, { protected: true });
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    await agent.post("/api/suggestions", { item: { kind: "document", parentId: guide.id }, baseVersion: 0, content: { title: "Setup" }, reasoning: "Missing." });
+    const files = await untarGz((await admin.download("/api/export")).body);
+    const path = Object.keys(files).find((p) => /\d+-guide\.md$/.test(p))!;
+    const tampered = (change: (entry: Record<string, unknown>) => void) => {
+      const { data, body } = markdown(files[path]!);
+      change(data.suggestedDocuments[0]);
+      return tarGz({ ...files, [path]: `---\n${stringify(data)}---\n${body}` });
+    };
+
+    for (const [change, error] of [
+      [(e: Record<string, unknown>) => Object.assign(e, { state: "accepted", acceptedWithEdits: false, resultVersion: 1, decidedAt: e.at, decidedBy: "ada@example.com" }), /is accepted, so it belongs with the Document it created/],
+      [(e: Record<string, unknown>) => Object.assign(e, { baseVersion: 1 }), /baseVersion must be 0/],
+    ] as const) {
+      const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+      const refused = await elsewhere.upload("/api/import", await tampered(change));
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(error);
+    }
+  });
+});
+
 describe("Protected marks in an export", () => {
   it("are written in the frontmatter of the items they belong to, with who marked and unmarked them", async () => {
     const { admin } = await busyWorkspace();
