@@ -25,6 +25,7 @@ import type {
   Invitation,
   LinkedDocument,
   Member,
+  Mention,
   Merge,
   MergedSection,
   Conflict,
@@ -81,6 +82,7 @@ export type {
   Invitation,
   LinkedDocument,
   Member,
+  Mention,
   Merge,
   MergedSection,
   Conflict,
@@ -196,6 +198,8 @@ export const api = {
   terms: (projectKey?: string) => request<{ terms: Term[] }>("GET", `${scopePath(projectKey)}/terms`).then((r) => r.terms),
   term: (id: string) => request<{ term: Term }>("GET", termPath(id)).then((r) => r.term),
   termVersions: (id: string) => request<{ versions: TermVersion[] }>("GET", `${termPath(id)}/versions`).then((r) => r.versions),
+  /** What names the Term where it applies, most recently changed first. */
+  termMentions: (id: string) => request<{ mentions: Mention[] }>("GET", `${termPath(id)}/mentions`).then((r) => r.mentions),
   createTerm: (projectKey: string | undefined, input: TermInput) =>
     request<{ term: Term }>("POST", `${scopePath(projectKey)}/terms`, input).then((r) => r.term),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
@@ -232,6 +236,8 @@ export const api = {
     request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
   setDecisionStatus: (key: string, status: DecisionStatus) =>
     request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status }).then((r) => r.decision),
+  /** What names the Decision's key, most recently changed first. */
+  decisionMentions: (key: string) => request<{ mentions: Mention[] }>("GET", `${decisionPath(key)}/mentions`).then((r) => r.mentions),
   decisionVersions: (key: string) =>
     request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
 

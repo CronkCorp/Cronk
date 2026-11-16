@@ -18,7 +18,7 @@ import {
 import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
 import { packMarkdownFolder } from "./folder-archive.js";
-import { CronkMarkdown, highlightIds, type Highlight } from "./markdown.js";
+import { CronkMarkdown, highlightIds, MarkdownPlace, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { useSelectedPassage, type SelectedPassage } from "./selected-passage.js";
 import { MarkdownEditor } from "./markdown-editor.js";
@@ -173,7 +173,11 @@ export function DocumentPage(props: { id: string; edit: boolean }) {
   const [document, reload, setDocument] = useLoad(() => api.document(props.id), [props.id]);
   return (
     <Show state={document}>
-      {(d) => <DocumentView key={d.id} document={d} startEditing={props.edit} onChanged={setDocument} onReload={reload} />}
+      {(d) => (
+        <MarkdownPlace.Provider value={d.projectKey}>
+          <DocumentView key={d.id} document={d} startEditing={props.edit} onChanged={setDocument} onReload={reload} />
+        </MarkdownPlace.Provider>
+      )}
     </Show>
   );
 }

@@ -405,7 +405,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list)"),
-      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get)"),
+      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get, mentions)"),
       status: z.array(z.enum(DECISION_STATUSES)).optional().describe("Only Decisions with one of these statuses (list)"),
       group: z.array(z.string()).optional().describe("Only Decisions in one of these groups, ignoring case (list)"),
     },
@@ -420,6 +420,11 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         writes: false,
         run: (api, a) => api("GET", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "get"))}`),
       },
+      mentions: {
+        description: "what names a Decision's key: Tickets, Documents, Comments, Terms and Decisions, most recently changed first",
+        writes: false,
+        run: (api, a) => api("GET", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "mentions"))}/mentions`),
+      },
     },
   });
 
@@ -432,7 +437,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK, for the Terms that apply in it; leave out for the Workspace's (list, get by name)"),
       name: z.string().optional().describe("The Term's name, ignoring case (get)"),
-      id: z.string().optional().describe("The Term's id, instead of a name (get)"),
+      id: z.string().optional().describe("The Term's id, instead of a name (get); the Term's id (mentions)"),
     },
     actions: {
       list: {
@@ -452,6 +457,11 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           if (!term) throw new ToolError(`No Term named ${a.name.trim()} applies in ${a.project?.toUpperCase() ?? "the Workspace"}`);
           return { status: 200, body: { term } };
         },
+      },
+      mentions: {
+        description: "what names a Term with its capitalisation where it applies: Tickets, Documents, Comments, other Terms and Decisions, most recently changed first",
+        writes: false,
+        run: (api, a) => api("GET", `/api/terms/${encodeURIComponent(required(a.id, "an id", "mentions"))}/mentions`),
       },
     },
   });

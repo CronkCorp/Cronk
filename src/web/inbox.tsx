@@ -377,7 +377,7 @@ function QuestionDetail(props: DetailProps<QuestionItem>) {
         {!props.resolved && <Chip tone={question.blocking ? "danger" : "warn"}>{`${question.agent.name} is waiting`}</Chip>}
       </div>
       <div className="inbox-question">
-        <CronkMarkdown>{question.body}</CronkMarkdown>
+        <CronkMarkdown projectKey={props.item.ticket.key.replace(/-[0-9]+$/, "")}>{question.body}</CronkMarkdown>
       </div>
       <CommentForm
         label="Answer"
