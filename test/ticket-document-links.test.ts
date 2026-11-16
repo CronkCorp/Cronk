@@ -48,6 +48,7 @@ describe("Linking a Document to a Ticket", () => {
     const { admin, claude, session } = await delegatedSetup(1);
     const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan" })).body.document.id;
     const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
 
     expect((await agent.post(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(201);
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(200);

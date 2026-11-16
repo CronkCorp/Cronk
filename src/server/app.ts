@@ -21,6 +21,7 @@ import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
+import { refuseWritesFromOtherSites } from "./identity/same-site.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -30,6 +31,11 @@ export interface AppConfig {
   databaseUrl: string;
   /** Mark the sign-in cookie Secure; turn on when served over HTTPS. */
   cookieSecure: boolean;
+  /**
+   * The address Cronk is reached at, such as `https://cronk.example`. Writes made with the sign-in cookie are accepted
+   * only from this site; without it, only from the host the request was sent to.
+   */
+  publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;
 }
@@ -83,9 +89,10 @@ export async function buildApp(opts: {
     route.schema = {
       ...schema,
       querystring: inline ? { additionalProperties: false, ...querystring } : querystring,
-      // So every operation's description says it can be refused; a route's own 400 description wins. Every write
-      // that takes a sign-in or token can be refused to an Agent outside an Agent Session (see `requireActor`).
-      response: { ...errors(400), ...(isWrite(route.method) && schema.security === undefined && errors(403)), ...(schema.response as object | undefined) },
+      // So every operation's description says it can be refused; a route's own 400 and 403 descriptions win. Every write
+      // can be refused for coming from another site, and, if it takes a sign-in or token, to an Agent outside an Agent Session
+      // (see `requireActor`).
+      response: { ...errors(400), ...(isWrite(route.method) && errors(403)), ...(schema.response as object | undefined) },
     };
   });
   // Every API error has the same shape: `{ error: "<message>" }`.
@@ -100,6 +107,7 @@ export async function buildApp(opts: {
     return reply.code(500).send({ error: "Something went wrong" });
   });
   await app.register(cookie);
+  refuseWritesFromOtherSites(app, opts.config.publicUrl);
   addSharedSchemas(app);
   // Describes every route from its schema; served at /api/openapi.json.
   await app.register(swagger, {
@@ -118,7 +126,8 @@ export async function buildApp(opts: {
           "token, without one. Agents normally connect over MCP at /mcp instead, which does this for them. A script " +
           "starts a Session with `POST /api/agent-sessions` (the answer's `session.id`), sends that id on each write, and ends it " +
           "with `DELETE /api/agent-sessions/current` when done; a Session also ends once it stays silent past the Workspace's " +
-          "silence threshold.\n\n" +
+          "silence threshold. A signed-in write sent from another site (its `Origin`, or else `Referer`, isn't Cronk's own) " +
+          "is refused with 403, as is one with the cookie that names no site.\n\n" +
           "```sh\n" +
           'SESSION=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" $CRONK/api/agent-sessions | jq -r .session.id)\n' +
           'curl -X POST -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" -H "Content-Type: application/json" \\\n' +

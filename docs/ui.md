@@ -24,12 +24,12 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
   - Inbox, Triage, Documents, Terms, Decisions and Agents. Triage shows the number of items the User could act on, in `--muted`. Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
   - **Projects**, each listed by key and name. Archived Projects are left out.
   - **Workspace**: Guidance, plus Users and Settings for Admins.
-  - The signed-in User and their role, which opens the sign-out menu.
+  - The signed-in User and their role, which opens a menu: Change password (the `/password` page) and Sign out.
 - **Active item:** `--accent-soft` background with `--accent` text. There is exactly one active item, and a Ticket or Document marks its Project or Documents.
 - **Below 760px** the sidebar becomes a wrapping strip with the main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
 - **Page head:** breadcrumbs (13px, muted), then a row holding the `h1`, the view switcher and the actions. The primary action comes last. Destructive actions such as Archive and Delete go in a "…" menu, never next to the primary action.
 - **Project views:** List, Board and Reports are a segmented control in the page head. Statuses, Guidance and Access move into the Project's settings.
-- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page.
+- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. The signed-out link pages, `/invite/:token` and `/reset-password/:token`, show their card whoever is signed in.
 
 ## Design tokens
 
@@ -149,7 +149,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
   - **Comment:** the body in a bordered bubble, with replies indented under it. The Comment of a Send back is labelled `SENT BACK`.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
-  - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review".
+  - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review". A Change Cronk made itself, such as an upgrade's, names "Cronk" in plain muted text with no avatar.
 - **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
 
 ![Ticket, dark](ui/ticket-dark.png)

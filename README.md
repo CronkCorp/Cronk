@@ -36,6 +36,18 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSI
 
 Everything the script changes then shows in history with the Session it was made in. The full API is described at `/api/openapi.json`.
 
+## Forgotten passwords
+
+An Admin issues a password reset link from the Users page and passes it on; it works once, for 7 days. Signed-in Users change their own password from the menu under their name in the sidebar.
+
+If no Admin can sign in, issue a link for any User from the server, with the same `DATABASE_URL` as Cronk:
+
+```sh
+docker compose exec app node dist/server/reset-password.js ada@example.com --url https://cronk.example.com
+```
+
+`--url` is Cronk's address as people open it (default `http://localhost:$PORT`). Either way, issuing a link stops the User's old password and ends their sign-ins until they use it; their Agents' Sessions keep running.
+
 ## Configuration
 
 Cronk is a plain Node.js process configured only through environment variables, so it runs the same with or without Docker:
@@ -46,7 +58,10 @@ Cronk is a plain Node.js process configured only through environment variables, 
 | `HOST`          | `0.0.0.0`             | Address to listen on                                           |
 | `PORT`          | `3000`                | Port to listen on                                              |
 | `COOKIE_SECURE` | `false`               | Mark the sign-in cookie Secure (use behind HTTPS)              |
+| `PUBLIC_URL`    | (the request's host)  | Address Users reach Cronk at, e.g. `https://cronk.example`; set it behind a proxy that rewrites the `Host` header |
 | `WEB_ROOT`      | `dist/web` if present | Directory of the built web client                              |
+
+Signed-in writes are only accepted from Cronk's own site: a browser request whose `Origin` (or `Referer`) is another site is refused, and the sign-in cookie is `SameSite=Strict`. Cronk's own site is `PUBLIC_URL`, or without it, the host a request was sent to. Agents' token requests aren't affected.
 
 The database schema is created and upgraded by migrations every time Cronk starts.
 

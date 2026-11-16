@@ -272,7 +272,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "One Change to a Ticket: `change` says which; the other fields depend on it.",
     ...object({
       at: timestamp,
-      actor: { ...recordedActor, description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in." },
+      actor: {
+        description:
+          "Who made the change: a User, an Agent with the Owner it acted for and the Agent Session it was in, " +
+          "or Cronk itself (`kind` `system`) for a change no one made, such as one an upgrade makes.",
+        anyOf: [recordedActor, object({ kind: { const: "system" } })],
+      },
       change: {
         type: "string",
         enum: [
@@ -522,7 +527,7 @@ const ERROR_MEANINGS = {
   401: "Not signed in, or the Agent token is unknown or revoked",
   403:
     "The caller may not do this: an Admin-only change, Read access where Write is needed, an Agent where only a User may act, " +
-    "or an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions)",
+    "an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions), or a signed-in write sent from another site",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",

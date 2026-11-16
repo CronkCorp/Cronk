@@ -431,7 +431,42 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0018_renamed_ids",
+    id: "0018_assign_delegated_tickets",
+    sql: `
+      -- Cronk itself may record a Ticket change, as this upgrade does: a 'system' change has no acting User.
+      ALTER TABLE ticket_changes DROP CONSTRAINT IF EXISTS ticket_changes_actor_kind_check;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_kind_check CHECK (actor_kind IN ('user', 'agent', 'system'));
+      ALTER TABLE ticket_changes DROP CONSTRAINT IF EXISTS ticket_changes_actor_user;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_user CHECK ((actor_kind = 'system') = (actor_user_id IS NULL));
+
+      -- Delegated work always has a clear User: each delegated Ticket without an Assignee goes to its Delegate's Owner.
+      CREATE TEMPORARY TABLE assigned_on_upgrade ON COMMIT DROP AS
+        SELECT t.id AS ticket_id, u.id AS user_id, u.name AS user_name
+        FROM tickets t JOIN agents a ON a.id = t.delegate_id JOIN users u ON u.id = a.owner_id
+        WHERE t.assignee_id IS NULL;
+      UPDATE tickets t SET assignee_id = x.user_id, updated_at = now() FROM assigned_on_upgrade x WHERE t.id = x.ticket_id;
+      INSERT INTO ticket_changes (ticket_id, at, actor_kind, change, data)
+        SELECT ticket_id, now(), 'system', 'assignee', jsonb_build_object('from', NULL, 'to', jsonb_build_object('id', user_id, 'name', user_name))
+        FROM assigned_on_upgrade ORDER BY ticket_id;
+    `,
+  },
+  {
+    id: "0019_password_resets",
+    sql: `
+      -- A one-time link letting a User choose a new password (identity/password-resets.ts), issued by an Admin
+      -- or, with no issuer, by the server command. Only the token's hash is stored; issuing again replaces it.
+      CREATE TABLE password_resets (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        issued_by uuid REFERENCES users(id),
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL
+      );
+    `,
+  },
+  {
+    id: "0020_renamed_ids",
     sql: `
       -- An Agent or Agent Session an import (portability/people.ts) couldn't give the id it had in the
       -- export, because the id was taken here: the id it had there and the one it got. Transcripts name

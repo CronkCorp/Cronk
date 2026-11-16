@@ -32,6 +32,14 @@ export async function userForSignIn(db: Queryable, clock: Clock, token: string):
   return user?.active ? user : undefined;
 }
 
+/** Ends all of a User's sign-ins, except the one with token `except` if given. */
+export async function endSignIns(db: Queryable, userId: string, opts: { except?: string | undefined } = {}): Promise<void> {
+  await db.query("DELETE FROM sign_ins WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2", [
+    userId,
+    opts.except === undefined ? null : hash(opts.except),
+  ]);
+}
+
 export async function deleteSignIn(db: Queryable, token: string): Promise<void> {
   await db.query("DELETE FROM sign_ins WHERE token_hash = $1", [hash(token)]);
 }
