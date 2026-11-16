@@ -68,15 +68,17 @@ export async function listProtectionMarkings(db: Queryable, item: ProtectableIte
 export const SUGGEST_INSTEAD =
   "make a Suggestion of the change instead (POST /api/suggestions, or the `suggestions` tool), for a User to accept or reject";
 
+/** What an Agent refused a new Document under the Document `parentId`, in a protected branch, does instead, ending a refusal's sentence. */
+export const suggestNewDocumentInstead = (parentId: string) =>
+  `make a Suggestion of the new Document instead (POST /api/suggestions with item { kind: "document", parentId: "${parentId}" } and baseVersion 0, ` +
+  "or the `suggestions` tool), for a User to accept or reject";
+
 /**
  * Refuses an Agent's change to a Protected item (a 403) with a pointer to Suggestions, the way an
- * Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3", and
- * `change` what the Agent may not do, such as "delete it".
+ * Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3",
+ * `change` what the Agent may not do, such as "delete it", and `instead` what it does instead.
  */
-export function requireUnprotected(actor: Actor, item: { protected: boolean }, what: string, change = "change it"): void {
+export function requireUnprotected(actor: Actor, item: { protected: boolean }, what: string, change = "change it", instead = SUGGEST_INSTEAD): void {
   if (actor.kind !== "agent" || !item.protected) return;
-  throw new HttpError(
-    403,
-    `${what} is Protected: Agents may read it but not ${change}. ${SUGGEST_INSTEAD.charAt(0).toUpperCase()}${SUGGEST_INSTEAD.slice(1)}`,
-  );
+  throw new HttpError(403, `${what} is Protected: Agents may read it but not ${change}. ${instead.charAt(0).toUpperCase()}${instead.slice(1)}`);
 }

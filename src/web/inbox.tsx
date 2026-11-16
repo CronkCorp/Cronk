@@ -362,10 +362,15 @@ function kindOf(item: InboxItem): { kind: Kind; label: string; full: string } {
     : { kind: "question", label: "Question", full: "Question" };
 }
 
-/** A Suggestion's item as the Inbox names it: its key and title, and where it is. */
-function suggestedItem(item: SuggestionItem["suggestion"]["item"]): { key: string; title: string; to: string } {
+/** Whether a Suggestion proposes a new Document under a protected branch, not created until a User accepts it. */
+const isNewDocument = (suggestion: SuggestionItem["suggestion"]) => suggestion.item.kind === "document" && suggestion.item.id === null;
+
+/** A Suggestion's item as the Inbox names it: its key and title, and where it is; a new Document's goes to the Document it would go under. */
+function suggestedItem(suggestion: SuggestionItem["suggestion"]): { key: string; title: string; to: string } {
+  const { item } = suggestion;
   if (item.kind === "decision") return { key: item.key!, title: item.title, to: `/decisions/${item.key}` };
   if (item.kind === "term") return { key: "Term", title: item.title, to: `/terms/${item.id}` };
+  if (isNewDocument(suggestion)) return { key: "New Document", title: item.title, to: `/documents/${suggestion.parent!.id}` };
   if (item.kind === "document") return { key: "Document", title: item.title, to: `/documents/${item.id}` };
   return item.projectKey === null
     ? { key: "Guidance", title: "The Workspace's Guidance", to: "/guidance" }
@@ -380,7 +385,7 @@ function suggestedItem(item: SuggestionItem["suggestion"]["item"]): { key: strin
 function ListItem(props: { item: InboxItem; selected: boolean; arrived: boolean; to: string }) {
   const { item } = props;
   const { kind, label } = kindOf(item);
-  const named = item.kind === "decision" ? item.decision : item.kind === "suggestion" ? suggestedItem(item.suggestion.item) : item.ticket;
+  const named = item.kind === "decision" ? item.decision : item.kind === "suggestion" ? suggestedItem(item.suggestion) : item.ticket;
   const snippet =
     item.kind === "question"
       ? plainText(item.question.body)
@@ -416,7 +421,7 @@ function DetailHead(props: { item: InboxItem }) {
     item.kind === "decision"
       ? [item.decision.key, item.decision.title, `/decisions/${item.decision.key}`]
       : item.kind === "suggestion"
-        ? Object.values(suggestedItem(item.suggestion.item))
+        ? Object.values(suggestedItem(item.suggestion))
         : [item.ticket.key, item.ticket.title, `/tickets/${item.ticket.key}`];
   return (
     <div className="inbox-detail-head">
@@ -685,7 +690,14 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         <Actor actor={proposedBy} />
         <span className="muted">
           <RelativeTime at={suggestion.at} />
-          {` · from Version ${suggestion.baseVersion}`}
+          {isNewDocument(suggestion) ? (
+            <>
+              {" · new, under "}
+              <Link to={`/documents/${suggestion.parent!.id}`} className="link">{suggestion.parent!.title}</Link>
+            </>
+          ) : (
+            ` · from Version ${suggestion.baseVersion}`
+          )}
           {suggestion.sourceTicket && (
             <>
               {" · while working on "}
@@ -704,9 +716,9 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         <ContentEditor kind={item.kind} value={edited} onChange={setEdited} disabled={props.resolved} />
       ) : (
         <Diff
-          before={contentText(item.kind, suggestion.base)}
+          before={isNewDocument(suggestion) ? "" : contentText(item.kind, suggestion.base)}
           after={contentText(item.kind, suggestion.content)}
-          beforeLabel={`Version ${suggestion.baseVersion}${suggestion.outdated ? "" : ", current"}`}
+          beforeLabel={isNewDocument(suggestion) ? "Nothing yet" : `Version ${suggestion.baseVersion}${suggestion.outdated ? "" : ", current"}`}
           afterLabel={`Suggested by ${proposedBy.name}`}
           view={view}
           onViewChange={setView}

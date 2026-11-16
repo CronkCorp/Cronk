@@ -25,7 +25,7 @@ const contentBody = {
   additionalProperties: false,
   description:
     "The item's new content: for a Document `title` and `body`; for a Term `name`, `definition`, `avoid` and `group`; for a Decision `title`, `body` and `group`; " +
-    "for Guidance `markdown`. Fields left out keep what the base Version holds.",
+    "for Guidance `markdown`. Fields left out keep what the base Version holds; a new Document needs a `title`, and its `body` is empty if left out.",
   properties: {
     title: { type: "string", maxLength: 500 },
     body: { type: "string", maxLength: 1_000_000 },
@@ -39,9 +39,16 @@ const contentBody = {
 
 const itemBody = {
   description:
-    "The item to change: a Document or Term by `id`, a Decision by `key`, or Guidance by its Project's key as `project` (left out for the Workspace's).",
+    "The item to change: a Document or Term by `id`, a Decision by `key`, or Guidance by its Project's key as `project` (left out for the Workspace's). " +
+    "To suggest a new Document under a protected branch, name the Document it goes under as `parentId` instead of an `id`.",
   oneOf: [
     { type: "object", required: ["kind", "id"], additionalProperties: false, properties: { kind: { type: "string", enum: ["document", "term"] }, id: { type: "string", format: "uuid" } } },
+    {
+      type: "object",
+      required: ["kind", "parentId"],
+      additionalProperties: false,
+      properties: { kind: { type: "string", const: "document" }, parentId: { type: "string", format: "uuid", description: "The Document the new one goes under." } },
+    },
     { type: "object", required: ["kind", "key"], additionalProperties: false, properties: { kind: { type: "string", const: "decision" }, key: { type: "string", maxLength: 30 } } },
     {
       type: "object",
@@ -58,7 +65,7 @@ const newSuggestionBody = {
   additionalProperties: false,
   properties: {
     item: itemBody,
-    baseVersion: { type: "integer", minimum: 0, description: "The Version of the item the change starts from, as you read it; 0 only for Guidance nobody has written." },
+    baseVersion: { type: "integer", minimum: 0, description: "The Version of the item the change starts from, as you read it; 0 only for Guidance nobody has written, and for a new Document." },
     content: contentBody,
     reasoning: { type: "string", minLength: 1, maxLength: 10_000, description: "Why the change, in Markdown, for the User who reviews it." },
     ticket: {
