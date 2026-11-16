@@ -1,11 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { bearerToken, HttpError, SIGN_IN_COOKIE } from "../context.js";
-
-/** Methods that only read, which any site may send. */
-const READS = new Set(["GET", "HEAD", "OPTIONS"]);
-
-/** Whether a route with `method` (or methods) writes, so other sites may not call it. */
-export const isWrite = (method: string | string[]): boolean => [method].flat().some((m) => !READS.has(m));
+import { bearerToken, HttpError, isReading, SIGN_IN_COOKIE } from "../context.js";
 
 const REFUSED = "This write was sent from another site; make it from Cronk itself";
 
@@ -20,7 +14,7 @@ const REFUSED = "This write was sent from another site; make it from Cronk itsel
 export function refuseWritesFromOtherSites(app: FastifyInstance, publicUrl: string | undefined): void {
   const publicOrigin = publicUrl === undefined ? undefined : new URL(publicUrl).origin;
   app.addHook("onRequest", async (request) => {
-    if (!isWrite(request.method)) return;
+    if (isReading(request.method)) return;
     const signedIn = request.cookies[SIGN_IN_COOKIE] !== undefined;
     if (!signedIn && bearerToken(request) !== undefined) return;
     const from = sentFrom(request);

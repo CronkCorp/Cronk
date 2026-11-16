@@ -118,6 +118,18 @@ describe("the OpenAPI description", () => {
     expect(deleteParams).toEqual([expect.objectContaining({ name: "baseVersion", required: true })]);
   });
 
+  it("says every write an Agent makes needs an Agent Session, and how a script starts and ends one", async () => {
+    const doc = await openapi();
+    expect(doc.info.description).toContain("POST /api/agent-sessions");
+    expect(doc.info.description).toContain("DELETE /api/agent-sessions/current");
+    expect(doc.info.description).toMatch(/[Rr]eads? .*without/);
+    for (const [label, op] of operations(doc)) {
+      // Starting a Session is the one change made outside one; routes anyone may call take no token.
+      if (label.startsWith("GET ") || op.security !== undefined || label === "POST /api/agent-sessions") continue;
+      expect(op.responses["403"]?.description, label).toMatch(/Agent Session/);
+    }
+  });
+
   it("describes the archives imports take", async () => {
     const doc = await openapi();
     for (const path of ["/api/import", "/api/workspace/documents/import", "/api/projects/{key}/documents/import"]) {
