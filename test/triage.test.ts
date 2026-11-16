@@ -82,6 +82,10 @@ describe("Triage on Project items", () => {
     expect(await triageLines(admin)).toEqual(["suggestion Architecture"]);
     expect(await triageLines(bob)).toEqual(["suggestion Architecture"]);
     expect(await triageLines(rita)).toEqual([]);
+    // Bob loses sight of it once CRONK is private and he isn't listed.
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await triageLines(bob)).toEqual([]);
+    expect(await triageLines(admin)).toEqual(["suggestion Architecture"]);
     expect(await triageLines(admin, "?project=cronk")).toEqual(["suggestion Architecture"]);
     expect(await triageLines(admin, "?project=OPS")).toEqual([]);
   });

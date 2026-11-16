@@ -47,11 +47,14 @@ export function inboxAddressFrom(search: URLSearchParams): InboxAddress {
   };
 }
 
-const inboxPath = (address: InboxAddress) => {
+/** The address of a split view at `base` with a filter and a selected item, such as the Inbox's or Triage's. */
+const viewPath = (base: string, address: { filter: object; item?: string }) => {
   const entries = [...Object.entries(address.filter), ["item", address.item]];
   const query = new URLSearchParams(entries.filter((entry): entry is [string, string] => !!entry[1]));
-  return `/inbox${query.size ? `?${query}` : ""}`;
+  return `${base}${query.size ? `?${query}` : ""}`;
 };
+
+const inboxPath = (address: InboxAddress) => viewPath("/inbox", address);
 
 type QuestionItem = Extract<InboxItem, { kind: "question" }>;
 type ReviewItem = Extract<InboxItem, { kind: "review" }>;
@@ -69,9 +72,10 @@ const itemId = (item: InboxItem) =>
         ? `suggestion-${item.suggestion.id}`
         : `${item.kind}-${item.ticket.key}`;
 
-/** A group of the list: its name, and which items it holds. */
+/** A group of the list: its name, the kind of item it holds, and which items of that kind. */
 interface Group {
   name: string;
+  kind: InboxKind;
   holds: (item: InboxItem) => boolean;
 }
 
@@ -80,12 +84,12 @@ interface Group {
  * completions, then Agents' Suggestions, then Decisions Agents proposed.
  */
 const GROUPS: Group[] = [
-  { name: "Blocking", holds: (item) => item.kind === "question" && item.question.blocking },
-  { name: "Questions", holds: (item) => item.kind === "question" && !item.question.blocking },
-  { name: "To review", holds: (item) => item.kind === "review" },
-  { name: "Unverified", holds: (item) => item.kind === "unverified" },
-  { name: "Suggestions", holds: (item) => item.kind === "suggestion" },
-  { name: "Proposed Decisions", holds: (item) => item.kind === "decision" },
+  { name: "Blocking", kind: "question", holds: (item) => item.kind === "question" && item.question.blocking },
+  { name: "Questions", kind: "question", holds: (item) => item.kind === "question" && !item.question.blocking },
+  { name: "To review", kind: "review", holds: (item) => item.kind === "review" },
+  { name: "Unverified", kind: "unverified", holds: (item) => item.kind === "unverified" },
+  { name: "Suggestions", kind: "suggestion", holds: (item) => item.kind === "suggestion" },
+  { name: "Proposed Decisions", kind: "decision", holds: (item) => item.kind === "decision" },
 ];
 
 /**
@@ -171,8 +175,8 @@ export interface TriageAddress {
 /** The kinds Triage holds, by the names its chips give them. */
 const TRIAGE_KIND_NAMES: Record<TriageKind, string> = { unverified: "Unverified", suggestion: "Suggestions" };
 
-/** Triage's groups, in the order they are shown. */
-const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.name === "Unverified" || group.name === "Suggestions");
+/** Triage's groups, in the order they are shown: the Inbox's groups that hold its kinds. */
+const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.kind in TRIAGE_KIND_NAMES);
 
 /** The Triage filter and selected item in a page address. */
 export function triageAddressFrom(search: URLSearchParams): TriageAddress {
@@ -187,11 +191,7 @@ export function triageAddressFrom(search: URLSearchParams): TriageAddress {
   };
 }
 
-const triagePath = (address: TriageAddress) => {
-  const entries = [...Object.entries(address.filter), ["item", address.item]];
-  const query = new URLSearchParams(entries.filter((entry): entry is [string, string] => !!entry[1]));
-  return `/triage${query.size ? `?${query}` : ""}`;
-};
+const triagePath = (address: TriageAddress) => viewPath("/triage", address);
 
 /**
  * Triage: the waiting items with no clear User that the signed-in User could act on (Admins see all), in the Inbox's split view
