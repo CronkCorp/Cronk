@@ -4,7 +4,8 @@ import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
+import { answer, errors, holding, listing, pathParams, projectKeyParam, ref, savedHolding } from "../schemas.js";
+import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
 import { markRejected, rejectionOf, waitingEvent } from "../coordination/waiting-work.js";
@@ -132,7 +133,8 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      return insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, input.ticket));
+      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, input.ticket));
+      return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
     };
 
     /**
@@ -193,17 +195,17 @@ export function decisionRoutes(ctx: AppContext) {
         schema: {
           params: projectParams,
           body: newDecisionBody,
-          response: { 201: answer("The new Decision, proposed, at Version 1", holding("decision", "Decision")), ...errors(400, 401, 403, 404, 410) },
+          response: { 201: answer("The new Decision, proposed, at Version 1", savedHolding("decision", "Decision")), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const decision = await transaction(ctx.db, async (tx) => {
+        const saved = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           return create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
         });
-        await reviewerHears(decision);
-        return reply.code(201).send({ decision });
+        await reviewerHears(saved.decision);
+        return reply.code(201).send(saved);
       },
     );
 
@@ -212,15 +214,15 @@ export function decisionRoutes(ctx: AppContext) {
       {
         schema: {
           body: newDecisionBody,
-          response: { 201: answer("The new Workspace Decision, proposed, at Version 1", holding("decision", "Decision")), ...errors(400, 401, 403, 410) },
+          response: { 201: answer("The new Workspace Decision, proposed, at Version 1", savedHolding("decision", "Decision")), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
-        const decision = await transaction(ctx.db, (tx) => create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body));
-        await reviewerHears(decision);
-        return reply.code(201).send({ decision });
+        const saved = await transaction(ctx.db, (tx) => create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body));
+        await reviewerHears(saved.decision);
+        return reply.code(201).send(saved);
       },
     );
 
@@ -250,7 +252,7 @@ export function decisionRoutes(ctx: AppContext) {
             properties: { baseVersion, title, body, group, supersedes },
           },
           response: {
-            200: answer("The Decision at its new Version; unchanged if the edit changed nothing", holding("decision", "Decision")),
+            200: answer("The Decision at its new Version; unchanged if the edit changed nothing", savedHolding("decision", "Decision")),
             ...errors(400, 401, 403, 404, 410),
             409: { description: "The edit is based on a Version that is no longer current; the answer carries the current Version", ...ref("StaleDecision") },
           },
@@ -258,7 +260,7 @@ export function decisionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const decision = await transaction(ctx.db, async (tx) => {
+        const saved = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (actor.kind === "agent" && current.status !== "proposed") {
             throw new HttpError(403, `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}; only Users change it now`);
@@ -272,10 +274,13 @@ export function decisionRoutes(ctx: AppContext) {
             ...(newGroup !== undefined && { group: groupOf(newGroup) }),
             ...(newSupersedes !== undefined && { supersedes: await requireSuperseded(tx, scopeOf(actor, current), current.number, newSupersedes) }),
           };
-          return save(tx, actor, current, content);
+          return {
+            decision: await save(tx, actor, current, content),
+            avoidedWords: await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body)),
+          };
         });
-        await reviewerHears(decision);
-        return { decision };
+        await reviewerHears(saved.decision);
+        return saved;
       },
     );
 
