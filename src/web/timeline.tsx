@@ -198,7 +198,7 @@ export function ReportCard(props: { report: Report }) {
         <Link to={`/documents/${r.id}`} className="link">Open Report</Link>
       </div>
       <div className="tl-report-body">
-        <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+        <Show state={document}>{(d) => <CronkMarkdown embeds={d.embeds}>{d.body}</CronkMarkdown>}</Show>
         <InlineAttachments documentId={r.id} />
       </div>
       {r.decisions.length > 0 && (
@@ -230,7 +230,7 @@ function CommentEntry(props: { comment: Comment; className: string } & Thread) {
       </div>
       <div className="tl-bubble">
         <div className="tl-body">
-          <CronkMarkdown>{c.body}</CronkMarkdown>
+          <CronkMarkdown embeds={c.embeds}>{c.body}</CronkMarkdown>
           <InlineAttachments commentId={c.id} />
         </div>
         {replies.length > 0 && <ReplyList replies={replies} thread={props} />}
@@ -251,7 +251,7 @@ function ReplyList(props: { replies: Comment[]; thread: Thread }) {
             <RelativeTime at={r.at} clock />
           </div>
           <div className="tl-body">
-            <CronkMarkdown>{r.body}</CronkMarkdown>
+            <CronkMarkdown embeds={r.embeds}>{r.body}</CronkMarkdown>
             <InlineAttachments commentId={r.id} />
           </div>
           {props.thread.comments.some((c) => c.replyToCommentId === r.id) && (
@@ -402,7 +402,7 @@ function CommentItem(props: { comment: Comment; card?: Card } & Thread) {
         <RelativeTime at={c.at} />
       </div>
       <div className="comment-body">
-        <CronkMarkdown>{c.body}</CronkMarkdown>
+        <CronkMarkdown embeds={c.embeds}>{c.body}</CronkMarkdown>
         <InlineAttachments commentId={c.id} />
       </div>
       <Replies comments={props.comments} canWrite={props.canWrite} post={props.post} onPosted={props.onPosted} replies={replies} replyTo={{ replyToCommentId: c.id }} replyLabel="Reply" />

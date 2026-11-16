@@ -33,6 +33,7 @@ import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
 import type { Mention as StoredMention } from "./knowledge/mentions.js";
+import type { EmbeddedIn as StoredEmbeddedIn } from "./files/artifact-embeds.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
@@ -125,6 +126,8 @@ export type Claim = Serialized<StoredClaim>;
 export type LinkedDocument = Serialized<StoredLinkedDocument>;
 /** Something whose text mentions a Decision or Term. */
 export type Mention = Serialized<StoredMention>;
+/** A Document, Report or Comment embedding an Artifact, as the Artifact's Version menu lists it. */
+export type EmbeddedIn = Serialized<StoredEmbeddedIn>;
 
 /** A Ticket with the Tickets and Documents around it and its live Claim, as its page shows it. */
 export interface TicketDetail {

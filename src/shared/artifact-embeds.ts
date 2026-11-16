@@ -61,10 +61,10 @@ function linesOf(paragraph: MarkdownNode): MarkdownNode[][] {
 
 /**
  * Replaces each paragraph under `node` that holds a line embedding an Artifact with paragraphs of its other lines
- * and, in place of each such line, the node `embed` makes for it. Code, quotes and HTML are left alone, being
- * no paragraphs; paragraphs in lists and quotes count.
+ * and, in place of each such line, the node `embed` makes for it; where `embed` makes none, the line stays as it
+ * was. Code and HTML are left alone, being no paragraphs; paragraphs in lists and quotes count.
  */
-export function replaceArtifactEmbeds(node: MarkdownNode, embed: (at: ArtifactAt) => MarkdownNode): void {
+export function replaceArtifactEmbeds(node: MarkdownNode, embed: (at: ArtifactAt) => MarkdownNode | undefined): void {
   if (!node.children) return;
   node.children = node.children.flatMap((child) => {
     if (child.type !== "paragraph") {
@@ -72,8 +72,11 @@ export function replaceArtifactEmbeds(node: MarkdownNode, embed: (at: ArtifactAt
       return [child];
     }
     const lines = linesOf(child);
-    const found = lines.map(embeddedBy);
-    if (found.every((at) => at === undefined)) return [child];
+    const made = lines.map((line) => {
+      const at = embeddedBy(line);
+      return at && embed(at);
+    });
+    if (made.every((n) => n === undefined)) return [child];
     const out: MarkdownNode[] = [];
     let run: MarkdownNode[][] = [];
     const flush = () => {
@@ -83,10 +86,10 @@ export function replaceArtifactEmbeds(node: MarkdownNode, embed: (at: ArtifactAt
       run = [];
     };
     lines.forEach((line, k) => {
-      const at = found[k];
-      if (at === undefined) return void run.push(line);
+      const node = made[k];
+      if (node === undefined) return void run.push(line);
       flush();
-      out.push(embed(at));
+      out.push(node);
     });
     flush();
     return out;

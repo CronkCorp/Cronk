@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, type Artifact, type ArtifactVersion } from "./api.js";
+import { api, ApiError, type Artifact, type ArtifactVersion, type EmbeddedIn } from "./api.js";
 import { Actor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { formatBytes } from "./components/files.js";
@@ -23,6 +23,62 @@ export const versionOf = (param: string | null): number | undefined => (param &&
 
 /** The `sandbox` an Artifact's frame gets: its scripts run, but in an origin of their own, away from Cronk's. */
 const FRAME_SANDBOX = "allow-scripts allow-modals allow-downloads";
+
+/** What an embed shows of an Artifact: the Version it names, or else its latest. */
+interface Embedded {
+  title: string;
+  number: number;
+  latest: boolean;
+  frameUrl: string;
+  /** Its page in Cronk, at that Version when the embed names one. */
+  page: string;
+}
+
+/** Loads what an embed of Artifact `id` shows: Version `version`, or else the latest. */
+async function loadEmbedded(id: string, version: number | null): Promise<Embedded> {
+  if (version === null) {
+    const a = await api.artifact(id);
+    return { title: a.title, number: a.version, latest: true, frameUrl: a.frameUrl ?? "", page: `/artifacts/${id}` };
+  }
+  const v = await api.artifactVersion(id, version);
+  return { title: v.title, number: v.number, latest: false, frameUrl: v.frameUrl ?? "", page: `/artifacts/${id}?version=${v.number}` };
+}
+
+/**
+ * An Artifact embedded in a Document, Report or Comment (docs/ui.md § Artifact): a bordered block with a bar (kind label,
+ * title, Version chip, Open full size) above the sandboxed frame. One the reader can't open shows as its address, a link.
+ */
+export function ArtifactEmbed(props: { artifactId: string; version: number | null; address: string }) {
+  const [state] = useLoad(() => loadEmbedded(props.artifactId, props.version), [props.artifactId, props.version]);
+  if (state.kind === "failed") {
+    return (
+      <p>
+        <a href={props.address} className="link">{props.address}</a>
+      </p>
+    );
+  }
+  const shown = state.kind === "loaded" ? state.value : undefined;
+  return (
+    <figure className="artifact-embed">
+      <div className="artifact-embed-bar">
+        <span className="kind-label">Artifact</span>
+        {shown ? (
+          <Link to={shown.page} className="artifact-embed-title link">{shown.title}</Link>
+        ) : (
+          <span className="artifact-embed-title muted">Loading…</span>
+        )}
+        {shown && <Chip>{`Version ${shown.number}${shown.latest ? " · latest" : ""}`}</Chip>}
+        <span className="grow" />
+        {shown && (
+          <a className={buttonClass("secondary")} href={shown.frameUrl} target="_blank" rel="noopener noreferrer">Open full size</a>
+        )}
+      </div>
+      {shown && (
+        <iframe key={shown.frameUrl} className="artifact-embed-frame" title={`${shown.title}, Version ${shown.number}`} src={shown.frameUrl} sandbox={FRAME_SANDBOX} />
+      )}
+    </figure>
+  );
+}
 
 /** The Artifacts of a Project, or of the Workspace without `projectKey`, with Publish for those who may write there. */
 export function ArtifactsPage(props: { projectKey?: string }) {
@@ -204,9 +260,46 @@ function VersionMenu(props: { artifact: Artifact; shown: number }) {
         </ul>
         <CopyLink url={a.url} label="Copy link to latest" />
         <div className="menu-label">Embedded in</div>
-        <p className="muted version-empty">Not embedded anywhere yet.</p>
+        <EmbeddedInList artifactId={a.id} version={a.version} />
       </div>
     </Popover>
+  );
+}
+
+/** Where a place embedding an Artifact is read: a Document or Report, or the Ticket or Document a Comment is on. */
+const embeddedInPage = (e: EmbeddedIn) =>
+  e.kind !== "comment" ? `/documents/${e.id}` : e.ticketKey ? `/tickets/${e.ticketKey}` : `/documents/${e.documentId}`;
+
+const EMBED_KIND_LABELS: Record<EmbeddedIn["kind"], string> = { document: "Document", report: "Report", comment: "Comment" };
+
+/** The Documents, Reports and Comments embedding an Artifact, each with the Version it shows; loaded again on each publish. */
+function EmbeddedInList(props: { artifactId: string; version: number }) {
+  const [places] = useLoad(() => api.artifactEmbeddedIn(props.artifactId), [props.artifactId, props.version]);
+  return (
+    <Show state={places}>
+      {(list) =>
+        list.length === 0 ? (
+          <p className="muted version-empty">Not embedded anywhere yet.</p>
+        ) : (
+          <ul className="version-list" aria-label="Embedded in">
+            {list.map((e) => (
+              <li key={`${e.kind}:${e.id}:${e.version ?? ""}`}>
+                <Link to={embeddedInPage(e)} className="version-row">
+                  <span className="embedded-in-head">
+                    <span className={`kind-label${e.kind === "report" ? " report" : e.kind === "comment" ? " comment" : ""}`}>{EMBED_KIND_LABELS[e.kind]}</span>
+                    {e.ticketKey && <span className="key">{e.ticketKey}</span>}
+                  </span>
+                  <span>{e.title}</span>
+                  <span className="muted">
+                    {e.version === null ? "Latest Version" : `Version ${e.version}`} · <RelativeTime at={e.at} />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </Show>
   );
 }
 

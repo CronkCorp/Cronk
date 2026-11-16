@@ -8,6 +8,8 @@ import { useLoad } from "./ui.js";
 import { alignCodeToSource, alignToSource, encodeBounds, type Container, type SourceBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../shared/knowledge-references.js";
+import { ARTIFACT_ADDRESS, replaceArtifactEmbeds, type ArtifactAt } from "../shared/artifact-embeds.js";
+import { ArtifactEmbed } from "./artifacts.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
 interface MdNode extends MarkdownNode {
@@ -36,13 +38,20 @@ interface Found {
   url: string;
 }
 
+/** Where a link to an Artifact's address goes: within Cronk when the address is this Cronk's, else the address as written. */
+const artifactHref = (address: string) => {
+  const url = URL.parse(address);
+  return url && url.origin === location.origin ? `${url.pathname}${url.search}` : address;
+};
+
 /**
  * The references `text` makes, left to right without overlaps (the longer wins where two start
- * together): Ticket and Decision keys of known Projects, keys of the Workspace's Decisions, and the
- * names of Terms with their capitalisation, as whole words.
+ * together): Artifacts' addresses, Ticket and Decision keys of known Projects, keys of the Workspace's
+ * Decisions, and the names of Terms with their capitalisation, as whole words.
  */
 function referencesIn(text: string, targets: LinkTargets, terms: RegExp | undefined): Found[] {
   const found: Found[] = [];
+  for (const m of text.matchAll(ARTIFACT_ADDRESS)) found.push({ index: m.index, text: m[0], url: artifactHref(m[0]) });
   for (const m of text.matchAll(TICKET_REFERENCE)) {
     if (targets.projectKeys.has(m[1]!)) found.push({ index: m.index, text: m[0], url: `/tickets/${m[0]}` });
   }
@@ -96,6 +105,23 @@ function linkReferences(targets: LinkTargets, source: string) {
     return parts;
   };
   return () => (tree: MdNode) => replaceReferenceText(tree, split);
+}
+
+/** The key an embed is listed by: its Artifact and the Version it names. */
+const embedKey = (at: ArtifactAt) => `${at.artifactId}@${at.version ?? ""}`;
+
+/**
+ * A remark plugin that turns each line holding an Artifact's address alone into an embed of it, when the API listed
+ * it among what the text embeds (`embeds`); any other such line stays a link.
+ */
+function embedArtifacts(embeds: ArtifactAt[]) {
+  const listed = new Set(embeds.map(embedKey));
+  return () => (tree: MdNode) =>
+    replaceArtifactEmbeds(tree, (at) =>
+      listed.has(embedKey(at))
+        ? ({ type: "artifactEmbed", children: [], data: { hName: "artifact-embed", hProperties: { artifactId: at.artifactId, version: at.version ?? "" } } } as MdNode)
+        : undefined,
+    );
 }
 
 /** Whether every run of text a hast node shows was parsed from between `start` and `end` in the source. */
@@ -405,28 +431,41 @@ const NO_TARGETS: LinkTargets = { projectKeys: new Set(), workspaceDecisions: ne
  * How rendered Markdown shows its elements. Defined once, not per render: a new component each render
  * would remount every link, and a selection ending inside one would lose its end.
  */
-const COMPONENTS: Components = {
+const COMPONENTS = {
   a: ({ href, children }) =>
     href?.startsWith("/") ? (
       <Link to={href} className="link">{children}</Link>
     ) : (
       <a href={href} className="link">{children}</a>
     ),
-};
+  "artifact-embed": ({ node }: { node?: { properties?: Record<string, unknown> } }) => {
+    const id = String(node?.properties?.artifactId ?? "");
+    const version = node?.properties?.version ? Number(node.properties.version) : null;
+    return <ArtifactEmbed artifactId={id} version={version} address={`${location.origin}/artifacts/${id}${version === null ? "" : `?version=${version}`}`} />;
+  },
+} as Components;
 
 /**
- * Renders Cronk Markdown: CommonMark plus Ticket and Decision keys and Term names as links, the Terms
+ * Renders Cronk Markdown: CommonMark plus Artifacts' addresses, Ticket and Decision keys and Term names as links, the Terms
  * being those that apply in `projectKey` (null for the Workspace), or else where `MarkdownPlace` says it
  * lies. With `sourceOffsets`, each run of text says where it sits in the Markdown, so a selection can be
- * read back as the Markdown it shows, and `highlights` are marked where their passages first appear.
+ * read back as the Markdown it shows, and `highlights` are marked where their passages first appear. The
+ * Artifacts of `embeds` show in place where their address stands alone on a line.
  */
-export function CronkMarkdown(props: { children: string; projectKey?: string | null; sourceOffsets?: boolean; highlights?: Highlight[] }) {
+export function CronkMarkdown(props: {
+  children: string;
+  projectKey?: string | null;
+  sourceOffsets?: boolean;
+  highlights?: Highlight[];
+  /** The Artifacts the API answers the text embeds; their addresses alone on a line show them in place. */
+  embeds?: ArtifactAt[];
+}) {
   const place = useContext(MarkdownPlace);
   const projectKey = props.projectKey !== undefined ? props.projectKey : place;
   const [targets] = useLoad(() => loadLinkTargets(projectKey), [projectKey]);
   return (
     <Markdown
-      remarkPlugins={[linkReferences(targets.kind === "loaded" ? targets.value : NO_TARGETS, props.children)]}
+      remarkPlugins={[embedArtifacts(props.embeds ?? []), linkReferences(targets.kind === "loaded" ? targets.value : NO_TARGETS, props.children)]}
       rehypePlugins={props.sourceOffsets ? [markSourceAndHighlights(props.children, props.highlights ?? [])] : []}
       components={COMPONENTS}
     >
