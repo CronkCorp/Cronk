@@ -21,6 +21,7 @@ import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
+import { isWrite, refuseWritesFromOtherSites } from "./identity/same-site.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -30,6 +31,11 @@ export interface AppConfig {
   databaseUrl: string;
   /** Mark the sign-in cookie Secure; turn on when served over HTTPS. */
   cookieSecure: boolean;
+  /**
+   * The address Cronk is reached at, such as `https://cronk.example`. Writes made with the sign-in cookie are accepted
+   * only from pages of this origin; without it, only from pages of the host the request was sent to.
+   */
+  publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;
 }
@@ -83,8 +89,9 @@ export async function buildApp(opts: {
     route.schema = {
       ...schema,
       querystring: inline ? { additionalProperties: false, ...querystring } : querystring,
-      // So every operation's description says it can be refused; a route's own 400 description wins.
-      response: { ...errors(400), ...(schema.response as object | undefined) },
+      // So every operation's description says it can be refused, and every write that it can be refused for coming
+      // from another site; a route's own 400 and 403 descriptions win.
+      response: { ...errors(400), ...(isWrite(route.method) && errors(403)), ...(schema.response as object | undefined) },
     };
   });
   // Every API error has the same shape: `{ error: "<message>" }`.
@@ -99,6 +106,7 @@ export async function buildApp(opts: {
     return reply.code(500).send({ error: "Something went wrong" });
   });
   await app.register(cookie);
+  refuseWritesFromOtherSites(app, opts.config.publicUrl);
   addSharedSchemas(app);
   // Describes every route from its schema; served at /api/openapi.json.
   await app.register(swagger, {
@@ -112,7 +120,8 @@ export async function buildApp(opts: {
           "as `Authorization: Bearer <token>`. An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
           "Agent Access, and its token (read-only tokens are refused every write). An Agent calls within one of its Agent Sessions " +
           "by also sending `Cronk-Agent-Session: <id>` (see /api/agent-sessions); the call refreshes the Session, and history records it. " +
-          "Agents normally connect over MCP at /mcp instead, which does this for them.",
+          "Agents normally connect over MCP at /mcp instead, which does this for them. A signed-in change sent from a page on " +
+          "another site (its `Origin`, or else `Referer`, isn't Cronk's own) is refused with 403, as is one with the cookie that names no page.",
       },
       components: {
         securitySchemes: {

@@ -33,7 +33,10 @@ Cronk is a plain Node.js process configured only through environment variables, 
 | `HOST`          | `0.0.0.0`             | Address to listen on                                           |
 | `PORT`          | `3000`                | Port to listen on                                              |
 | `COOKIE_SECURE` | `false`               | Mark the sign-in cookie Secure (use behind HTTPS)              |
+| `PUBLIC_URL`    | (the request's host)  | Address Users reach Cronk at, e.g. `https://cronk.example`; set it behind a proxy that rewrites the `Host` header |
 | `WEB_ROOT`      | `dist/web` if present | Directory of the built web client                              |
+
+Signed-in changes are only accepted from Cronk's own pages: a browser request whose `Origin` (or `Referer`) is another site is refused, and the sign-in cookie is `SameSite=Strict`. Cronk's own pages are those of `PUBLIC_URL`, or without it, of the host a request was sent to. Agents' token requests aren't affected.
 
 The database schema is created and upgraded by migrations every time Cronk starts.
 

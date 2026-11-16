@@ -57,14 +57,46 @@ export interface Response<T = any> {
   body: T;
 }
 
-/** One API caller with its own cookie jar, like a browser tab or a script, optionally sending a bearer token. */
+/** A cookie as the server last set it, with the attributes that decide when a browser sends it back. */
+export interface SetCookie {
+  value: string;
+  sameSite?: string | undefined;
+  httpOnly?: boolean | undefined;
+}
+
+/** The origin `app.inject` requests are made to, which a page Cronk served sends as its `Origin`. */
+export const OWN_ORIGIN = "http://localhost";
+
+/**
+ * One API caller with its own cookie jar, like a browser tab or a script, optionally sending a bearer token.
+ * Like a page Cronk served, it sends Cronk's own `Origin` with every call; `headers` add to or replace that,
+ * and a header given as `null` isn't sent at all.
+ */
 export class Client {
-  private cookies = new Map<string, string>();
+  private readonly headers: Record<string, string>;
   constructor(
     private readonly cronk: Cronk,
     private readonly token?: string,
-    private readonly headers: Record<string, string> = {},
-  ) {}
+    headers: Record<string, string | null> = {},
+    private readonly cookies = new Map<string, string>(),
+    private readonly cookiesSet = new Map<string, SetCookie>(),
+  ) {
+    const all = { origin: OWN_ORIGIN, ...headers };
+    this.headers = Object.fromEntries(Object.entries(all).filter((entry): entry is [string, string] => entry[1] !== null));
+  }
+
+  /**
+   * The same caller, sharing this cookie jar, calling as a page of another site would: with `headers`
+   * such as that site's `origin` or `referer` (`null` leaves one out, as a script or a stricter browser does).
+   */
+  elsewhere(headers: Record<string, string | null>): Client {
+    return new Client(this.cronk, this.token, { ...this.headers, ...headers }, this.cookies, this.cookiesSet);
+  }
+
+  /** The cookie `name` as the server last set it for this caller, if it has. */
+  cookieSet(name: string): SetCookie | undefined {
+    return this.cookiesSet.get(name);
+  }
 
   get<T = any>(path: string) {
     return this.request<T>("GET", path);
@@ -128,6 +160,7 @@ export class Client {
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {
+      this.cookiesSet.set(c.name, { value: c.value, sameSite: c.sameSite, httpOnly: c.httpOnly });
       if (c.value === "" || (c.maxAge !== undefined && c.maxAge <= 0)) this.cookies.delete(c.name);
       else this.cookies.set(c.name, c.value);
     }
@@ -194,8 +227,8 @@ export class EventStream {
 export interface Cronk {
   app: FastifyInstance;
   clock: FakeClock;
-  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given, and any extra `headers`. */
-  client(token?: string, headers?: Record<string, string>): Client;
+  /** A new caller with an empty cookie jar, sending `token` as a bearer token if given, and any extra `headers` (`null` leaves one out). */
+  client(token?: string, headers?: Record<string, string | null>): Client;
   /** Stops the application and starts it again on the same database. */
   restart(): Promise<void>;
   /**
@@ -267,8 +300,9 @@ async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
 
 /**
  * Starts Cronk in-process on a fresh, empty database and stops it when the test ends.
+ * `publicUrl` is the address Cronk is configured to be reached at, if any.
  */
-export async function startCronk(): Promise<Cronk> {
+export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
   const dbName = `cronk_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -281,12 +315,12 @@ export async function startCronk(): Promise<Cronk> {
 
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
     clock,
-    client: (token?: string, headers?: Record<string, string>) => new Client(cronk, token, headers),
+    client: (token?: string, headers?: Record<string, string | null>) => new Client(cronk, token, headers),
     restart: async () => {
       await cronk.app.close();
       cronk.app = await start();
