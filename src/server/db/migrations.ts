@@ -720,4 +720,60 @@ export const migrations: Migration[] = [
       UPDATE decisions SET protected = true WHERE status = 'accepted';
     `,
   },
+  {
+    id: "0029_artifacts",
+    sql: `
+      -- An Artifact (files/artifacts.ts): a folder of files with index.html, belonging to a Project or, with no
+      -- Project, the Workspace. Each publish adds a Version holding the whole folder; the latest is the highest number.
+      CREATE TABLE artifacts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        title text NOT NULL CHECK (title <> ''),
+        version integer NOT NULL DEFAULT 0,
+        protected boolean NOT NULL DEFAULT false,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE INDEX artifacts_place ON artifacts (workspace_id, project_id, updated_at DESC);
+
+      -- One publish of an Artifact: who published it, from which Ticket's Claim if an Agent named one, and the
+      -- files it holds, whose bytes are in the file store under artifact-files/<file id>.
+      CREATE TABLE artifact_versions (
+        artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        number integer NOT NULL CHECK (number > 0),
+        title text NOT NULL,
+        source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL)),
+        PRIMARY KEY (artifact_id, number)
+      );
+      CREATE TABLE artifact_files (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        artifact_id uuid NOT NULL,
+        version integer NOT NULL,
+        path text NOT NULL CHECK (path <> ''),
+        content_type text NOT NULL,
+        size bigint NOT NULL CHECK (size >= 0),
+        FOREIGN KEY (artifact_id, version) REFERENCES artifact_versions(artifact_id, number) ON DELETE CASCADE,
+        UNIQUE (artifact_id, version, path)
+      );
+
+      -- Artifacts can be Protected, recorded in the same history as Documents, Terms and Decisions.
+      ALTER TABLE protection_markings ADD COLUMN artifact_id uuid REFERENCES artifacts(id) ON DELETE CASCADE;
+      ALTER TABLE protection_markings DROP CONSTRAINT protection_markings_check;
+      ALTER TABLE protection_markings ADD CONSTRAINT protection_markings_one_item CHECK (num_nonnulls(document_id, term_id, decision_id, artifact_id) = 1);
+      CREATE INDEX protection_markings_artifact ON protection_markings (artifact_id) WHERE artifact_id IS NOT NULL;
+
+      -- Limits per Version: 25 MB and 500 files unless an Admin changes them.
+      ALTER TABLE workspaces ADD COLUMN artifact_max_bytes bigint NOT NULL DEFAULT 26214400 CHECK (artifact_max_bytes > 0);
+      ALTER TABLE workspaces ADD COLUMN artifact_max_files integer NOT NULL DEFAULT 500 CHECK (artifact_max_files > 0);
+      -- The secret the Artifact hostname's addresses are signed with, so a frame shows only what Cronk handed out.
+      ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+    `,
+  },
 ];

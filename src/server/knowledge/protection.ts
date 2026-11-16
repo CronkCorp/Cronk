@@ -3,22 +3,22 @@ import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 
 /**
- * Protected (ADR 0004): a Document, Term or Decision Agents may read but never change, whatever
+ * Protected (ADR 0004): a Document, Term, Decision or Artifact Agents may read but never change, whatever
  * their Agent Access. Only Users with Write where the item lives mark and unmark it, and each time
  * is recorded in the item's protection history. A Document's mark covers every Document under it.
  */
 
 /** An item that can be marked Protected. */
-export type ProtectableKind = "document" | "term" | "decision";
+export type ProtectableKind = "document" | "term" | "decision" | "artifact";
 /** One item that can be marked Protected, by its kind and id. */
 export interface ProtectableItem {
   kind: ProtectableKind;
   id: string;
 }
 
-const TABLE: Record<ProtectableKind, string> = { document: "documents", term: "terms", decision: "decisions" };
+const TABLE: Record<ProtectableKind, string> = { document: "documents", term: "terms", decision: "decisions", artifact: "artifacts" };
 /** The column of `protection_markings` naming each kind of item. */
-export const PROTECTION_COLUMN: Record<ProtectableKind, string> = { document: "document_id", term: "term_id", decision: "decision_id" };
+export const PROTECTION_COLUMN: Record<ProtectableKind, string> = { document: "document_id", term: "term_id", decision: "decision_id", artifact: "artifact_id" };
 
 /** One marking of an item as Protected, or unmarking, with the User who did it. */
 export interface ProtectionMarking {

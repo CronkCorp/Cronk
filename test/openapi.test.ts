@@ -89,6 +89,7 @@ describe("the OpenAPI description", () => {
     const staleDecisionBody = { $ref: "#/components/schemas/StaleDecision" };
     const staleTermBody = { $ref: "#/components/schemas/StaleTermVersion" };
     const sectionBody = { $ref: "#/components/schemas/SectionRefused" };
+    const staleArtifactBody = { $ref: "#/components/schemas/StaleArtifact" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
       // Every operation that needs a sign-in or token can be refused without one, or for an ended Agent Session.
@@ -112,6 +113,7 @@ describe("the OpenAPI description", () => {
                 staleTermBody,
                 staleDecisionBody,
                 expect.objectContaining({ anyOf: [staleBody, errorBody] }),
+                expect.objectContaining({ anyOf: [staleArtifactBody, errorBody] }),
                 expect.objectContaining({ anyOf: [staleTermBody, errorBody] }),
               ]
             : refusesSections

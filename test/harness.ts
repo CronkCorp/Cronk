@@ -69,6 +69,9 @@ export interface SetCookie {
 /** The origin `app.inject` requests are made to, which Cronk's own web client sends as its `Origin`. */
 export const OWN_ORIGIN = "http://localhost";
 
+/** The Artifact hostname every test Cronk is configured with; a request sends it as its `Host` header to reach it (ADR 0007). */
+export const ARTIFACT_HOST = "artifacts.localhost";
+
 /**
  * One API caller with its own cookie jar, like a browser tab or a script, optionally sending a bearer token.
  * Like Cronk's web client, it sends Cronk's own `Origin` with every call; `headers` add to or replace that,
@@ -322,7 +325,7 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
   const start = () =>
-    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, filesDir }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, filesDir, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),

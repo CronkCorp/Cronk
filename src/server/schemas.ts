@@ -73,6 +73,9 @@ export type SharedSchemaName =
   | "RenamedId"
   | "ProtectionMarking"
   | "Attachment"
+  | "Artifact"
+  | "ArtifactVersion"
+  | "StaleArtifact"
   | "AvoidedWord";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
@@ -264,6 +267,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
     attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
     transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
+    artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
+    artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
@@ -749,6 +754,61 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       at: timestamp,
       actor: { ...recordedActor, description: "Who attached it." },
     }),
+  },
+  Artifact: {
+    description:
+      "A folder of files with `index.html`, such as a prototype or dashboard, published by a User or an Agent and served in isolation " +
+      "on the Artifact hostname. It belongs to a Project or the Workspace; each publish is a new Version.",
+    ...object(
+      {
+        id,
+        title: { type: "string", description: "Its title, as its latest Version gave it." },
+        projectKey: { ...nullable({ type: "string" }), description: "The Project it belongs to; null for the Workspace." },
+        version: { type: "integer", description: "The latest Version's number, counting from 1." },
+        protected: { type: "boolean", description: "Whether it is Protected: Agents may read it but not publish new Versions of it." },
+        url: { type: "string", description: "Its address in Cronk, which always shows the latest Version." },
+        versionUrl: { type: "string", description: "The address of its latest Version, which keeps showing that Version after later publishes." },
+        frameUrl: {
+          type: "string",
+          description: "Where its latest Version is served on the Artifact hostname, for a sandboxed frame; signed for the caller and valid for 12 hours.",
+        },
+        publishedBy: { ...recordedActor, description: "Who published the latest Version." },
+        sourceTicket: {
+          ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
+          description: "The Ticket the latest Version came from: the one whose Claim the publishing Agent Session held.",
+        },
+        createdAt: timestamp,
+        updatedAt: { ...timestamp, description: "When its latest Version was published." },
+        versions: { type: "array", items: { $ref: "ArtifactVersion#" }, description: "Its Versions, newest first; only when one Artifact is asked for." },
+      },
+      ["frameUrl", "versions"],
+    ),
+  },
+  StaleArtifact: {
+    description: "A publish refused for being based on a Version that is no longer the latest; merge with the latest and publish again.",
+    ...object({ error: { type: "string" }, version: { type: "integer", description: "The latest Version's number." } }),
+  },
+  ArtifactVersion: {
+    description: "One publish of an Artifact: the whole folder as it was then.",
+    ...object(
+      {
+        number: { type: "integer", description: "Counts from 1." },
+        title: { type: "string" },
+        at: timestamp,
+        actor: { ...recordedActor, description: "Who published it, with the Agent Session if an Agent did." },
+        sourceTicket: { ...nullable(object({ key: { type: "string" }, title: { type: "string" } })), description: "The Ticket it came from, if any." },
+        fileCount: { type: "integer", description: "How many files it holds." },
+        size: { type: "integer", description: "How many bytes its files take." },
+        url: { type: "string", description: "Its address in Cronk." },
+        frameUrl: { type: "string", description: "Where it is served on the Artifact hostname, signed for the caller and valid for 12 hours; only when one Version is asked for." },
+        files: {
+          type: "array",
+          items: object({ path: { type: "string" }, contentType: { type: "string" }, size: { type: "integer" } }),
+          description: "Its files by path; only when one Version is asked for.",
+        },
+      },
+      ["frameUrl", "files"],
+    ),
   },
   Transcript: {
     description:

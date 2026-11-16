@@ -18,6 +18,9 @@ export interface ServerConfig extends AppConfig {
  * - `WEB_ROOT` (default: the built client next to the server, if present), absolute or relative to the working directory.
  * - `FILES_DIR` (default `data/files`): where the files of Attachments are stored, absolute or relative to the working directory.
  *   Keep it on a volume that outlives the server, like the database's.
+ * - `ARTIFACTS_URL` (optional, recommended): the address of the hostname Artifacts are served from, such as
+ *   `https://artifacts.cronk.example`, pointed at this same server. Without it, Artifacts are served from Cronk's own
+ *   hostname in a stricter sandbox (ADR 0007).
  */
 export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): ServerConfig {
   const databaseUrl = env.DATABASE_URL;
@@ -30,6 +33,16 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
   if (publicUrl !== undefined && !/^https?:$/.test(URL.parse(publicUrl)?.protocol ?? "")) {
     throw new Error(`PUBLIC_URL must be an http or https address, such as https://cronk.example, got "${publicUrl}"`);
   }
+  const artifactsUrl = env.ARTIFACTS_URL || undefined;
+  if (artifactsUrl !== undefined) {
+    const url = URL.parse(artifactsUrl);
+    if (!url || !/^https?:$/.test(url.protocol) || url.pathname !== "/") {
+      throw new Error(`ARTIFACTS_URL must be the http or https address of a hostname of its own, such as https://artifacts.cronk.example, got "${artifactsUrl}"`);
+    }
+    if (publicUrl !== undefined && new URL(publicUrl).host === url.host) {
+      throw new Error("ARTIFACTS_URL must be a different hostname from PUBLIC_URL, so Artifacts can't act as the signed-in User");
+    }
+  }
   return {
     databaseUrl,
     host: env.HOST ?? "0.0.0.0",
@@ -38,5 +51,6 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
     publicUrl,
     webRoot: env.WEB_ROOT ? resolve(env.WEB_ROOT) : defaultWebRoot,
     filesDir: resolve(env.FILES_DIR || "data/files"),
+    artifactsUrl,
   };
 }
