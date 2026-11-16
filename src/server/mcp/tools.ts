@@ -321,13 +321,13 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       tree: {
         description: "a Project's (or the Workspace's) page tree, depth first, each Document with its depth",
         writes: false,
-        run: (api, a) => api("GET", `${treePath(a.project)}/documents`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/documents`),
       },
       create: {
         description: "a new Document at Version 1, last among its siblings",
         writes: true,
         run: (api, a) =>
-          api("POST", `${treePath(a.project)}/documents`, {
+          api("POST", `${scopePath(a.project)}/documents`, {
             title: required(a.title, "a title", "create"),
             ...(a.body !== undefined && { body: a.body }),
             ...(a.parentId !== undefined && { parentId: a.parentId }),
@@ -403,7 +403,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       list: {
         description: "a Project's (or the Workspace's) Decisions, newest first, without their bodies, optionally filtered",
         writes: false,
-        run: (api, a) => api("GET", `${treePath(a.project)}/decisions${query({ status: a.status, group: a.group })}`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/decisions${query({ status: a.status, group: a.group })}`),
       },
       get: {
         description: "one Decision with its Markdown body, what it supersedes and what superseded it",
@@ -442,5 +442,5 @@ function commentsPath(a: { key?: string | undefined; documentId?: string | undef
   return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
 }
 
-/** Where a page tree's (or a Decision register's) API lives: a Project's, or the Workspace's when no Project is named. */
-const treePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);
+/** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */
+const scopePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);

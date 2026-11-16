@@ -7,11 +7,10 @@ import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip } from "./compone
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
 import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionSummary } from "./api.js";
-import { useCanWrite } from "./documents.js";
 import { CronkMarkdown } from "./markdown.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Link, navigate } from "./router.js";
-import { Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
+import { Field, Show, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
 
 // The Decisions register and a Decision's page: docs/ui.md § Decisions.
 

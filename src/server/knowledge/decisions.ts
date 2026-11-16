@@ -119,16 +119,12 @@ async function refsIn(db: Queryable, scope: DecisionScope, numbers: number[]): P
   return new Map(rows.map((r) => [r.number, { key: decisionKey(r.project_key, r.number), title: r.title, status: r.status }]));
 }
 
-const SELECT_VERSION_ACTOR = `
-  SELECT v.number, v.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, v.actor_session_id AS session_id
-  FROM decision_versions v JOIN users u ON u.id = v.actor_user_id LEFT JOIN agents a ON a.id = v.actor_agent_id`;
-
 async function toDecision(db: Queryable, row: DecisionRow): Promise<Decision> {
   const scope = { workspaceId: row.workspace_id, projectId: row.project_id };
   const refs = await refsIn(db, scope, [...row.supersedes, ...(row.superseded_by === null ? [] : [row.superseded_by])]);
   const { rows: actors } = await db.query<RecordedActorRow & { number: number; at: Date }>(
     // Its first Version, and the first of the Versions since its status last changed.
-    `${SELECT_VERSION_ACTOR}
+    `${SELECT_DECISION_VERSIONS}
      WHERE v.decision_id = $1 AND (v.number = 1 OR v.number = (
        SELECT coalesce(max(number), 0) + 1 FROM decision_versions WHERE decision_id = $1 AND status <> $2))
      ORDER BY v.number`,

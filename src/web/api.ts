@@ -135,8 +135,8 @@ export class ApiError extends Error {
 export const staleVersionOf = (err: unknown): Version | undefined =>
   err instanceof ApiError && err.status === 409 && err.body.current ? (err.body.current as Version) : undefined;
 
-/** Where a page tree's API lives: a Project's, or the Workspace's without a Project key. */
-const treePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+/** Where a Project's API lives, for its page tree or Decisions, or the Workspace's without a Project key. */
+const scopePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
 const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}`;
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 
@@ -179,7 +179,7 @@ export const api = {
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
   /** Imports a .zip, .tar.gz or .tar of a folder of Markdown files as Documents of a Project's tree, or the Workspace's. */
   importDocuments: (projectKey: string | undefined, file: Blob) =>
-    upload<{ documents: DocumentTreeEntry[] }>(`${treePath(projectKey)}/documents/import`, file).then((r) => r.documents),
+    upload<{ documents: DocumentTreeEntry[] }>(`${scopePath(projectKey)}/documents/import`, file).then((r) => r.documents),
   /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
   search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
     request<{ results: SearchResult[] }>(
@@ -197,10 +197,10 @@ export const api = {
   updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
 
   /** A Project's Decisions, or the Workspace's without a Project key, newest first. */
-  decisions: (projectKey?: string) => request<{ decisions: DecisionSummary[] }>("GET", `${treePath(projectKey)}/decisions`).then((r) => r.decisions),
+  decisions: (projectKey?: string) => request<{ decisions: DecisionSummary[] }>("GET", `${scopePath(projectKey)}/decisions`).then((r) => r.decisions),
   decision: (key: string) => request<{ decision: Decision }>("GET", decisionPath(key)).then((r) => r.decision),
   createDecision: (projectKey: string | undefined, input: { title: string; group?: string | null; supersedes?: string[] }) =>
-    request<{ decision: Decision }>("POST", `${treePath(projectKey)}/decisions`, input).then((r) => r.decision),
+    request<{ decision: Decision }>("POST", `${scopePath(projectKey)}/decisions`, input).then((r) => r.decision),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveDecision: (key: string, input: { baseVersion: number; title?: string; body?: string; group?: string | null; supersedes?: string[] }) =>
     request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
@@ -307,9 +307,9 @@ export const api = {
       (r) => r.documents,
     ),
   documentTree: (projectKey?: string) =>
-    request<{ documents: DocumentTreeEntry[] }>("GET", `${treePath(projectKey)}/documents`).then((r) => r.documents),
+    request<{ documents: DocumentTreeEntry[] }>("GET", `${scopePath(projectKey)}/documents`).then((r) => r.documents),
   createDocument: (projectKey: string | undefined, input: { title: string; body?: string; parentId?: string }) =>
-    request<{ document: Document }>("POST", `${treePath(projectKey)}/documents`, input).then((r) => r.document),
+    request<{ document: Document }>("POST", `${scopePath(projectKey)}/documents`, input).then((r) => r.document),
   document: (id: string) => request<{ document: Document }>("GET", documentPath(id)).then((r) => r.document),
   /** Refused with the current Version (see `staleVersionOf`) if `baseVersion` is no longer current. */
   saveDocument: (id: string, input: { baseVersion: number; title?: string; body?: string }) =>

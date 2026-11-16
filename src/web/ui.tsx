@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 
+import { api } from "./api.js";
+
 export const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** Runs a change against the API, tracking whether it is busy and showing its error message if it is refused. */
@@ -135,4 +137,11 @@ export function AuthCard(props: { title: string; intro?: string; children: React
       </div>
     </main>
   );
+}
+
+/** Whether the signed-in User may change Documents and Decisions in a Project, or the Workspace's (every User may). */
+export function useCanWrite(projectKey: string | null | undefined): boolean {
+  const [project] = useLoad(() => (projectKey ? api.project(projectKey) : Promise.resolve(undefined)), [projectKey]);
+  if (!projectKey) return true;
+  return project.kind === "loaded" && project.value?.project.access === "write";
 }
