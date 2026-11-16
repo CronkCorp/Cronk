@@ -86,13 +86,21 @@ export function knowledgeRoutes(ctx: AppContext) {
 
     /**
      * Locks the Document `id` for a delete by `actor`, who has Write where it belongs. Only a User
-     * may delete a Report (a 403), and its Ticket is locked first, as a move into In Review locks
-     * it before checking for a Report, so the two can't interleave.
+     * may delete a Document (a 403 to an Agent, before anything is locked). A Report's Ticket is
+     * locked first, as a move into In Review locks it before checking for a Report, so the two
+     * can't interleave.
      */
     const lockForDelete = async (tx: Queryable, actor: Actor, id: string) => {
       const document = await documentFor(tx, actor, id, "write");
+      if (actor.kind === "agent") {
+        throw new HttpError(
+          403,
+          document.ticketKey === null
+            ? `Deleting ${document.title} removes it and its Versions for good, so a User decides; Agents can't delete Documents`
+            : `A Report records the work handed over on ${document.ticketKey}, so a User decides whether to delete it; Agents can't delete Documents`,
+        );
+      }
       if (document.ticketKey === null) return documentFor(tx, actor, id, "write", { forUpdate: true });
-      if (actor.kind === "agent") throw new HttpError(403, `A Report records the work handed over on ${document.ticketKey}, so only a User may delete it`);
       await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey, { forUpdate: true });
       return documentFor(tx, actor, id, "write", { forUpdate: true });
     };

@@ -128,3 +128,34 @@ describe("Workspace Document access", () => {
     expect((await admin.get(`/api/documents/${id}`)).body.document.version).toBe(1);
   });
 });
+
+describe("Deleting a Document", () => {
+  it("is refused to an Agent with Write in the Project, leaving the Document and its Versions, and allowed to a User", async () => {
+    const { cronk, admin, id } = await projectDocument();
+    await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "v2" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    const refused = await claude.delete(`/api/documents/${id}?baseVersion=2`);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/a User decides/);
+    expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "v2", version: 2 });
+    expect((await admin.get(`/api/documents/${id}/versions`)).body.versions).toHaveLength(2);
+
+    expect((await admin.delete(`/api/documents/${id}?baseVersion=2`)).status).toBe(204);
+    expect((await admin.get(`/api/documents/${id}`)).status).toBe(404);
+  });
+
+  it("is refused to an Agent with Write in the Workspace, and allowed to a User", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const id: string = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "v1" })).body.document.id;
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+
+    const refused = await claude.delete(`/api/documents/${id}?baseVersion=1`);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/a User decides/);
+    expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "v1", version: 1 });
+
+    expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(204);
+    expect((await admin.get(`/api/documents/${id}`)).status).toBe(404);
+  });
+});
