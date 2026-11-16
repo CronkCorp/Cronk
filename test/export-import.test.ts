@@ -334,6 +334,37 @@ describe("importing a Project export", () => {
   });
 });
 
+describe("Agent and Agent Session ids across an import", () => {
+  /** A Project where claude-laptop retitled CRONK-1 in an Agent Session, and the since removed old-bot was its delegate before. */
+  async function agentWork() {
+    const { cronk, admin, claude, session } = await delegatedSetup(1);
+    const old = await registerAgent(admin, "old-bot");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: old.agentId });
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId });
+    await admin.delete(`/api/agents/${old.agentId}`);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    expect((await agent.patch("/api/tickets/CRONK-1", { title: "Built" })).status).toBe(200);
+    return { cronk, admin, claudeId: claude.agentId, oldId: old.agentId, sessionId: agent.sessionId };
+  }
+
+  /** Who made the last change to `key`: the Agent's id and its Agent Session's. */
+  async function lastChangeBy(admin: Client, key: string): Promise<{ agent: string; session: string }> {
+    const { actor } = (await admin.get(`/api/tickets/${key}/changes`)).body.changes.at(-1);
+    return { agent: actor.id, session: actor.session?.id };
+  }
+
+  it("are kept when the installation has none of them", async () => {
+    const { admin: before, claudeId, sessionId } = await agentWork();
+    const exported = await before.download("/api/projects/CRONK/export");
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    const imported = await admin.upload("/api/import", exported.body);
+    expect(imported.status).toBe(201);
+    expect(await lastChangeBy(admin, "CRONK-1")).toEqual({ agent: claudeId, session: sessionId });
+  });
+});
+
 describe("a Ticket's history in an export", () => {
   it("is refused when a change in it isn't one Cronk records", async () => {
     const before = await busyWorkspace();
