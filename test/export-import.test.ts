@@ -196,6 +196,7 @@ describe("exporting a scope's Decisions as docs/adr", () => {
     expect(Object.keys(await untarGz((await grace.download("/api/projects/CRONK/decisions/export")).body))).toEqual(["docs/adr/0001-limits-in-the-api.md"]);
     expect(Object.keys(await untarGz((await grace.download("/api/workspace/decisions/export")).body))).toEqual(["docs/adr/0001-compose-for-installs.md"]);
     expect((await claude.download("/api/workspace/decisions/export")).status).toBe(200);
+    expect((await claude.download("/api/projects/CRONK/decisions/export")).status).toBe(200);
     expect((await grace.download("/api/projects/SECRET/decisions/export")).status).toBe(404);
     const stranger = cronk.client();
     expect((await stranger.download("/api/workspace/decisions/export")).status).toBe(401);
