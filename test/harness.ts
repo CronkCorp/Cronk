@@ -135,10 +135,10 @@ export class Client {
     return { status: res.statusCode, headers: res.headers, body: res.rawPayload };
   }
 
-  /** Uploads `bytes` to `path` as a file of `contentType`; the answer is JSON. */
-  async upload<T = any>(path: string, bytes: Buffer, contentType = "application/gzip"): Promise<Response<T>> {
+  /** Uploads `bytes` to `path` as a file of `contentType`, with `method` (POST by default); the answer is JSON. */
+  async upload<T = any>(path: string, bytes: Buffer, contentType = "application/gzip", method: "POST" | "PUT" = "POST"): Promise<Response<T>> {
     const res = await this.cronk.app.inject({
-      method: "POST",
+      method,
       url: path,
       headers: { ...this.authHeaders(), "content-type": contentType },
       payload: bytes,
