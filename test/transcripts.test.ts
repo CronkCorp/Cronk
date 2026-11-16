@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, registerAgent, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
 
 /** A chat in the turn convention, as a client's hook converts it, in which the Agent saw `sessionIds` in its tool results. */
 const chat = (ask: string, ...sessionIds: string[]) =>
@@ -136,3 +136,78 @@ describe("Uploading the same chat again", () => {
     expect((await admin.get(`/api/transcripts/${one.body.transcript.id}`)).body.transcript.markdown).toBe(chat("A", agent.sessionId));
   });
 });
+
+/**
+ * Bob's Agent changes CRONK-1 (an open Project), SECRET-1 (private, where Bob has Write) and a Workspace Document, and
+ * uploads the chat. Carol is another Member; Ada the Admin.
+ */
+async function transcriptAcrossProjects() {
+  const { cronk, admin } = await startInstalledCronk();
+  const bob = await joinAs(cronk, admin, "bob@example.com");
+  const carol = await joinAs(cronk, admin, "carol@example.com");
+  const bobId = (await bob.get("/api/me")).body.user.id;
+  const carolId = (await carol.get("/api/me")).body.user.id;
+  await projectWithTickets(admin, "CRONK", 1);
+  await projectWithTickets(admin, "SECRET", 1);
+  await admin.patch("/api/projects/SECRET", { visibility: "private" });
+  await admin.put(`/api/projects/SECRET/members/${bobId}`, { access: "write" });
+  const claude = await registerAgent(bob, "claude-laptop");
+  for (const key of ["CRONK-1", "SECRET-1"]) await admin.patch(`/api/tickets/${key}`, { assigneeId: bobId, delegateId: claude.agentId });
+  const agent = await startSession(cronk, claude.secret);
+  for (const key of ["CRONK-1", "SECRET-1"]) {
+    await agent.post(`/api/tickets/${key}/claim`);
+    await agent.post(`/api/tickets/${key}/activities`, { kind: "progress", body: `Working on ${key}` });
+  }
+  const handbook = (await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" })).body.document.id;
+  const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Do it all", agent.sessionId));
+  expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(201);
+  return { cronk, admin, bob, carol, bobId, carolId, claude, handbook, id: uploaded.body.transcript.id as string };
+}
+
+describe("Who may read a Transcript", () => {
+  it("is its Owner, and whoever has Read everywhere its Sessions changed things", async () => {
+    const { cronk, admin, bob, carol, carolId, handbook, id } = await transcriptAcrossProjects();
+    const items = { tickets: [{ key: "CRONK-1" }, { key: "SECRET-1" }], documents: [{ id: handbook, title: "Handbook" }] };
+    expect((await bob.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject(items);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject(items);
+    expect((await carol.get(`/api/transcripts/${id}`)).status).toBe(404);
+
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect((await carol.get(`/api/transcripts/${id}`)).status).toBe(200);
+
+    // Carol's Agent is capped as usual: by the Workspace's Agent Access for the Handbook.
+    const codex = await registerAgent(carol, "codex");
+    expect((await cronk.client(codex.secret).get(`/api/transcripts/${id}`)).status).toBe(200);
+    await admin.patch("/api/workspace", { agentAccess: "none" });
+    expect((await cronk.client(codex.secret).get(`/api/transcripts/${id}`)).status).toBe(404);
+  });
+
+  it("lets its Owner read it without Read where its Sessions changed things, leaving out what they can't read", async () => {
+    const { admin, bob, bobId, id } = await transcriptAcrossProjects();
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    const read = await bob.get(`/api/transcripts/${id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1" }]);
+  });
+
+  it("outlives its Agent's removal", async () => {
+    const { bob, claude, id } = await transcriptAcrossProjects();
+    expect((await bob.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
+    expect((await bob.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({ agent: { id: claude.agentId, name: "claude-laptop" } });
+  });
+});
+
+describe("Deleting a Transcript", () => {
+  it("is for its Owner only", async () => {
+    const { cronk, admin, bob, carol, claude, id } = await transcriptAcrossProjects();
+    expect((await carol.delete(`/api/transcripts/${id}`)).status).toBe(404);
+    const byAdmin = await admin.delete(`/api/transcripts/${id}`);
+    expect(byAdmin.status).toBe(403);
+    expect(byAdmin.body.error).toMatch(/Owner/);
+    expect((await (await startSession(cronk, claude.secret)).delete(`/api/transcripts/${id}`)).status).toBe(403);
+
+    expect((await bob.delete(`/api/transcripts/${id}`)).status).toBe(204);
+    expect((await bob.get(`/api/transcripts/${id}`)).status).toBe(404);
+  });
+});
+

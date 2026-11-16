@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { lockUntilCommit, transaction } from "../db/database.js";
-import { answer, errors, holding, pathParams } from "../schemas.js";
+import { answer, errors, holding, noContent, pathParams } from "../schemas.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import {
   afterUpload,
@@ -9,6 +9,7 @@ import {
   findForUpdate,
   findTranscript,
   readTranscript,
+  deleteTranscript,
   sessionsNamedIn,
   sizeOf,
   storeTranscript,
@@ -101,6 +102,26 @@ export function transcriptRoutes(ctx: AppContext) {
         const transcript = stored && (await readTranscript(ctx.db, actor, stored));
         if (!transcript) throw new HttpError(404, "No such Transcript");
         return { transcript };
+      },
+    );
+
+    app.delete<{ Params: { id: string } }>(
+      "/api/transcripts/:id",
+      {
+        schema: {
+          description: "Deletes a Transcript, for good. Only its Owner may, not their Agents; it is otherwise kept, even after its Agent is removed.",
+          params: transcriptParams,
+          response: { 204: noContent("The Transcript is deleted"), ...errors(400, 401, 403, 404, 410) },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "delete a Transcript");
+        const stored = await findTranscript(ctx.db, actor.user.workspaceId, request.params.id);
+        if (!stored || !(await readTranscript(ctx.db, actor, stored))) throw new HttpError(404, "No such Transcript");
+        if (stored.ownerId !== actor.user.id) throw new HttpError(403, "Only a Transcript's Owner can delete it");
+        await deleteTranscript(ctx.db, stored.id);
+        return reply.code(204).send();
       },
     );
   };

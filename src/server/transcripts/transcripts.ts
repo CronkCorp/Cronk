@@ -241,3 +241,8 @@ export async function readTranscript(
     updatedAt: stored.updatedAt,
   };
 }
+
+/** Deletes a Transcript and its links. */
+export async function deleteTranscript(db: Queryable, id: string): Promise<void> {
+  await db.query("DELETE FROM transcripts WHERE id = $1", [id]);
+}
