@@ -4,13 +4,13 @@ import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
-import { ticketItems, UNVERIFIED, type SuggestionInboxItem, type UnverifiedItem } from "./inbox.js";
+import { ticketItems, type SuggestionInboxItem, type UnverifiedItem } from "./inbox.js";
 
 /**
  * Triage: the shared list of waiting items with no clear User to go to. Each User sees the items they could
  * act on, which takes Write where the item lives; Admins have Write everywhere, so they see all. An item
  * leaves Triage as soon as someone acts on it. A new item kind also belongs in the live updates (see
- * `inboxesChanged`), which tell Triage whenever any waiting item may have changed.
+ * `waitingItemsChanged`), which tell Triage whenever any waiting item may have changed.
  */
 
 /** One item in Triage. */
@@ -40,7 +40,7 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
 
 /** The Unverified completions of Tickets with no Assignee in the Projects `projectIds`, which any User with Write there may Accept. */
 function unverified(db: Queryable, projectIds: string[]): Promise<UnverifiedItem[]> {
-  return ticketItems(db, `t.assignee_id IS NULL AND ${UNVERIFIED} AND t.project_id = ANY($1::uuid[])`, [projectIds], "unverified");
+  return ticketItems(db, "unverified", { assigneeId: null, projectIds });
 }
 
 /**

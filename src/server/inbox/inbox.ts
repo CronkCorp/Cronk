@@ -168,27 +168,31 @@ async function openQuestions(db: Queryable, user: User, projectIds: string[]): P
 }
 
 function reviews(db: Queryable, user: User, projectIds: string[]): Promise<ReviewItem[]> {
-  return ticketItems(db, "t.assignee_id = $1 AND s.category = 'in_review' AND t.project_id = ANY($2::uuid[])", [user.id, projectIds], "review");
+  return ticketItems(db, "review", { assigneeId: user.id, projectIds });
 }
 
 function unverified(db: Queryable, user: User, projectIds: string[]): Promise<UnverifiedItem[]> {
-  return ticketItems(db, `t.assignee_id = $1 AND ${UNVERIFIED} AND t.project_id = ANY($2::uuid[])`, [user.id, projectIds], "unverified");
+  return ticketItems(db, "unverified", { assigneeId: user.id, projectIds });
 }
 
-/** SQL for whether the Ticket aliased `t` is an Unverified completion. */
-export const UNVERIFIED = "t.verification = 'unverified'";
+/** What makes a Ticket each kind of Ticket item, as SQL on the Ticket `t` and its Status `s`. */
+const TICKET_KINDS = { review: "s.category = 'in_review'", unverified: "t.verification = 'unverified'" } as const;
 
 /**
- * The Tickets, as `t` with their Status as `s`, that match `where` with `params`, each with its Reports, at when it
- * entered its Status, oldest first.
+ * The Tickets waiting as `kind` items in the Projects `projectIds`, whose Assignee is `assigneeId` (none, with null), each with
+ * its Reports, at when it entered its Status, oldest first.
  */
-export async function ticketItems<K extends "review" | "unverified">(db: Queryable, where: string, params: unknown[], kind: K): Promise<TicketItem<K>[]> {
+export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
+  db: Queryable,
+  kind: K,
+  which: { assigneeId: string | null; projectIds: string[] },
+): Promise<TicketItem<K>[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
     `SELECT t.id, COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at) AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id
-     WHERE ${where}
+     WHERE t.assignee_id IS NOT DISTINCT FROM $1::uuid AND ${TICKET_KINDS[kind]} AND t.project_id = ANY($2::uuid[])
      ORDER BY at, p.key, t.number`,
-    params,
+    [which.assigneeId, which.projectIds],
   );
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
   const at = new Map(rows.map((r) => [r.id, r.at]));
@@ -202,7 +206,7 @@ export async function ticketItems<K extends "review" | "unverified">(db: Queryab
  * Whatever changes a waiting item may also send it to Triage or take it out, as may a change of access,
  * so this tells Triage too, even with no User given: a change to an item with no clear User names none.
  */
-export function inboxesChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
+export function waitingItemsChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
   for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
   live.publish(TRIAGE_TOPIC, { event: "triage", data: {} });
 }

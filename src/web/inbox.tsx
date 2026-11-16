@@ -6,7 +6,7 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, watchInboxAndTriage, type InboxFilter, type InboxItem, type InboxKind, type SuggestedContent, type TriageFilter, type TriageKind, type User } from "./api.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type SuggestedContent, type User } from "./api.js";
 import { ContentEditor, contentText, creditNote, Diff, Reasoning, useDiffView } from "./suggestions.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CONTINUED, ReopenDialog } from "./components/reopen-dialog.js";
@@ -16,8 +16,8 @@ import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
 
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
-// one on the right, where the User reads it in full and acts on it without leaving the Inbox. Triage is the
-// same split view over the waiting items with no clear User (docs/ui.md § Inbox and Triage in Phase 2).
+// one on the right, where the User reads it in full and acts on it without leaving the Inbox. Triage (triage.tsx)
+// is the same split view over the waiting items with no clear User (docs/ui.md § Inbox and Triage in Phase 2).
 
 const KIND_NAMES: Record<InboxKind, string> = {
   question: "Questions",
@@ -48,7 +48,7 @@ export function inboxAddressFrom(search: URLSearchParams): InboxAddress {
 }
 
 /** The address of a split view at `base` with a filter and a selected item, such as the Inbox's or Triage's. */
-const viewPath = (base: string, address: { filter: object; item?: string }) => {
+export const viewPath = (base: string, address: { filter: object; item?: string }) => {
   const entries = [...Object.entries(address.filter), ["item", address.item]];
   const query = new URLSearchParams(entries.filter((entry): entry is [string, string] => !!entry[1]));
   return `${base}${query.size ? `?${query}` : ""}`;
@@ -63,7 +63,7 @@ type DecisionItem = Extract<InboxItem, { kind: "decision" }>;
 type SuggestionItem = Extract<InboxItem, { kind: "suggestion" }>;
 
 /** An item's id in the address: stable across reloads, and readable for a review or a Decision. */
-const itemId = (item: InboxItem) =>
+export const itemId = (item: InboxItem) =>
   item.kind === "question"
     ? `question-${item.question.id}`
     : item.kind === "decision"
@@ -73,7 +73,7 @@ const itemId = (item: InboxItem) =>
         : `${item.kind}-${item.ticket.key}`;
 
 /** A group of the list: its name, the kind of item it holds, and which items of that kind. */
-interface Group {
+export interface Group {
   name: string;
   kind: InboxKind;
   holds: (item: InboxItem) => boolean;
@@ -83,7 +83,7 @@ interface Group {
  * The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews, then Unverified
  * completions, then Agents' Suggestions, then Decisions Agents proposed.
  */
-const GROUPS: Group[] = [
+export const GROUPS: Group[] = [
   { name: "Blocking", kind: "question", holds: (item) => item.kind === "question" && item.question.blocking },
   { name: "Questions", kind: "question", holds: (item) => item.kind === "question" && !item.question.blocking },
   { name: "To review", kind: "review", holds: (item) => item.kind === "review" },
@@ -102,7 +102,6 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
   const { filter } = props.address;
   const { kind: _kind, ...scope } = filter;
   const [items, reload] = useLoad(() => api.inbox(scope), [filter.project, filter.agent]);
-  const [projects] = useLoad(() => api.projects(), []);
   const [agents] = useLoad(() => api.agents(), []);
   // Reload on every (re)connect, so changes made while the stream was away aren't missed, and on each change.
   const [live, onLive] = useLiveState();
@@ -110,7 +109,6 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
   // A new filter starts a new list, so nothing selected before carries over.
   const setFilter = (changes: InboxFilter) => navigate(inboxPath({ filter: { ...filter, ...changes } }));
   const all = items.kind === "loaded" ? items.value : [];
-  const count = (kind?: InboxKind) => all.filter((item) => !kind || item.kind === kind).length;
   const agentName = agents.kind === "loaded" ? agents.value.find((a) => a.id === filter.agent)?.name : undefined;
 
   return (
@@ -119,20 +117,7 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
         <h1>Inbox</h1>
         <div className="inbox-filters" role="group" aria-label="Filters">
           <LiveIndicator state={live} />
-          <FilterChip pressed={!filter.kind} onClick={() => setFilter({ kind: undefined })}>{`Everything ${count()}`}</FilterChip>
-          {(Object.keys(KIND_NAMES) as InboxKind[]).map((kind) => (
-            <FilterChip key={kind} pressed={filter.kind === kind} onClick={() => setFilter({ kind })}>
-              {`${KIND_NAMES[kind]} ${count(kind)}`}
-            </FilterChip>
-          ))}
-          <Menu
-            label="Filter by Project"
-            trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${filter.project} ▾` : "Project ▾"}</FilterChip>}
-            items={[
-              { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
-              ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
-            ]}
-          />
+          <KindAndProjectFilters kinds={KIND_NAMES} items={all} filter={filter} setFilter={setFilter} />
           <Menu
             label="Filter by Agent"
             trigger={<FilterChip menu pressed={!!filter.agent}>{filter.agent ? `Agent: ${agentName ?? "unknown"} ▾` : "Agent ▾"}</FilterChip>}
@@ -166,90 +151,36 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
   );
 }
 
-/** Where Triage is: its filter, and the item selected in it, if the address names one. */
-export interface TriageAddress {
-  filter: TriageFilter;
-  item?: string;
-}
-
-/** The kinds Triage holds, by the names its chips give them. */
-const TRIAGE_KIND_NAMES: Record<TriageKind, string> = { unverified: "Unverified", suggestion: "Suggestions" };
-
-/** Triage's groups, in the order they are shown: the Inbox's groups that hold its kinds. */
-const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.kind in TRIAGE_KIND_NAMES);
-
-/** The Triage filter and selected item in a page address. */
-export function triageAddressFrom(search: URLSearchParams): TriageAddress {
-  const kind = search.get("kind");
-  const item = search.get("item");
-  return {
-    filter: {
-      ...(kind && kind in TRIAGE_KIND_NAMES ? { kind: kind as TriageKind } : {}),
-      ...(search.get("project") ? { project: search.get("project")! } : {}),
-    },
-    ...(item ? { item } : {}),
-  };
-}
-
-const triagePath = (address: TriageAddress) => viewPath("/triage", address);
-
 /**
- * Triage: the waiting items with no clear User that the signed-in User could act on (Admins see all), in the Inbox's split view
- * with its keyboard. It loads again whenever the server says it may have changed; acting on an item takes it out for everyone.
+ * The filter chips a split view shares: Everything and one per kind, each with its count among `items`, then the Project menu.
+ * `kinds` names the kinds the view holds, in the order their chips are shown.
  */
-export function TriagePage(props: { address: TriageAddress; me: User }) {
-  const { filter } = props.address;
-  const [items, reload] = useLoad(() => api.triage({ project: filter.project }), [filter.project]);
+export function KindAndProjectFilters<K extends InboxKind>(props: {
+  kinds: Record<K, string>;
+  items: InboxItem[];
+  filter: { kind?: K; project?: string };
+  setFilter: (changes: { kind?: K; project?: string }) => void;
+}) {
+  const { filter, setFilter } = props;
   const [projects] = useLoad(() => api.projects(), []);
-  const [live, onLive] = useLiveState();
-  useEffect(() => watchInboxAndTriage({ ready: reload, onLive, on: { triage: reload } }), [filter.project]);
-  const setFilter = (changes: TriageFilter) => navigate(triagePath({ filter: { ...filter, ...changes } }));
-  const all = items.kind === "loaded" ? items.value : [];
-  const count = (kind?: TriageKind) => all.filter((item) => !kind || item.kind === kind).length;
-
+  const count = (kind?: K) => props.items.filter((item) => !kind || item.kind === kind).length;
   return (
-    <section className="inbox">
-      <div className="page-head">
-        <h1>Triage</h1>
-        <div className="inbox-filters" role="group" aria-label="Filters">
-          <LiveIndicator state={live} />
-          <FilterChip pressed={!filter.kind} onClick={() => setFilter({ kind: undefined })}>{`Everything ${count()}`}</FilterChip>
-          {(Object.keys(TRIAGE_KIND_NAMES) as TriageKind[]).map((kind) => (
-            <FilterChip key={kind} pressed={filter.kind === kind} onClick={() => setFilter({ kind })}>
-              {`${TRIAGE_KIND_NAMES[kind]} ${count(kind)}`}
-            </FilterChip>
-          ))}
-          <Menu
-            label="Filter by Project"
-            trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${filter.project} ▾` : "Project ▾"}</FilterChip>}
-            items={[
-              { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
-              ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
-            ]}
-          />
-        </div>
-      </div>
-      <p className="muted page-intro">Waiting items with nobody clear to go to. You see the ones you could act on.</p>
-      <Show state={items}>
-        {(loaded) => (
-          <InboxSplit
-            key={`${filter.project ?? ""}/${filter.kind ?? ""}`}
-            items={loaded.filter((item) => !filter.kind || item.kind === filter.kind)}
-            item={props.address.item}
-            pathTo={(item) => triagePath({ filter, ...(item ? { item: itemId(item) } : {}) })}
-            groups={TRIAGE_GROUPS}
-            label="Triage items"
-            empty={{
-              heading: "Nothing in Triage",
-              hint: "Agents' Unverified completions of Tickets with no Assignee, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
-            }}
-            keysHint="J / K moves through the list, C Accepts, S reopens or rejects."
-            me={props.me}
-            onChanged={reload}
-          />
-        )}
-      </Show>
-    </section>
+    <>
+      <FilterChip pressed={!filter.kind} onClick={() => setFilter({ kind: undefined })}>{`Everything ${count()}`}</FilterChip>
+      {(Object.keys(props.kinds) as K[]).map((kind) => (
+        <FilterChip key={kind} pressed={filter.kind === kind} onClick={() => setFilter({ kind })}>
+          {`${props.kinds[kind]} ${count(kind)}`}
+        </FilterChip>
+      ))}
+      <Menu
+        label="Filter by Project"
+        trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${filter.project} ▾` : "Project ▾"}</FilterChip>}
+        items={[
+          { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
+          ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
+        ]}
+      />
+    </>
   );
 }
 
@@ -326,7 +257,7 @@ interface SplitProps {
 }
 
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
-function InboxSplit(props: SplitProps) {
+export function InboxSplit(props: SplitProps) {
   const { items, pathTo } = props;
   // Items acted on here leave the list as the action succeeds rather than waiting for the reload, which would
   // otherwise find them gone and show them as resolved elsewhere; while the action runs, `busy` holds its item

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
-import { inboxesChanged } from "../inbox/inbox.js";
+import { waitingItemsChanged } from "../inbox/inbox.js";
 import { agentTopic, documentTopic } from "../live/topics.js";
 import { markSuggestionRejected, suggestionRejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { answer, errors, holding, listing, pathParams, ref } from "../schemas.js";
@@ -79,7 +79,7 @@ export function suggestionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /** Tells whoever a change to `suggestion` concerns: its reviewer's Inbox and, once accepted, the watchers of a Document it changed. */
     const changed = (suggestion: Suggestion) => {
-      inboxesChanged(ctx.live, [suggestion.reviewer?.id]);
+      waitingItemsChanged(ctx.live, [suggestion.reviewer?.id]);
       if (suggestion.state === "accepted" && suggestion.item.kind === "document") {
         ctx.live.publish(documentTopic(suggestion.item.id!), { event: "version", data: { version: suggestion.resultVersion } });
       }
