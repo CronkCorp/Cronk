@@ -451,6 +451,8 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 /* Actor and Agent Session: docs/ui.md § Component conventions. A User is round and neutral, an Agent square and violet. */
 .actor { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-weight: 600; }
 .actor .muted { font-weight: 400; }
+/* Cronk itself, as the maker of a Change no one made: plain and muted, with no avatar. */
+.actor.system { font-weight: 400; color: var(--muted); }
 .avatar { align-self: center; width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 600; }
 .avatar::before { content: attr(data-initial); }
 .avatar.agent { border-radius: 4px; background: var(--agent-soft); color: var(--agent); }

@@ -30,6 +30,12 @@ export type RecordedActor =
   | { kind: "user"; id: string; name: string }
   | { kind: "agent"; id: string; name: string; owner: { id: string; name: string }; session: { id: string } | null };
 
+/** Cronk itself, as the recorded actor of a change no one made, such as one an upgrade makes. Only Ticket history records it. */
+export type SystemActor = { kind: "system" };
+
+/** Who made a Ticket change: a User, an Agent, or Cronk itself (see `SystemActor`). */
+export type ChangeActor = RecordedActor | SystemActor;
+
 /**
  * An Actor as a history row stores it, by id: the acting User (an Agent's Owner), and the Agent and
  * Agent Session if an Agent acted. An import records history this way, for Actors not calling now.
@@ -55,6 +61,11 @@ export interface RecordedActorRow {
   agent_id: string | null;
   agent_name: string | null;
   session_id: string | null;
+}
+
+/** Who a Ticket change's row records: Cronk itself where it has no acting User, otherwise as `toRecordedActor`. */
+export function toChangeActor(row: Omit<RecordedActorRow, "user_id" | "user_name"> & { user_id: string | null; user_name: string | null }): ChangeActor {
+  return row.user_id === null ? { kind: "system" } : toRecordedActor(row as RecordedActorRow);
 }
 
 /** The Actor a history row records, from the columns `RecordedActorRow` names. */

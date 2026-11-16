@@ -1,4 +1,4 @@
-import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
+import { actorColumns, toChangeActor, type Actor, type ChangeActor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
@@ -291,9 +291,9 @@ export type TicketChange =
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
   | { change: "document linked" | "document unlinked"; document: DocumentName };
 
-export type { RecordedActor };
+export type { ChangeActor, RecordedActor };
 
-export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
+export type RecordedChange = { at: Date; actor: ChangeActor } & TicketChange;
 
 /** Records a change in the Ticket's history: by `actor` as it calls now, or as an import stored it. */
 export async function recordChange(db: Queryable, ticketId: string, actor: Actor | StoredActor, at: Date, change: TicketChange): Promise<void> {
@@ -305,7 +305,10 @@ export async function recordChange(db: Queryable, ticketId: string, actor: Actor
   );
 }
 
-interface HistoryRow extends RecordedActorRow {
+interface HistoryRow extends Omit<RecordedActorRow, "user_id" | "user_name"> {
+  /** Null for a change Cronk itself made. */
+  user_id: string | null;
+  user_name: string | null;
   at: Date;
   change: TicketChange["change"];
   data: object;
@@ -315,7 +318,7 @@ interface HistoryRow extends RecordedActorRow {
 export async function listHistory(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
   const { rows } = await db.query<HistoryRow>(
     `SELECT c.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id, c.change, c.data
-     FROM ticket_changes c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
+     FROM ticket_changes c LEFT JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
      WHERE c.ticket_id = $1 ORDER BY c.id`,
     [ticketId],
   );
@@ -323,7 +326,7 @@ export async function listHistory(db: Queryable, ticketId: string): Promise<Reco
     (row) =>
       ({
         at: row.at,
-        actor: toRecordedActor(row),
+        actor: toChangeActor(row),
         change: row.change,
         ...row.data,
         ...(row.change === "status" && { sentBack: (row.data as { sentBack?: boolean }).sentBack === true }),
