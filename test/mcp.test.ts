@@ -19,6 +19,9 @@ describe("the MCP endpoint", () => {
 
     expect(mcp.client.getInstructions()).toContain("claude-laptop");
     expect(mcp.client.getInstructions()).toContain("Acme");
+    expect(mcp.client.getInstructions()).toContain(
+      "Claiming a Ticket gives you its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and the Documents that mention it.",
+    );
     const [agent] = (await admin.get("/api/agents")).body.agents;
     expect(agent.sessions).toEqual([expect.objectContaining({ id: mcp.transport.sessionId, startedAt: "2026-01-01T09:00:00.000Z" })]);
   });
