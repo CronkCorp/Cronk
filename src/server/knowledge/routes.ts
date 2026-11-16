@@ -93,12 +93,8 @@ export function knowledgeRoutes(ctx: AppContext) {
     const lockForDelete = async (tx: Queryable, actor: Actor, id: string) => {
       const document = await documentFor(tx, actor, id, "write");
       if (actor.kind === "agent") {
-        throw new HttpError(
-          403,
-          document.ticketKey === null
-            ? `Deleting ${document.title} removes it and its Versions for good, so a User decides; Agents can't delete Documents`
-            : `A Report records the work handed over on ${document.ticketKey}, so a User decides whether to delete it; Agents can't delete Documents`,
-        );
+        const why = document.ticketKey === null ? `${document.title} and its Versions would be gone for good` : `it is the Report on ${document.ticketKey}`;
+        throw new HttpError(403, `Only a User can delete this Document, not an Agent: ${why}; a User decides`);
       }
       if (document.ticketKey === null) return documentFor(tx, actor, id, "write", { forUpdate: true });
       await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey, { forUpdate: true });
