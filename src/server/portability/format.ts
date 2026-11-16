@@ -70,6 +70,10 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   in the order they were written; replies and answers name them by that number. \`<KEY>.history.md\` holds its history, oldest
   first, with the names recorded at the time; a User in it also has their \`email\`, a Status its \`current\` name if it is
   still in the Project, an Agent its id from \`people.md\`, and a Document the \`path\` of its file if the export holds it.
+- \`transcripts/<n>.md\`: the chats that led Agents to change things (Workspace exports only), numbered in the order they were
+  first uploaded. The frontmatter names the Agent and its Agent Sessions by their ids in \`people.md\`, the client's \`chatId\`,
+  and the Tickets (by key) and Documents (by path) those Sessions changed; the body is the latest text. \`<n>.earlier/\` holds, as
+  they are and oldest first, earlier texts a later upload didn't continue.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
 already in the installation an export is imported into come in deactivated, since they have no password there; an Admin

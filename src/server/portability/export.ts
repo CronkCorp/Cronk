@@ -7,6 +7,7 @@ import { exportGuidance } from "./guidance.js";
 import { exportPeople } from "./people.js";
 import { exportProject, type ProjectRow } from "./projects.js";
 import { exportTickets } from "./tickets.js";
+import { exportTranscripts } from "./transcripts.js";
 import { exportWorkspaceSettings } from "./workspace.js";
 
 /**
@@ -37,6 +38,8 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<F
     await exportTickets(ctx, dir, p, statusNow);
   }
   ctx.writePending();
+  // Transcripts are kept only in the full export.
+  if (scope.projectId === null) await exportTranscripts(ctx);
   // Last, so a Project export lists only who the other files name.
   await exportPeople(ctx);
   const whole = scope.projectId === null;

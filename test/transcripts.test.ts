@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { parse } from "yaml";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, untarGz, type Client } from "./harness.js";
 
 /** A chat in the turn convention, as a client's hook converts it, in which the Agent saw `sessionIds` in its tool results. */
 const chat = (ask: string, ...sessionIds: string[]) =>
@@ -18,7 +19,7 @@ describe("Uploading a Transcript", () => {
     const hook = cronk.client(claude.secret);
 
     const uploaded = await upload(hook, "chat-1", chat("Fix CRONK-1", agent.sessionId));
-    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(201);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
     const id = uploaded.body.transcript.id;
 
     const read = await admin.get(`/api/transcripts/${id}`);
@@ -51,7 +52,7 @@ describe("Uploading a Transcript", () => {
       expect(refused.status, markdown).toBe(422);
       expect(refused.body.error).toMatch(/changed anything/);
     }
-    expect((await upload(cronk.client(other.secret), "chat-1", chat("Hello", codex.sessionId))).status).toBe(201);
+    expect((await upload(cronk.client(other.secret), "chat-1", chat("Hello", codex.sessionId))).status).toBe(200);
   });
 
   it("takes only an Agent's token that isn't read-only", async () => {
@@ -80,7 +81,7 @@ describe("Uploading the same chat again", () => {
     const hook = cronk.client(claude.secret);
     const before = chat("Fix CRONK-1", first.sessionId);
     const created = await upload(hook, "chat-1", before);
-    expect(created.status).toBe(201);
+    expect(created.status).toBe(200);
 
     cronk.clock.advance(60_000);
     const second = await session();
@@ -130,7 +131,7 @@ describe("Uploading the same chat again", () => {
     const hook = cronk.client(claude.secret);
     const one = await upload(hook, "chat-1", chat("A", agent.sessionId));
     const two = await upload(hook, "chat/2 with spaces", chat("B", agent.sessionId));
-    expect([one.status, two.status]).toEqual([201, 201]);
+    expect([one.status, two.status]).toEqual([200, 200]);
     expect(two.body.transcript).toMatchObject({ chatId: "chat/2 with spaces" });
     expect(two.body.transcript.id).not.toBe(one.body.transcript.id);
     expect((await admin.get(`/api/transcripts/${one.body.transcript.id}`)).body.transcript.markdown).toBe(chat("A", agent.sessionId));
@@ -160,7 +161,7 @@ async function transcriptAcrossProjects() {
   }
   const handbook = (await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" })).body.document.id;
   const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Do it all", agent.sessionId));
-  expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(201);
+  expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
   return { cronk, admin, bob, carol, bobId, carolId, claude, handbook, id: uploaded.body.transcript.id as string };
 }
 
@@ -232,7 +233,7 @@ describe("The Transcript size limit", () => {
 
     // 1200 bytes fit; a rewrite of as many more doesn't, since the old text is kept beside it.
     const first = chat("a".repeat(1100), agent.sessionId);
-    expect((await upload(hook, "chat-1", first)).status).toBe(201);
+    expect((await upload(hook, "chat-1", first)).status).toBe(200);
     expect((await upload(hook, "chat-1", chat("b".repeat(1100), agent.sessionId))).status).toBe(413);
     expect((await upload(hook, "chat-1", first + "c".repeat(500))).status).toBe(200);
   });
@@ -243,5 +244,77 @@ describe("The Transcript size limit", () => {
     expect((await bob.patch("/api/workspace", { transcriptMaxBytes: 5000 })).status).toBe(403);
     expect((await admin.patch("/api/workspace", { transcriptMaxBytes: 0 })).status).toBe(400);
     expect((await admin.patch("/api/workspace", { transcriptMaxBytes: 101 * 1024 * 1024 })).status).toBe(400);
+  });
+});
+
+/** A file of an export: its frontmatter and body. */
+function exported(text: string | undefined): { data: any; body: string } {
+  const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text ?? "");
+  if (!m) throw new Error(`Not a Markdown file with frontmatter: ${text}`);
+  return { data: parse(m[1]!), body: m[2]! };
+}
+
+describe("Exporting and importing Transcripts", () => {
+  it("writes each as Markdown with frontmatter in the Workspace export, and the import restores it linked to the same work", async () => {
+    const before = await transcriptAcrossProjects();
+    const hook = before.cronk.client(before.claude.secret);
+    const sessionId = (await before.bob.get(`/api/transcripts/${before.id}`)).body.transcript.sessions[0].id;
+    // A rewrite keeps the first text as an earlier one.
+    const rewritten = chat("Summary", sessionId);
+    expect((await upload(hook, "chat-1", rewritten)).status).toBe(200);
+    await before.admin.patch("/api/workspace", { transcriptMaxBytes: 5_000_000 });
+    const original = (await before.admin.get(`/api/transcripts/${before.id}`)).body.transcript;
+
+    const archive = await before.admin.download("/api/export");
+    const files = await untarGz(archive.body);
+    const file = exported(files["transcripts/1.md"]);
+    expect(file.data).toEqual({
+      agent: before.claude.agentId,
+      chatId: "chat-1",
+      createdAt: original.createdAt,
+      updatedAt: original.updatedAt,
+      sessions: [sessionId],
+      tickets: ["CRONK-1", "SECRET-1"],
+      documents: ["documents/1-handbook.md"],
+    });
+    expect(file.body).toBe(rewritten);
+    expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId));
+    expect(exported(files["people.md"]).data.sessions.map((s: { id: string }) => s.id)).toContain(sessionId);
+    expect(exported(files["workspace.md"]).data.transcriptMaxBytes).toBe(5_000_000);
+    // A Project export holds none.
+    const project = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    expect(Object.keys(project).filter((p) => p.includes("transcripts"))).toEqual([]);
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", archive.body)).status).toBe(201);
+    expect((await admin.get("/api/workspace")).body.transcriptMaxBytes).toBe(5_000_000);
+    const listed = (await admin.get("/api/transcripts")).body.transcripts;
+    expect(listed).toHaveLength(1);
+    const restored = (await admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript;
+    const handbook = (await admin.get("/api/workspace/documents")).body.documents.find((d: { title: string }) => d.title === "Handbook");
+    expect(restored).toEqual({
+      ...original,
+      id: listed[0].id,
+      // Until import keeps Agent and Agent Session ids (#155), the links follow the ids the import gave them.
+      agent: { id: expect.any(String), name: "claude-laptop", owner: { id: expect.any(String), name: "bob" } },
+      sessions: [{ id: expect.any(String) }],
+      documents: [{ id: handbook.id, title: "Handbook" }],
+    });
+  });
+});
+
+describe("Listing Transcripts", () => {
+  it("lists those the caller may read, newest first, without their text", async () => {
+    const { cronk, bob, carol, claude, id } = await transcriptAcrossProjects();
+    const agent = await startSession(cronk, claude.secret);
+    await agent.post("/api/tickets/CRONK-1/comments", { body: "More" });
+    cronk.clock.advance(1000);
+    const second = (await upload(cronk.client(claude.secret), "chat-2", chat("Only CRONK", agent.sessionId))).body.transcript.id;
+
+    const mine = (await bob.get("/api/transcripts")).body.transcripts;
+    expect(mine.map((t: { id: string }) => t.id)).toEqual([second, id]);
+    expect(mine[0]).not.toHaveProperty("markdown");
+    expect(mine[0]).toMatchObject({ chatId: "chat-2", tickets: [{ key: "CRONK-1" }] });
+    expect((await carol.get("/api/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([second]);
   });
 });

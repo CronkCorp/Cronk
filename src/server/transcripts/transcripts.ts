@@ -127,7 +127,7 @@ export interface Upload {
  * continues it (starts with it), is dropped when the current one already continues it (a stale re-upload), and otherwise
  * goes beside it, keeping the current one as an earlier text. Sessions only add up.
  */
-export function afterUpload(existing: StoredTranscript | undefined, markdown: string, named: string[]): Upload {
+export function afterUpload(existing: Upload | undefined, markdown: string, named: string[]): Upload {
   if (!existing) return { markdown, earlier: [], sessionIds: named };
   const sessionIds = [...new Set([...existing.sessionIds, ...named])];
   if (markdown.startsWith(existing.markdown)) return { markdown, earlier: existing.earlier, sessionIds };
@@ -182,8 +182,8 @@ const CHANGED_DOCUMENTS = `
   WHERE d.id IN (SELECT document_id FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
                  UNION SELECT document_id FROM comments WHERE document_id IS NOT NULL AND actor_session_id = ANY($1::uuid[]))`;
 
-/** What the Sessions changed, each with the Project it lies in. */
-async function changedItems(db: Queryable, sessionIds: string[]) {
+/** What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents in the order they were created. */
+export async function changedItems(db: Queryable, sessionIds: string[]) {
   const { rows: tickets } = await db.query<{ id: string; key: string; title: string; project_id: string }>(
     `${CHANGED_TICKETS} ORDER BY p.key, t.number`,
     [sessionIds],
@@ -244,6 +244,17 @@ export async function readTranscript(
     updatedAt: stored.updatedAt,
   };
 }
+
+/** Every Transcript of the Workspace, most recently uploaded first, whoever may read them. */
+export async function listTranscripts(db: Queryable, workspaceId: string): Promise<StoredTranscript[]> {
+  const { rows } = await db.query<TranscriptRow>(`${SELECT_TRANSCRIPTS} WHERE tr.workspace_id = $1 ORDER BY tr.updated_at DESC, tr.created_at DESC, tr.id`, [
+    workspaceId,
+  ]);
+  return rows.map(toStored);
+}
+
+/** A Transcript without its text, as listings show it. */
+export const transcriptSummary = ({ markdown: _m, earlier: _e, ...summary }: Transcript) => summary;
 
 /** Deletes a Transcript and its links. */
 export async function deleteTranscript(db: Queryable, id: string): Promise<void> {
