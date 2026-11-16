@@ -71,6 +71,39 @@ describe("exporting a Project", () => {
     );
   });
 
+  it("writes Decisions as docs/adr/NNNN-slug.md files with frontmatter", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits!", body: "Per email.", supersedes: ["CRONK-D1"] });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "Use Compose." });
+
+    const project = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(markdown(project["projects/CRONK/docs/adr/0001-limits-in-the-api.md"])).toEqual({
+      data: {
+        key: "CRONK-D1",
+        title: "Limits in the API",
+        status: "superseded",
+        group: "Security",
+        supersededBy: "CRONK-D2",
+        version: 3,
+        createdAt: "2026-01-01T09:00:00.000Z",
+        createdBy: "ada@example.com",
+        updatedAt: "2026-01-01T09:00:00.000Z",
+        updatedBy: "ada@example.com",
+      },
+      body: "Limit sign-ins.",
+    });
+    expect(markdown(project["projects/CRONK/docs/adr/0002-per-email-limits.md"]).data).toMatchObject({ key: "CRONK-D2", status: "accepted", supersedes: ["CRONK-D1"] });
+    expect(markdown(project["projects/CRONK/docs/adr/0001-limits-in-the-api.versions/2.md"]).data).toMatchObject({ status: "accepted", by: "ada@example.com" });
+    expect(Object.keys(project).filter((p) => p.startsWith("docs/"))).toEqual([]);
+
+    const workspace = await untarGz((await admin.download("/api/export")).body);
+    expect(markdown(workspace["docs/adr/0001-compose-for-installs.md"])).toMatchObject({ data: { key: "D1", status: "proposed" }, body: "Use Compose." });
+  });
+
   it("is only for Admins", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
@@ -100,6 +133,15 @@ async function snapshot(admin: Client): Promise<unknown> {
     versions: await Promise.all((await get(`/api/documents/${id}/versions`)).versions.map((v: { number: number }) => get(`/api/documents/${id}/versions/${v.number}`))),
     comments: await get(`/api/documents/${id}/comments`),
   });
+  const decisions = async (path: string) => {
+    const { decisions: listed } = await get(path);
+    return Promise.all(
+      listed.map(async (d: { key: string }) => ({
+        ...(await get(`/api/decisions/${d.key}`)),
+        versions: await Promise.all((await get(`/api/decisions/${d.key}/versions`)).versions.map((v: { number: number }) => get(`/api/decisions/${d.key}/versions/${v.number}`))),
+      })),
+    );
+  };
   const tree = async (path: string) => {
     const { documents } = await get(path);
     return { documents, contents: await Promise.all(documents.map((d: { id: string }) => document(d.id))) };
@@ -115,6 +157,7 @@ async function snapshot(admin: Client): Promise<unknown> {
       guidanceVersions: await get(`/api/projects/${key}/guidance/versions`),
       terms: await terms(`/api/projects/${key}/terms`),
       documents: await tree(`/api/projects/${key}/documents`),
+      decisions: await decisions(`/api/projects/${key}/decisions`),
       tickets: await Promise.all(
         tickets.map(async (t: { key: string }) => {
           const { reports } = await get(`/api/tickets/${t.key}/reports`);
@@ -139,6 +182,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     guidanceVersions: await get("/api/workspace/guidance/versions"),
     terms: await terms("/api/workspace/terms"),
     documents: await tree("/api/workspace/documents"),
+    decisions: await decisions("/api/workspace/decisions"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
   };
   const ids = new Map<string, string>();
@@ -211,6 +255,16 @@ async function busyWorkspace() {
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
   await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
 
+  // Decisions in both scopes: one superseded by another Grace accepted, one rejected, one edited.
+  await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
+  await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+  await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the proxy", group: "Security" });
+  await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected" });
+  await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits", supersedes: ["CRONK-D1"] });
+  cronk.clock.advance(60_000);
+  await grace.post("/api/decisions/CRONK-D3/status", { status: "accepted" });
+  await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "v1" });
+  await admin.patch("/api/decisions/D1", { baseVersion: 1, body: "v2", group: "Ops" });
   // Terms in both places, with Versions, one saved by an Agent; a Project Term overriding a Workspace Term.
   const ticketTerm = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["Issue", "task"], group: "Work" })).body.term;
   await admin.patch(`/api/terms/${ticketTerm.id}`, { baseVersion: 1, definition: "A unit of work\n---\ntracked within a *Project*." });
@@ -264,6 +318,9 @@ describe("importing an export", () => {
       value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
     expect(await snapshot(admin)).toEqual(expected);
+    // Decision numbers carry on where the export left off.
+    expect((await admin.post("/api/projects/CRONK/decisions", { title: "Next" })).body.decision.key).toBe("CRONK-D4");
+    expect((await admin.post("/api/workspace/decisions", { title: "Next" })).body.decision.key).toBe("D2");
   });
 });
 

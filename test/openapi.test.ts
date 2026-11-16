@@ -84,6 +84,7 @@ describe("the OpenAPI description", () => {
     const errorBody = { $ref: "#/components/schemas/Error" };
     const staleBody = { $ref: "#/components/schemas/StaleVersion" };
     const staleGuidanceBody = { $ref: "#/components/schemas/StaleGuidance" };
+    const staleDecisionBody = { $ref: "#/components/schemas/StaleDecision" };
     const staleTermBody = { $ref: "#/components/schemas/StaleTermVersion" };
     const sectionBody = { $ref: "#/components/schemas/SectionRefused" };
     for (const [label, op] of operations(doc)) {
@@ -96,7 +97,7 @@ describe("the OpenAPI description", () => {
       if (!label.startsWith("GET ")) expect(errors, label).toContain("403");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance or a Term);
+        // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance, a Term or a Decision);
         // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons;
         // a refused section heading's is the error shape plus the Document's headings.
         const refusesSections = label === "POST /api/documents/{id}/replace-section" && ["400", "404"].includes(code);
@@ -107,6 +108,7 @@ describe("the OpenAPI description", () => {
                 staleBody,
                 staleGuidanceBody,
                 staleTermBody,
+                staleDecisionBody,
                 expect.objectContaining({ anyOf: [staleBody, errorBody] }),
                 expect.objectContaining({ anyOf: [staleTermBody, errorBody] }),
               ]

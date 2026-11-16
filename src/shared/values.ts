@@ -56,3 +56,7 @@ export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
 export const MARKDOWN_FILE = /\.(md|markdown)$/i;
+
+/** A Decision's lifecycle status. Only Users change it; a Decision becomes superseded when one superseding it is accepted. */
+export const DECISION_STATUSES = ["proposed", "accepted", "rejected", "deprecated", "superseded"] as const;
+export type DecisionStatus = (typeof DECISION_STATUSES)[number];

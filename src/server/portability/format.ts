@@ -63,15 +63,17 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
 
 - \`README.md\`: this file; its frontmatter says what the export holds and which version of the format it is.
 - \`people.md\`: the Users (by email) and Agents (by id) the other files name, and the Agent Sessions Agents worked in.
-- \`workspace.md\`, \`guidance.md\`, \`documents/\`, \`GLOSSARY.md\`, \`terms.md\`: the Workspace's settings, Guidance, page tree and
-  Terms (Workspace exports only).
+- \`workspace.md\`, \`guidance.md\`, \`documents/\`, \`docs/adr/\`, \`GLOSSARY.md\`, \`terms.md\`: the Workspace's settings, Guidance,
+  page tree, Decisions and Terms (Workspace exports only).
 - \`projects/<KEY>/project.md\`: a Project's settings, Statuses and members; beside it its \`guidance.md\`, \`documents/\`,
-  \`GLOSSARY.md\`, \`terms.md\` and \`tickets/\`.
+  \`docs/adr/\`, \`GLOSSARY.md\`, \`terms.md\` and \`tickets/\`.
 - \`GLOSSARY.md\`: a place's Terms as a glossary to read, or keep in a repository; a Project's replace the Workspace's of the
   same name within it. \`terms.md\` beside it holds the same Terms whole in its frontmatter, with their Versions when the export
   includes them; an import reads that, not the glossary.
 - \`documents/\`: the page tree. Each Document is \`<n>-<title>.md\`, numbered in tree order, with the Documents under it in a
   folder of the same name. \`<name>.versions/\` holds its Versions when the export includes them, \`<name>.comments/\` its Comments.
+- \`docs/adr/\`: the Decisions, each \`<NNNN>-<title>.md\` named by its number, its status, group and the Decisions it supersedes
+  or was superseded by (named by key) in its frontmatter. \`<name>.versions/\` holds its Versions when the export includes them.
 - \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key, and \`documents\` lists the
   Documents and Reports linked to it by the path of their file, in the order they were linked. Beside it,
   \`<KEY>.activities/\`, \`<KEY>.comments/\` and \`<KEY>.reports/\` hold its Activities, Comments and Reports, each numbered from 1

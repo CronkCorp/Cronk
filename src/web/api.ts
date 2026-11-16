@@ -10,6 +10,10 @@ import type {
   AgentToken,
   AgentRecordEntry,
   Comment,
+  Decision,
+  DecisionStatus,
+  DecisionSummary,
+  DecisionVersion,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -62,6 +66,10 @@ export type {
   AgentToken,
   AgentRecordEntry,
   Comment,
+  Decision,
+  DecisionStatus,
+  DecisionSummary,
+  DecisionVersion,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -131,8 +139,9 @@ export class ApiError extends Error {
 export const staleVersionOf = (err: unknown): Version | undefined =>
   err instanceof ApiError && err.status === 409 && err.body.current ? (err.body.current as Version) : undefined;
 
-/** Where a page tree's API lives: a Project's, or the Workspace's without a Project key. */
-const treePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+/** Where a Project's API lives, for its page tree or Decisions, or the Workspace's without a Project key. */
+const scopePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}`;
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -178,17 +187,17 @@ export interface TermInput {
 }
 
 /** Where a place's GLOSSARY.md downloads from: a Project's own Terms, or the Workspace's without a Project key. */
-export const glossaryUrl = (projectKey?: string) => `${treePath(projectKey)}/terms/glossary`;
+export const glossaryUrl = (projectKey?: string) => `${scopePath(projectKey)}/terms/glossary`;
 
 const termPath = (id: string) => `/api/terms/${encodeURIComponent(id)}`;
 
 export const api = {
   /** The Terms that apply in a Project (its own and the Workspace's it doesn't replace), or the Workspace's without a Project key. */
-  terms: (projectKey?: string) => request<{ terms: Term[] }>("GET", `${treePath(projectKey)}/terms`).then((r) => r.terms),
+  terms: (projectKey?: string) => request<{ terms: Term[] }>("GET", `${scopePath(projectKey)}/terms`).then((r) => r.terms),
   term: (id: string) => request<{ term: Term }>("GET", termPath(id)).then((r) => r.term),
   termVersions: (id: string) => request<{ versions: TermVersion[] }>("GET", `${termPath(id)}/versions`).then((r) => r.versions),
   createTerm: (projectKey: string | undefined, input: TermInput) =>
-    request<{ term: Term }>("POST", `${treePath(projectKey)}/terms`, input).then((r) => r.term),
+    request<{ term: Term }>("POST", `${scopePath(projectKey)}/terms`, input).then((r) => r.term),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveTerm: (id: string, baseVersion: number, input: TermInput) => request<{ term: Term }>("PATCH", termPath(id), { baseVersion, ...input }).then((r) => r.term),
   deleteTerm: (id: string, baseVersion: number) => request<void>("DELETE", `${termPath(id)}?baseVersion=${baseVersion}`),
@@ -196,7 +205,7 @@ export const api = {
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
   /** Imports a .zip, .tar.gz or .tar of a folder of Markdown files as Documents of a Project's tree, or the Workspace's. */
   importDocuments: (projectKey: string | undefined, file: Blob) =>
-    upload<{ documents: DocumentTreeEntry[] }>(`${treePath(projectKey)}/documents/import`, file).then((r) => r.documents),
+    upload<{ documents: DocumentTreeEntry[] }>(`${scopePath(projectKey)}/documents/import`, file).then((r) => r.documents),
   /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
   search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
     request<{ results: SearchResult[] }>(
@@ -212,6 +221,19 @@ export const api = {
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
   updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
+
+  /** A Project's Decisions, or the Workspace's without a Project key, newest first. */
+  decisions: (projectKey?: string) => request<{ decisions: DecisionSummary[] }>("GET", `${scopePath(projectKey)}/decisions`).then((r) => r.decisions),
+  decision: (key: string) => request<{ decision: Decision }>("GET", decisionPath(key)).then((r) => r.decision),
+  createDecision: (projectKey: string | undefined, input: { title: string; group?: string | null; supersedes?: string[] }) =>
+    request<{ decision: Decision }>("POST", `${scopePath(projectKey)}/decisions`, input).then((r) => r.decision),
+  /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
+  saveDecision: (key: string, input: { baseVersion: number; title?: string; body?: string; group?: string | null; supersedes?: string[] }) =>
+    request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
+  setDecisionStatus: (key: string, status: DecisionStatus) =>
+    request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status }).then((r) => r.decision),
+  decisionVersions: (key: string) =>
+    request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
 
   /** The Workspace's Guidance, or with `projectKey` that Project's. */
   guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),
@@ -321,9 +343,9 @@ export const api = {
       (r) => r.documents,
     ),
   documentTree: (projectKey?: string) =>
-    request<{ documents: DocumentTreeEntry[] }>("GET", `${treePath(projectKey)}/documents`).then((r) => r.documents),
+    request<{ documents: DocumentTreeEntry[] }>("GET", `${scopePath(projectKey)}/documents`).then((r) => r.documents),
   createDocument: (projectKey: string | undefined, input: { title: string; body?: string; parentId?: string }) =>
-    request<{ document: Document }>("POST", `${treePath(projectKey)}/documents`, input).then((r) => r.document),
+    request<{ document: Document }>("POST", `${scopePath(projectKey)}/documents`, input).then((r) => r.document),
   document: (id: string) => request<{ document: Document }>("GET", documentPath(id)).then((r) => r.document),
   /** Refused with the current Version (see `staleVersionOf`) if `baseVersion` is no longer current. */
   saveDocument: (id: string, input: { baseVersion: number; title?: string; body?: string }) =>
