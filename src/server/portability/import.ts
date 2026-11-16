@@ -4,6 +4,7 @@ import { unwrapFolder, type Folder } from "./archive.js";
 import { natural, refuse } from "./fields.js";
 import { FORMAT } from "./format.js";
 import { importGuidance } from "./guidance.js";
+import { importDecisions } from "./decisions.js";
 import { importTree } from "./documents.js";
 import { ImportContext } from "./import-context.js";
 import { importPeople } from "./people.js";
@@ -42,6 +43,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importWorkspaceSettings(ctx);
     await importGuidance(ctx, "guidance", null);
     await importTree(ctx, "documents", null);
+    await importDecisions(ctx, "", null, null);
   }
   // Tickets by key across the imported Projects, for parents and relations.
   const tickets = new ImportedTickets();
@@ -51,6 +53,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     created.push(project.key);
     await importGuidance(ctx, `projects/${dirKey}/guidance`, project.id);
     await importTree(ctx, `projects/${dirKey}/documents`, project.id);
+    await importDecisions(ctx, `projects/${dirKey}`, project.id, project.key);
     await importTickets(ctx, dirKey, project, tickets);
   }
   await tickets.storeRelations(ctx);
@@ -79,10 +82,11 @@ async function checkRoom(ctx: ImportContext, scope: Imported["scope"], projectKe
     const { rows } = await ctx.db.query(
       `SELECT 1 FROM projects WHERE workspace_id = $1
        UNION ALL SELECT 1 FROM documents WHERE workspace_id = $1
+       UNION ALL SELECT 1 FROM decisions WHERE workspace_id = $1
        UNION ALL SELECT 1 FROM guidance_versions WHERE workspace_id = $1 LIMIT 1`,
       [ctx.workspaceId],
     );
-    if (rows.length > 0) throw new HttpError(409, "A Workspace export goes into a Workspace with no Projects, Documents or Guidance yet; import Projects one at a time instead");
+    if (rows.length > 0) throw new HttpError(409, "A Workspace export goes into a Workspace with no Projects, Documents, Decisions or Guidance yet; import Projects one at a time instead");
   } else if (projectKeys.length !== 1) {
     refuse("A Project export holds exactly one projects/<KEY>/project.md");
   }

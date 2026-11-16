@@ -354,3 +354,24 @@ export async function listDecisions(db: Queryable, scope: DecisionScope, filters
   const refs = await refsIn(db, scope, rows.flatMap((r) => (r.superseded_by === null ? [] : [r.superseded_by])));
   return rows.map((row) => summarize(row, refs));
 }
+
+/** A Decision's row as an import writes it, keeping its number and times; the caller records its Versions. */
+export async function insertDecisionRow(
+  db: Queryable,
+  scope: DecisionScope,
+  d: DecisionContent & { number: number; supersededBy: number | null; version: number; createdAt: Date; updatedAt: Date },
+): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, group_name, supersedes, superseded_by, version, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+    [scope.workspaceId, scope.projectId, d.number, d.title, d.body, d.status, d.group, d.supersedes, d.supersededBy, d.version, d.createdAt, d.updatedAt],
+  );
+  return rows[0]!.id;
+}
+
+/** Makes a scope's next Decision number follow the highest it holds, as after an import. */
+export async function continueNumbering(db: Queryable, scope: DecisionScope): Promise<void> {
+  const next = `(SELECT coalesce(max(number), 0) + 1 FROM decisions WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2)`;
+  if (scope.projectId === null) await db.query(`UPDATE workspaces SET next_decision_number = ${next} WHERE id = $1`, [scope.workspaceId, null]);
+  else await db.query(`UPDATE projects SET next_decision_number = ${next} WHERE id = $2`, [scope.workspaceId, scope.projectId]);
+}
