@@ -2,7 +2,7 @@ import type { Actor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { insertDocument, type Tree, type TreeEntry } from "../knowledge/documents.js";
-import { unwrapFolder, type Folder } from "./archive.js";
+import { textOf, unwrapFolder, type Folder } from "./archive.js";
 import { readFrontmatter } from "./frontmatter.js";
 import { MARKDOWN_FILE } from "../../shared/values.js";
 
@@ -71,7 +71,7 @@ function documentsIn(entries: { path: string; relative: string }[], folder: Fold
 function documentFrom(path: string, folder: Folder, fallback: string): DocumentToCreate {
   let parsed: ReturnType<typeof readFrontmatter>;
   try {
-    parsed = readFrontmatter(folder.get(path)!.replace(/^\uFEFF/, ""));
+    parsed = readFrontmatter(textOf(folder.get(path)!).replace(/^\uFEFF/, ""));
   } catch (err) {
     throw new HttpError(400, `${path} can't be read: ${(err as Error).message}`);
   }

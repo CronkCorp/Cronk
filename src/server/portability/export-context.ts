@@ -1,5 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { Folder } from "./archive.js";
+import type { FileStore } from "../files/store.js";
 import type { ActorRef } from "./format.js";
 import { writeFrontmatter } from "./frontmatter.js";
 
@@ -50,16 +51,25 @@ export class ExportContext {
     readonly scope: ExportScope,
     /** Every User of the Workspace. */
     readonly users: UserRow[],
+    /** Where the files of Attachments are read from. */
+    readonly files: FileStore,
   ) {
     this.emailOf = new Map(users.map((u) => [u.id, u.email]));
   }
 
-  static async start(db: Queryable, scope: ExportScope): Promise<ExportContext> {
+  static async start(db: Queryable, scope: ExportScope, files: FileStore): Promise<ExportContext> {
     const { rows } = await db.query<UserRow>(
       "SELECT id, email, name, role, deactivated_at FROM users WHERE workspace_id = $1 ORDER BY lower(name), lower(email)",
       [scope.workspaceId],
     );
-    return new ExportContext(db, scope, rows);
+    return new ExportContext(db, scope, rows, files);
+  }
+
+  /** Writes the file at `path` as the bytes stored under `key` in the file store. */
+  async addStoredFile(path: string, key: string): Promise<void> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of this.files.get(key)) chunks.push(chunk as Buffer);
+    this.folder.set(path, Buffer.concat(chunks));
   }
 
   /** Writes the file at `path`: `data` as frontmatter, then `body`. */

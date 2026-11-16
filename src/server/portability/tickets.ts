@@ -4,6 +4,7 @@ import { recordChange, ticketKeySql } from "../work/tickets.js";
 import { findUserById } from "../identity/users.js";
 import { storeRelation } from "../work/relations.js";
 import { storeDocumentLink } from "../work/document-links.js";
+import { exportAttachments, importAttachments } from "./attachments.js";
 import { exportComments, importComments } from "./comments.js";
 import { exportDocument, importDocument, type DocumentRow } from "./documents.js";
 import { exportHistory, importHistory } from "./history.js";
@@ -98,6 +99,7 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
     );
   });
   await exportActivitiesAndComments(ctx, base, t.id);
+  await exportAttachments(ctx, base, t.id);
   await exportHistory(ctx, base, t.id, statusNow);
   const { rows: reports } = await ctx.db.query<DocumentRow>("SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id", [t.id]);
   for (const [i, r] of reports.entries()) await exportDocument(ctx, `${base}.reports/${i + 1}`, r);
@@ -202,6 +204,7 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
     const history = ctx.read(`${base}.history.md`);
     if (history) tickets.histories.push({ ticketId: id, statusIds: project.statusIds, file: history });
     await importActivitiesAndComments(ctx, base, id);
+    await importAttachments(ctx, base, id);
     for (const report of ctx.filesIn(`${base}.reports`)) {
       await importDocument(ctx, report.slice(0, -".md".length), { projectId: project.id, parentId: null, position: 0, ticketId: id });
     }

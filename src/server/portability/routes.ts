@@ -55,7 +55,7 @@ function exportRoutes(app: FastifyInstance, ctx: AppContext) {
     const now = ctx.clock.now();
     const folder = await transaction(ctx.db, async (tx) => {
       await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
-      return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now });
+      return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }, ctx.files);
     });
     const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
     return reply
@@ -132,7 +132,7 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
       requireAdmin(user, "import an export");
       const folder = await unpackFolder(archiveBody(request.body));
       try {
-        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now()));
+        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), ctx.files));
         return reply.code(201).send(imported);
       } catch (err) {
         // The database refusing a value (a constraint or a malformed value) means the export holds data Cronk can't take.

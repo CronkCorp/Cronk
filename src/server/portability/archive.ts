@@ -8,8 +8,14 @@ import { HttpError } from "../context.js";
  * file manager's "Compress" makes of one.
  */
 
-/** A folder's files: path (`/`-separated, relative) to text, in the order they are packed. */
-export type Folder = Map<string, string>;
+/**
+ * A folder's files: path (`/`-separated, relative) to contents, in the order they are packed. Files written as text
+ * are strings; files unpacked from an archive, and files such as Attachments that aren't text, are bytes.
+ */
+export type Folder = Map<string, string | Buffer>;
+
+/** A file's contents read as UTF-8 text. */
+export const textOf = (contents: string | Buffer): string => (typeof contents === "string" ? contents : contents.toString("utf8"));
 
 /** The most an archive may unpack to, so a small upload can't fill the memory. */
 const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
@@ -49,7 +55,7 @@ export async function unpackFolder(archive: Buffer): Promise<Folder> {
       const chunks: Buffer[] = [];
       for await (const chunk of entry) chunks.push(Buffer.from(chunk as Uint8Array));
       const path = relativePath(entry.header.name);
-      if (entry.header.type === "file" && path !== undefined) folder.set(path, Buffer.concat(chunks).toString("utf8"));
+      if (entry.header.type === "file" && path !== undefined) folder.set(path, Buffer.concat(chunks));
     }
   })();
   extract.end(raw);
@@ -133,7 +139,7 @@ function readZip(archive: Buffer): Folder {
     const data = method === 0 ? packed : inflateRawSync(packed, { maxOutputLength: Math.max(1, MAX_UNPACKED_BYTES - unpacked) });
     unpacked += data.length;
     if (unpacked > MAX_UNPACKED_BYTES) throw tooLarge();
-    folder.set(path, data.toString("utf8"));
+    folder.set(path, Buffer.from(data));
   }
   return folder;
 }
@@ -162,6 +168,6 @@ export function unwrapFolder(folder: Folder): Folder {
     const paths = [...current.keys()];
     const tops = new Set(paths.map((p) => p.split("/")[0]));
     if (tops.size !== 1 || paths.some((p) => !p.includes("/"))) return current;
-    current = new Map([...current].map(([path, text]) => [path.slice(path.indexOf("/") + 1), text]));
+    current = new Map([...current].map(([path, contents]) => [path.slice(path.indexOf("/") + 1), contents]));
   }
 }

@@ -6,6 +6,7 @@ import { FORMAT } from "./format.js";
 import { importGuidance } from "./guidance.js";
 import { importTree } from "./documents.js";
 import { ImportContext } from "./import-context.js";
+import type { FileStore } from "../files/store.js";
 import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
@@ -26,8 +27,20 @@ export interface Imported {
 }
 
 /** Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. */
-export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date): Promise<Imported> {
-  const ctx = new ImportContext(db, workspaceId, unwrapFolder(archived), now);
+export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date, files: FileStore): Promise<Imported> {
+  const ctx = new ImportContext(db, workspaceId, unwrapFolder(archived), now, files);
+  try {
+    return await importInto(ctx);
+  } catch (err) {
+    // Nothing of a failed import stays: its transaction rolls back, and the files it stored go too.
+    for (const key of ctx.storedFiles) await files.delete(key);
+    throw err;
+  }
+}
+
+/** Imports the export `ctx` holds. */
+async function importInto(ctx: ImportContext): Promise<Imported> {
+  const { db, workspaceId } = ctx;
   const scope = readScope(ctx);
   // One import at a time per Workspace, so two can't both find it empty or a key free.
   await lockUntilCommit(db, `import:${workspaceId}`);

@@ -1,6 +1,7 @@
 import type { StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import type { Folder } from "./archive.js";
+import { textOf, type Folder } from "./archive.js";
+import type { FileStore } from "../files/store.js";
 import { natural, refuse, type File } from "./fields.js";
 import { readFrontmatter } from "./frontmatter.js";
 
@@ -17,6 +18,8 @@ export class ImportContext {
   readonly sessionIds = new Map<string, string>();
   /** Documents and Reports imported so far, by the path of their file in the export. */
   readonly documentIds = new Map<string, string>();
+  /** The keys of the files this import stored, to remove again if it fails. */
+  readonly storedFiles: string[] = [];
 
   constructor(
     readonly db: Queryable,
@@ -24,14 +27,22 @@ export class ImportContext {
     /** The export, unwrapped. */
     readonly folder: Folder,
     readonly now: Date,
+    /** Where the files of Attachments go. */
+    readonly files: FileStore,
   ) {}
+
+  /** Stores `bytes` under `key` in the file store, remembering it in `storedFiles`. */
+  async storeFile(key: string, bytes: Buffer): Promise<void> {
+    this.storedFiles.push(key);
+    await this.files.put(key, bytes);
+  }
 
   /** The file at `path`, read, if the export has it. */
   read(path: string): File | undefined {
-    const text = this.folder.get(path);
-    if (text === undefined) return undefined;
+    const contents = this.folder.get(path);
+    if (contents === undefined) return undefined;
     try {
-      return { path, ...readFrontmatter(text) };
+      return { path, ...readFrontmatter(textOf(contents)) };
     } catch (err) {
       refuse(`${path} can't be read: ${(err as Error).message}`);
     }
