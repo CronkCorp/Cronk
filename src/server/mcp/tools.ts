@@ -751,7 +751,7 @@ function artifactRules(rules: Welcome["artifacts"]): string {
 function registerSearchTool(server: McpServer, ctx: ToolContext): void {
   const inputSchema = z.object({
     query: z.string().describe('What to look for, as typed into a search box: words, "quoted phrases", and -words to leave out'),
-    kind: z.array(z.enum(SEARCH_KINDS)).optional().describe("Only these kinds: ticket, document (in a page tree), report, comment"),
+    kind: z.array(z.enum(SEARCH_KINDS)).optional().describe("Only these kinds: ticket, document (in a page tree), report, comment, term"),
     project: z.array(z.string()).optional().describe("Only in these Projects, by key such as CRONK; leaves out the Workspace outside any Project"),
     limit: z.number().int().optional().describe("At most this many results, up to 100; 20 if left out"),
   });
@@ -759,8 +759,9 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
     server,
     ctx,
     "search",
-    "Full-text search across the Tickets, Documents, Reports and Comments you may read, best match first, each result with an " +
-      "excerpt around the match. Get a result with the tickets or documents tool by its ticketKey or documentId.",
+    "Full-text search across the Tickets, Documents, Reports, Comments and Terms you may read, best match first, each result with an " +
+      "excerpt around the match; a Term is found by its name, definition or words to avoid. Get a result with the tickets or documents " +
+      "tool by its ticketKey or documentId, or a Term with the terms tool by its termId.",
     inputSchema,
     (api, { query: q, kind, project, limit }) =>
       api("GET", `/api/search${query({ q: [q], kind, project, limit: limit === undefined ? undefined : [String(limit)] })}`),
