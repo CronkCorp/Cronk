@@ -312,7 +312,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
-      "move, or create Documents under; propose a change to it with the `suggestions` tool instead.",
+      "move, or create Documents under; propose a change to it, or a new Document under it, with the `suggestions` tool instead.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
@@ -486,13 +486,16 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Protected), or Guidance, which only Users write. Send the item's new content based on the Version you read (`baseVersion`, the item's `version`; " +
       "Guidance at 0 when nobody has written it) with your reasoning; fields you leave out keep what that Version holds. A User reviews it (the Assignee " +
       "of the Ticket you hold the Claim on, or else your Owner; a Workspace item goes to Triage) and accepts it as is, credited to you, edits and accepts " +
-      "it, credited to them, or rejects it with a reason, which reaches you as waiting work. Check where yours stand with `list`.",
+      "it, credited to them, or rejects it with a reason, which reaches you as waiting work. Check where yours stand with `list`. " +
+      "To add a Document under a protected branch, suggest the new Document: kind `document`, the Document it goes under as `parentId`, `baseVersion` 0, " +
+      "and its `title` and `body`; accepting it creates the Document there.",
     parameters: {
       kind: z.enum(["document", "term", "decision", "guidance"]).optional().describe("What kind of item to change (create)"),
       itemId: z.string().optional().describe("The Document's or Term's id (create)"),
+      parentId: z.string().optional().describe("For a new Document, instead of an itemId: the Document under the protected branch it goes under (create)"),
       key: z.string().optional().describe("The Decision's key, such as CRONK-D7 (create)"),
       project: z.string().optional().describe("For Guidance, the Project key whose Guidance to change; leave out for the Workspace's (create)"),
-      baseVersion: z.number().int().optional().describe("The item's `version` you read and are changing (create)"),
+      baseVersion: z.number().int().optional().describe("The item's `version` you read and are changing; 0 for a new Document (create)"),
       title: z.string().optional().describe("A Document's or Decision's new title (create)"),
       body: z.string().optional().describe("A Document's or Decision's new Markdown body (create)"),
       name: z.string().optional().describe("A Term's new name (create)"),
@@ -510,7 +513,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     actions: {
       create: {
-        description: "suggest a new Version of a Protected Document, Term or Decision, or of Guidance",
+        description: "suggest a new Version of a Protected Document, Term or Decision, or of Guidance, or a new Document under a protected branch",
         writes: true,
         run: (api, a) => {
           const kind = required(a.kind, "a kind", "create");
@@ -519,7 +522,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
               ? { kind, key: required(a.key, "a key for a Decision", "create") }
               : kind === "guidance"
                 ? { kind, project: a.project ?? null }
-                : { kind, id: required(a.itemId, `an itemId for a ${kind === "document" ? "Document" : "Term"}`, "create") };
+                : kind === "document" && a.itemId === undefined
+                  ? { kind, parentId: required(a.parentId, "an itemId for a Document, or a parentId for a new one", "create") }
+                  : { kind, id: required(a.itemId, `an itemId for a ${kind === "document" ? "Document" : "Term"}`, "create") };
           const fields = { title: a.title, body: a.body, name: a.name, definition: a.definition, avoid: a.avoid, group: a.group, markdown: a.markdown };
           const content = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
           return api("POST", "/api/suggestions", {

@@ -332,6 +332,31 @@ describe("the suggestions tool", () => {
   });
 });
 
+describe("the suggestions tool and a new Document", () => {
+  it("suggests one under a protected branch, where creating it is refused, and the welcome tells the Agent why a User rejected it", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Architecture", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const refused = await callTool(mcp, "documents", { action: "create", project: "CRONK", parentId: document.id, title: "Backups" });
+    expect(refused.isError).toBe(true);
+    expect(refused.body).toMatch(/Make a Suggestion of the new Document instead.*`suggestions` tool/);
+    const made = await callTool(mcp, "suggestions", { action: "create", kind: "document", parentId: document.id, baseVersion: 0, title: "Backups", body: "Nightly.", reasoning: "Missing." });
+    expect(made.isError).toBe(false);
+    expect(made.body.suggestion).toMatchObject({ item: { kind: "document", id: null, title: "Backups" }, parent: { id: document.id }, content: { title: "Backups", body: "Nightly." } });
+    expect(await callTool(mcp, "suggestions", { action: "create", kind: "document", baseVersion: 0, title: "Backups", reasoning: "Missing." })).toEqual({
+      isError: true,
+      body: "The create action needs an itemId for a Document, or a parentId for a new one",
+    });
+    await mcp.disconnect();
+    await admin.post(`/api/suggestions/${made.body.suggestion.id}/reject`, { reason: "It's in the runbook." });
+
+    const instructions = (await connectMcp(cronk, claude.secret)).client.getInstructions()!;
+    expect(instructions).toContain(`- Your Suggestion ${made.body.suggestion.id} of a new Document “Backups”: Ada rejected it, saying why:\n  > It's in the runbook.`);
+  });
+});
+
 describe("the decisions tool", () => {
   it("lists and gets Decisions of the Workspace or a Project through the API's access rules", async () => {
     const { cronk, admin } = await startInstalledCronk();
