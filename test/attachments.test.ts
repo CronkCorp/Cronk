@@ -95,6 +95,8 @@ describe("Downloading part of an Attachment", () => {
     const outside = await admin.download(file, { range: "bytes=10-12" });
     expect(outside.status).toBe(416);
     expect(outside.headers["content-range"]).toBe("bytes */10");
+    expect(outside.headers["content-type"]).toMatch(/^application\/json/);
+    expect(JSON.parse(outside.body.toString()).error).toMatch(/10 bytes/);
 
     const several = await admin.download(file, { range: "bytes=0-1,4-5" });
     expect(several.status).toBe(200);

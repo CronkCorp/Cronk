@@ -14,6 +14,9 @@ import { HttpError } from "../context.js";
  */
 export type Folder = Map<string, string | Buffer>;
 
+/** A file's contents as bytes, text as UTF-8. */
+export const bytesOf = (contents: string | Buffer): Buffer => (typeof contents === "string" ? Buffer.from(contents, "utf8") : contents);
+
 /** A file's contents read as UTF-8 text. */
 export const textOf = (contents: string | Buffer): string => (typeof contents === "string" ? contents : contents.toString("utf8"));
 

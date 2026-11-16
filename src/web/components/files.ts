@@ -1,3 +1,5 @@
+import { SHOWN_MEDIA_TYPES } from "../../shared/values.js";
+
 /** How files are named and measured on screen: sizes, and the short type label shown where there is no preview. */
 
 const KB = 1024;
@@ -13,11 +15,12 @@ export function formatBytes(bytes: number): string {
 /** What a file is, as its thumbnail shows it in a browser: an image, a video or audio it plays, or anything else. */
 export type FileKind = "image" | "video" | "audio" | "other";
 
-/** The kind of a file of `contentType`; only what browsers play in the page counts as video or audio. */
+/** The kind of a file of `contentType`; only what Cronk serves to show in the page counts as an image, video or audio. */
 export function fileKind(contentType: string): FileKind {
-  if (/^image\/(png|jpeg|gif|webp|avif)$/.test(contentType)) return "image";
-  if (/^video\/(mp4|webm|ogg)$/.test(contentType)) return "video";
-  if (/^audio\//.test(contentType)) return "audio";
+  const shown = (types: readonly string[]) => types.includes(contentType);
+  if (shown(SHOWN_MEDIA_TYPES.image)) return "image";
+  if (shown(SHOWN_MEDIA_TYPES.video)) return "video";
+  if (shown(SHOWN_MEDIA_TYPES.audio)) return "audio";
   return "other";
 }
 

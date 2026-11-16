@@ -148,12 +148,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
-/** Uploads `file`, such as a .tar.gz archive, as the raw request body. */
-async function upload<T>(path: string, file: Blob): Promise<T> {
+/**
+ * Sends `file` as the raw request body: typed `contentType`, or as plain bytes, as an archive is (the server tells a zip
+ * from a tar, gzipped or not, by its bytes).
+ */
+async function upload<T>(path: string, file: Blob, contentType = "application/octet-stream"): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
-    // The server tells a zip from a tar, gzipped or not, by its bytes, so the upload is sent as plain bytes.
-    headers: { "content-type": "application/octet-stream" },
+    headers: { "content-type": contentType },
     body: file,
     credentials: "same-origin",
   });
@@ -161,20 +163,6 @@ async function upload<T>(path: string, file: Blob): Promise<T> {
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   return data as T;
-}
-
-/** Uploads `file` as an Attachment on the Ticket `key`, sent as itself with its own media type. */
-async function attach(key: string, file: File): Promise<Attachment> {
-  const res = await fetch(`/api/tickets/${encodeURIComponent(key)}/attachments?${new URLSearchParams({ name: file.name || "pasted" })}`, {
-    method: "POST",
-    headers: { "content-type": file.type || "application/octet-stream" },
-    body: file,
-    credentials: "same-origin",
-  });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
-  return (data as { attachment: Attachment }).attachment;
 }
 
 /** Where an Attachment's file is served: shown in the page when it is an image, video, audio or plain text, saved otherwise. */
@@ -213,7 +201,11 @@ export const api = {
   /** A Ticket's Attachments, in the order they were attached. */
   attachments: (key: string) =>
     request<{ attachments: Attachment[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/attachments`).then((r) => r.attachments),
-  attach,
+  /** Attaches `file` to the Ticket `key`, sent as itself with its own media type. */
+  attach: (key: string, file: File) =>
+    upload<{ attachment: Attachment }>(`/api/tickets/${encodeURIComponent(key)}/attachments?${new URLSearchParams({ name: file.name || "pasted" })}`, file, file.type || undefined).then(
+      (r) => r.attachment,
+    ),
   deleteAttachment: (id: string) => request<void>("DELETE", `/api/attachments/${encodeURIComponent(id)}`),
 
   /** The Workspace's Guidance, or with `projectKey` that Project's. */

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { mkdir, rename, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -16,6 +16,7 @@ export interface ByteRange {
   end: number;
 }
 
+/** Where files' bytes are kept, by key: local disk by default. Every backend behaves the same, ranges included. */
 export interface FileStore {
   /**
    * Stores `bytes` under `key`, replacing any file there, and answers how many bytes it stored. With `maxBytes`,
@@ -26,8 +27,6 @@ export interface FileStore {
   get(key: string, range?: ByteRange): Readable;
   /** Removes the file under `key`; removing one that isn't there does nothing. */
   delete(key: string): Promise<void>;
-  /** The keys of every stored file starting with `prefix`, in no particular order. */
-  list(prefix?: string): Promise<string[]>;
 }
 
 /** A file refused for growing past the most a store was told to take. */
@@ -80,20 +79,4 @@ export class LocalDiskStore implements FileStore {
     await rm(this.path(key), { force: true });
   }
 
-  async list(prefix = ""): Promise<string[]> {
-    const keys: string[] = [];
-    const walk = async (dir: string): Promise<void> => {
-      const entries = await readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
-        if (err.code === "ENOENT") return [];
-        throw err;
-      });
-      for (const entry of entries) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) await walk(path);
-        else if (!entry.name.endsWith(".partial")) keys.push(relative(this.root, path).split(sep).join("/"));
-      }
-    };
-    await walk(this.root);
-    return keys.filter((k) => k.startsWith(prefix)).sort();
-  }
 }

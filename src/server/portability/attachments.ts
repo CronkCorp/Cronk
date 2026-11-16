@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { attachmentKey, insertAttachment } from "../files/attachments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
-import { date, refuse, text } from "./fields.js";
+import { bytesOf } from "./archive.js";
+import { date, list, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
-import { isRecord } from "./format.js";
 
 /**
  * A Ticket's Attachments: their files in `<KEY>.attachments/`, each named `<n>-<name>` in the order they were
@@ -48,14 +48,11 @@ export async function exportAttachments(ctx: ExportContext, base: string, ticket
 export async function importAttachments(ctx: ImportContext, base: string, ticketId: string): Promise<void> {
   const index = ctx.read(`${base}.attachments/index.md`);
   if (!index) return;
-  const listed = index.data.attachments ?? [];
-  if (!Array.isArray(listed)) refuse(`${index.path} attachments must be a list`);
-  for (const [i, entry] of listed.entries()) {
+  for (const [i, entry] of list(index, "attachments").entries()) {
     const where = `${index.path} attachments[${i}]`;
-    if (!isRecord(entry)) refuse(`${where} must say what the file is`);
     const path = `${base}.attachments/${text(entry.file, `${where} file`)}`;
     const contents = ctx.folder.get(path) ?? refuse(`${where} names ${path}, which the export doesn't hold`);
-    const bytes = typeof contents === "string" ? Buffer.from(contents, "utf8") : contents;
+    const bytes = bytesOf(contents);
     const id = await freeId(ctx, entry.id);
     await ctx.storeFile(attachmentKey(id), bytes);
     await insertAttachment(ctx.db, {

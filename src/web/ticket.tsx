@@ -23,7 +23,7 @@ import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
-import { AttachmentViewer, FilesPanel, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
+import { AttachmentViewer, FilesPanel, type AttachmentsView, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
 import type { Attachment } from "./api.js";
 import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -152,7 +152,7 @@ function TicketView(props: {
   const canWrite = project.kind === "loaded" && project.value.project.access === "write";
   const attaching = useAttach(t.key, props.onAttached);
   const dragging = usePageDrop(canWrite, (files) => void attaching.attach(files));
-  const files = {
+  const files: AttachmentsView = {
     attachments: props.attachments,
     canWrite,
     attaching,

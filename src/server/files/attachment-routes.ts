@@ -10,13 +10,14 @@ import { ticketsChanged } from "../work/ticket-changes.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import type { Ticket } from "../work/tickets.js";
 import { getWorkspace } from "../workspace/workspaces.js";
+import { SHOWN_MEDIA_TYPES } from "../../shared/values.js";
 import { FileTooLarge, type ByteRange } from "./store.js";
 import { attachmentKey, deleteAttachment, findAttachment, insertAttachment, listAttachments, publicAttachment, type Attachment } from "./attachments.js";
 
 /** The longest file name an Attachment keeps. */
 const MAX_NAME_LENGTH = 255;
 
-const uploadDescription =
+const attachDescription =
   "Attaches a file to the Ticket. The request body is the file itself, sent with its media type as `Content-Type` " +
   "(`application/octet-stream` when unknown), and `name` is its file name. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim.";
 
@@ -31,7 +32,7 @@ export function attachmentRoutes(ctx: AppContext) {
       "/api/tickets/:key/attachments",
       {
         schema: {
-          description: uploadDescription,
+          description: attachDescription,
           consumes: ["application/octet-stream", "*/*"],
           body: { description: "The file's bytes." },
           params: pathParams({ key: ticketKeyParam }),
@@ -197,16 +198,8 @@ function byteRange(header: string | undefined, size: number): ByteRange | "unsat
   return { start, end };
 }
 
-/**
- * The media types a browser shows in the page rather than saving: images, video and audio it plays, and plain text.
- * None of them can run script; anything else, HTML and SVG above all, is saved as a file instead.
- */
-const SHOWN_IN_PAGE = new Set([
-  ...["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"],
-  ...["video/mp4", "video/webm", "video/ogg"],
-  ...["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/flac"],
-  "text/plain",
-]);
+/** The media types served to show in the page rather than to save. */
+const SHOWN_IN_PAGE = new Set<string>(Object.values(SHOWN_MEDIA_TYPES).flat());
 
 /** The `Content-Disposition` an Attachment is served with: shown in the page or saved, under its own name (RFC 6266). */
 function contentDisposition(attachment: Attachment): string {

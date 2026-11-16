@@ -120,15 +120,20 @@ function DropZone(props: { attaching: Attaching; maxBytes: number | undefined; d
   );
 }
 
-/** The Ticket's own Attachments as thumbnails under its description, with where to drop more. */
-export function TicketAttachments(props: {
+/** What both the thumbnails and the Files panel show and do. */
+export interface AttachmentsView {
   attachments: Attachment[];
   canWrite: boolean;
   attaching: Attaching;
+  /** The Workspace's Attachment size limit, once known. */
   maxBytes: number | undefined;
+  /** Whether files are being dragged over the page. */
   dragging: boolean;
   onOpen: (attachment: Attachment) => void;
-}) {
+}
+
+/** The Ticket's own Attachments as thumbnails under its description, with where to drop more. */
+export function TicketAttachments(props: AttachmentsView) {
   if (!props.canWrite && props.attachments.length === 0) return null;
   return (
     <section className="attachments" aria-label="Attachments">
@@ -144,8 +149,8 @@ export function TicketAttachments(props: {
                 <Preview attachment={a} />
                 <span className="thumbnail-caption">
                   <span className="thumbnail-name">{a.name}</span>
-                  <span className="muted">
-                    {formatBytes(a.size)} · {a.actor.name}
+                  <span className="muted file-by">
+                    {formatBytes(a.size)} · <Actor actor={attachedBy(a.actor)} owner={false} />
                   </span>
                 </span>
               </button>
@@ -178,14 +183,7 @@ function Preview(props: { attachment: Attachment }) {
 }
 
 /** Every file on the Ticket, in the side panel, with where to drop more. */
-export function FilesPanel(props: {
-  attachments: Attachment[];
-  canWrite: boolean;
-  attaching: Attaching;
-  maxBytes: number | undefined;
-  dragging: boolean;
-  onOpen: (attachment: Attachment) => void;
-}) {
+export function FilesPanel(props: AttachmentsView) {
   if (!props.canWrite && props.attachments.length === 0) return null;
   return (
     <section className="side-panel side-files" aria-label="Files">
@@ -202,8 +200,8 @@ export function FilesPanel(props: {
               <span className="file-type" aria-hidden="true">{typeLabel(a.name, a.contentType).slice(0, 4)}</span>
               <span className="file-meta">
                 <button type="button" className="link-button" onClick={() => props.onOpen(a)}>{a.name}</button>
-                <span className="muted">
-                  {formatBytes(a.size)} · {a.actor.name}
+                <span className="muted file-by">
+                  {formatBytes(a.size)} · <Actor actor={attachedBy(a.actor)} owner={false} />
                 </span>
               </span>
             </li>

@@ -500,8 +500,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     ...object({
       id,
       ticketKey: { type: "string", description: "The Ticket it is attached to." },
-      name: { type: "string", description: "Its file name, as uploaded." },
-      contentType: { type: "string", description: "Its media type, such as `image/png`, as uploaded." },
+      name: { type: "string", description: "Its file name, as attached." },
+      contentType: { type: "string", description: "Its media type, such as `image/png`, as attached." },
       size: { type: "integer", description: "Its size in bytes." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who attached it." },
@@ -568,8 +568,8 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 
-/** A Ticket's key, such as `CRONK-12`, in any case. */
 /** An Attachment's id. */
 export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
 
+/** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
