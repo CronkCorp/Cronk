@@ -968,4 +968,15 @@ export const migrations: Migration[] = [
       CREATE INDEX tickets_discovered_source_claim ON tickets (discovered_source_claim_id) WHERE discovered_source_claim_id IS NOT NULL;
     `,
   },
+  {
+    id: "0039_discovered_blocks",
+    sql: `
+      -- A block an Agent added from its own Discovered Ticket, without a Claim (work/relations.ts): the Agent that added it
+      -- and why, which the blocked Ticket shows. Null on every other Relation.
+      ALTER TABLE ticket_relations ADD COLUMN added_by_agent_id uuid REFERENCES agents(id);
+      ALTER TABLE ticket_relations ADD COLUMN reason text;
+      ALTER TABLE ticket_relations ADD CONSTRAINT ticket_relations_discovered_block
+        CHECK ((added_by_agent_id IS NULL) = (reason IS NULL) AND (added_by_agent_id IS NULL OR kind = 'blocks'));
+    `,
+  },
 ];

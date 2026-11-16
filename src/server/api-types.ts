@@ -119,6 +119,8 @@ export type Project = Serialized<StoredProject> & {
 
 export type Ticket = Serialized<StoredTicket>;
 export type Relations = Serialized<StoredRelations>;
+/** Another Ticket at the other end of a block, with who added it from a Discovered Ticket and why. */
+export type BlockingRef = Relations["blocks"][number];
 
 /** An Agent Session's hold on a Ticket. */
 export type Claim = Serialized<StoredClaim>;

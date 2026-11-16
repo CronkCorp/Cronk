@@ -266,7 +266,7 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
  * may then change it without a Claim, from any of its Agent Sessions, though not work on it. Once delegated, it stays
  * the Delegate's to work on under a Claim, even if the Delegation is later taken away.
  */
-async function isOwnDiscoveryAwaitingDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
+export async function isOwnDiscoveryAwaitingDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
   if (ticket.discovered?.agent.id !== agent.agent.id || ticket.delegate !== null) return false;
   if (FINISHED_CATEGORIES.includes(ticket.status.category)) return false;
   return !(await wasEverDelegated(db, ticket.id));
