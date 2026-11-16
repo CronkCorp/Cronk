@@ -456,3 +456,56 @@ function mergeBodies(base: string, mine: string, theirs: string): MergedSection[
     return { heading: s.heading, text: null, conflict: sectionConflict(spaced(c.base, last), spaced(c.mine, last), spaced(c.theirs, last)) };
   });
 }
+
+/** Each side's value of a field both sides changed differently. */
+export interface FieldConflict<T> {
+  base: T;
+  mine: T;
+  theirs: T;
+}
+
+/** A merge of a Decision: its title and body as `mergeEdits` merges a Document's, and its group and superseded Decisions as whole fields. */
+export interface DecisionMerge extends Merge {
+  /** The merged group, null for none; also null when it conflicts. */
+  group: string | null;
+  /** Set when both sides changed the group differently. */
+  groupConflict: FieldConflict<string | null> | null;
+  /** The keys of the Decisions the merge supersedes, in order; null when they conflict. */
+  supersedes: string[] | null;
+  /** Set when both sides changed the superseded Decisions differently. */
+  supersedesConflict: FieldConflict<string[]> | null;
+}
+
+/** What a Decision's edit holds that merges; `supersedes` are keys in order. */
+export interface DecisionSide {
+  title: string;
+  body: string;
+  group: string | null;
+  supersedes: string[];
+}
+
+/** The three-way merge of a whole field: the side that changed it, or null and a conflict when both did, differently. */
+function mergeField<T>(base: T, mine: T, theirs: T, same: (a: T, b: T) => boolean): { merged: T | null; conflict: FieldConflict<T> | null } {
+  if (same(mine, theirs) || same(mine, base)) return { merged: theirs, conflict: null };
+  if (same(theirs, base)) return { merged: mine, conflict: null };
+  return { merged: null, conflict: { base, mine, theirs } };
+}
+
+/**
+ * Three-way merges two edits of a Decision made from `base`: the title and body as `mergeEdits`
+ * merges them, and the group and the superseded Decisions each as one field, taken from the side
+ * that changed it, or a conflict when both did, differently.
+ */
+export function mergeDecisionEdits(base: DecisionSide, mine: DecisionSide, theirs: DecisionSide): DecisionMerge {
+  const merge = mergeEdits(base, mine, theirs);
+  const group = mergeField(base.group, mine.group, theirs.group, (a, b) => a === b);
+  const supersedes = mergeField(base.supersedes, mine.supersedes, theirs.supersedes, (a, b) => a.join("\n") === b.join("\n"));
+  return {
+    ...merge,
+    group: group.merged,
+    groupConflict: group.conflict,
+    supersedes: supersedes.merged,
+    supersedesConflict: supersedes.conflict,
+    conflicts: merge.conflicts + (group.conflict ? 1 : 0) + (supersedes.conflict ? 1 : 0),
+  };
+}
