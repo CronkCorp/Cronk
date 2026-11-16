@@ -282,7 +282,7 @@ export async function artifactFor(db: Queryable, actor: Actor, id: string, need:
 export const artifactAddress = (origin: string, id: string, version?: number) => `${origin}/artifacts/${id}${version === undefined ? "" : `?version=${version}`}`;
 
 /** What the API answers for an Artifact, without its Versions. */
-function publicArtifact(a: Artifact, origin: string) {
+export function publicArtifact(a: Artifact, origin: string) {
   return {
     id: a.id,
     title: a.title,
@@ -299,7 +299,7 @@ function publicArtifact(a: Artifact, origin: string) {
 }
 
 /** What the API answers for one Version of an Artifact, without its files. */
-function publicVersion(a: Artifact, v: ArtifactVersion, origin: string) {
+export function publicVersion(a: Artifact, v: ArtifactVersion, origin: string) {
   return {
     number: v.number,
     title: v.title,

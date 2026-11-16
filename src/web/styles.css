@@ -654,3 +654,23 @@ a.register-row:hover { background: var(--bg); }
 .term-detail .term-definition { font-size: 15px; line-height: 1.65; margin-bottom: 8px; }
 .term-detail p.small { margin: 8px 0 0; }
 .term-version { display: flex; flex-direction: column; gap: 2px; }
+
+/* An Artifact's page (docs/ui.md § Artifact): a thin bar over the Artifact in a sandboxed frame, full bleed. */
+.artifact-page { display: flex; flex-direction: column; gap: 8px; }
+.artifact-shell { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.artifact-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.artifact-title { font-size: 14px; font-weight: 600; margin: 0; }
+.artifact-source { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.artifact-source .key { min-width: 0; }
+.artifact-frame { display: block; width: 100%; height: calc(100vh - 180px); min-height: 480px; border: none; }
+.artifact-note { margin: 0; font-size: 12px; }
+.version-chip { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
+.version-chip:hover { color: var(--text); }
+.version-menu { display: flex; flex-direction: column; gap: 4px; min-width: 300px; max-width: 360px; }
+.version-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.version-row { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 4px; font-size: 13px; }
+.version-row:hover { background: var(--accent-soft); }
+.version-list li.current .version-row { background: var(--accent-soft); color: var(--accent); }
+.version-number { font-weight: 600; }
+.version-empty { margin: 0; padding: 0 12px 8px; font-size: 12px; }
+.version-menu > .btn { align-self: flex-start; margin: 4px 10px; }

@@ -40,7 +40,7 @@ export const explainStale = (reload: () => void, doing: string) => (err: unknown
 };
 
 /** The way back to a Project, optionally followed by more crumbs. */
-function ProjectCrumbs(props: { projectKey: string; children?: ReactNode }) {
+export function ProjectCrumbs(props: { projectKey: string; children?: ReactNode }) {
   return (
     <div className="muted">
       <Link to="/" className="link">Projects</Link> / <Link to={`/projects/${props.projectKey}`} className="link">{props.projectKey}</Link>

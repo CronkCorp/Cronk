@@ -26,6 +26,7 @@ import type {
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
 import type { publicAttachment } from "./files/attachments.js";
+import type { publicArtifact, publicVersion } from "./files/artifact-routes.js";
 import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
@@ -84,9 +85,17 @@ export type Invitation = Serialized<ReturnType<typeof publicInvitation>>;
 export type Workspace = Serialized<ReturnType<typeof publicWorkspace>>;
 /** A file attached to a Ticket. */
 export type Attachment = Serialized<ReturnType<typeof publicAttachment>>;
+/** One publish of an Artifact; asked for alone, with its files and where to frame it. */
+export type ArtifactVersion = Serialized<ReturnType<typeof publicVersion>> & {
+  frameUrl?: string;
+  files?: { path: string; contentType: string; size: number }[];
+};
+/** A folder of files with index.html, published as Versions; asked for alone, with its Versions and where to frame the latest. */
+export type Artifact = Serialized<ReturnType<typeof publicArtifact>> & { frameUrl?: string; versions?: ArtifactVersion[] };
 /** How much storage the Workspace's files take, by kind; Admins only. */
 export interface Storage {
   attachments: { files: number; bytes: number };
+  artifacts: { files: number; bytes: number };
 }
 /** Standing instructions Users write for Agents: its Markdown and current Version (0 before anyone writes it). */
 export type Guidance = Serialized<StoredGuidance>;
@@ -146,7 +155,7 @@ export type Version = Serialized<StoredVersion>;
 export type Term = Serialized<StoredTerm>;
 /** One saved state of a Term, with the Actor who saved it. */
 export type TermVersion = Serialized<StoredTermVersion>;
-/** One marking of a Document, Term or Decision as Protected, or unmarking, with the User who did it. */
+/** One marking of a Document, Term, Decision or Artifact as Protected, or unmarking, with the User who did it. */
 export type ProtectionMarking = Serialized<StoredProtectionMarking>;
 /** A Version without its body, as a Document's Version list shows it. */
 export type VersionSummary = Omit<Version, "body">;

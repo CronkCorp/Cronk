@@ -236,6 +236,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                 trigger={<Button variant="secondary" aria-label="Project actions">…</Button>}
                 items={[
                   { label: "Documents", onSelect: () => navigate(`/projects/${p.key}/documents`) },
+                  { label: "Artifacts", onSelect: () => navigate(`/projects/${p.key}/artifacts`) },
                   // Everyone who sees the Project may read its settings; only Write access changes them or archives it.
                   { label: "Project settings", onSelect: () => navigate(projectPath(p.key, "settings", {})) },
                   // Only an Admin may export; the archive downloads as an attachment.
