@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Priority, Status } from "../api.js";
+import type { DecisionStatus, Priority, Status } from "../api.js";
 
 // Small labels set into rows and headings: docs/ui.md § Component conventions.
 
@@ -56,4 +56,18 @@ export function StatusPill(props: { status: Status }) {
 /** A Status as its Category's dot alone, for dense rows: the name is in its tooltip and accessible label. */
 export function StatusDot(props: { status: Status }) {
   return <span className={`dot ${props.status.category}`} role="img" aria-label={props.status.name} title={props.status.name} />;
+}
+
+/** Each Decision status as the UI names it. */
+export const DECISION_STATUS_NAMES: Record<DecisionStatus, string> = {
+  proposed: "Proposed",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  deprecated: "Deprecated",
+  superseded: "Superseded",
+};
+
+/** A Decision's status as an 11px uppercase pill, styled by status (docs/ui.md § Component conventions). */
+export function DecisionStatusPill(props: { status: DecisionStatus }) {
+  return <span className={`decision-status ${props.status}`}>{DECISION_STATUS_NAMES[props.status]}</span>;
 }

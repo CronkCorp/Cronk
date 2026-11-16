@@ -10,7 +10,7 @@ import { useLoad } from "./ui.js";
 
 // The app frame's sidebar: docs/ui.md § Layout and navigation.
 
-/** Which sidebar item a page belongs to: a Ticket marks its Project, a Document marks Documents. */
+/** Which sidebar item a page belongs to: a Ticket marks its Project, a Document marks Documents, a Decision marks Decisions. */
 function currentItem(route: Route): string | undefined {
   switch (route.page) {
     case "inbox":
@@ -21,6 +21,9 @@ function currentItem(route: Route): string | undefined {
     case "users":
     case "settings":
       return route.page === "document" ? "documents" : route.page;
+    case "decisions":
+    case "decision":
+      return "decisions";
     case "project":
     case "projectDocuments":
       return projectItem(route.key);
@@ -88,6 +91,9 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         </NavItem>
         <NavItem to="/documents" current={current === "documents"}>
           <span className="nav-text">Documents</span>
+        </NavItem>
+        <NavItem to="/decisions" current={current === "decisions"}>
+          <span className="nav-text">Decisions</span>
         </NavItem>
         <NavItem to="/agents" current={current === "agents"}>
           <span className="nav-text">Agents</span>

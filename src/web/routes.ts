@@ -7,6 +7,8 @@ export type Route =
   | { page: "ticket"; key: string }
   | { page: "documents" }
   | { page: "document"; id: string }
+  | { page: "decisions" }
+  | { page: "decision"; key: string }
   | { page: "inbox" }
   | { page: "agents" }
   | { page: "search" }
@@ -17,6 +19,7 @@ export type Route =
 const FIXED: Record<string, Route> = {
   "/archived": { page: "projects", archived: true },
   "/documents": { page: "documents" },
+  "/decisions": { page: "decisions" },
   "/inbox": { page: "inbox" },
   "/agents": { page: "agents" },
   "/search": { page: "search" },
@@ -30,6 +33,7 @@ const PATTERNS: [RegExp, (param: string) => Route][] = [
   [/^\/projects\/([^/]+)\/documents$/, (key) => ({ page: "projectDocuments", key })],
   [/^\/tickets\/([^/]+)$/, (key) => ({ page: "ticket", key })],
   [/^\/documents\/([^/]+)$/, (id) => ({ page: "document", id })],
+  [/^\/decisions\/([^/]+)$/, (key) => ({ page: "decision", key })],
 ];
 
 /** The page at `path`; any other address, or a malformed one, is the Projects page. */

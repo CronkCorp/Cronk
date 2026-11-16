@@ -10,6 +10,10 @@ import type {
   AgentToken,
   AgentRecordEntry,
   Comment,
+  Decision,
+  DecisionStatus,
+  DecisionSummary,
+  DecisionVersion,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -60,6 +64,10 @@ export type {
   AgentToken,
   AgentRecordEntry,
   Comment,
+  Decision,
+  DecisionStatus,
+  DecisionSummary,
+  DecisionVersion,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -129,6 +137,7 @@ export const staleVersionOf = (err: unknown): Version | undefined =>
 
 /** Where a page tree's API lives: a Project's, or the Workspace's without a Project key. */
 const treePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}`;
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -186,6 +195,19 @@ export const api = {
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
   updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
+
+  /** A Project's Decisions, or the Workspace's without a Project key, newest first. */
+  decisions: (projectKey?: string) => request<{ decisions: DecisionSummary[] }>("GET", `${treePath(projectKey)}/decisions`).then((r) => r.decisions),
+  decision: (key: string) => request<{ decision: Decision }>("GET", decisionPath(key)).then((r) => r.decision),
+  createDecision: (projectKey: string | undefined, input: { title: string; group?: string | null; supersedes?: string[] }) =>
+    request<{ decision: Decision }>("POST", `${treePath(projectKey)}/decisions`, input).then((r) => r.decision),
+  /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
+  saveDecision: (key: string, input: { baseVersion: number; title?: string; body?: string; group?: string | null; supersedes?: string[] }) =>
+    request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
+  setDecisionStatus: (key: string, status: DecisionStatus) =>
+    request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status }).then((r) => r.decision),
+  decisionVersions: (key: string) =>
+    request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
 
   /** The Workspace's Guidance, or with `projectKey` that Project's. */
   guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),

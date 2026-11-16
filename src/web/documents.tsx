@@ -38,8 +38,8 @@ const explainStale = (reload: () => void, doing: string) => (err: unknown): neve
   throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
 
-/** Whether the signed-in User may change Documents in a Project's tree, or the Workspace's (every User may). */
-function useCanWrite(projectKey: string | null | undefined): boolean {
+/** Whether the signed-in User may change Documents and Decisions in a Project, or the Workspace's (every User may). */
+export function useCanWrite(projectKey: string | null | undefined): boolean {
   const [project] = useLoad(() => (projectKey ? api.project(projectKey) : Promise.resolve(undefined)), [projectKey]);
   if (!projectKey) return true;
   return project.kind === "loaded" && project.value?.project.access === "write";

@@ -2,6 +2,7 @@ import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
+import { decisionFilterFrom, DecisionsPage } from "./decisions.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
 import { inboxAddressFrom, InboxPage } from "./inbox.js";
@@ -159,6 +160,10 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
       return <DocumentsPage projectKey={route.key} />;
     case "document":
       return <DocumentPage id={route.id} edit={search.get("edit") === "1"} />;
+    case "decisions":
+      return <DecisionsPage projectKey={search.get("project") ?? undefined} filter={decisionFilterFrom(search)} />;
+    case "decision":
+      return <DecisionsPage filter={decisionFilterFrom(search)} selected={route.key} />;
     case "guidance":
       return <WorkspaceGuidancePage me={props.me} />;
     case "project":
