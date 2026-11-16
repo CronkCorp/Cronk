@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 import tar from "tar-stream";
@@ -314,9 +317,12 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
   url.pathname = `/${dbName}`;
   const databaseUrl = url.toString();
 
+  // Files are stored on local disk in a directory of the test's own, kept across restarts.
+  const filesDir = await mkdtemp(join(tmpdir(), "cronk-files-"));
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+  const start = () =>
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, filesDir }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -422,6 +428,7 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
     await admin.connect();
     await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
     await admin.end();
+    await rm(filesDir, { recursive: true, force: true });
   });
   return cronk;
 }

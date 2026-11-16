@@ -22,6 +22,8 @@ import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
 import { refuseWritesFromOtherSites } from "./identity/same-site.js";
+import { attachmentRoutes } from "./files/attachment-routes.js";
+import { LocalDiskStore } from "./files/store.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -38,6 +40,8 @@ export interface AppConfig {
   publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;
+  /** Directory the files of Attachments are stored in, on local disk. */
+  filesDir: string;
 }
 
 /**
@@ -67,7 +71,13 @@ export async function buildApp(opts: {
     await db.end();
     throw err;
   }
-  const ctx: AppContext = { db, clock: opts.clock, cookieSecure: opts.config.cookieSecure, live: opts.live ?? new LiveUpdates() };
+  const ctx: AppContext = {
+    db,
+    clock: opts.clock,
+    cookieSecure: opts.config.cookieSecure,
+    live: opts.live ?? new LiveUpdates(),
+    files: new LocalDiskStore(opts.config.filesDir),
+  };
 
   // Open live-update streams would otherwise keep the server from closing.
   app.addHook("preClose", async () => ctx.live.close());
@@ -160,6 +170,7 @@ export async function buildApp(opts: {
   await app.register(workspaceRoutes(ctx));
   await app.register(workRoutes(ctx));
   await app.register(documentLinkRoutes(ctx));
+  await app.register(attachmentRoutes(ctx));
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
   await app.register(coordinationRoutes(ctx));

@@ -58,7 +58,8 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
-  | "AgentRecordEntry";
+  | "AgentRecordEntry"
+  | "Attachment";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -481,6 +482,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       version: { ...nullable(object({ number: { type: "integer" } })), description: "A Version of the Document it saved." },
     }),
   },
+  Attachment: {
+    description:
+      "A plain file, such as an image, video, PDF or log, attached to a Ticket. Whoever can read the Ticket can read it; " +
+      "download it from GET /api/attachments/{id}/file.",
+    ...object({
+      id,
+      ticketKey: { type: "string", description: "The Ticket it is attached to." },
+      name: { type: "string", description: "Its file name, as uploaded." },
+      contentType: { type: "string", description: "Its media type, such as `image/png`, as uploaded." },
+      size: { type: "integer", description: "Its size in bytes." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who attached it." },
+    }),
+  },
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
     ...object({
@@ -521,6 +536,8 @@ const ERROR_MEANINGS = {
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",
+  413: "The file is larger than the Workspace lets an Attachment be",
+  416: "The range asked for lies outside the file",
 } as const;
 
 /** The error answers of a route, each with the shared `Error` shape. */
@@ -541,4 +558,7 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
+/** An Attachment's id. */
+export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
+
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
