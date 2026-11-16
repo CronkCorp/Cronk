@@ -97,11 +97,11 @@ export async function decisionFor(db: Queryable, actor: Actor, key: string, need
 
 export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    /** Saves `content` as `current`'s next Version, then supersedes what it replaces if it is accepted. */
+    /** Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step. */
     const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent) => {
       const now = ctx.clock.now();
       const saved = await saveDecision(tx, current, content, actor, now);
-      await applySuperseding(tx, scopeOf(actor, saved), saved, actor, now);
+      await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now);
       return saved;
     };
 

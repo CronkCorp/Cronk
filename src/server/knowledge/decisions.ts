@@ -220,7 +220,8 @@ export const contentOf = (decision: Decision): DecisionContent => ({
   supersedes: decision.supersedes.map((ref) => parseDecisionKey(ref.key)!.number),
 });
 
-const sameNumbers = (a: number[], b: number[]) => a.length === b.length && [...a].sort().every((n, i) => n === [...b].sort()[i]);
+/** Whether two lists hold the same numbers, in any order. */
+const sameNumbers = (a: number[], b: number[]) => a.length === b.length && a.every((n) => b.includes(n));
 
 /**
  * Saves a new Version of a Decision holding `content`, unless it would change nothing. Pass a
@@ -239,7 +240,10 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
   const number = decision.version + 1;
   await insertDecisionVersion(db, decision.id, { ...content, number, actor, now });
   await db.query(
-    `UPDATE decisions SET title = $2, body = $3, status = $4, group_name = $5, supersedes = $6, version = $7, updated_at = $8 WHERE id = $1`,
+    // Only a superseded Decision names what superseded it.
+    `UPDATE decisions SET title = $2, body = $3, status = $4, group_name = $5, supersedes = $6, version = $7, updated_at = $8,
+       superseded_by = CASE WHEN $4 = 'superseded' THEN superseded_by END
+     WHERE id = $1`,
     [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now],
   );
   return (await findDecisionById(db, decision.id))!;
@@ -323,23 +327,47 @@ async function scopeKey(db: Queryable, projectId: string): Promise<string> {
 }
 
 /**
- * Marks superseded, as a change by `actor`, each Decision an accepted `decision` supersedes that
- * isn't superseded or rejected already. Does nothing for a Decision that isn't accepted. Run inside
- * the transaction that saved it.
+ * Keeps the Decisions `decision` supersedes in step with a save that took it from `before`, as a
+ * change by `actor`: once accepted, each Decision it newly supersedes (all of them, when it has just
+ * become accepted) is marked superseded, unless superseded or rejected already; and each Decision it
+ * no longer supersedes that it had superseded goes back to the status it had before. Run inside the
+ * transaction that saved it.
  */
-export async function applySuperseding(db: Queryable, scope: DecisionScope, decision: Decision, actor: Actor | StoredActor, now: Date): Promise<void> {
-  if (decision.status !== "accepted") return;
-  const numbers = decision.supersedes.map((ref) => parseDecisionKey(ref.key)!.number);
-  if (numbers.length === 0) return;
+export async function applySuperseding(
+  db: Queryable,
+  scope: DecisionScope,
+  before: DecisionContent,
+  decision: Decision,
+  actor: Actor | StoredActor,
+  now: Date,
+): Promise<void> {
+  const numbers = contentOf(decision).supersedes;
+  const added = before.status === "accepted" ? numbers.filter((n) => !before.supersedes.includes(n)) : numbers;
+  const dropped = before.supersedes.filter((n) => !numbers.includes(n));
+  if (decision.status === "accepted" && added.length > 0) {
+    for (const older of await lockedIn(db, scope, added, "d.status NOT IN ('superseded', 'rejected')")) {
+      await saveDecision(db, older, { ...contentOf(older), status: "superseded" }, actor, now);
+      await db.query("UPDATE decisions SET superseded_by = $2 WHERE id = $1", [older.id, decision.number]);
+    }
+  }
+  if (dropped.length > 0) {
+    for (const older of await lockedIn(db, scope, dropped, `d.status = 'superseded' AND d.superseded_by = ${decision.number}`)) {
+      const { rows } = await db.query<{ status: DecisionStatus }>(
+        "SELECT status FROM decision_versions WHERE decision_id = $1 AND status <> 'superseded' ORDER BY number DESC LIMIT 1",
+        [older.id],
+      );
+      await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted" }, actor, now);
+    }
+  }
+}
+
+/** The Decisions of a scope with these numbers that meet `condition` (SQL on `d`), locked until the transaction ends, in number order. */
+async function lockedIn(db: Queryable, scope: DecisionScope, numbers: number[], condition: string): Promise<Decision[]> {
   const { rows } = await db.query<DecisionRow>(
-    `${SELECT_DECISIONS} WHERE ${IN_SCOPE} AND d.number = ANY($3::int[]) AND d.status NOT IN ('superseded', 'rejected') ORDER BY d.number FOR UPDATE OF d`,
+    `${SELECT_DECISIONS} WHERE ${IN_SCOPE} AND d.number = ANY($3::int[]) AND ${condition} ORDER BY d.number FOR UPDATE OF d`,
     [scope.workspaceId, scope.projectId, numbers],
   );
-  for (const row of rows) {
-    const older = await toDecision(db, row);
-    await saveDecision(db, older, { ...contentOf(older), status: "superseded" }, actor, now);
-    await db.query("UPDATE decisions SET superseded_by = $2 WHERE id = $1", [older.id, decision.number]);
-  }
+  return Promise.all(rows.map((row) => toDecision(db, row)));
 }
 
 /** A scope's Decisions, newest first, with only those in one of `statuses` and, ignoring case, one of `groups` when given. */

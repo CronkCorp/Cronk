@@ -223,6 +223,22 @@ describe("superseding a Decision", () => {
     expect((await admin.get("/api/decisions/D3/versions/3")).body.version.supersedes).toEqual(["D1", "D2"]);
   });
 
+  it("stops pointing at the replacement once the older Decision leaves superseded, or is no longer superseded by it", async () => {
+    const { admin } = await startInstalledCronk();
+    for (const title of ["Old", "Older", "New"]) await admin.post("/api/workspace/decisions", { title });
+    await admin.post("/api/decisions/D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/D2/status", { status: "deprecated" });
+    await admin.patch("/api/decisions/D3", { baseVersion: 1, supersedes: ["D1", "D2"] });
+    await admin.post("/api/decisions/D3/status", { status: "accepted" });
+
+    // A User takes D1 back as accepted: it no longer points at D3.
+    expect((await admin.post("/api/decisions/D1/status", { status: "accepted" })).body.decision).toMatchObject({ status: "accepted", supersededBy: null });
+    // D3 stops superseding D2, which goes back to the status it had before.
+    await admin.patch("/api/decisions/D3", { baseVersion: 3, supersedes: ["D1"] });
+    expect((await admin.get("/api/decisions/D2")).body.decision).toMatchObject({ status: "deprecated", supersededBy: null });
+    expect((await admin.get("/api/workspace/decisions?status=superseded")).body.decisions).toEqual([]);
+  });
+
   it("names only other Decisions of the same Project or Workspace", async () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
