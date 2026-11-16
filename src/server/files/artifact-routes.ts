@@ -41,6 +41,25 @@ const artifactParams = pathParams({ id: artifactIdParam });
 const versionParams = pathParams({ id: artifactIdParam, number: { type: "string", pattern: "^[1-9][0-9]{0,8}$", description: "The Version's number, counting from 1." } });
 const projectParams = pathParams({ key: projectKeyParam });
 
+/** What a publish answers on how to embed the Artifact it published. */
+const howToEmbed = (artifact: { url: string; versionUrl: string; version: number }) =>
+  `To show it in a Report, Document or Comment, put its address alone on a line. In a Report, embed this Version's address, ${artifact.versionUrl}, ` +
+  `so the evidence stays as reviewed: it keeps showing Version ${artifact.version}. ${artifact.url} always shows the latest Version.`;
+
+/** The answer to a publish: the Artifact, and how to embed it. */
+const publishAnswer = (description: string) =>
+  answer(
+    description,
+    {
+      type: "object",
+      required: ["artifact", "embedding"],
+      properties: {
+        artifact: ref("Artifact"),
+        embedding: { type: "string", description: "How to embed it: its address alone on a line; a Report should embed `versionUrl`, which keeps showing this Version." },
+      },
+    },
+  );
+
 /** The largest archive a publish takes; the Workspace's limits on what it unpacks to are usually far lower. */
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 
@@ -74,6 +93,12 @@ export function artifactRoutes(ctx: AppContext) {
           versions: (await listArtifactVersions(ctx.db, artifact.id)).map((v) => publicVersion(artifact, v, origin)),
         }),
       };
+    };
+
+    /** What a publish answers: the Artifact, and how to embed it. */
+    const published = async (request: FastifyRequest, artifact: Artifact) => {
+      const answered = await shown(request, artifact);
+      return { artifact: answered, embedding: howToEmbed(answered) };
     };
 
     /** Stores the folder of a publish and records it with `record`, which runs in a transaction; nothing stays stored if it fails. */
@@ -112,7 +137,7 @@ export function artifactRoutes(ctx: AppContext) {
       consumes: ARCHIVE_TYPES,
       body: { description: "The folder as a zip archive, or a tar archive gzipped or not." },
       querystring: { type: "object", required: ["title"], properties: { title: titleParam, ticket: ticketParam } },
-      response: { 201: answer("The new Artifact", holding("artifact", "Artifact")), ...errors(400, 401, 403, 404, 409, 410, 413) },
+      response: { 201: publishAnswer("The new Artifact"), ...errors(400, 401, 403, 404, 409, 410, 413) },
     });
 
     app.post<{ Params: { key: string }; Querystring: PublishQuery }>(
@@ -122,7 +147,7 @@ export function artifactRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { project } = await projectFor(ctx.db, actor, request.params.key, "write");
         const artifact = await create(actor, project.id, request.body, request.query);
-        return reply.code(201).send({ artifact: await shown(request, artifact) });
+        return reply.code(201).send(await published(request, artifact));
       },
     );
 
@@ -130,7 +155,7 @@ export function artifactRoutes(ctx: AppContext) {
       const actor = await requireActor(ctx, request);
       await requireWorkspaceAccess(ctx.db, actor, "write");
       const artifact = await create(actor, null, request.body, request.query);
-      return reply.code(201).send({ artifact: await shown(request, artifact) });
+      return reply.code(201).send(await published(request, artifact));
     });
 
     app.post<{ Params: { id: string }; Querystring: PublishQuery }>(
@@ -153,7 +178,7 @@ export function artifactRoutes(ctx: AppContext) {
             },
           },
           response: {
-            201: answer("The Artifact at its new Version", holding("artifact", "Artifact")),
+            201: publishAnswer("The Artifact at its new Version"),
             ...errors(400, 401, 403, 404, 410, 413),
             409: {
               description: "The publish is based on a Version that is no longer the latest (the answer names the latest), or names a Ticket whose Claim the Agent Session doesn't hold",
@@ -180,7 +205,7 @@ export function artifactRoutes(ctx: AppContext) {
           const title = request.query.title?.trim() ?? current.title;
           return insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
         });
-        return reply.code(201).send({ artifact: await shown(request, artifact) });
+        return reply.code(201).send(await published(request, artifact));
       },
     );
 

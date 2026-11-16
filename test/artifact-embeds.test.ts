@@ -157,3 +157,15 @@ describe("Upgrading an installation", () => {
     ]);
   });
 });
+
+describe("Publishing tells how to embed", () => {
+  it("answers a publish with how to embed the Artifact, saying to embed the Version's address in Reports", async () => {
+    const { admin, artifact } = await setup();
+    const first = await admin.upload("/api/projects/CRONK/artifacts?title=Other", await tarGz({ "index.html": "<p>x</p>" }));
+    expect(first.body.embedding).toContain(first.body.artifact.versionUrl);
+    expect(first.body.embedding).toMatch(/Reports?/);
+
+    const next = await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "<p>v2</p>" }));
+    expect(next.body.embedding).toContain(`${OWN_ORIGIN}/artifacts/${artifact.id}?version=2`);
+  });
+});

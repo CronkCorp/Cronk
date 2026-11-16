@@ -961,6 +961,7 @@ describe("the artifacts tool", () => {
     const origin = new URL(await cronk.url()).origin;
     expect(artifact.url).toBe(`${origin}/artifacts/${artifact.id}`);
     expect(artifact.versionUrl).toBe(`${origin}/artifacts/${artifact.id}?version=1`);
+    expect(created.body.embedding).toContain(`embed this Version's address, ${artifact.versionUrl}`);
 
     const next = await callTool(mcp, "artifacts", { action: "publish", id: artifact.id, baseVersion: 1, files: [{ path: "index.html", content: "<p>v2</p>" }] });
     expect(next.body.artifact).toMatchObject({ version: 2, versionUrl: `${origin}/artifacts/${artifact.id}?version=2` });
