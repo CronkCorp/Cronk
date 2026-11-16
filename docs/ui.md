@@ -245,7 +245,7 @@ The Project page is shown in `docs/ui/frame.png`.
 ### Attachments on Documents, Reports and Comments
 
 - **A Document or Report** shows its own Attachments as the same thumbnails under its body, with a drop zone for those with Write; dropping or pasting a file anywhere on the page outside the editor attaches it to the Document. They belong to the Document, not a Version, so an old Version whose Markdown shows one (`![name](/api/attachments/<id>/file)`) still shows it.
-- **A Comment box** has "Attach files…": the picked files are attached to the Comment once it is posted. Only whoever posted a Comment may attach to it.
+- **A Comment box** has "Attach files…": the picked files are attached to the Comment once it is posted. Only whoever posted a Comment may attach to it; any User with Write may delete its files.
 - **Where they were posted:** a Comment's files sit under its text, and a Report's under its body in the Ticket's timeline: images and MP4/WebM video at most 360px tall, video and audio playing in place, anything else by type and name. Opening one shows the same dialog as a thumbnail.
 
 ## Live updates

@@ -332,8 +332,21 @@ describe("Attachments on a Comment", () => {
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const notHis = await bob.upload(`/api/comments/${comment.id}/attachments?name=bob.png`, png, "image/png");
     expect(notHis.status).toBe(403);
-    expect((await bob.delete(`/api/attachments/${res.body.attachment.id}`)).status).toBe(403);
     expect((await bob.download(`/api/attachments/${res.body.attachment.id}/file`)).status).toBe(200);
+  });
+
+  it("can be deleted by whoever posted the Comment, or by a User with Write, as a moderator", async () => {
+    const { cronk, admin } = await setup();
+    const agent = await agentOf(cronk, admin, "claude-laptop");
+    const its = (await agent.post("/api/tickets/CRONK-1/comments", { body: "Token in this log." })).body.comment;
+    const leaked = (await agent.upload(`/api/comments/${its.id}/attachments?name=env.log`, Buffer.from("TOKEN=1"), "text/plain")).body.attachment.id;
+    const kept = (await agent.upload(`/api/comments/${its.id}/attachments?name=run.log`, Buffer.from("ok"), "text/plain")).body.attachment.id;
+    const other = await agentOf(cronk, admin, "codex");
+
+    expect((await other.delete(`/api/attachments/${kept}`)).status).toBe(403);
+    expect((await admin.delete(`/api/attachments/${leaked}`)).status).toBe(204);
+    expect((await agent.delete(`/api/attachments/${kept}`)).status).toBe(204);
+    expect((await admin.get("/api/tickets/CRONK-1/attachments")).body.attachments).toEqual([]);
   });
 
   it("follow the Comment's Ticket for who can read them", async () => {

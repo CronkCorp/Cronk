@@ -90,6 +90,7 @@ export const publicAttachment = (a: Attachment) => ({
   actor: a.actor,
 });
 
+/** The `ticket_id`, `document_id` and `comment_id` an Attachment on `target` is stored with: one set, the others null. */
 const targetColumns = (target: AttachmentTarget): [ticketId: string | null, documentId: string | null, commentId: string | null] => [
   "ticketId" in target ? target.ticketId : null,
   "documentId" in target ? target.documentId : null,

@@ -82,6 +82,7 @@ export function attachmentRoutes(ctx: AppContext) {
     const toDocument = (id: string) => async (tx: Queryable, actor: Actor) => ({ documentId: (await documentToAttachTo(tx, actor, id, ctx.clock.now())).id });
     const toComment = (id: string) => async (tx: Queryable, actor: Actor) => ({ commentId: (await commentToAttachTo(tx, actor, id)).id });
 
+    /** The OpenAPI schema of an upload route, described by `description`, with the item's path `params`. */
     const uploadSchema = (description: string, params: object) => ({
       description: `${description} ${UPLOAD_BODY}`,
       consumes: ["application/octet-stream", "*/*"],
@@ -212,7 +213,8 @@ export function attachmentRoutes(ctx: AppContext) {
         schema: {
           description:
             "Deletes an Attachment and its file. Needs what attaching a file to its Ticket, Document or Comment needs: " +
-            "Write where it belongs and, for an Agent, the Ticket's Claim, an unprotected Document, or a Comment it posted.",
+            "Write where it belongs and, for an Agent, the Ticket's Claim, an unprotected Document, or a Comment it posted. " +
+            "Any User with Write may delete a Comment's Attachment, whoever posted the Comment.",
           params: pathParams({ id: attachmentIdParam }),
           response: { 204: noContent("The Attachment is deleted"), ...errors(401, 403, 404, 409, 410) },
         },
@@ -224,7 +226,7 @@ export function attachmentRoutes(ctx: AppContext) {
           const now = ctx.clock.now();
           if (attachment.on === "ticket") await ticketToAttachTo(tx, actor, attachment.ticketKey!, now);
           else if (attachment.on === "document") await documentToAttachTo(tx, actor, attachment.documentId!, now);
-          else await commentToAttachTo(tx, actor, attachment.commentId!);
+          else await commentToAttachTo(tx, actor, attachment.commentId!, { orUserWithWrite: true });
           if (!(await deleteAttachment(tx, attachment.id))) throw new HttpError(404, "No such Attachment");
           return attachment;
         });
@@ -273,15 +275,17 @@ async function documentToAttachTo(tx: Queryable, actor: Actor, id: string, now: 
 
 /**
  * The Comment with this id, if `actor` may attach files to it: they posted it (the same User, or the same Agent),
- * and have Write on its Ticket or Document. Run inside a transaction.
+ * and have Write on its Ticket or Document. With `orUserWithWrite`, as for removing a file, any User with that
+ * Write may too, so a file posted by mistake can be taken down. Run inside a transaction.
  */
-async function commentToAttachTo(tx: Queryable, actor: Actor, id: string): Promise<Comment> {
+async function commentToAttachTo(tx: Queryable, actor: Actor, id: string, opts: { orUserWithWrite?: boolean } = {}): Promise<Comment> {
   const found = (await findCommentsByIds(tx, [id]))[0];
   if (!found) throw new HttpError(404, "No such Comment");
   const { comment } = found;
   if (comment.ticketKey !== null) await ticketFor(tx, actor, comment.ticketKey, "write");
   else await documentFor(tx, actor, comment.documentId!, "write");
-  if (comment.actor.kind !== actor.kind || comment.actor.id !== actorId(actor)) {
+  const moderating = opts.orUserWithWrite && actor.kind === "user";
+  if (!moderating && (comment.actor.kind !== actor.kind || comment.actor.id !== actorId(actor))) {
     throw new HttpError(403, "Only whoever posted a Comment may attach files to it");
   }
   return comment;
