@@ -62,6 +62,20 @@ describe("Ticket Delegate", () => {
     expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes).toHaveLength(1);
   });
 
+  it("is refused together with unassigning the Ticket, which would leave delegated work without a User", async () => {
+    const { admin, claude } = await delegatedSetup(1);
+    const changesBefore = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.length;
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: null });
+
+    const both = await admin.patch("/api/tickets/CRONK-1", { assigneeId: null, delegateId: claude.agentId });
+    expect(both.status).toBe(400);
+    expect(both.body.error).toMatch(/Assign the Ticket to a User before delegating it/);
+    const ticket = (await admin.get("/api/tickets/CRONK-1")).body.ticket;
+    expect(ticket.assignee).not.toBeNull();
+    expect(ticket.delegate).toBeNull();
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes).toHaveLength(changesBefore + 1);
+  });
+
   it("is refused when the Agent isn't the Assignee's", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const bob = await joinAs(cronk, admin, "bob@example.com");

@@ -85,7 +85,7 @@ An Activity in which an Agent asks something of a User, marked **blocking** when
 _Avoid_: Prompt, request, clarification
 
 **Change**:
-One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or Relations, or its creation, shown in the Ticket's timeline.
+One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or Relations, or its creation, shown in the Ticket's timeline. A Change no Actor made, such as an upgrade assigning a delegated Ticket to its Delegate's Owner, is recorded as by Cronk itself (a system Change).
 _Avoid_: Event, history entry, field change
 
 **Comment**:

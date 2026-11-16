@@ -29,7 +29,9 @@ export async function exportHistory(ctx: ExportContext, base: string, ticketId: 
       changes: changes.map((c) => ({
         at: iso(c.at),
         by: c.actor_user_id === null ? null : ctx.actor({ ...c, actor_user_id: c.actor_user_id }),
-        change: c.change, ...changeToExport(c.change, c.data, ctx, statusNow) })),
+        change: c.change,
+        ...changeToExport(c.change, c.data, ctx, statusNow),
+      })),
     }),
   );
 }

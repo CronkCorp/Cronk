@@ -727,8 +727,9 @@ export function workRoutes(ctx: AppContext) {
             changes.status = status;
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
-          // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it.
-          if (delegateId && (changes.assignee === undefined ? ticket.assignee : changes.assignee) === null) {
+          // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it,
+          // unless the same request unassigns it, which `delegableAgent` refuses.
+          if (delegateId !== undefined && delegateId !== null && assigneeId === undefined && ticket.assignee === null) {
             const { id, name } = actingUser(actor);
             changes.assignee = { id, name };
           }

@@ -1,4 +1,4 @@
-import { actorColumns, toChangeActor, type Actor, type ChangeActor, type RecordedActor, type RecordedActorRow, type StoredActor, type SystemActor } from "../actor.js";
+import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type ChangeActorRow, type RecordedActor, type StoredActor, type SystemActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
@@ -308,18 +308,15 @@ export async function recordChange(
   await db.query(
     `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [ticketId, at, ...(actor.kind === "system" ? ["system", null, null, null] : actorColumns(actor)), kind, data],
+    [ticketId, at, ...changeActorColumns(actor), kind, data],
   );
 }
 
-interface ChangeRow extends Omit<RecordedActorRow, "user_id" | "user_name"> {
-  /** Null for a change Cronk itself made. */
-  user_id: string | null;
-  user_name: string | null;
+type ChangeRow = ChangeActorRow & {
   at: Date;
   change: TicketChange["change"];
   data: object;
-}
+};
 
 /** A Ticket's Changes, oldest first. */
 export async function listChanges(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
