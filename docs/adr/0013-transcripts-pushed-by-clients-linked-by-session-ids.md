@@ -4,7 +4,7 @@ Cronk only sees an Agent's tool calls, never the chat that led to them, and it n
 
 ## Consequences
 
-- Agent Session ids must keep appearing in the welcome and in tool results, or linking breaks.
+- Agent Session ids must keep appearing in the welcome and in every MCP tool result, errors included, or linking breaks.
 - The client's conversion to Markdown must be deterministic. Re-uploads are matched by (Agent, client chat id) and replace the stored text only when the new text continues it; otherwise the old text is kept as well.
 - Clients that cannot export a chat, such as claude.ai, produce no Transcripts.
 - Known secret patterns are scrubbed on upload, and the originals are never stored. This is best-effort.

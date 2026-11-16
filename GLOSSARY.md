@@ -45,7 +45,7 @@ A Delegation in which the Delegate may complete Tickets itself rather than stopp
 _Avoid_: Auto mode, unattended mode, YOLO mode
 
 **Report**:
-The Document of findings an Agent writes on a Ticket it worked on, with supporting evidence such as Artifacts and Attachments. Lives with its Ticket rather than in the Project's page tree. Required whenever an Agent hands work over, by moving a Ticket to In Review or completing it. Only a User may delete one, and an Agent may change one only while holding its Ticket's Claim.
+The Document of findings an Agent writes on a Ticket it worked on, with supporting evidence such as Artifacts and Attachments. Lives with its Ticket rather than in the Project's page tree. Required whenever an Agent hands work over, by moving a Ticket to In Review or completing it. Like any Document, only a User may delete one; an Agent may change one only while holding its Ticket's Claim.
 _Avoid_: Summary, write-up, result
 
 **Verification**:
@@ -121,7 +121,7 @@ _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's
 ### Knowledge
 
 **Document**:
-A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown.
+A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown. Only a User may delete one, since a delete removes it and its Versions for good; an Agent never may, even with Write.
 _Avoid_: Page, doc, wiki page, note
 
 **Page tree**:

@@ -3,12 +3,67 @@ import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/type
 import type { McpConnection } from "./harness.js";
 import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
-/** Calls a tool and returns its result: the API's answer parsed from the text, and whether it is an error. */
-async function callTool(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: any }> {
+/** A tool's raw result: whether it is an error, and the text of each content item. */
+async function rawResult(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; texts: string[] }> {
   const result = (await mcp.client.callTool({ name, arguments: args })) as { isError?: boolean; content: { type: string; text: string }[] };
-  const text = result.content[0]!.text;
-  return { isError: result.isError ?? false, body: result.isError ? text : JSON.parse(text) };
+  return { isError: result.isError ?? false, texts: result.content.map((c) => c.text) };
 }
+
+/**
+ * Calls a tool and returns its result: the API's answer parsed from the text after the leading
+ * Agent Session id, and whether it is an error.
+ */
+async function callTool(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: any }> {
+  const { isError, texts } = await rawResult(mcp, name, args);
+  expect(texts).toHaveLength(2);
+  expect(texts[0]).toBe(`Agent Session ${mcp.transport.sessionId}`);
+  return { isError, body: isError ? texts[1] : JSON.parse(texts[1]!) };
+}
+
+describe("every MCP tool result", () => {
+  it("starts with the calling Agent Session's id, ahead of the API's unchanged JSON", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "v1" })).body.document;
+    const mcp = await connectMcp(cronk, claude.secret);
+    const named = `Agent Session ${mcp.transport.sessionId}`;
+
+    for (const [name, args, url] of [
+      ["tickets", { action: "get", key: "CRONK-1" }, "/api/tickets/CRONK-1"],
+      ["activities", { action: "list", key: "CRONK-1" }, "/api/tickets/CRONK-1/activities"],
+      ["comments", { action: "list", key: "CRONK-1" }, "/api/tickets/CRONK-1/comments"],
+      ["documents", { action: "get", id: doc.id }, `/api/documents/${doc.id}`],
+      ["guidance", { action: "get" }, "/api/workspace/guidance"],
+      ["search", { query: "plan" }, "/api/search?q=plan"],
+    ] as const) {
+      const { isError, texts } = await rawResult(mcp, name, args);
+      expect({ name, isError, first: texts[0] }).toEqual({ name, isError: false, first: named });
+      expect(JSON.parse(texts[1]!)).toEqual((await admin.get(url)).body);
+    }
+  });
+
+  it("starts with the calling Agent Session's id when the call fails, however it fails", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    const named = `Agent Session ${mcp.transport.sessionId}`;
+
+    // The API refuses it.
+    expect(await rawResult(mcp, "tickets", { action: "get", key: "CRONK-404" })).toEqual({ isError: true, texts: [named, "No such Ticket"] });
+    // The Agent left out a parameter the action needs.
+    expect(await rawResult(mcp, "tickets", { action: "get" })).toEqual({ isError: true, texts: [named, "The get action needs a key"] });
+    // The tool itself throws: a lone surrogate can't be put in a URL.
+    expect(await rawResult(mcp, "tickets", { action: "get", key: "\uD800" })).toEqual({ isError: true, texts: [named, "URI malformed"] });
+  });
+
+  it("names the Agent Session that made the call, so two Sessions each see their own", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const first = await connectMcp(cronk, claude.secret);
+    const second = await connectMcp(cronk, claude.secret);
+
+    expect((await rawResult(first, "guidance", { action: "get" })).texts[0]).toBe(`Agent Session ${first.transport.sessionId}`);
+    expect((await rawResult(second, "guidance", { action: "get" })).texts[0]).toBe(`Agent Session ${second.transport.sessionId}`);
+    expect(first.transport.sessionId).not.toBe(second.transport.sessionId);
+  });
+});
 
 describe("the MCP endpoint", () => {
   it("starts an Agent Session for an Agent token and welcomes it", async () => {
