@@ -238,7 +238,9 @@ The Project page is shown in `docs/ui/frame.png`.
 
 - **Under the description:** the Ticket's own Attachments as 168px thumbnails (a frame for video, the type for other files) with name, size and who attached them, and a drop zone.
 - **Files** in the side panel: every Attachment on the Ticket, in Comments and Reports too, and the Artifacts from its work, each with type, size and Actor.
-- **Dropping a file anywhere** on the Ticket page attaches it to the Ticket. Video and images posted in a Comment or Report show inline where they were posted.
+- **Dropping a file anywhere** on the Ticket page attaches it to the Ticket, as does pasting one. Video and images posted in a Comment or Report show inline where they were posted.
+- **Opening one** (a thumbnail or a Files entry) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
+- **Workspace settings** hold the Attachment size limit, and show Admins the storage Attachments use.
 
 ## Live updates
 

@@ -51,6 +51,17 @@ export const MENTION_SYNTAX =
   '`@"Ada Lovelace"/codex`. Mentions inside code and block quotes don\'t count.';
 
 /** What a search can find: Tickets, Documents in a page tree, Reports, and Comments. */
+/**
+ * The media types of the files a browser shows or plays in the page, by kind: Cronk serves these inline and shows them
+ * in the Ticket's Attachments. None can run script; any other file, HTML and SVG above all, is saved instead.
+ */
+export const SHOWN_MEDIA_TYPES = {
+  image: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"],
+  video: ["video/mp4", "video/webm", "video/ogg"],
+  audio: ["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/flac"],
+  text: ["text/plain"],
+} as const;
+
 export const SEARCH_KINDS = ["ticket", "document", "report", "comment"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 

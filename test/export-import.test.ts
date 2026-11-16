@@ -23,6 +23,7 @@ describe("exporting a Project", () => {
     await admin.post("/api/tickets/CRONK-1/comments", { body: "Starting." });
     const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "# Plan\n\nShip." })).body.document;
     await admin.post(`/api/tickets/CRONK-1/documents/${plan.id}`);
+    await admin.upload("/api/tickets/CRONK-1/attachments?name=sign-in-flood.log", Buffer.from("429 x 50\n"), "text/plain");
 
     const res = await admin.download("/api/projects/CRONK/export");
     expect(res.status).toBe(200);
@@ -46,6 +47,11 @@ describe("exporting a Project", () => {
       data: { at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" },
       body: "Starting.",
     });
+    // Attachments are their files, with an index saying what each is.
+    expect(markdown(files["projects/CRONK/tickets/CRONK-1.attachments/index.md"]).data.attachments).toEqual([
+      { id: expect.any(String), file: "1-sign-in-flood.log", name: "sign-in-flood.log", contentType: "text/plain", size: 9, at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" },
+    ]);
+    expect(files["projects/CRONK/tickets/CRONK-1.attachments/1-sign-in-flood.log"]).toBe("429 x 50\n");
     expect(markdown(files["projects/CRONK/documents/1-plan.md"])).toMatchObject({ data: { title: "Plan", version: 1 }, body: "# Plan\n\nShip." });
     expect(markdown(files["people.md"]).data.users).toEqual([{ email: "ada@example.com", name: "Ada", role: "admin", active: true }]);
     // History names Users by email, Statuses by name and Tickets by key, keeping the names recorded at the time.
@@ -171,6 +177,12 @@ async function snapshot(admin: Client): Promise<unknown> {
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
             changes: await get(`/api/tickets/${t.key}/changes`),
+            attachments: await Promise.all(
+              (await get(`/api/tickets/${t.key}/attachments`)).attachments.map(async (a: { id: string }) => ({
+                ...a,
+                file: (await admin.download(`/api/attachments/${a.id}/file`)).body.toString("base64"),
+              })),
+            ),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -181,6 +193,7 @@ async function snapshot(admin: Client): Promise<unknown> {
   const projects = [...(await get("/api/projects")).projects, ...(await get("/api/projects?archived=true")).projects];
   const raw = {
     workspace: await get("/api/workspace"),
+    storage: await get("/api/workspace/storage"),
     users: await get("/api/users"),
     agents: await get("/api/agents?all=true"),
     guidance: await get("/api/workspace/guidance"),
@@ -199,7 +212,7 @@ async function busyWorkspace() {
   const { cronk, admin, session } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
-  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600 });
+  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024 });
   await admin.put("/api/workspace/guidance", { baseVersion: 0, markdown: "Be kind." });
   await admin.put("/api/workspace/guidance", { baseVersion: 1, markdown: "Be kind. Be brief." });
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
@@ -228,6 +241,10 @@ async function busyWorkspace() {
   const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The *disk* one.", replyToActivityId: question.id })).body.comment;
   await agent.post("/api/tickets/CRONK-1/comments", { body: "Thanks.", replyToCommentId: answer.id });
   const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
+  // Attachments: the Agent's binary screenshot, and two of Ada's, one named as a hidden file would be.
+  await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
+  await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");
+  await admin.upload("/api/tickets/CRONK-2/attachments?name=notes.md", Buffer.from("---\ntitle: not a Ticket\n---\n"), "text/markdown");
   await agent.patch(`/api/documents/${report.id}`, { baseVersion: 1, body: "It was the disk cache." });
   const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
   expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
@@ -800,5 +817,21 @@ describe("a delegated Ticket without an Assignee in an export", () => {
     expect(ticket.delegate).toMatchObject({ name: "claude-laptop" });
     const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: ada });
+  });
+});
+
+describe("Attachments in an export", () => {
+  it("keep their ids, so links to their files still work after the move", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const id = (await admin.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50]), "image/png")).body.attachment.id;
+    const exported = await admin.download("/api/export");
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    const file = await elsewhere.download(`/api/attachments/${id}/file`);
+    expect(file.status).toBe(200);
+    expect([...file.body]).toEqual([0x89, 0x50]);
   });
 });

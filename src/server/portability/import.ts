@@ -8,10 +8,12 @@ import { importDecisions } from "./decisions.js";
 import { importTree } from "./documents.js";
 import { importTerms } from "./terms.js";
 import { ImportContext } from "./import-context.js";
+import type { ImportedFiles } from "./import-context.js";
 import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
 import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
+import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
 
 /**
@@ -32,9 +34,13 @@ export interface Imported {
   renamedIds: RenamedId[];
 }
 
-/** Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. */
-export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date): Promise<Imported> {
-  const ctx = new ImportContext(db, workspaceId, unwrapFolder(archived), now);
+/**
+ * Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. The
+ * files of its Attachments go into `files.store`, each key added to `files.stored` as it is, for the caller to remove
+ * should the transaction fail.
+ */
+export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date, files: ImportedFiles): Promise<Imported> {
+  const ctx = new ImportContext(db, workspaceId, unwrapFolder(archived), now, files);
   const scope = readScope(ctx);
   // One import at a time per Workspace, so two can't both find it empty or a key free.
   await lockUntilCommit(db, `import:${workspaceId}`);
@@ -67,6 +73,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await tickets.storeRelations(ctx);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
+  // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
+  if (scope === "workspace") await importTranscripts(ctx);
   return { scope, projects: created, renamedIds: ctx.renamedIds };
 }
 

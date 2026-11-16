@@ -581,7 +581,63 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0024_protected",
+    id: "0024_attachments",
+    sql: `
+      -- A file attached to a Ticket (files/attachments.ts). Its bytes live in the file store under
+      -- attachments/<id>; the row is what Cronk knows of it. It is readable by whoever can read its Ticket.
+      CREATE TABLE attachments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        seq bigserial NOT NULL,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        ticket_id uuid NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        name text NOT NULL CHECK (name <> ''),
+        content_type text NOT NULL,
+        size bigint NOT NULL CHECK (size >= 0),
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+      CREATE INDEX attachments_ticket ON attachments (ticket_id, seq);
+      CREATE INDEX attachments_workspace ON attachments (workspace_id);
+
+      -- The largest file an Attachment may be: 100 MB unless an Admin changes it.
+      ALTER TABLE workspaces ADD COLUMN attachment_max_bytes bigint NOT NULL DEFAULT 104857600 CHECK (attachment_max_bytes > 0);
+    `,
+  },
+  {
+    id: "0025_transcripts",
+    sql: `
+      -- The most a Transcript may hold, all its texts together, in bytes: 10 MB unless an Admin changes it.
+      ALTER TABLE workspaces ADD COLUMN transcript_max_bytes integer NOT NULL DEFAULT 10485760 CHECK (transcript_max_bytes > 0);
+
+      -- The verbatim chat behind an Agent's changes (transcripts/transcripts.ts), one per Agent and client chat id. markdown is
+      -- the latest upload's text; earlier holds, oldest first, texts a later upload didn't continue. Its Owner is its Agent's.
+      CREATE TABLE transcripts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        chat_id text NOT NULL,
+        markdown text NOT NULL,
+        earlier text[] NOT NULL DEFAULT '{}',
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        UNIQUE (agent_id, chat_id)
+      );
+
+      -- The uploading Agent's Agent Sessions a Transcript names, and so everything they changed. Links only grow.
+      CREATE TABLE transcript_sessions (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        session_id uuid NOT NULL REFERENCES agent_sessions(id),
+        PRIMARY KEY (transcript_id, session_id)
+      );
+      CREATE INDEX transcript_sessions_session ON transcript_sessions (session_id);
+    `,
+  },
+  {
+    id: "0026_protected",
     sql: `
       -- Protected (ADR 0004): Agents may read the item but never change it. Only Users set or unset the mark.
       -- A Document's mark also covers every Document under it in the page tree, worked out when read.

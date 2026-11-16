@@ -3,7 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { AvoidedWord } from "../api-types.js";
-import type { ApiCall, ApiResponse, Caller } from "./api.js";
+import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
@@ -453,6 +453,46 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           const [term] = found.body.terms as unknown[];
           if (!term) throw new ToolError(`No Term named ${a.name.trim()} applies in ${a.project?.toUpperCase() ?? "the Workspace"}`);
           return { status: 200, body: { term } };
+        },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "attachments",
+    description:
+      "Attachments: plain files on a Ticket, such as screenshots, recordings, logs or PDFs, kept as evidence with the work. " +
+      "Whoever can read the Ticket can read them. Attach one to a Ticket you hold the Claim on, as text (`content`) or as base64 " +
+      "(`contentBase64`) for anything else; each may be as large as the Workspace allows (100 MB unless an Admin changed it), " +
+      "and at most 100 MB through this tool. For a larger file, POST it to /api/tickets/{key}/attachments?name=<name> with the HTTP API.",
+    parameters: {
+      key: z.string().optional().describe("Ticket key, such as CRONK-12 (attach, list)"),
+      name: z.string().optional().describe("The file's name, such as sign-in-flood.log or proxy-ip.png (attach)"),
+      content: z.string().optional().describe("The file's text, stored as UTF-8 (attach)"),
+      contentBase64: z.string().optional().describe("The file's bytes as base64, instead of content (attach)"),
+      contentType: z
+        .string()
+        .optional()
+        .describe("The file's media type, such as image/png; text/plain for content and application/octet-stream for contentBase64 if left out (attach)"),
+    },
+    actions: {
+      list: {
+        description: "a Ticket's Attachments, in the order they were attached; download one at GET /api/attachments/{id}/file",
+        writes: false,
+        run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "list"))}/attachments`),
+      },
+      attach: {
+        description: "attach a file to a Ticket you hold the Claim on",
+        writes: true,
+        run: (api, a) => {
+          const key = required(a.key, "a key", "attach");
+          const name = required(a.name, "a name", "attach");
+          if ((a.content === undefined) === (a.contentBase64 === undefined)) throw new ToolError("The attach action needs either content or contentBase64, not both");
+          const file =
+            a.content !== undefined
+              ? new FileBody(Buffer.from(a.content, "utf8"), a.contentType ?? "text/plain")
+              : new FileBody(Buffer.from(a.contentBase64!, "base64"), a.contentType ?? "application/octet-stream");
+          return api("POST", `/api/tickets/${encodeURIComponent(key)}/attachments?name=${encodeURIComponent(name)}`, file);
         },
       },
     },
