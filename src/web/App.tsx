@@ -13,6 +13,7 @@ import { Link, navigate, useLocation } from "./router.js";
 import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
 import { filterFrom, ProjectPage, ProjectsPage, projectViewOf } from "./work.js";
 import { TicketPage } from "./ticket.js";
+import { TermPage, TermsPage } from "./terms.js";
 
 type State =
   | { kind: "loading" }
@@ -161,6 +162,10 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
       return <DocumentPage id={route.id} edit={search.get("edit") === "1"} />;
     case "guidance":
       return <WorkspaceGuidancePage me={props.me} />;
+    case "terms":
+      return <TermsPage projectKey={search.get("project") ?? undefined} />;
+    case "term":
+      return <TermPage id={route.id} edit={search.get("edit") === "1"} />;
     case "project":
       // Keyed by Project, so state kept while on the page, such as opened board columns, starts afresh in another.
       return <ProjectPage key={route.key} projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;

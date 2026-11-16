@@ -8,6 +8,8 @@ export type Route =
   | { page: "documents" }
   | { page: "document"; id: string }
   | { page: "inbox" }
+  | { page: "terms" }
+  | { page: "term"; id: string }
   | { page: "agents" }
   | { page: "search" }
   | { page: "guidance" }
@@ -18,6 +20,7 @@ const FIXED: Record<string, Route> = {
   "/archived": { page: "projects", archived: true },
   "/documents": { page: "documents" },
   "/inbox": { page: "inbox" },
+  "/terms": { page: "terms" },
   "/agents": { page: "agents" },
   "/search": { page: "search" },
   "/guidance": { page: "guidance" },
@@ -30,6 +33,7 @@ const PATTERNS: [RegExp, (param: string) => Route][] = [
   [/^\/projects\/([^/]+)\/documents$/, (key) => ({ page: "projectDocuments", key })],
   [/^\/tickets\/([^/]+)$/, (key) => ({ page: "ticket", key })],
   [/^\/documents\/([^/]+)$/, (id) => ({ page: "document", id })],
+  [/^\/terms\/([^/]+)$/, (id) => ({ page: "term", id })],
 ];
 
 /** The page at `path`; any other address, or a malformed one, is the Projects page. */
@@ -50,3 +54,10 @@ export function routeOf(path: string): Route {
 
 /** The Project a Ticket key belongs to: everything before its last "-", as Project keys hold none. */
 export const projectKeyOfTicket = (ticketKey: string) => ticketKey.slice(0, Math.max(0, ticketKey.lastIndexOf("-")));
+
+/** The Project a page belongs to, if any, so the Terms page can start on it: a Project's own pages, or a Ticket's. */
+export function projectKeyOf(route: Route): string | undefined {
+  if (route.page === "project" || route.page === "projectDocuments") return route.key.toUpperCase();
+  if (route.page === "ticket") return projectKeyOfTicket(route.key).toUpperCase();
+  return undefined;
+}
