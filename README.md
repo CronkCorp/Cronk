@@ -36,6 +36,18 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSI
 
 Everything the script changes then shows in history with the Session it was made in. The full API is described at `/api/openapi.json`.
 
+## Forgotten passwords
+
+An Admin issues a password reset link from the Users page and passes it on; it works once, for 7 days. Signed-in Users change their own password from the menu under their name in the sidebar.
+
+If no Admin can sign in, issue a link for any User from the server, with the same `DATABASE_URL` as Cronk:
+
+```sh
+docker compose exec app node dist/server/reset-password.js ada@example.com --url https://cronk.example.com
+```
+
+`--url` is Cronk's address as people open it (default `http://localhost:$PORT`). Either way, issuing a link stops the User's old password and ends their sign-ins until they use it; their Agents' Sessions keep running.
+
 ## Configuration
 
 Cronk is a plain Node.js process configured only through environment variables, so it runs the same with or without Docker:

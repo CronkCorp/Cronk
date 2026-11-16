@@ -12,7 +12,8 @@ export type Route =
   | { page: "search" }
   | { page: "guidance" }
   | { page: "users" }
-  | { page: "settings" };
+  | { page: "settings" }
+  | { page: "password" };
 
 const FIXED: Record<string, Route> = {
   "/archived": { page: "projects", archived: true },
@@ -23,6 +24,7 @@ const FIXED: Record<string, Route> = {
   "/guidance": { page: "guidance" },
   "/users": { page: "users" },
   "/settings": { page: "settings" },
+  "/password": { page: "password" },
 };
 
 const PATTERNS: [RegExp, (param: string) => Route][] = [
