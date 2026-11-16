@@ -263,3 +263,24 @@ describe("Accept", () => {
     expect((await admin.get("/api/inbox")).body.items).toEqual([]);
   });
 });
+
+describe("A question under Autonomous Delegation", () => {
+  it("never blocks: asked as blocking, it is recorded as non-blocking and lands in the Owner's Inbox", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const asked = await agent.post("/api/tickets/CRONK-1/activities", { kind: "question", body: "Which cache?", blocking: true });
+    expect(asked.status).toBe(201);
+    expect(asked.body.activity).toMatchObject({ kind: "question", blocking: false });
+    expect((await admin.get("/api/inbox")).body.items).toMatchObject([
+      { kind: "question", ticket: { key: "CRONK-1" }, question: { body: "Which cache?", blocking: false } },
+    ]);
+
+    // Without Autonomous Delegation the Agent may still wait on its answer.
+    await agent.post("/api/tickets/CRONK-2/claim");
+    const waiting = await agent.post("/api/tickets/CRONK-2/activities", { kind: "question", body: "Which queue?", blocking: true });
+    expect(waiting.body.activity.blocking).toBe(true);
+  });
+});
