@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, startInstalledCronk, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
 
 interface Status {
   id: string;
@@ -230,5 +230,64 @@ describe("Statuses", () => {
       expect((await client.delete(`/api/projects/CRONK/statuses/${qa.id}`)).status).toBe(expected);
     }
     expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In QA", "In Review", "Done", "Canceled"]);
+  });
+});
+
+describe("Statuses, managed by an Agent", () => {
+  async function agentSetup() {
+    const { cronk, admin } = await startInstalledCronk();
+    await createProject(admin, "CRONK");
+    const claude = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    return { cronk, admin, claude };
+  }
+
+  it("refuses an Agent with Write Agent Access adding a Status", async () => {
+    const { admin, claude } = await agentSetup();
+
+    const res = await claude.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Only a User can manage Statuses/);
+    expect(names(await statuses(admin))).not.toContain("In QA");
+  });
+
+  it("refuses an Agent renaming or reordering a Status, leaving it unchanged", async () => {
+    const { admin, claude } = await agentSetup();
+    await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" });
+    const before = await statuses(admin);
+    const qa = await statusNamed(admin, "In QA");
+
+    for (const res of [
+      await claude.patch(`/api/projects/CRONK/statuses/${qa.id}`, { name: "Testing" }),
+      await claude.patch(`/api/projects/CRONK/statuses/${qa.id}`, { position: 0 }),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Only a User can manage Statuses/);
+    }
+    expect(await statuses(admin)).toEqual(before);
+  });
+
+  it("refuses an Agent removing a Status, even moving its Tickets into a Completed Status, leaving them where they are", async () => {
+    const { admin, session } = await delegatedSetup();
+    const claude = await session();
+    await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" });
+    const qa = await statusNamed(admin, "In QA");
+    const done = (await statuses(admin)).find((s) => s.category === "completed")!;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: qa.id });
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const ticketBefore = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(ticketBefore.claim).not.toBeNull();
+    await admin.post("/api/projects/CRONK/statuses", { name: "Spare", category: "started" });
+    const spare = await statusNamed(admin, "Spare");
+    const before = await statuses(admin);
+
+    for (const res of [
+      await claude.delete(`/api/projects/CRONK/statuses/${spare.id}`),
+      await claude.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${done.id}`),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Only a User can manage Statuses/);
+    }
+    expect(await statuses(admin)).toEqual(before);
+    expect((await admin.get("/api/tickets/CRONK-1")).body).toEqual(ticketBefore);
   });
 });
