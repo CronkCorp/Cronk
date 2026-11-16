@@ -327,12 +327,12 @@ describe("the decisions tool", () => {
     expect(refused.body).toMatch(/only while it is proposed/);
   });
 
-  it("offers a read-only token only list and get", async () => {
+  it("offers a read-only token only list, get and mentions", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
     const { tools } = await mcp.client.listTools();
     const action = tools.find((t) => t.name === "decisions")!.inputSchema.properties!.action as { enum: string[] };
-    expect(action.enum).toEqual(["list", "get"]);
+    expect(action.enum).toEqual(["list", "get", "mentions"]);
   });
 
   it("welcomes the Agent with the reason a User rejected a Decision it proposed", async () => {
@@ -344,6 +344,20 @@ describe("the decisions tool", () => {
 
     const instructions = (await connectMcp(cronk, claude.secret)).client.getInstructions()!;
     expect(instructions).toContain("- D1: Compose for installs: Ada rejected it, which you proposed, saying why:\n  > We ship a single binary.\n  > Compose is too much.");
+  });
+
+  it("and the terms tool list what mentions a Decision or Term", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await admin.post("/api/workspace/decisions", { title: "Postgres" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse", description: "Each Claim, per D1." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    expect((await callTool(mcp, "decisions", { action: "mentions", key: "d1" })).body).toEqual((await admin.get("/api/decisions/D1/mentions")).body);
+    expect((await callTool(mcp, "terms", { action: "mentions", id: claim.id })).body).toEqual((await admin.get(`/api/terms/${claim.id}/mentions`)).body);
+    expect((await callTool(mcp, "terms", { action: "mentions", id: claim.id })).body.mentions).toHaveLength(1);
+    expect(await callTool(mcp, "terms", { action: "mentions" })).toEqual({ isError: true, body: "The mentions action needs an id" });
   });
 });
 

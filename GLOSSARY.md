@@ -128,6 +128,10 @@ _Avoid_: Page, doc, wiki page, note
 The nested arrangement of a Project's or the Workspace's Documents, where each Document may sit under another. Reports live with their Ticket, outside it.
 _Avoid_: Wiki, folder, hierarchy
 
+**Mention**:
+A Ticket, Document, Comment, Term or Decision whose text names a Decision's key (`CRONK-D7`, or `D7` for the Workspace's) or a Term's name, written with its capitalisation as a whole word, outside code and links. The text links to it, and the Decision or Term lists what mentions it under "Mentioned in". Not to be confused with a Comment's @mention of an Agent.
+_Avoid_: Reference, backlink
+
 **Linked Document**:
 A Document an Actor linked to a Ticket from the Ticket's side, so it is one click away without editing the Document. The Ticket lists it beside its Reports and the Documents that mention its key. Unlike a Relation, it never blocks.
 _Avoid_: Relation (reserved for Ticket to Ticket), attachment, reference

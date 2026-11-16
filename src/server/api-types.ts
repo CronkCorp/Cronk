@@ -31,6 +31,7 @@ import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.j
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
+import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
 import type { QuestionItem, DecisionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
@@ -110,6 +111,8 @@ export type Claim = Serialized<StoredClaim>;
 
 /** A Document linked to a Ticket: one of its Reports, or a Document mentioning its key. */
 export type LinkedDocument = Serialized<StoredLinkedDocument>;
+/** Something whose text mentions a Decision or Term. */
+export type Mention = Serialized<StoredMention>;
 
 /** A Ticket with the Tickets and Documents around it and its live Claim, as its page shows it. */
 export interface TicketDetail {

@@ -3,7 +3,7 @@ import { actingUser, type Actor } from "../actor.js";
 import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, pathParams, projectKeyParam, ref, savedHolding } from "../schemas.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
@@ -29,6 +29,7 @@ import {
   type DecisionSource,
   type DecisionVersion,
 } from "./decisions.js";
+import { listMentions } from "./mentions.js";
 
 /** A Decision title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -363,6 +364,27 @@ export function decisionRoutes(ctx: AppContext) {
         );
         await reviewersHear([decision, ...changed]);
         return { decision };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/decisions/:key/mentions",
+      {
+        schema: {
+          params: decisionParams,
+          response: {
+            200: answer(
+              "What mentions the Decision's key, most recently changed first (at most 50): Tickets, Documents, Comments, Terms and Decisions the caller can read",
+              listing("mentions", ref("Mention")),
+            ),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const decision = await decisionFor(ctx.db, actor, request.params.key, "read");
+        return { mentions: await listMentions(ctx.db, { decisionKey: decision.key }, await readablePlaces(ctx.db, actor)) };
       },
     );
 
