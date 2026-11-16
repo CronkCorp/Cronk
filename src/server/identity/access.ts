@@ -173,8 +173,8 @@ export function requireAdmin(who: User | Actor, what: string): void {
   if (user?.role !== "admin") throw new HttpError(403, `Only an Admin can ${what}`);
 }
 
-/** Refuses an Agent: only a User can `what` (as "manage Statuses"). */
-export function refuseAgent(actor: Actor, what: string): void {
+/** A 403 for an Agent: `what` completes "Only a User can …", as "manage Statuses". */
+export function requireUserActor(actor: Actor, what: string): void {
   if (actor.kind === "agent") throw new HttpError(403, `Only a User can ${what}, not an Agent`);
 }
 

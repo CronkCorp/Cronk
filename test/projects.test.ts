@@ -111,7 +111,7 @@ describe("Projects", () => {
 });
 
 describe("Projects, managed by an Agent", () => {
-  it("can't be renamed, archived or unarchived by an Agent, even alongside other changes", async () => {
+  it("can't be renamed, archived or unarchived by an Agent, one change at a time or several at once", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     await admin.post("/api/projects", { name: "Old site", key: "OLD" });
