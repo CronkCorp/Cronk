@@ -142,16 +142,17 @@ export function agentRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
-        const { ticketIds, undelegated } = await transaction(ctx.db, async (tx) => {
+        const { claimed, undelegated } = await transaction(ctx.db, async (tx) => {
           const agent = await ownAgent(ctx, user, request.params.id);
           const now = ctx.clock.now();
           await removeAgent(tx, agent, now);
           // Its Tickets are no longer delegated, as if its Owner had cleared each by hand.
           const undelegated = await clearDelegationsTo(tx, agent.id, userActor(user), now);
-          return { ...(await endAgentSessionsOf(tx, agent.id, now)), undelegated };
+          const { ticketIds: claimed } = await endAgentSessionsOf(tx, agent.id, now);
+          return { claimed, undelegated };
         });
         // The Agent is gone, so nothing is Ready for it, but their Claims ended.
-        await claimsEnded(ctx, ticketIds);
+        await claimsEnded(ctx, claimed);
         ticketsChanged(ctx.live, undelegated);
         // Its open questions leave its Owner's Inbox.
         inboxesChanged(ctx.live, [user.id]);
