@@ -135,7 +135,7 @@ export function agentRoutes(ctx: AppContext) {
         schema: {
           params: agentParams,
           response: {
-            204: noContent("The Agent is removed, its tokens revoked and its Agent Sessions ended"),
+            204: noContent("The Agent is removed, its tokens revoked, its Agent Sessions ended and it is cleared as Delegate of every Ticket"),
             ...errors(400, 401, 403, 404, 410),
           },
         },
