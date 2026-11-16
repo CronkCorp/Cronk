@@ -661,7 +661,7 @@ export function workRoutes(ctx: AppContext) {
             properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
           },
           response: {
-            201: answer("The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            201: answer("The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated yet.", holding("relations", "Relations")),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -701,7 +701,7 @@ export function workRoutes(ctx: AppContext) {
             otherKey: { type: "string", description: "The other Ticket's key, such as `CRONK-7`; any case." },
           }),
           response: {
-            200: answer("The Ticket's remaining relations. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            200: answer("The Ticket's remaining relations. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated yet.", holding("relations", "Relations")),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -747,7 +747,7 @@ export function workRoutes(ctx: AppContext) {
           },
           response: {
             200: answer(
-              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to change its fields or move it, and can't assign or delegate it.",
+              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to move it, and to change its fields unless it is the Agent's own Discovered Ticket no User has delegated yet, and can't assign or delegate it.",
               savedHolding("ticket", "Ticket"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),

@@ -101,7 +101,7 @@ export function attachmentRoutes(ctx: AppContext) {
       "/api/tickets/:key/attachments",
       {
         schema: uploadSchema(
-          "Attaches a file to the Ticket. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim.",
+          "Attaches a file to the Ticket. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated yet.",
           pathParams({ key: ticketKeyParam }),
         ),
       },
@@ -214,7 +214,7 @@ export function attachmentRoutes(ctx: AppContext) {
         schema: {
           description:
             "Deletes an Attachment and its file. Needs what attaching a file to its Ticket, Document or Comment needs: " +
-            "Write where it belongs and, for an Agent, the Ticket's Claim, an unprotected Document, or a Comment it posted. " +
+            "Write where it belongs and, for an Agent, the Ticket's Claim (or its own undelegated Discovered Ticket), an unprotected Document, or a Comment it posted. " +
             "Any User with Write may delete a Comment's Attachment, whoever posted the Comment.",
           params: pathParams({ id: attachmentIdParam }),
           response: { 204: noContent("The Attachment is deleted"), ...errors(401, 403, 404, 409, 410) },
