@@ -1,4 +1,5 @@
 import { afterUpload, changedItems, findForUpdate, listTranscripts, storeTranscript, type Upload } from "../transcripts/transcripts.js";
+import { textOf } from "./archive.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -46,7 +47,7 @@ export async function importTranscripts(ctx: ImportContext): Promise<void> {
     if (!Array.isArray(sessions)) refuse(`${where} sessions must be a list of Agent Session ids`);
     const sessionIds = sessions.map((s) => ctx.sessionIds.get(String(s)) ?? refuse(`${where} names an Agent Session that isn't in people.md`));
     const texts: string[] = [];
-    for (let k = 1; ctx.folder.has(`transcripts/${n}.earlier/${k}.md`); k++) texts.push(ctx.folder.get(`transcripts/${n}.earlier/${k}.md`)!);
+    for (let k = 1; ctx.folder.has(`transcripts/${n}.earlier/${k}.md`); k++) texts.push(textOf(ctx.folder.get(`transcripts/${n}.earlier/${k}.md`)!));
     texts.push(file.body);
     // As if each text were uploaded again in turn, onto what this Workspace may already hold of the chat.
     const existing = await findForUpdate(ctx.db, agent.id, chatId);

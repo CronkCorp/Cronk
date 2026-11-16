@@ -15,9 +15,10 @@ export type ActorRef = string | { agent: string; session: string | null };
 /**
  * What a field of a Ticket change holds in `<KEY>.history.md`. Records are written as Cronk recorded them, with the
  * names they had at the time, plus what an import finds them by: a `user` by its `email`, an `agent` by its id in
- * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true.
+ * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true;
+ * a `boolean` always.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag" | "boolean" | "verification";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -34,6 +35,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   assignee: fromTo("user", true),
   delegate: fromTo("agent", true),
   parent: fromTo("ticket", true),
+  autonomous: fromTo("boolean"),
+  verification: fromTo("verification", true),
   "relation added": relation,
   "relation removed": relation,
   "document linked": { document: { holds: "document" } },
@@ -77,6 +80,11 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   in the order they were written; replies and answers name them by that number. \`<KEY>.history.md\` holds its history, oldest
   first, with the names recorded at the time; a User in it also has their \`email\`, a Status its \`current\` name if it is
   still in the Project, an Agent its id from \`people.md\`, and a Document the \`path\` of its file if the export holds it.
+  A Ticket under Autonomous Delegation has \`autonomous: true\`, and an Agent's completion its \`verification\` (\`unverified\`
+  or \`verified\`); a Project's \`autonomousByDefault\` is written when on.
+  \`<KEY>.attachments/\` holds its Attachments as the files themselves, each named \`<n>-<name>\` in the order they were
+  attached, and \`index.md\`, whose frontmatter lists each file's id, name, media type, size, when and by whom it was attached;
+  an import keeps the id unless it is taken.
 - \`transcripts/<n>.md\`: the chats that led Agents to change things (Workspace exports only), numbered in the order they were
   first uploaded. The frontmatter names the Agent and its Agent Sessions by their ids in \`people.md\`, the client's \`chatId\`,
   the Tickets (by key), Documents (by path) and Terms (by name, after their Project's key) those Sessions changed; the body is the latest text. \`<n>.earlier/\` holds, as

@@ -14,6 +14,7 @@ export async function exportWorkspaceSettings(ctx: ExportContext): Promise<void>
     name: w.name,
     agentAccess: w.agentAccess,
     silenceThresholdSeconds: w.silenceThresholdSeconds,
+    attachmentMaxBytes: w.attachmentMaxBytes,
     transcriptMaxBytes: w.transcriptMaxBytes,
   });
 }
@@ -25,6 +26,8 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
     name: text(w.data.name, "workspace.md name"),
     agentAccess: oneOf(w.data.agentAccess, agentAccessSchema.enum, "workspace.md agentAccess"),
     silenceThresholdSeconds: integer(w.data.silenceThresholdSeconds, "workspace.md silenceThresholdSeconds"),
+    // An export from before Attachments has none; the Workspace keeps its own.
+    ...(w.data.attachmentMaxBytes !== undefined && { attachmentMaxBytes: integer(w.data.attachmentMaxBytes, "workspace.md attachmentMaxBytes") }),
     // Exports from before Transcripts leave it out, keeping the default.
     ...(w.data.transcriptMaxBytes !== undefined && { transcriptMaxBytes: transcriptMaxBytes(w.data.transcriptMaxBytes) }),
   });

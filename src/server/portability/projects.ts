@@ -15,6 +15,7 @@ export interface ProjectRow {
   name: string;
   visibility: string;
   agent_access: string;
+  autonomous_by_default: boolean;
   archived_at: Date | null;
   created_at: Date;
   next_ticket_number: number;
@@ -35,6 +36,8 @@ export async function exportProject(ctx: ExportContext, dir: string, p: ProjectR
     name: p.name,
     visibility: p.visibility,
     agentAccess: p.agent_access,
+    // Written only when on, as a Project from before Autonomous Delegation has none.
+    autonomousByDefault: p.autonomous_by_default || undefined,
     archivedAt: iso(p.archived_at),
     createdAt: iso(p.created_at),
     nextTicketNumber: p.next_ticket_number,
@@ -60,9 +63,10 @@ export async function importProject(ctx: ImportContext, dirKey: string): Promise
   const key = text(p.data.key, `${p.path} key`).toUpperCase();
   if (key !== dirKey.toUpperCase()) refuse(`${p.path} says its key is ${key}, but it is in projects/${dirKey}`);
   if (!new RegExp(`^${PROJECT_KEY_PATTERN}$`).test(key)) refuse(`${p.path} key must be a letter then 1 to 9 letters or digits`);
+  if (p.data.autonomousByDefault !== undefined && typeof p.data.autonomousByDefault !== "boolean") refuse(`${p.path} autonomousByDefault must be true or false`);
   const { rows } = await ctx.db.query<{ id: string }>(
-    `INSERT INTO projects (workspace_id, name, key, visibility, agent_access, archived_at, created_at, next_ticket_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    `INSERT INTO projects (workspace_id, name, key, visibility, agent_access, archived_at, created_at, next_ticket_number, autonomous_by_default)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
     [
       ctx.workspaceId,
       text(p.data.name, `${p.path} name`),
@@ -72,6 +76,7 @@ export async function importProject(ctx: ImportContext, dirKey: string): Promise
       optionalDate(p.data.archivedAt, `${p.path} archivedAt`),
       date(p.data.createdAt, `${p.path} createdAt`),
       integer(p.data.nextTicketNumber, `${p.path} nextTicketNumber`),
+      p.data.autonomousByDefault === true,
     ],
   );
   const id = rows[0]!.id;

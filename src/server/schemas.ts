@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -69,7 +69,9 @@ export type SharedSchemaName =
   | "Term"
   | "TermVersion"
   | "StaleTermVersion"
-  | "RenamedId";
+  | "RenamedId"
+  | "Attachment"
+  | "AvoidedWord";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -242,6 +244,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     name: { type: "string" },
     agentAccess: agentAccessSchema,
     silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+    attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
     transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
   }),
   Guidance: {
@@ -319,6 +322,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     archived: { type: "boolean" },
     visibility: { type: "string", enum: ["open", "private"] },
     agentAccess: agentAccessSchema,
+    autonomousByDefault: {
+      type: "boolean",
+      description: "What delegating one of its Tickets sets Autonomous Delegation to, unless the delegating User says otherwise. Off unless a User turns it on.",
+    },
     access: { ...accessSchema, description: "What the caller may do in the Project." },
   }),
   Status: object({
@@ -340,6 +347,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     assignee: nullable(named),
     delegate: { ...nullable(named), description: "The Agent the Assignee handed the Ticket to; always one of the Assignee's own." },
     parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
+    autonomous: {
+      type: "boolean",
+      description: "Autonomous Delegation: the Delegate may complete the Ticket itself, each completion Unverified until a User Accepts it. Only Users set it.",
+    },
+    verification: {
+      ...nullable({ type: "string", enum: VERIFICATIONS }),
+      description:
+        "Where an Agent's completion under Autonomous Delegation stands: `unverified` until a User Accepts it, then `verified`. Null for any other Ticket.",
+    },
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
@@ -368,7 +384,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
         ],
@@ -387,6 +403,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "labels" }, from: labels, to: labels }),
       ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
+      object({ change: { const: "autonomous" }, from: { type: "boolean" }, to: { type: "boolean" } }),
+      object({ change: { const: "verification" }, from: nullable({ type: "string", enum: VERIFICATIONS }), to: nullable({ type: "string", enum: VERIFICATIONS }) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },
@@ -603,6 +621,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A save or delete of a Term refused because the Version it is based on is no longer current, with the current Version.",
     ...object({ error: { type: "string" }, current: ref("TermVersion") }),
   },
+  AvoidedWord: {
+    description:
+      "A word a Term says to avoid, found in the prose a save wrote, with the Term to use instead. The save succeeds regardless; " +
+      "words in code spans, code blocks, block quotes and raw HTML don't count.",
+    ...object({
+      field: { type: "string", description: "The request field it was written in, such as `title`, `body` or `description`." },
+      word: { type: "string", description: "The word or phrase as written." },
+      line: { type: "integer", minimum: 1, description: "The line it starts on in the field as sent, counting from 1." },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "The column of that line it starts at, counting from 1 in UTF-16 code units, as JavaScript strings index text.",
+      },
+      term: { ...named, description: "The Term to use instead, as it applies where the text was saved." },
+    }),
+  },
   RenamedId: {
     description: "An Agent or Agent Session an import gave a new id, because the id it had in the export was taken.",
     ...object({
@@ -631,6 +665,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
       comment: { ...nullable(object({ id, body: { type: "string" } })), description: "A Comment it posted; the body is Markdown." },
       version: { ...nullable(object({ number: { type: "integer" } })), description: "A Version of the Document it saved." },
+    }),
+  },
+  Attachment: {
+    description:
+      "A plain file, such as an image, video, PDF or log, attached to a Ticket. Whoever can read the Ticket can read it; " +
+      "download it from GET /api/attachments/{id}/file.",
+    ...object({
+      id,
+      ticketKey: { type: "string", description: "The Ticket it is attached to." },
+      name: { type: "string", description: "Its file name, as attached." },
+      contentType: { type: "string", description: "Its media type, such as `image/png`, as attached." },
+      size: { type: "integer", description: "Its size in bytes." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who attached it." },
     }),
   },
   Transcript: {
@@ -672,6 +720,13 @@ export function addSharedSchemas(app: FastifyInstance): void {
 /** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
 export const holding = (field: string, name: SharedSchemaName) => object({ [field]: ref(name) });
 
+/**
+ * The answer to a save of text: one field holding a shared shape, such as `{ report: Document }`, and
+ * `avoidedWords`, the words a Term says to avoid that the save wrote, in the order of the request's fields.
+ */
+export const savedHolding = (field: string, name: SharedSchemaName) =>
+  object({ [field]: ref(name), avoidedWords: { type: "array", items: ref("AvoidedWord") } });
+
 /** A JSON body with one field listing items, such as `{ tickets: Ticket[] }`. */
 export const listing = (field: string, items: object) => object({ [field]: { type: "array", items } });
 
@@ -691,7 +746,8 @@ const ERROR_MEANINGS = {
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",
-  413: "The upload is larger than the Workspace allows",
+  413: "The upload is larger than the Workspace allows: an Attachment's file, or a Transcript with every text it keeps",
+  416: "The range asked for lies outside the file",
   422: "The request is well formed but can't be kept as it is",
 } as const;
 
@@ -711,6 +767,9 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
+
+/** An Attachment's id. */
+export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
 
 /** A Term's id. */
 export const termIdParam = { type: "string", format: "uuid", description: "The Term's id." } as const;

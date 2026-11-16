@@ -8,6 +8,8 @@ export interface Workspace {
   agentAccess: AgentAccess;
   /** How long an Agent Session may stay silent before it ends and its Claims lapse. */
   silenceThresholdSeconds: number;
+  /** The largest file an Attachment may be, in bytes. */
+  attachmentMaxBytes: number;
   /** The most a Transcript may hold, all its texts together, in bytes. */
   transcriptMaxBytes: number;
 }
@@ -17,6 +19,7 @@ export const publicWorkspace = (w: Workspace) => ({
   name: w.name,
   agentAccess: w.agentAccess,
   silenceThresholdSeconds: w.silenceThresholdSeconds,
+  attachmentMaxBytes: w.attachmentMaxBytes,
   transcriptMaxBytes: w.transcriptMaxBytes,
 });
 
@@ -25,6 +28,7 @@ interface WorkspaceRow {
   name: string;
   agent_access: AgentAccess;
   silence_threshold_seconds: number;
+  attachment_max_bytes: string;
   transcript_max_bytes: number;
 }
 
@@ -33,6 +37,7 @@ const toWorkspace = (row: WorkspaceRow): Workspace => ({
   name: row.name,
   agentAccess: row.agent_access,
   silenceThresholdSeconds: row.silence_threshold_seconds,
+  attachmentMaxBytes: Number(row.attachment_max_bytes),
   transcriptMaxBytes: row.transcript_max_bytes,
 });
 
@@ -49,17 +54,25 @@ export async function getWorkspace(db: Queryable, id: string): Promise<Workspace
   return toWorkspace(rows[0]!);
 }
 
-/** Renames the Workspace and/or changes its Agent Access, silence threshold or Transcript limit. */
+/** Renames the Workspace and/or changes its Agent Access, silence threshold, Attachment size limit or Transcript limit. */
 export async function updateWorkspace(
   db: Queryable,
   id: string,
-  changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; transcriptMaxBytes?: number },
+  changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; attachmentMaxBytes?: number; transcriptMaxBytes?: number },
 ): Promise<Workspace> {
   const { rows } = await db.query<WorkspaceRow>(
     `UPDATE workspaces SET name = coalesce($2, name), agent_access = coalesce($3, agent_access),
-       silence_threshold_seconds = coalesce($4, silence_threshold_seconds), transcript_max_bytes = coalesce($5, transcript_max_bytes)
+       silence_threshold_seconds = coalesce($4, silence_threshold_seconds), attachment_max_bytes = coalesce($5, attachment_max_bytes),
+       transcript_max_bytes = coalesce($6, transcript_max_bytes)
      WHERE id = $1 RETURNING *`,
-    [id, changes.name ?? null, changes.agentAccess ?? null, changes.silenceThresholdSeconds ?? null, changes.transcriptMaxBytes ?? null],
+    [
+      id,
+      changes.name ?? null,
+      changes.agentAccess ?? null,
+      changes.silenceThresholdSeconds ?? null,
+      changes.attachmentMaxBytes ?? null,
+      changes.transcriptMaxBytes ?? null,
+    ],
   );
   return toWorkspace(rows[0]!);
 }

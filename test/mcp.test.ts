@@ -350,6 +350,33 @@ describe("the terms tool", () => {
   });
 });
 
+describe("a tool that saves text", () => {
+  it("follows the API's answer with a hint naming each word a Term says to avoid and the Term to use", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["issue", "work item"] });
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const { isError, texts } = await rawResult(mcp, "documents", {
+      action: "write_report",
+      key: "CRONK-1",
+      title: "Fixed the issue",
+      body: "This work item is done.\n\n`issue` in code\n\n> an issue quoted",
+    });
+    expect(isError).toBe(false);
+    expect(texts).toHaveLength(3);
+    expect(JSON.parse(texts[1]!).avoidedWords).toHaveLength(2);
+    expect(texts[2]).toBe(
+      "Saved, but it uses words a Term says to avoid:\n" +
+        '- "issue" (title, line 1, column 11): use Ticket\n' +
+        '- "work item" (body, line 1, column 6): use Ticket',
+    );
+
+    const clean = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "progress", body: "All good." });
+    expect(clean.body.avoidedWords).toEqual([]);
+  });
+});
+
 describe("working a delegated Ticket over MCP", () => {
   /** Ada's Project CRONK with `count` Tickets assigned to her and delegated to her Agent claude-laptop, which connects over MCP. */
   async function delegatedOverMcp(count: number) {
@@ -364,6 +391,25 @@ describe("working a delegated Ticket over MCP", () => {
   it("welcomes the Agent with its Ready Tickets", async () => {
     const { mcp } = await delegatedOverMcp(2);
     expect(mcp.client.getInstructions()).toMatch(/Ready Tickets[\s\S]*CRONK-1: Ticket 1[\s\S]*CRONK-2: Ticket 2/);
+  });
+
+  it("welcomes the Agent saying which Ready Tickets are autonomous, and completes one with a Report", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 2);
+    const claude = await registerAgent(admin, "claude-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId, autonomous: true });
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId });
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const instructions = mcp.client.getInstructions()!;
+    expect(instructions).toMatch(/Autonomous Delegation/);
+    expect(instructions).toContain("- CRONK-1: Ticket 1 (Backlog, autonomous: complete it yourself with a Report)");
+    expect(instructions).toContain("- CRONK-2: Ticket 2 (Backlog)\n");
+
+    expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.ticket.autonomous).toBe(true);
+    await callTool(mcp, "documents", { action: "write_report", key: "CRONK-1", title: "Done", body: "Fixed the cache." });
+    const done = await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "Done" });
+    expect(done).toMatchObject({ isError: false, body: { ticket: { status: { category: "completed" }, verification: "unverified" } } });
   });
 
   it("Claims the next Ready Ticket, moves it, splits it and releases it", async () => {
@@ -714,5 +760,48 @@ describe("a Ticket becoming Ready over MCP", () => {
       logger: "cronk",
       data: { message: expect.stringMatching(/CRONK-2: Ticket 2[\s\S]*`claim`/), ticketReady: { key: "CRONK-2", title: "Ticket 2" } },
     });
+  });
+});
+
+describe("the attachments tool", () => {
+  it("attaches text or base64 files to a Ticket the Agent holds the Claim on, and lists them", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect((await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "log.txt", content: "boom" })).isError).toBe(true);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const log = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "sign-in-flood.log", content: "429 x 50\n" });
+    expect(log.isError).toBe(false);
+    expect(log.body.attachment).toMatchObject({ name: "sign-in-flood.log", contentType: "text/plain", size: 9, actor: { kind: "agent", session: { id: mcp.transport.sessionId } } });
+
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const image = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "proxy-ip.png", contentBase64: png.toString("base64"), contentType: "image/png" });
+    expect(image.body.attachment).toMatchObject({ contentType: "image/png", size: 8 });
+    expect((await admin.download(`/api/attachments/${image.body.attachment.id}/file`)).body.equals(png)).toBe(true);
+
+    expect(await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "x", content: "a", contentBase64: "YQ==" })).toEqual({
+      isError: true,
+      body: "The attach action needs either content or contentBase64, not both",
+    });
+    const listed = await callTool(mcp, "attachments", { action: "list", key: "CRONK-1" });
+    expect(listed.body).toEqual((await admin.get("/api/tickets/CRONK-1/attachments")).body);
+  });
+
+  it("takes files of several MB, not only what fits a small JSON request", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const recording = Buffer.alloc(3 * 1024 * 1024, 7);
+    const attached = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "repro.mp4", contentBase64: recording.toString("base64"), contentType: "video/mp4" });
+    expect(attached.body.attachment).toMatchObject({ name: "repro.mp4", size: recording.length });
+  });
+
+  it("offers a read-only token only list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "attachments")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
   });
 });
