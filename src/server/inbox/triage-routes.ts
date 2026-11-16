@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUser, type AppContext } from "../context.js";
 import { answer, errors, ref } from "../schemas.js";
 import { listTriage, TRIAGE_KINDS, type TriageItem } from "./triage.js";
+import { pausedTickets } from "./routes.js";
 
 const timestamp = { type: "string", format: "date-time" } as const;
 
@@ -63,11 +64,7 @@ const discoveredItem = {
     at: { ...timestamp, description: "When the Agent filed it." },
     ticket: ref("Ticket"),
     reports: { type: "array", items: ref("Report") },
-    blocks: {
-      type: "array",
-      items: ref("BlockingRef"),
-      description: "The Tickets it blocks that the User can see, in key order, each with the Agent that added the block and why: what it pauses until finished or the block is removed.",
-    },
+    blocks: pausedTickets,
   },
 } as const;
 

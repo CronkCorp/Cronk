@@ -18,7 +18,7 @@ import {
   type Ticket,
   type TicketChanges,
   type TicketDetail,
-  type Relations,
+  type BlockingRef,
   type TicketRef,
 } from "./api.js";
 import { PRIORITIES } from "../shared/values.js";
@@ -488,7 +488,7 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean }) {
   const [other, setOther] = useState("");
   const add = useAction(() => api.addRelation(t.key, kind, other.trim()), () => setOther(""));
   const remove = useAction((kind: RelationKind, otherKey: string) => api.removeRelation(t.key, kind, otherKey), () => {});
-  const lists: [RelationKind, (TicketRef & { block?: Relations["blocks"][number]["block"] })[]][] = [
+  const lists: [RelationKind, (TicketRef & { block?: BlockingRef["block"] })[]][] = [
     ["blocks", props.detail.relations.blocks],
     ["blocked_by", props.detail.relations.blockedBy],
     ["relates_to", props.detail.relations.relatesTo],
@@ -619,7 +619,7 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
  * Tickets listed beside a Ticket, each linked, with Remove when given `onRemove`. A block an Agent added from its Discovered Ticket
  * also says which Agent added it and why (docs/ui.md § Ticket).
  */
-function TicketRefList(props: { name: string; refs: (TicketRef & { block?: Relations["blocks"][number]["block"] })[]; onRemove?: (ref: TicketRef) => void; busy?: boolean }) {
+function TicketRefList(props: { name: string; refs: (TicketRef & { block?: BlockingRef["block"] })[]; onRemove?: (ref: TicketRef) => void; busy?: boolean }) {
   return (
     <ul className="side-list" aria-label={props.name}>
       {props.refs.map((ref) => (

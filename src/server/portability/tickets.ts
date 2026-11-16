@@ -2,7 +2,7 @@ import { insertActivity, markAnswered, type Activity } from "../coordination/act
 import { ACTIVITY_KINDS, PRIORITIES, VERIFICATIONS } from "../../shared/values.js";
 import { recordChange, ticketKeySql } from "../work/tickets.js";
 import { findUserById } from "../identity/users.js";
-import { storeRelation } from "../work/relations.js";
+import { storeRelation, type NewDiscoveredBlock } from "../work/relations.js";
 import { storeDocumentLink } from "../work/document-links.js";
 import { exportAttachments, importAttachments } from "./attachments.js";
 import { exportComments, importComments } from "./comments.js";
@@ -184,7 +184,7 @@ interface PendingRelation {
   kind: "blocks" | "relates_to";
   to: string;
   /** The Agent and reason of a block from its Discovered Ticket. */
-  block?: { agentId: string; reason: string };
+  block?: NewDiscoveredBlock;
 }
 
 /** A Document a Ticket file links, by the path of its file, to store once every Document is in. */

@@ -877,10 +877,13 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
   );
 }
 
+/** "1 Ticket", "2 Tickets". */
+const ticketCount = (n: number) => (n === 1 ? "1 Ticket" : `${n} Tickets`);
+
 /** Who found a Discovered Ticket and where, as its list item says it: "By claude-laptop · from CRONK-12". */
 function foundBy(item: DiscoveredItem): string {
   const { agent, sourceTicket } = item.ticket.discovered!;
-  const pauses = item.blocks.length === 0 ? "" : ` · pauses ${item.blocks.length === 1 ? "1 Ticket" : `${item.blocks.length} Tickets`}`;
+  const pauses = item.blocks.length === 0 ? "" : ` · pauses ${ticketCount(item.blocks.length)}`;
   return `By ${agent.name}${sourceTicket ? ` · from ${sourceTicket.key}` : ""}${pauses}`;
 }
 
@@ -938,7 +941,7 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
       </div>
       {blocks.length > 0 && (
         <Banner tone="warn" role="status">
-          <p>{`Pauses ${blocks.length === 1 ? "1 Ticket" : `${blocks.length} Tickets`} until it is finished:`}</p>
+          <p>{`Pauses ${ticketCount(blocks.length)} until it is finished:`}</p>
           <ul className="paused-list" aria-label="Paused Tickets">
             {blocks.map((b) => (
               <li key={b.key}>

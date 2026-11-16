@@ -12,6 +12,12 @@ export interface DiscoveredBlock {
   reason: string;
 }
 
+/** A block an Agent adds from its Discovered Ticket, as stored: the Agent's id and why. */
+export interface NewDiscoveredBlock {
+  agentId: string;
+  reason: string;
+}
+
 /** A Ticket on the other end of a block, with the Agent and reason if the block came from a Discovered Ticket (else null). */
 export interface BlockingRef extends TicketRef {
   block: DiscoveredBlock | null;
@@ -38,7 +44,7 @@ export interface StoredRelation {
   kind: "blocks" | "relates_to";
   from: string;
   to: string;
-  block?: { agentId: string; reason: string } | null;
+  block?: NewDiscoveredBlock | null;
 }
 
 /** The stored row for a relation: blocking runs from blocker to blocked; relating is stored once, lower id first. */
@@ -77,7 +83,7 @@ async function wouldCycle(db: Queryable, blocker: string, blocked: string): Prom
 export async function addRelation(
   db: Queryable,
   workspaceId: string,
-  input: RelationChange & { block?: { agentId: string; reason: string } },
+  input: RelationChange & { block?: NewDiscoveredBlock },
 ): Promise<boolean> {
   const row: StoredRelation = { ...storedRow(input.ticket, input.kind, input.other), block: input.block ?? null };
   if (row.kind === "blocks") {
@@ -130,8 +136,12 @@ async function recordBothSides(db: Queryable, change: "relation added" | "relati
   await recordChange(db, other.id, actor, now, { change, kind: inverse[kind], ticket: { key: ticket.key, title: ticket.title } });
 }
 
-/** The Tickets at the `other` end of the blocks whose `end` is `ticketId`, each with the Agent and reason of a block from a Discovered Ticket. */
-async function blockingRefs(db: Queryable, ticketId: string, end: "from_ticket_id" | "to_ticket_id", other: "from_ticket_id" | "to_ticket_id"): Promise<BlockingRef[]> {
+/**
+ * The Tickets `ticketId` blocks (`side` "from") or is blocked by ("to"), in key order, each with the Agent and reason of a
+ * block from a Discovered Ticket.
+ */
+async function blockingRefs(db: Queryable, ticketId: string, side: "from" | "to"): Promise<BlockingRef[]> {
+  const [end, other] = side === "from" ? ["from_ticket_id", "to_ticket_id"] : ["to_ticket_id", "from_ticket_id"];
   const { rows } = await db.query<{ id: string; agent_id: string | null; agent_name: string | null; reason: string | null }>(
     `SELECT r.${other} AS id, r.added_by_agent_id AS agent_id, a.name AS agent_name, r.reason
      FROM ticket_relations r LEFT JOIN agents a ON a.id = r.added_by_agent_id
@@ -143,11 +153,12 @@ async function blockingRefs(db: Queryable, ticketId: string, end: "from_ticket_i
   return refs.map(({ id, ...ref }) => ({ ...ref, block: blocks.get(id)! }));
 }
 
+/** A Ticket's relations, each with the Tickets at its other end in key order; blocks carry who added one from a Discovered Ticket, and why. */
 export async function listRelations(db: Queryable, ticketId: string): Promise<Relations> {
   const related = (sql: string) => listTicketRefs(db, `t.id IN (${sql})`, [ticketId]);
   return {
-    blocks: await blockingRefs(db, ticketId, "from_ticket_id", "to_ticket_id"),
-    blockedBy: await blockingRefs(db, ticketId, "to_ticket_id", "from_ticket_id"),
+    blocks: await blockingRefs(db, ticketId, "from"),
+    blockedBy: await blockingRefs(db, ticketId, "to"),
     relatesTo: await related(
       `SELECT to_ticket_id FROM ticket_relations WHERE kind = 'relates_to' AND from_ticket_id = $1
        UNION SELECT from_ticket_id FROM ticket_relations WHERE kind = 'relates_to' AND to_ticket_id = $1`,
