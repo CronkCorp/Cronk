@@ -29,11 +29,24 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
   lines.push(...termLines(welcome));
   lines.push("", "## Your Ready Tickets", "");
   if (welcome.readyTickets.length === 0) lines.push("None right now.");
-  else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.", "");
+  else lines.push("Highest Priority first. Use the `tickets` tool's `next` action to Claim the first, or `claim` to Claim one by key.");
+  if (welcome.readyTickets.some((t) => t.autonomous)) {
+    lines.push(
+      "Those marked autonomous are under Autonomous Delegation: when the work is done, write a Report and move the Ticket to a Completed Status " +
+        "yourself instead of stopping at In Review; a User verifies it afterwards. Your questions on them never block: record your best guess and carry on.",
+    );
+  }
+  if (welcome.readyTickets.length > 0) lines.push("");
   for (const t of welcome.readyTickets) lines.push(readyLine(t));
   lines.push("", "## Work waiting for you", "");
   if (welcome.waitingWork.length === 0) lines.push("Nothing new since your last Agent Session.");
-  else lines.push("Comments that concern you, posted since your last Agent Session, oldest first. Read the whole conversation with the `comments` tool.", "");
+  else {
+    lines.push(
+      "Comments that concern you, and rejections of Decisions you proposed, since your last Agent Session, oldest first. " +
+        "Read the whole conversation with the `comments` tool, and a Decision with the `decisions` tool.",
+      "",
+    );
+  }
   for (const w of welcome.waitingWork) lines.push(...waitingLines(w));
   if (!welcome.readOnly) {
     lines.push("", "While you hold a Ticket's Claim, log your plan, progress, findings and errors with the `activities` tool; each Activity keeps your Claim alive.");
@@ -42,23 +55,30 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
 }
 
 /** Why a Comment waits for the Agent, as the welcome says it. */
-const WHY: Record<WaitingWork["reason"], string> = {
+const WHY: Record<Exclude<WaitingWork["reason"], "rejected">, string> = {
   answer: "answered your question",
   mention: "mentioned you",
   comment: "commented on your delegated Ticket",
 };
 
-/** One piece of waiting work as welcome lines: where, who and why, then the Comment quoted. */
-export function waitingLines({ reason, comment, ticket, document }: WaitingWork): string[] {
+/** One piece of waiting work as welcome lines: where, who and why, then the Comment, or the reason for a rejection, quoted. */
+export function waitingLines(work: WaitingWork): string[] {
+  const quote = (text: string) => text.trim().split("\n").map((line) => `  > ${line}`);
+  if (work.reason === "rejected") {
+    const { decision, ticket } = work;
+    const from = ticket ? `, which you proposed from ${ticket.key}` : ", which you proposed";
+    return [`- ${decision.key}: ${decision.title}: ${decision.rejectedBy.name} rejected it${from}, saying why:`, ...quote(decision.reason)];
+  }
+  const { reason, comment, ticket, document } = work;
   const where = ticket ? `${ticket.key}: ${ticket.title}` : `Document “${document!.title}” (${document!.id})`;
   const who = comment.actor.kind === "agent" ? `the Agent ${comment.actor.name}` : comment.actor.name;
-  const quoted = comment.body.trim().split("\n").map((line) => `  > ${line}`);
-  return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quoted];
+  return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quote(comment.body)];
 }
 
-/** One Ready Ticket as a welcome line: its key, title, Status and any Priority. */
+/** One Ready Ticket as a welcome line: its key, title, Status, any Priority, and whether it is autonomous. */
 export function readyLine(t: Welcome["readyTickets"][number]): string {
-  return `- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`})`;
+  const autonomous = t.autonomous ? ", autonomous: complete it yourself with a Report" : "";
+  return `- ${t.key}: ${t.title} (${t.status.name}${t.priority === "none" ? "" : `, ${t.priority} Priority`}${autonomous})`;
 }
 
 /** The welcome's Terms section: the Workspace's Term names, then each Project's own, marking those that replace a Workspace Term. */
@@ -77,7 +97,7 @@ function termLines({ workspace, projects }: Welcome): string[] {
     "## Terms",
     "",
     "The glossary's Term names. Use them, and avoid the words each Term lists; within a Project, its own Terms replace the Workspace's of the same name. " +
-      "Look a Term up with the `terms` tool.",
+      "Look a Term up with the `terms` tool. A save that uses a word to avoid still goes through, and its result lists each one with the Term to use.",
     "",
     ...lines,
   ];

@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 import tar from "tar-stream";
@@ -129,16 +132,16 @@ export class Client {
     return new EventStream(res, () => abort.abort());
   }
 
-  /** Downloads `path` as raw bytes, as a browser saving a file does. */
-  async download(path: string): Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }> {
-    const res = await this.cronk.app.inject({ method: "GET", url: path, headers: this.authHeaders() });
+  /** Downloads `path` as raw bytes, as a browser saving a file does, sending any extra `headers` (such as `range`). */
+  async download(path: string, headers: Record<string, string> = {}): Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }> {
+    const res = await this.cronk.app.inject({ method: "GET", url: path, headers: { ...this.authHeaders(), ...headers } });
     return { status: res.statusCode, headers: res.headers, body: res.rawPayload };
   }
 
-  /** Uploads `bytes` to `path` as a file of `contentType`; the answer is JSON. */
-  async upload<T = any>(path: string, bytes: Buffer, contentType = "application/gzip"): Promise<Response<T>> {
+  /** Uploads `bytes` to `path` as a file of `contentType`, with `method` (POST by default); the answer is JSON. */
+  async upload<T = any>(path: string, bytes: Buffer, contentType = "application/gzip", method: "POST" | "PUT" = "POST"): Promise<Response<T>> {
     const res = await this.cronk.app.inject({
-      method: "POST",
+      method,
       url: path,
       headers: { ...this.authHeaders(), "content-type": contentType },
       payload: bytes,
@@ -315,9 +318,12 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
   url.pathname = `/${dbName}`;
   const databaseUrl = url.toString();
 
+  // Files are stored on local disk in a directory of the test's own, kept across restarts.
+  const filesDir = await mkdtemp(join(tmpdir(), "cronk-files-"));
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
-  const start = () => buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+  const start = () =>
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, filesDir }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -434,6 +440,7 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
     await admin.connect();
     await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
     await admin.end();
+    await rm(filesDir, { recursive: true, force: true });
   });
   return cronk;
 }

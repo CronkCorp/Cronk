@@ -2,15 +2,17 @@ import { useState, type ReactNode } from "react";
 import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button, buttonClass } from "./components/button.js";
-import { Chip } from "./components/tags.js";
+import { Chip, ProtectedMark } from "./components/tags.js";
+import { ProtectionHistory } from "./components/protection.js";
 import { ConfirmDialog, Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { api, glossaryUrl, type Term, type TermInput, type TermVersion } from "./api.js";
-import { explainStale, useCanWrite } from "./documents.js";
-import { CronkMarkdown } from "./markdown.js";
+import { explainStale } from "./documents.js";
+import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
+import { MentionedIn } from "./mentions.js";
 import { Link, navigate } from "./router.js";
 import { termsAddress } from "./routes.js";
-import { Field, Show, TextArea, useAction, useLoad } from "./ui.js";
+import { Field, Show, TextArea, useAction, useCanWrite, useLoad } from "./ui.js";
 
 // The Terms page and a Term's page: docs/ui.md § Terms.
 
@@ -159,6 +161,7 @@ function TermRow(props: { term: Term }) {
     <li className="term">
       <div className="term-head">
         <Link to={`/terms/${t.id}`} className="term-name">{t.name}</Link>
+        {t.protected && <ProtectedMark />}
         <OverridePill term={t} />
         <span className="muted small">{placeName(t.projectKey)}</span>
         <span className="grow" />
@@ -210,7 +213,10 @@ function TermForm(props: { initial?: TermInput; submitLabel: string; busy: boole
 }
 
 function NewTerm(props: { projectKey: string | undefined; onCancel: () => void }) {
-  const create = useAction((input: TermInput) => api.createTerm(props.projectKey, input), (term) => navigate(`/terms/${term.id}`));
+  const create = useAction((input: TermInput) => api.createTerm(props.projectKey, input), (term) => {
+    forgetLinkedKnowledge();
+    navigate(`/terms/${term.id}`);
+  });
   return (
     <section className="panel wide">
       <h2>New {props.projectKey ? `${props.projectKey} ` : "Workspace "}Term</h2>
@@ -223,7 +229,15 @@ function NewTerm(props: { projectKey: string | undefined; onCancel: () => void }
 /** One Term at its current Version: its override, definition, words to avoid and group, then its History; edited in place. */
 export function TermPage(props: { id: string; edit: boolean }) {
   const [term, reload, setTerm] = useLoad(() => api.term(props.id), [props.id]);
-  return <Show state={term}>{(t) => <TermView key={t.id} term={t} startEditing={props.edit} onChanged={setTerm} onReload={reload} />}</Show>;
+  return (
+    <Show state={term}>
+      {(t) => (
+        <MarkdownPlace.Provider value={t.projectKey}>
+          <TermView key={t.id} term={t} startEditing={props.edit} onChanged={setTerm} onReload={reload} />
+        </MarkdownPlace.Provider>
+      )}
+    </Show>
+  );
 }
 
 function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Term) => void; onReload: () => void }) {
@@ -235,27 +249,37 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
     (input: TermInput) =>
       api.saveTerm(t.id, t.version, input).catch(explainStale(props.onReload, "saving")),
     (saved) => {
+      forgetLinkedKnowledge();
       setEditing(false);
       props.onChanged(saved);
     },
   );
   const remove = useAction(
     () => api.deleteTerm(t.id, t.version),
-    () => navigate(termsAddress(t.projectKey)),
+    () => {
+      forgetLinkedKnowledge();
+      navigate(termsAddress(t.projectKey));
+    },
   );
+  const protect = useAction((value: boolean) => api.protectTerm(t.id, value), props.onChanged);
   return (
     <section className="term-page">
       <div className="page-head">
         <div>
           <Crumbs projectKey={t.projectKey} />
-          <h1>{t.name}</h1>
+          <h1>
+            {t.name} {t.protected && <ProtectedMark />}
+          </h1>
         </div>
         {canWrite && !editing && (
           <div className="actions">
             <Menu
               label="More"
               trigger={<Button variant="secondary" aria-label="More">…</Button>}
-              items={[{ label: "Delete", danger: true, onSelect: () => setConfirmingDelete(true) }]}
+              items={[
+                { label: t.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!t.protected), disabled: protect.busy },
+                { label: "Delete", danger: true, onSelect: () => setConfirmingDelete(true) },
+              ]}
             />
             <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
           </div>
@@ -271,6 +295,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
         />
       </div>
       {remove.error && <p className="error" role="alert">{remove.error}</p>}
+      {protect.error && <p className="error" role="alert">{protect.error}</p>}
       <OverrideBanner term={t} />
       {editing ? (
         <section className="panel wide">
@@ -296,6 +321,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
           </p>
         </section>
       )}
+      <MentionedIn load={() => api.termMentions(t.id)} deps={[t.id, t.version]} what="the Term's name" />
       <History term={t} />
     </section>
   );
@@ -351,6 +377,7 @@ function History(props: { term: Term }) {
           </ol>
         )}
       </Show>
+      <ProtectionHistory load={() => api.termProtection(props.term.id)} reloadOn={[props.term.id, props.term.protected]} />
     </section>
   );
 }

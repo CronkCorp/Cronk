@@ -19,6 +19,19 @@ const reviewItem = {
   },
 } as const;
 
+const unverifiedItem = {
+  type: "object",
+  required: ["kind", "at", "ticket", "reports"],
+  description:
+    "An Agent's completion under Autonomous Delegation of a Ticket the User is Assignee of, Unverified until a User Accepts it, with its Reports.",
+  properties: {
+    kind: { type: "string", const: "unverified" },
+    at: { ...timestamp, description: "When the Agent completed it." },
+    ticket: ref("Ticket"),
+    reports: { type: "array", items: ref("Report") },
+  },
+} as const;
+
 const questionItem = {
   type: "object",
   required: ["kind", "at", "question", "ticket"],
@@ -28,6 +41,20 @@ const questionItem = {
     at: { ...timestamp, description: "When the Agent asked it." },
     question: ref("Activity"),
     ticket: ref("TicketRef"),
+  },
+} as const;
+
+const decisionItem = {
+  type: "object",
+  required: ["kind", "at", "decision", "ticket"],
+  description:
+    "A Decision an Agent proposed, which the User reviews: they are Assignee of the Ticket it came from, or, with none, the proposing Agent's Owner. " +
+    "It stays until a User accepts or rejects it; rejecting needs a reason, which reaches the Agent.",
+  properties: {
+    kind: { type: "string", const: "decision" },
+    at: { ...timestamp, description: "When the Agent proposed it." },
+    decision: ref("Decision"),
+    ticket: { anyOf: [ref("TicketRef"), { type: "null" }], description: "The Ticket it came from; null for none." },
   },
 } as const;
 
@@ -46,12 +73,12 @@ export function inboxRoutes(ctx: AppContext) {
               agent: {
                 type: "array",
                 items: { type: "string", format: "uuid" },
-                description: "Only items of these Agents: questions they asked, and Tickets delegated to them.",
+                description: "Only items of these Agents: questions they asked, Tickets delegated to them, and Decisions they proposed.",
               },
             },
           },
           response: {
-            200: answer("The signed-in User's Inbox: blocking questions first, then the other items, each oldest first", { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [questionItem, reviewItem] } } } }),
+            200: answer("The signed-in User's Inbox: blocking questions first, then the other items, each oldest first", { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [questionItem, reviewItem, unverifiedItem, decisionItem] } } } }),
             ...errors(400, 401, 403, 410),
           },
         },

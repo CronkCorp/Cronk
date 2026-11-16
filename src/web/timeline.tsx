@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Actor, agentActor, Avatar, type ActorLike } from "./components/actor.js";
 import { Button } from "./components/button.js";
-import { Chip, KindLabel, PRIORITY_NAMES } from "./components/tags.js";
+import { Chip, DecisionStatusPill, KindLabel, PRIORITY_NAMES } from "./components/tags.js";
 import { formatDay, RelativeTime, sameDay, useNow } from "./components/time.js";
 import { api, type Activity, type ActivityKind, type Comment, type NewComment, type RecordedChange, type RelationKind, type Report } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -198,6 +198,18 @@ export function ReportCard(props: { report: Report }) {
       <div className="tl-report-body">
         <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
       </div>
+      {r.decisions.length > 0 && (
+        <div className="tl-report-decisions">
+          <h4>Decisions proposed during the work</h4>
+          <ul>
+            {r.decisions.map((d) => (
+              <li key={d.key}>
+                <Link to={`/decisions/${d.key}`} className="link"><span className="mono">{d.key}</span> {d.title}</Link> <DecisionStatusPill status={d.status} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -326,6 +338,12 @@ export function describeChange(change: RecordedChange): ReactNode {
       return `linked the Document “${change.document.title}”`;
     case "document unlinked":
       return `unlinked the Document “${change.document.title}”`;
+    case "autonomous":
+      return change.to ? "turned on Autonomous Delegation" : "turned off Autonomous Delegation";
+    case "verification":
+      if (change.to === "unverified") return "completed it on its own, Unverified until a User Accepts it";
+      if (change.to === "verified") return "Accepted the completion";
+      return "ended its Verification";
   }
 }
 

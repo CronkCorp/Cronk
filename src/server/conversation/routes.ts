@@ -4,9 +4,10 @@ import { HttpError, requireActor, requireUser, type AppContext } from "../contex
 import { userActor } from "../actor.js";
 import { findStatusToMoveInto, listStatuses } from "../work/projects.js";
 import { updateTicket } from "../work/tickets.js";
-import { transaction, type Queryable } from "../db/database.js";
-import { answer, documentIdParam, errors, holding, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import type { Queryable } from "../db/database.js";
+import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
+import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
@@ -14,7 +15,7 @@ import { ticketsChanged } from "../work/ticket-changes.js";
 import { tellNewlyReady } from "../coordination/ready.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
-import { markWaiting, waitingEvent, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
+import { markWaiting, waitingEvent, withWaitingWork, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
 import { findComment, insertComment, listComments, publicComment, type Comment, type CommentTarget } from "./comments.js";
 
@@ -102,24 +103,9 @@ export function conversationRoutes(ctx: AppContext) {
       return { comment, answered, waiting: await markWaiting(tx, actor, comment, place, asker, comment.at, positioned) };
     };
 
-    /**
-     * Runs `fn` in a transaction, passing it what to tell `post` about the positions it takes,
-     * then `committed` with its result. Each position is expected on its Agent's stream
-     * (`LiveUpdates.expect`) before it commits, until `committed` pushes it (`pushWaiting`). If the
-     * transaction rolls back or `committed` throws, they are forgotten, so they never hold a
-     * stream's `ready` back for good.
-     */
-    const posting = async <T>(fn: (tx: Queryable, positioned: Positioned) => Promise<T>, committed: (result: T) => void): Promise<T> => {
-      const forget: (() => void)[] = [];
-      try {
-        const result = await transaction(ctx.db, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
-        committed(result);
-        return result;
-      } catch (err) {
-        for (const f of forget) f();
-        throw err;
-      }
-    };
+    /** Runs `fn` in a transaction, then `committed`, keeping the positions it takes expected meanwhile (see `withWaitingWork`). */
+    const posting = <T,>(fn: (tx: Queryable, positioned: Positioned) => Promise<T>, committed: (result: T) => void): Promise<T> =>
+      withWaitingWork(ctx, fn, committed);
 
     /**
      * Tells each Agent the Comment now waits for, through its live Agent Sessions. Call from `posting`'s `committed`.
@@ -143,16 +129,17 @@ export function conversationRoutes(ctx: AppContext) {
         schema: {
           params: ticketParams,
           body: newCommentBody,
-          response: { 201: answer("The Comment, posted on the Ticket", holding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
+          response: { 201: answer("The Comment, posted on the Ticket", savedHolding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { ticket, posted } = await posting(
+        const { ticket, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write");
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-            return { ticket, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body) };
+            const posted = await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body);
+            return { ticket, posted, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody({ body: request.body.body })) };
           },
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
@@ -163,7 +150,7 @@ export function conversationRoutes(ctx: AppContext) {
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
           },
         );
-        return reply.code(201).send({ comment: publicComment(posted.comment) });
+        return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
       },
     );
 
@@ -240,23 +227,24 @@ export function conversationRoutes(ctx: AppContext) {
         schema: {
           params: documentParams,
           body: newCommentBody,
-          response: { 201: answer("The Comment, posted on the Document", holding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
+          response: { 201: answer("The Comment, posted on the Document", savedHolding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { document, posted } = await posting(
+        const { document, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const document = await documentFor(tx, actor, request.params.id, "write");
             const place = { projectId: document.projectId, delegateId: null };
-            return { document, posted: await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document) };
+            const posted = await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document);
+            return { document, posted, avoidedWords: await avoidedWordsIn(tx, actor, document.projectId, titleAndBody({ body: request.body.body })) };
           },
           ({ document, posted }) => {
             ctx.live.publish(documentTopic(document.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } });
           },
         );
-        return reply.code(201).send({ comment: publicComment(posted.comment) });
+        return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
       },
     );
 

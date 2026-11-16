@@ -2,7 +2,7 @@ import type { Actor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { insertDocument, type Tree, type TreeEntry } from "../knowledge/documents.js";
-import { unwrapFolder, type Folder } from "./archive.js";
+import { textOf, unwrapFolder, type Folder } from "./archive.js";
 import { readFrontmatter } from "./frontmatter.js";
 import { MARKDOWN_FILE } from "../../shared/values.js";
 
@@ -33,7 +33,7 @@ export async function importMarkdownFolder(db: Queryable, tree: Tree, folder: Fo
   const create = async (planned: DocumentToCreate, parentId: string | null, depth: number) => {
     const document = await insertDocument(db, { tree, parentId, title: planned.title, body: planned.body, actor, now });
     if (document === "no such parent") throw new Error("A Document just created vanished");
-    created.push({ id: document.id, parentId, title: document.title, depth });
+    created.push({ id: document.id, parentId, title: document.title, depth, protected: false });
     for (const child of planned.children) await create(child, document.id, depth + 1);
   };
   for (const planned of toCreate) await create(planned, null, 0);
@@ -71,7 +71,7 @@ function documentsIn(entries: { path: string; relative: string }[], folder: Fold
 function documentFrom(path: string, folder: Folder, fallback: string): DocumentToCreate {
   let parsed: ReturnType<typeof readFrontmatter>;
   try {
-    parsed = readFrontmatter(folder.get(path)!.replace(/^\uFEFF/, ""));
+    parsed = readFrontmatter(textOf(folder.get(path)!).replace(/^\uFEFF/, ""));
   } catch (err) {
     throw new HttpError(400, `${path} can't be read: ${(err as Error).message}`);
   }

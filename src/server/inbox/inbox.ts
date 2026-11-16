@@ -8,19 +8,27 @@ import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, type Ticket, type TicketRef } from "../work/tickets.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
+import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 
 /**
- * A User's Inbox: everything waiting on them. In Phase 1 that is the Tickets in an In Review
- * Status they are Assignee of, and the open questions of the Agents they own.
+ * A User's Inbox: everything waiting on them: the Tickets in an In Review Status they are Assignee of,
+ * the Unverified completions of Tickets they are Assignee of, the open questions of the Agents they own, and
+ * the Decisions Agents proposed that they review (see `PROPOSED_DECISIONS`).
  */
 
-/** A Ticket waiting for its Assignee's review, with its Reports. `at` is when it entered its Status. */
-export interface ReviewItem {
-  kind: "review";
+/** A Ticket waiting on its Assignee, with its Reports. `at` is when it entered its Status. */
+interface TicketItem<K extends string> {
+  kind: K;
   at: Date;
   ticket: Ticket;
   reports: Report[];
 }
+
+/** A Ticket waiting for its Assignee's review. */
+export type ReviewItem = TicketItem<"review">;
+
+/** An Agent's completion under Autonomous Delegation, waiting for its Assignee to Accept it. */
+export type UnverifiedItem = TicketItem<"unverified">;
 
 /** An open question of one of the User's Agents, with the Ticket it is on. `at` is when it was asked. */
 export interface QuestionItem {
@@ -30,11 +38,44 @@ export interface QuestionItem {
   ticket: TicketRef;
 }
 
+/**
+ * A Decision an Agent proposed, waiting for a User to accept or reject it, with the Ticket it came
+ * from, if any. `at` is when it was proposed.
+ */
+export interface DecisionItem {
+  kind: "decision";
+  at: Date;
+  decision: Decision;
+  ticket: TicketRef | null;
+}
+
 /** One item waiting on a User. */
-export type InboxItem = ReviewItem | QuestionItem;
+export type InboxItem = ReviewItem | UnverifiedItem | QuestionItem | DecisionItem;
 
 /** The kinds of Inbox item, which the Inbox filters by. */
-export const INBOX_KINDS = ["review", "question"] as const;
+export const INBOX_KINDS = ["review", "unverified", "question", "decision"] as const;
+
+/**
+ * The Decisions Agents proposed, as `d`, each with `reviewer_id`, the User who reviews it while it is
+ * proposed: the Assignee of the Ticket it came from, or else the proposing Agent's Owner.
+ */
+const AGENTS_DECISIONS = `
+  SELECT d.id, d.project_id, d.status, d.created_at, COALESCE(t.assignee_id, v.actor_user_id) AS reviewer_id
+  FROM decisions d JOIN decision_versions v ON v.decision_id = d.id AND v.number = 1
+    LEFT JOIN tickets t ON t.id = d.source_ticket_id
+  WHERE v.actor_kind = 'agent'`;
+
+/** The Decisions Agents proposed that are still proposed, as `AGENTS_DECISIONS` gives them. */
+const PROPOSED_DECISIONS = `SELECT * FROM (${AGENTS_DECISIONS}) a WHERE a.status = 'proposed'`;
+
+/**
+ * The User who reviews the Decision with this id while it is proposed, if an Agent proposed it, whatever
+ * its status now: whose Inbox a change to it may concern.
+ */
+export async function decisionReviewer(db: Queryable, decisionId: string): Promise<string | undefined> {
+  const { rows } = await db.query<{ reviewer_id: string }>(`SELECT * FROM (${AGENTS_DECISIONS}) d WHERE d.id = $1`, [decisionId]);
+  return rows[0]?.reviewer_id;
+}
 
 /** Narrows the Inbox: an item matches when, for every field given, it has one of that field's values. */
 export interface InboxFilter {
@@ -56,9 +97,39 @@ export async function listInbox(db: Queryable, user: User, filter: InboxFilter =
   const items = [
     ...(wants("question") ? await openQuestions(db, user, projectIds) : []),
     ...(wants("review") ? await reviews(db, user, projectIds) : []),
-  ].filter((item) => !agents || agents.has((item.kind === "question" ? item.question.agent.id : item.ticket.delegate?.id) ?? ""));
+    ...(wants("unverified") ? await unverified(db, user, projectIds) : []),
+    ...(wants("decision") ? await proposedDecisions(db, user, projectIds, !filter.projectKeys?.length) : []),
+  ].filter((item) => !agents || agents.has(agentOf(item) ?? ""));
   const pinned = (item: InboxItem) => (item.kind === "question" && item.question.blocking ? 0 : 1);
   return items.sort((a, b) => pinned(a) - pinned(b) || a.at.getTime() - b.at.getTime());
+}
+
+/** The Agent an item is about: the one that asked, that proposed, or that a Ticket is delegated to. */
+function agentOf(item: InboxItem): string | undefined {
+  if (item.kind === "question") return item.question.agent.id;
+  if (item.kind === "decision") return item.decision.proposedBy.id;
+  return item.ticket.delegate?.id;
+}
+
+/** The proposed Decisions `user` reviews, in the Projects `projectIds` and, with `inWorkspace`, the Workspace's. */
+async function proposedDecisions(db: Queryable, user: User, projectIds: string[], inWorkspace: boolean): Promise<DecisionItem[]> {
+  const { rows } = await db.query<{ id: string; created_at: Date }>(
+    `SELECT d.id, d.created_at FROM (${PROPOSED_DECISIONS}) d
+     WHERE d.reviewer_id = $1 AND (d.project_id = ANY($2::uuid[]) OR (d.project_id IS NULL AND $3))
+     ORDER BY d.created_at`,
+    [user.id, projectIds, inWorkspace],
+  );
+  const decisions = await Promise.all(rows.map(async (r) => ({ at: r.created_at, decision: (await findDecisionById(db, r.id))! })));
+  const sources = await db.query<{ id: string; source_ticket_id: string }>(
+    "SELECT id, source_ticket_id FROM decisions WHERE id = ANY($1::uuid[]) AND source_ticket_id IS NOT NULL",
+    [rows.map((r) => r.id)],
+  );
+  const ticketOf = new Map(sources.rows.map((r) => [r.id, r.source_ticket_id]));
+  const tickets = new Map((await findTicketsByIds(db, [...new Set(ticketOf.values())])).map((t) => [t.id, t]));
+  return decisions.map(({ at, decision }) => {
+    const ticket = tickets.get(ticketOf.get(decision.id) ?? "");
+    return { kind: "decision", at, decision, ticket: ticket ? { key: ticket.key, title: ticket.title, status: ticket.status } : null };
+  });
 }
 
 async function openQuestions(db: Queryable, user: User, projectIds: string[]): Promise<QuestionItem[]> {
@@ -70,17 +141,32 @@ async function openQuestions(db: Queryable, user: User, projectIds: string[]): P
   });
 }
 
-async function reviews(db: Queryable, user: User, projectIds: string[]): Promise<ReviewItem[]> {
+function reviews(db: Queryable, user: User, projectIds: string[]): Promise<ReviewItem[]> {
+  return assignedTickets(db, user, projectIds, "s.category = 'in_review'", "review");
+}
+
+function unverified(db: Queryable, user: User, projectIds: string[]): Promise<UnverifiedItem[]> {
+  return assignedTickets(db, user, projectIds, "t.verification = 'unverified'", "unverified");
+}
+
+/** The Tickets `user` is Assignee of that match `where`, each with its Reports, at when it entered its Status. */
+async function assignedTickets<K extends "review" | "unverified">(
+  db: Queryable,
+  user: User,
+  projectIds: string[],
+  where: string,
+  kind: K,
+): Promise<TicketItem<K>[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
     `SELECT t.id, COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at) AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id
-     WHERE t.assignee_id = $1 AND s.category = 'in_review' AND t.project_id = ANY($2::uuid[])
+     WHERE t.assignee_id = $1 AND ${where} AND t.project_id = ANY($2::uuid[])
      ORDER BY at, p.key, t.number`,
     [user.id, projectIds],
   );
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
   const at = new Map(rows.map((r) => [r.id, r.at]));
-  return Promise.all(tickets.map(async (ticket) => ({ kind: "review" as const, at: at.get(ticket.id)!, ticket, reports: await listTicketReports(db, ticket.id) })));
+  return Promise.all(tickets.map(async (ticket) => ({ kind, at: at.get(ticket.id)!, ticket, reports: await listTicketReports(db, ticket.id) })));
 }
 
 /**
@@ -93,18 +179,21 @@ export function inboxesChanged(live: LiveUpdates, userIds: (string | null | unde
 
 /**
  * Ids of the Users with items on the Tickets of a Project, or of a Status: the Assignees of those
- * in an In Review Status, and the Owners of Agents with open questions on them. Keep it in step
+ * in an In Review Status or Unverified, and the Owners of Agents with open questions on them; and for a
+ * Project, the Users reviewing its proposed Decisions. Keep it in step
  * with the item kinds `listInbox` gathers.
  */
 export async function usersWithItemsOn(db: Queryable, scope: { projectId: string } | { statusId: string }): Promise<string[]> {
   const [column, id] = "projectId" in scope ? ["t.project_id", scope.projectId] : ["t.status_id", scope.statusId];
   const { rows } = await db.query<{ id: string }>(
     `SELECT t.assignee_id AS id FROM tickets t JOIN statuses s ON s.id = t.status_id
-     WHERE ${column} = $1 AND s.category = 'in_review' AND t.assignee_id IS NOT NULL
+     WHERE ${column} = $1 AND (s.category = 'in_review' OR t.verification = 'unverified') AND t.assignee_id IS NOT NULL
      UNION
      SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
-     WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL`,
-    [id],
+     WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL
+     UNION
+     SELECT d.reviewer_id FROM (${PROPOSED_DECISIONS}) d WHERE $2 AND d.project_id = $1`,
+    [id, "projectId" in scope],
   );
   return rows.map((r) => r.id);
 }

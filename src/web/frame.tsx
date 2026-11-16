@@ -4,13 +4,14 @@ import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { api, watchInbox, type Project, type User, type Workspace } from "./api.js";
 import { Link, navigate, useLocation } from "./router.js";
+import { decisionsAddress } from "./decisions.js";
 import { routeOf, projectKeyOf, projectKeyOfTicket, termsAddress, type Route } from "./routes.js";
 import { SearchBox } from "./search.js";
 import { useLoad } from "./ui.js";
 
 // The app frame's sidebar: docs/ui.md § Layout and navigation.
 
-/** Which sidebar item a page belongs to: a Ticket marks its Project, a Document marks Documents. */
+/** Which sidebar item a page belongs to: a Ticket marks its Project, a Document marks Documents, a Decision marks Decisions. */
 function currentItem(route: Route): string | undefined {
   switch (route.page) {
     case "terms":
@@ -24,6 +25,9 @@ function currentItem(route: Route): string | undefined {
     case "users":
     case "settings":
       return route.page === "document" ? "documents" : route.page;
+    case "decisions":
+    case "decision":
+      return "decisions";
     case "project":
     case "projectDocuments":
       return projectItem(route.key);
@@ -99,6 +103,9 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         </NavItem>
         <NavItem to={termsAddress(cameFrom)} current={current === "terms"}>
           <span className="nav-text">Terms</span>
+        </NavItem>
+        <NavItem to={decisionsAddress(cameFrom)} current={current === "decisions"}>
+          <span className="nav-text">Decisions</span>
         </NavItem>
         <NavItem to="/agents" current={current === "agents"}>
           <span className="nav-text">Agents</span>

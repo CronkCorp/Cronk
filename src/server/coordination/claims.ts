@@ -82,6 +82,26 @@ export async function listLiveClaims(db: Queryable, now: Date): Promise<Map<stri
   return new Map(rows.map((r) => [r.id, r.session_id]));
 }
 
+/** A Claim an Agent Session holds, with its Ticket and where that Ticket is. */
+export interface SessionClaim {
+  claimId: string;
+  ticketId: string;
+  ticketKey: string;
+  projectId: string;
+  /** Whether the Ticket's Project is private. */
+  private: boolean;
+}
+
+/** The Claims the Agent Session `sessionId` holds, in key order. Pass a live Session: a Claim is live exactly while its Session is. */
+export async function listSessionClaims(db: Queryable, sessionId: string): Promise<SessionClaim[]> {
+  const { rows } = await db.query<{ claim_id: string; id: string; key: string; project_id: string; visibility: string }>(
+    `SELECT t.claim_id, t.id, ${ticketKeySql("p", "t")} AS key, t.project_id, p.visibility
+     FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.claim_session_id = $1 ORDER BY p.key, t.number`,
+    [sessionId],
+  );
+  return rows.map((r) => ({ claimId: r.claim_id, ticketId: r.id, ticketKey: r.key, projectId: r.project_id, private: r.visibility === "private" }));
+}
+
 /** A Ticket an Agent Session holds the Claim on, as the Agents list shows it. */
 export interface ClaimedTicket {
   ticketKey: string;
