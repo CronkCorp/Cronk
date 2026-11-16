@@ -268,6 +268,23 @@ describe("the tickets tool", () => {
   });
 });
 
+describe("the tickets tool's Discovered Tickets", () => {
+  it("files a Discovered Ticket without a Claim and edits it until a User delegates it", async () => {
+    const { cronk, admin, claude } = await delegatedSetup(2);
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-2" });
+
+    expect(await callTool(mcp, "tickets", { action: "file", project: "CRONK" })).toEqual({ isError: true, body: "The file action needs a title" });
+    const filed = await callTool(mcp, "tickets", { action: "file", project: "CRONK", title: "Stale cache", description: "Seen in CRONK-2.", source: "CRONK-2" });
+    expect(filed.body.ticket).toMatchObject({ key: "CRONK-3", status: { category: "backlog" }, delegate: null, discovered: { sourceTicket: { key: "CRONK-2" } } });
+
+    expect((await callTool(mcp, "tickets", { action: "edit", key: "CRONK-3", title: "Stale cache after deploy" })).body.ticket.title).toBe("Stale cache after deploy");
+    await admin.patch("/api/tickets/CRONK-3", { delegateId: claude.agentId });
+    expect((await callTool(mcp, "tickets", { action: "edit", key: "CRONK-3", title: "Again" })).isError).toBe(true);
+  });
+});
+
 describe("the guidance tool", () => {
   it("fetches the Workspace's Guidance, or a Project's, through the API's access rules", async () => {
     const { cronk, admin } = await startInstalledCronk();

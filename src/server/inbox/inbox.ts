@@ -6,7 +6,7 @@ import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
-import { findTicketsByIds, type Ticket, type TicketRef } from "../work/tickets.js";
+import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -14,8 +14,9 @@ import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge
 /**
  * A User's Inbox: everything waiting on them: the Tickets in an In Review Status they are Assignee of,
  * the Unverified completions of Tickets they are Assignee of, the open questions of the Agents they own, and
- * the Decisions Agents proposed that they review (see `PROPOSED_DECISIONS`), and the open Suggestions on
- * Project items that they review (see `reviewerSql`). Suggestions on Workspace items go to Triage instead.
+ * the Decisions Agents proposed that they review (see `PROPOSED_DECISIONS`), the open Suggestions on
+ * Project items that they review (see `reviewerSql`), and the Discovered Tickets waiting for them (see `isWaitingDiscovery`).
+ * Suggestions on Workspace items, and unassigned Discovered Tickets, go to Triage instead.
  */
 
 /** A Ticket waiting on someone, with its Reports. `at` is when it entered its Status. */
@@ -31,6 +32,9 @@ export type ReviewItem = TicketItem<"review">;
 
 /** An Agent's completion under Autonomous Delegation, waiting for its Assignee to Accept it. */
 export type UnverifiedItem = TicketItem<"unverified">;
+
+/** A Discovered Ticket waiting for its Assignee to delegate it, keep it in Backlog or cancel it. `at` is when it was filed. */
+export type DiscoveredItem = TicketItem<"discovered">;
 
 /** An open question of one of the User's Agents, with the Ticket it is on. `at` is when it was asked. */
 export interface QuestionItem {
@@ -59,10 +63,10 @@ export interface SuggestionInboxItem {
 }
 
 /** One item waiting on a User. */
-export type InboxItem = ReviewItem | UnverifiedItem | QuestionItem | DecisionItem | SuggestionInboxItem;
+export type InboxItem = ReviewItem | UnverifiedItem | QuestionItem | DecisionItem | SuggestionInboxItem | DiscoveredItem;
 
 /** The kinds of Inbox item, which the Inbox filters by. */
-export const INBOX_KINDS = ["review", "unverified", "question", "decision", "suggestion"] as const;
+export const INBOX_KINDS = ["review", "unverified", "question", "decision", "suggestion", "discovered"] as const;
 
 /** The open Suggestions on Project items, as `s`, each with `reviewer_id`, the User who reviews it (see `reviewerSql`). */
 const OPEN_SUGGESTIONS = `
@@ -115,16 +119,18 @@ export async function listInbox(db: Queryable, user: User, filter: InboxFilter =
     ...(wants("unverified") ? await unverified(db, user, projectIds) : []),
     ...(wants("decision") ? await proposedDecisions(db, user, projectIds, !filter.projectKeys?.length) : []),
     ...(wants("suggestion") ? await openSuggestions(db, user, projectIds) : []),
+    ...(wants("discovered") ? await ticketItems(db, "discovered", { assigneeId: user.id, projectIds }) : []),
   ].filter((item) => !agents || agents.has(agentOf(item) ?? ""));
   const pinned = (item: InboxItem) => (item.kind === "question" && item.question.blocking ? 0 : 1);
   return items.sort((a, b) => pinned(a) - pinned(b) || a.at.getTime() - b.at.getTime());
 }
 
-/** The Agent an item is about: the one that asked, that proposed, or that a Ticket is delegated to. */
+/** The Agent an item is about: the one that asked, that proposed, that filed a Discovered Ticket, or that a Ticket is delegated to. */
 function agentOf(item: InboxItem): string | undefined {
   if (item.kind === "question") return item.question.agent.id;
   if (item.kind === "decision") return item.decision.proposedBy.id;
   if (item.kind === "suggestion") return item.suggestion.proposedBy.id;
+  if (item.kind === "discovered") return item.ticket.discovered?.agent.id;
   return item.ticket.delegate?.id;
 }
 
@@ -176,7 +182,7 @@ function unverified(db: Queryable, user: User, projectIds: string[]): Promise<Un
 }
 
 /** What makes a Ticket each kind of Ticket item, as SQL on the Ticket `t` and its Status `s`. */
-const TICKET_KINDS = { review: "s.category = 'in_review'", unverified: "t.verification = 'unverified'" } as const;
+const TICKET_KINDS = { review: "s.category = 'in_review'", unverified: "t.verification = 'unverified'", discovered: isWaitingDiscoverySql("t", "s") } as const;
 
 /**
  * The Tickets waiting as `kind` items in the Projects `projectIds`, whose Assignee is `assigneeId` (none, with null), each with
@@ -232,7 +238,7 @@ export function waitingItemsChanged(live: LiveUpdates, userIds: (string | null |
 
 /**
  * Ids of the Users with items on the Tickets of a Project, or of a Status: the Assignees of those
- * in an In Review Status or Unverified, and the Owners of Agents with open questions on them; and for a
+ * in an In Review Status, Unverified or Discovered and waiting, and the Owners of Agents with open questions on them; and for a
  * Project, the Users reviewing its proposed Decisions and open Suggestions. Keep it in step
  * with the item kinds `listInbox` gathers.
  */
@@ -240,7 +246,7 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
   const [column, id] = "projectId" in scope ? ["t.project_id", scope.projectId] : ["t.status_id", scope.statusId];
   const { rows } = await db.query<{ id: string }>(
     `SELECT t.assignee_id AS id FROM tickets t JOIN statuses s ON s.id = t.status_id
-     WHERE ${column} = $1 AND (s.category = 'in_review' OR t.verification = 'unverified') AND t.assignee_id IS NOT NULL
+     WHERE ${column} = $1 AND (s.category = 'in_review' OR t.verification = 'unverified' OR ${isWaitingDiscoverySql("t", "s")}) AND t.assignee_id IS NOT NULL
      UNION
      SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
      WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL

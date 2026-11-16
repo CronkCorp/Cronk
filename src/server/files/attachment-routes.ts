@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { findCommentsByIds, type Comment } from "../conversation/comments.js";
-import { requireClaimHolder } from "../coordination/claims.js";
+import { requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import type { Document } from "../knowledge/documents.js";
@@ -103,7 +103,7 @@ export function attachmentRoutes(ctx: AppContext) {
       "/api/tickets/:key/attachments",
       {
         schema: uploadSchema(
-          "Attaches a file to the Ticket. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim.",
+          "Attaches a file to the Ticket. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.",
           pathParams({ key: ticketKeyParam }),
         ),
       },
@@ -233,7 +233,7 @@ export function attachmentRoutes(ctx: AppContext) {
         schema: {
           description:
             "Deletes an Attachment and its file. Needs what attaching a file to its Ticket, Document or Comment needs: " +
-            "Write where it belongs and, for an Agent, the Ticket's Claim, an unprotected Document, or a Comment it posted. " +
+            "Write where it belongs and, for an Agent, the Ticket's Claim (or its own undelegated Discovered Ticket), an unprotected Document, or a Comment it posted. " +
             "Any User with Write may delete a Comment's Attachment, whoever posted the Comment.",
           params: pathParams({ id: attachmentIdParam }),
           response: { 204: noContent("The Attachment is deleted"), ...errors(401, 403, 404, 409, 410) },
@@ -273,10 +273,13 @@ function attachmentsChanged(ctx: AppContext, attachment: Attachment): void {
   if (attachment.artifactId) ctx.live.publish(artifactTopic(attachment.artifactId), { event: "attachments", data: {} });
 }
 
-/** The Ticket with this key, if `actor` may attach files to it: Write in its Project and, for an Agent, its Claim. Run inside a transaction. */
+/**
+ * The Ticket with this key, if `actor` may attach files to it: Write in its Project and, for an Agent, its Claim, unless it is
+ * the Agent's own undelegated Discovered Ticket. Run inside a transaction.
+ */
 async function ticketToAttachTo(tx: Queryable, actor: Actor, key: string, now: Date): Promise<Ticket> {
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
-  if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its Attachments");
+  if (actor.kind === "agent") await requireAgentMayChange(tx, actor, ticket, now, "changing its Attachments");
   return ticket;
 }
 

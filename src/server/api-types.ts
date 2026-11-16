@@ -37,7 +37,7 @@ import type { EmbeddedIn as StoredEmbeddedIn } from "./files/artifact-embeds.js"
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, DecisionItem, ReviewItem, SuggestionInboxItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { QuestionItem, DecisionItem, DiscoveredItem, ReviewItem, SuggestionInboxItem, UnverifiedItem } from "./inbox/inbox.js";
 import type { UnattendedItem } from "./inbox/triage.js";
 import type { Suggestion as StoredSuggestion, SuggestedContent } from "./knowledge/suggestions.js";
 import type {
@@ -177,14 +177,15 @@ export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
 /**
  * One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, a Decision an
- * Agent proposed, or a Suggestion an Agent made.
+ * Agent proposed, a Suggestion an Agent made, or a Discovered Ticket waiting for them.
  */
 export type InboxItem =
   | Serialized<ReviewItem>
   | Serialized<UnverifiedItem>
   | (Serialized<Omit<QuestionItem, "question">> & { question: Activity })
   | Serialized<DecisionItem>
-  | Serialized<SuggestionInboxItem>;
+  | Serialized<SuggestionInboxItem>
+  | Serialized<DiscoveredItem>;
 
 /** A new Version of a Protected item, or of Guidance, an Agent proposes for a User to accept or reject (ADR 0014). */
 export type Suggestion = Serialized<StoredSuggestion>;
@@ -193,9 +194,9 @@ export type InboxKind = InboxItem["kind"];
 
 /**
  * One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, a delegated or In Review Ticket
- * whose Assignee is deactivated or can't see its Project, or a Suggestion nobody reviews.
+ * whose Assignee is deactivated or can't see its Project, a Suggestion nobody reviews, or a Discovered Ticket with no Assignee who can act on it.
  */
-export type TriageItem = Serialized<UnverifiedItem> | Serialized<UnattendedItem> | Serialized<SuggestionInboxItem>;
+export type TriageItem = Serialized<UnverifiedItem> | Serialized<UnattendedItem> | Serialized<SuggestionInboxItem> | Serialized<DiscoveredItem>;
 export type TriageKind = TriageItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
