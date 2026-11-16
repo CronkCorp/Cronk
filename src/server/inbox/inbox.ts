@@ -18,8 +18,8 @@ import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge
  * Project items that they review (see `reviewerSql`). Suggestions on Workspace items go to Triage instead.
  */
 
-/** A Ticket waiting on its Assignee, with its Reports. `at` is when it entered its Status. */
-interface TicketItem<K extends string> {
+/** A Ticket waiting, with its Reports. `at` is when it entered its Status. */
+export interface TicketItem<K extends string> {
   kind: K;
   at: Date;
   ticket: Ticket;
@@ -188,12 +188,21 @@ export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
   which: { assigneeId: string | null; projectIds: string[] },
 ): Promise<TicketItem<K>[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
-    `SELECT t.id, COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at) AS at
+    `SELECT t.id, ${ENTERED_STATUS_AT} AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id
      WHERE t.assignee_id IS NOT DISTINCT FROM $1::uuid AND ${TICKET_KINDS[kind]} AND t.project_id = ANY($2::uuid[])
      ORDER BY at, p.key, t.number`,
     [which.assigneeId, which.projectIds],
   );
+  return withReports(db, kind, rows);
+}
+
+/** When the Ticket `t` entered its Status, as SQL. */
+export const ENTERED_STATUS_AT =
+  "COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at)";
+
+/** The Tickets with these ids as `kind` items, each with its Reports, in the order given. */
+export async function withReports<K extends string>(db: Queryable, kind: K, rows: { id: string; at: Date }[]): Promise<TicketItem<K>[]> {
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
   const at = new Map(rows.map((r) => [r.id, r.at]));
   return Promise.all(tickets.map(async (ticket) => ({ kind, at: at.get(ticket.id)!, ticket, reports: await listTicketReports(db, ticket.id) })));

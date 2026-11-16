@@ -204,6 +204,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **A Discovered Ticket** shows where it was found and a `--warn` banner listing the Tickets it pauses, with a link to remove a block. Actions: **Delegate to <Agent>** (primary, the Agent that found it), **Delegate to…**, **Keep in Backlog**, and Cancel in the ghost style.
 - **A proposed Decision** shows who proposed it and from which Ticket, its body, and **Accept** (primary), **Reject…**, which opens a required reason box (the reason reaches the Agent as Waiting Work), and Open Decision.
 - **Triage** is the same split view, with the same keyboard shortcuts. A Discovered Ticket's primary action is **Take it**, which assigns it to the User.
+- **An Unattended Ticket** (in Triage only) is a delegated or In Review Ticket whose Assignee is deactivated or can't see its Project. The list names why ("Carol is deactivated", "Carol can't see CRONK"); the detail pane repeats it in a `--warn` banner, then shows the Status, the Delegate and any Reports. Actions: **Reassign to…** (primary), a menu of the active Users with the signed-in User first, and Open Ticket. A note says the Delegate stays only if it goes to the Delegate's Owner.
 
 | Side by side | Merge on accept | Reopen | Triage |
 |---|---|---|---|

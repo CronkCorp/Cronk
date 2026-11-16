@@ -4,7 +4,7 @@ import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
-import { ticketItems, type SuggestionInboxItem, type UnverifiedItem } from "./inbox.js";
+import { ENTERED_STATUS_AT, ticketItems, withReports, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
 
 /**
  * Triage: the shared list of waiting items with no clear User to go to. Each User sees the items they could
@@ -13,11 +13,20 @@ import { ticketItems, type SuggestionInboxItem, type UnverifiedItem } from "./in
  * `waitingItemsChanged`), which tell Triage whenever any waiting item may have changed.
  */
 
+/** Why an unattended Ticket's Assignee can't act on it: they are deactivated, or have no access to its Project. */
+export type UnattendedReason = "deactivated" | "no_access";
+
+/**
+ * An open Ticket, delegated or In Review, whose Assignee is deactivated or can't see its Project, so it waits in an Inbox
+ * no one reads until someone reassigns it.
+ */
+export type UnattendedItem = TicketItem<"unattended"> & { reason: UnattendedReason };
+
 /** One item in Triage. */
-export type TriageItem = UnverifiedItem | SuggestionInboxItem;
+export type TriageItem = UnverifiedItem | UnattendedItem | SuggestionInboxItem;
 
 /** The kinds of Triage item, which Triage filters by. */
-export const TRIAGE_KINDS = ["unverified", "suggestion"] as const;
+export const TRIAGE_KINDS = ["unverified", "unattended", "suggestion"] as const;
 
 /** Narrows Triage: an item matches when, for every field given, it has one of that field's values. */
 export interface TriageFilter {
@@ -33,6 +42,7 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
   const wants = (kind: TriageItem["kind"]) => !filter.kinds?.length || filter.kinds.includes(kind);
   const items = [
     ...(wants("unverified") ? await unverified(db, projectIds) : []),
+    ...(wants("unattended") ? await unattended(db, projectIds) : []),
     ...(wants("suggestion") ? await suggestions(db, user, projectIds, inWorkspace) : []),
   ];
   return items.sort((a, b) => a.at.getTime() - b.at.getTime());
@@ -41,6 +51,26 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
 /** The Unverified completions of Tickets with no Assignee in the Projects `projectIds`, which any User with Write there may Accept. */
 function unverified(db: Queryable, projectIds: string[]): Promise<UnverifiedItem[]> {
   return ticketItems(db, "unverified", { assigneeId: null, projectIds });
+}
+
+/**
+ * The unattended Tickets in the Projects `projectIds`: open, delegated or In Review, with an Assignee who is deactivated or
+ * has no access to the Project, as `userAccess` in identity/access.ts resolves it (Admins have Write everywhere; a listed Member
+ * has what is listed; otherwise an open Project gives Write and a private one nothing). `at` is when it entered its Status.
+ */
+async function unattended(db: Queryable, projectIds: string[]): Promise<UnattendedItem[]> {
+  const { rows } = await db.query<{ id: string; at: Date; reason: UnattendedReason }>(
+    `SELECT t.id, ${ENTERED_STATUS_AT} AS at, CASE WHEN u.deactivated_at IS NOT NULL THEN 'deactivated' ELSE 'no_access' END AS reason
+     FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id
+       LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = u.id
+     WHERE t.project_id = ANY($1::uuid[]) AND s.category NOT IN ('completed', 'canceled')
+       AND (t.delegate_id IS NOT NULL OR s.category = 'in_review')
+       AND (u.deactivated_at IS NOT NULL OR (u.role <> 'admin' AND m.user_id IS NULL AND p.visibility = 'private'))
+     ORDER BY at, p.key, t.number`,
+    [projectIds],
+  );
+  const reason = new Map(rows.map((r) => [r.id, r.reason]));
+  return (await withReports(db, "unattended", rows)).map((item) => ({ ...item, reason: reason.get(item.ticket.id)! }));
 }
 
 /**

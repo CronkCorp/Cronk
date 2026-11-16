@@ -151,3 +151,137 @@ describe("Triage's live updates", () => {
     expect((await agent.get("/api/triage")).status).toBe(403);
   });
 });
+
+/**
+ * Ada, the Admin; Bob, a Member with Write in the open Project CRONK; Rita, with Read there; and Carol, Assignee of CRONK-1, which
+ * is delegated to her Agent carol-bot.
+ */
+async function carolsDelegatedTicket() {
+  const { cronk, admin } = await startInstalledCronk();
+  await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+  await admin.post("/api/projects/CRONK/tickets", { title: "Fix the cache" });
+  const bob = await joinAs(cronk, admin, "bob@example.com");
+  const rita = await joinAs(cronk, admin, "rita@example.com");
+  const ritaId = (await rita.get("/api/me")).body.user.id;
+  await admin.put(`/api/projects/CRONK/members/${ritaId}`, { access: "read" });
+  const carol = await joinAs(cronk, admin, "carol@example.com");
+  const carolId: string = (await carol.get("/api/me")).body.user.id;
+  const carolBot = await registerAgent(carol, "carol-bot");
+  const assigned = await admin.patch("/api/tickets/CRONK-1", { assigneeId: carolId, delegateId: carolBot.agentId });
+  if (assigned.status !== 200) throw new Error(`Assigning failed: ${JSON.stringify(assigned.body)}`);
+  return { cronk, admin, bob, rita, carol, carolId, carolBot };
+}
+
+describe("Triage's unattended Tickets", () => {
+  it("lists a delegated Ticket whose Assignee is deactivated to the Users with Write in its Project, saying why", async () => {
+    const { admin, bob, rita, carolId } = await carolsDelegatedTicket();
+    expect(await triageLines(admin)).toEqual([]);
+
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+
+    const { items } = (await bob.get("/api/triage")).body;
+    expect(items).toMatchObject([{ kind: "unattended", reason: "deactivated", ticket: { key: "CRONK-1", assignee: { id: carolId }, delegate: { name: "carol-bot" } } }]);
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(rita)).toEqual([]);
+    expect(await triageLines(admin, "?kind=unattended")).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(admin, "?kind=suggestion")).toEqual([]);
+  });
+
+  it("lists a delegated Ticket whose Assignee loses access to its Project, when they leave a private Project's members or it becomes private without them", async () => {
+    const { admin, bob, rita, carolId } = await carolsDelegatedTicket();
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await admin.put(`/api/projects/CRONK/members/${bobId}`, { access: "write" });
+    await admin.put(`/api/projects/CRONK/members/${carolId}`, { access: "read" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    // Read is still access: Carol can see CRONK-1 in her Inbox.
+    expect(await triageLines(admin)).toEqual([]);
+
+    expect((await admin.delete(`/api/projects/CRONK/members/${carolId}`)).status).toBe(204);
+
+    expect((await bob.get("/api/triage")).body.items).toMatchObject([{ kind: "unattended", reason: "no_access", ticket: { key: "CRONK-1" } }]);
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(rita)).toEqual([]);
+
+    // Back to open, Carol has Write again; private again without her listed, she has nothing.
+    await admin.patch("/api/projects/CRONK", { visibility: "open" });
+    expect(await triageLines(admin)).toEqual([]);
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1"]);
+  });
+
+  it("drops it for everyone once it is reassigned to an active User with access, or its Assignee is reactivated", async () => {
+    const { cronk, admin, bob, carolId } = await carolsDelegatedTicket();
+    await admin.post("/api/projects/CRONK/tickets", { title: "Tidy the logs" });
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: carolId, statusId: await statusIn(admin, "in_review") });
+    const dave = await joinAs(cronk, admin, "dave@example.com");
+    const daveId = (await dave.get("/api/me")).body.user.id;
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await admin.put(`/api/projects/CRONK/members/${bobId}`, { access: "write" });
+    await admin.put(`/api/projects/CRONK/members/${carolId}`, { access: "write" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1", "unattended CRONK-2"]);
+
+    // Dave is active but can't see CRONK, so it can't go to him.
+    expect((await admin.patch("/api/tickets/CRONK-2", { assigneeId: daveId })).status).toBe(400);
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1", "unattended CRONK-2"]);
+    expect((await bob.patch("/api/tickets/CRONK-2", { assigneeId: bobId })).status).toBe(200);
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1"]);
+
+    await admin.patch(`/api/users/${carolId}`, { active: true });
+    expect(await triageLines(admin)).toEqual([]);
+    expect(await triageLines(bob)).toEqual([]);
+  });
+
+  it("drops it once it is neither delegated nor In Review, and never lists such a Ticket", async () => {
+    const { admin, carolId } = await carolsDelegatedTicket();
+    await admin.post("/api/projects/CRONK/tickets", { title: "Tidy the logs" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Write the docs" });
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: carolId });
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: carolId, statusId: await statusIn(admin, "in_review") });
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1", "unattended CRONK-3"]);
+
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: null });
+    await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "completed") });
+    expect(await triageLines(admin)).toEqual([]);
+  });
+
+  it("leaves the Ticket's Assignee, Delegate and Changes as they were when its Assignee is deactivated", async () => {
+    const { admin, carolId, carolBot } = await carolsDelegatedTicket();
+    const before = (await admin.get("/api/tickets/CRONK-1")).body.ticket;
+    const changes = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes;
+
+    expect((await admin.patch(`/api/users/${carolId}`, { active: false })).status).toBe(200);
+
+    const after = (await admin.get("/api/tickets/CRONK-1")).body.ticket;
+    expect(after.assignee).toEqual(before.assignee);
+    expect(after.assignee.id).toBe(carolId);
+    expect(after.delegate).toEqual({ id: carolBot.agentId, name: "carol-bot" });
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes).toEqual(changes);
+  });
+
+  it("lists a delegated Ticket that upgrading assigned to its Delegate's deactivated Owner", async () => {
+    const { cronk, admin, bob, carolId } = await carolsDelegatedTicket();
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    // As before the rule that delegated work has an Assignee: CRONK-1 delegated to carol-bot with none.
+    await cronk.undoMigration("0018_assign_delegated_tickets", "UPDATE tickets SET assignee_id = NULL");
+    await cronk.restart();
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.assignee).toMatchObject({ id: carolId });
+    expect((await bob.get("/api/triage")).body.items).toMatchObject([{ kind: "unattended", reason: "deactivated", ticket: { key: "CRONK-1" } }]);
+  });
+
+  it("tells Triage when an Assignee loses access to a Project", async () => {
+    const { admin, bob, carolId } = await carolsDelegatedTicket();
+    await admin.put(`/api/projects/CRONK/members/${carolId}`, { access: "write" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const stream = await bob.events("/api/inbox/events?triage=true");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.delete(`/api/projects/CRONK/members/${carolId}`);
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+  });
+});
+

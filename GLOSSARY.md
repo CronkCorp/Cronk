@@ -105,7 +105,7 @@ A User's personal list of everything waiting on them: Tickets In Review, Unverif
 _Avoid_: Review queue, notifications, to-do
 
 **Triage**:
-The shared list of waiting items that have no clear User to go to. Each User sees the items they could act on.
+The shared list of waiting items that have no clear User to go to, such as a delegated Ticket whose Assignee is deactivated or can no longer see its Project. Each User sees the items they could act on.
 _Avoid_: Unassigned queue, backlog
 
 ### Code
