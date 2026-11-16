@@ -120,13 +120,13 @@ export async function findAttachment(db: Queryable, workspaceId: string, id: str
  * and the Comments on its Reports.
  */
 export async function listTicketAttachments(db: Queryable, ticketId: string): Promise<Attachment[]> {
-  const { rows } = await db.query<AttachmentRow>(`${SELECT} WHERE t.id = $1 ORDER BY x.seq`, [ticketId]);
+  const { rows } = await db.query<AttachmentRow>(`${SELECT} WHERE t.id = $1 ORDER BY x.at, x.seq`, [ticketId]);
   return rows.map(toAttachment);
 }
 
 /** Every Attachment on a Document, in the order they were attached: its own and those in its Comments. */
 export async function listDocumentAttachments(db: Queryable, documentId: string): Promise<Attachment[]> {
-  const { rows } = await db.query<AttachmentRow>(`${SELECT} WHERE d.id = $1 ORDER BY x.seq`, [documentId]);
+  const { rows } = await db.query<AttachmentRow>(`${SELECT} WHERE d.id = $1 ORDER BY x.at, x.seq`, [documentId]);
   return rows.map(toAttachment);
 }
 
