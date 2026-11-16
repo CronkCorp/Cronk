@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { AvoidedWord } from "../api-types.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
@@ -330,13 +330,13 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       tree: {
         description: "a Project's (or the Workspace's) page tree, depth first, each Document with its depth",
         writes: false,
-        run: (api, a) => api("GET", `${treePath(a.project)}/documents`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/documents`),
       },
       create: {
         description: "a new Document at Version 1, last among its siblings",
         writes: true,
         run: (api, a) =>
-          api("POST", `${treePath(a.project)}/documents`, {
+          api("POST", `${scopePath(a.project)}/documents`, {
             title: required(a.title, "a title", "create"),
             ...(a.body !== undefined && { body: a.body }),
             ...(a.parentId !== undefined && { parentId: a.parentId }),
@@ -397,6 +397,32 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerGroupedTool(server, ctx, {
+    name: "decisions",
+    description:
+      "Decisions: recorded choices with their reasoning, belonging to a Project or, without a project, the Workspace, keyed like " +
+      "CRONK-D7 (D7 in the Workspace). Each has a status: proposed, accepted, rejected, deprecated, or superseded by a newer accepted " +
+      "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list)"),
+      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get)"),
+      status: z.array(z.enum(DECISION_STATUSES)).optional().describe("Only Decisions with one of these statuses (list)"),
+      group: z.array(z.string()).optional().describe("Only Decisions in one of these groups, ignoring case (list)"),
+    },
+    actions: {
+      list: {
+        description: "a Project's (or the Workspace's) Decisions, newest first, without their bodies, optionally filtered",
+        writes: false,
+        run: (api, a) => api("GET", `${scopePath(a.project)}/decisions${query({ status: a.status, group: a.group })}`),
+      },
+      get: {
+        description: "one Decision with its Markdown body, what it supersedes and what superseded it",
+        writes: false,
+        run: (api, a) => api("GET", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "get"))}`),
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
     name: "terms",
     description:
       "Terms: the glossary. Each names one concept with its definition and the words to avoid for it; use the name and avoid those words. " +
@@ -411,7 +437,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       list: {
         description: "the Terms that apply in a Project, or the Workspace's, by name, with their definitions",
         writes: false,
-        run: (api, a) => api("GET", `${treePath(a.project)}/terms`),
+        run: (api, a) => api("GET", `${scopePath(a.project)}/terms`),
       },
       get: {
         description: "one Term by name, as it applies in a Project or the Workspace, or by id",
@@ -419,7 +445,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         run: async (api, a) => {
           if (a.id !== undefined) return api("GET", `/api/terms/${encodeURIComponent(a.id)}`);
           if (a.name === undefined) throw new ToolError("The get action needs a name or an id");
-          const found = await api("GET", `${treePath(a.project)}/terms${query({ name: [a.name] })}`);
+          const found = await api("GET", `${scopePath(a.project)}/terms${query({ name: [a.name] })}`);
           if (found.status >= 400) return found;
           const [term] = found.body.terms as unknown[];
           if (!term) throw new ToolError(`No Term named ${a.name.trim()} applies in ${a.project?.toUpperCase() ?? "the Workspace"}`);
@@ -458,5 +484,5 @@ function commentsPath(a: { key?: string | undefined; documentId?: string | undef
   return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
 }
 
-/** Where a page tree's API lives: a Project's, or the Workspace's when no Project is named. */
-const treePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);
+/** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */
+const scopePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);
