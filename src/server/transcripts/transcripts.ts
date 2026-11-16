@@ -134,16 +134,17 @@ function hasWord(text: string, word: string): boolean {
 
 /**
  * Everything the Agent Sessions `$1` did, as the Ticket, Document or Term each record is on: the Ticket changes they made, the
- * Activities and Comments they wrote and the Document and Term Versions they saved.
+ * Activities, Comments and Attachments they added and the Document and Term Versions they saved.
  */
 const SESSION_RECORDS = `
   SELECT ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT ticket_id, NULL, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT ticket_id, document_id, NULL FROM comments WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT NULL, document_id, NULL FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, NULL, NULL FROM attachments WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT NULL, NULL, term_id FROM term_versions WHERE actor_session_id = ANY($1::uuid[])`;
 
-/** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, or a Document or Term Version. */
+/** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, an Attachment, or a Document or Term Version. */
 export async function changedAnything(db: Queryable, sessionIds: string[]): Promise<boolean> {
   if (sessionIds.length === 0) return false;
   const { rows } = await db.query(`SELECT 1 FROM (${SESSION_RECORDS}) r LIMIT 1`, [sessionIds]);

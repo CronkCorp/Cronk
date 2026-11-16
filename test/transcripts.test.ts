@@ -48,6 +48,18 @@ describe("Uploading a Transcript", () => {
     expect(read).toMatchObject({ tickets: [], documents: [], terms: [{ id: term.body.term.id, name: "Ticket" }] });
   });
 
+  it("links the Ticket its Sessions attached a file to, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const attached = await agent.upload("/api/tickets/CRONK-1/attachments?name=log.txt", Buffer.from("boom"), "text/plain");
+    expect(attached.status, JSON.stringify(attached.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Attach the log", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1" }]);
+  });
+
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const idle = await session();

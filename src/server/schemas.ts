@@ -100,7 +100,7 @@ const transcriptFields = {
   tickets: {
     type: "array",
     items: object({ key: { type: "string" }, title: { type: "string" } }),
-    description: "The Tickets its Sessions changed, wrote Activities or Comments on, that the caller can read.",
+    description: "The Tickets its Sessions changed, wrote Activities or Comments on, or attached files to, that the caller can read.",
   },
   documents: {
     type: "array",
