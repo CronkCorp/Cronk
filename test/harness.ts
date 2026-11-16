@@ -332,12 +332,20 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
       const admin = new pg.Client({ connectionString: adminUrl });
       await admin.connect();
       try {
-        // Only the connections open now count: the server reconnects as soon as it notices, and those new connections are what the test observes.
-        const { rows } = await admin.query<{ pid: number }>("SELECT pid FROM pg_stat_activity WHERE datname = $1", [dbName]);
-        const pids = rows.map((r) => r.pid);
-        await admin.query("SELECT pg_terminate_backend(pid) FROM unnest($1::int[]) AS pid", [pids]);
+        // Connections the server opens afterwards are its recovery, not survivors.
+        const { rows: terminated } = await admin.query<{ pid: number; started: string }>(
+          "SELECT pid, backend_start::text AS started FROM pg_stat_activity WHERE datname = $1",
+          [dbName],
+        );
+        await admin.query("SELECT pg_terminate_backend(pid) FROM unnest($1::int[]) AS pid", [terminated.map((c) => c.pid)]);
+        // A pid alone could be reused by a new connection, so each is matched with when it started.
         const outliving = async () =>
-          (await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid = ANY($1)", [pids])).rows[0]!.n;
+          (
+            await admin.query<{ n: number }>(
+              "SELECT count(*)::int AS n FROM pg_stat_activity a JOIN unnest($1::int[], $2::text[]) AS t(pid, started) ON a.pid = t.pid AND a.backend_start::text = t.started",
+              [terminated.map((c) => c.pid), terminated.map((c) => c.started)],
+            )
+          ).rows[0]!.n;
         await pollUntil(async () => (await outliving()) === 0, async () => `${await outliving()} connections to ${dbName} outlived pg_terminate_backend`);
       } finally {
         await admin.end();
