@@ -321,8 +321,9 @@ export function identityRoutes(ctx: AppContext) {
         if (!updated) throw new HttpError(404, "No such User");
         // Deactivating ended their Agents' Sessions, so the Claims those held lapsed.
         await claimsEnded(ctx, updated.endedClaims.ticketIds);
-        // A new role can show or hide private Projects, and so the items in them.
-        if (request.body.role !== undefined) inboxesChanged(ctx.live, [updated.user.id]);
+        // A new role can show or hide private Projects, and so the items in them; deactivating a User sends what
+        // they review to Triage, and reactivating them takes it back.
+        if (request.body.role !== undefined || request.body.active !== undefined) inboxesChanged(ctx.live, [updated.user.id]);
         return { user: publicUser(updated.user) };
       },
     );

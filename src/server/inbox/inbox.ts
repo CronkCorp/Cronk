@@ -1,6 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { LiveUpdates } from "../live/live-updates.js";
-import { inboxTopic } from "../live/topics.js";
+import { inboxTopic, TRIAGE_TOPIC } from "../live/topics.js";
 import { visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
@@ -198,9 +198,13 @@ export async function ticketItems<K extends "review" | "unverified">(db: Queryab
 /**
  * Tells each of these Users that their Inbox may have changed, so open Inbox views fetch it
  * again. Skips missing ids and repeats. Call once the change is committed.
+ *
+ * Whatever changes a waiting item may also send it to Triage or take it out, as may a change of access,
+ * so this tells Triage too, even with no User given: a change to an item with no clear User names none.
  */
 export function inboxesChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
   for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
+  live.publish(TRIAGE_TOPIC, { event: "changed", data: {} });
 }
 
 /**

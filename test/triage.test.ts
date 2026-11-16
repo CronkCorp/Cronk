@@ -119,3 +119,33 @@ describe("Triage's Unverified completions", () => {
     expect(await triageLines(bob)).toEqual([]);
   });
 });
+
+describe("Triage's live updates", () => {
+  it("tell every signed-in User whenever Triage may have changed, so they can fetch it again", async () => {
+    const { cronk, admin, bob, agent, handbookId } = await workspaceSetup();
+    const stream = await bob.events("/api/triage/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    const suggestion = await suggestBody(agent, handbookId, "v2");
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+
+    // A reviewer leaving sends a Project item's Suggestion to Triage.
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Architecture", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    await suggestBody(await startSession(cronk, (await registerAgent(carol, "carol-bot")).secret), document.id, "v2");
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.patch(`/api/users/${(await carol.get("/api/me")).body.user.id}`, { active: false });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+  });
+
+  it("are refused to Agents", async () => {
+    const { agent } = await workspaceSetup();
+    expect((await agent.get("/api/triage")).status).toBe(403);
+    expect((await agent.events("/api/triage/events")).status).toBe(403);
+  });
+});

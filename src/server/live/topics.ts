@@ -6,6 +6,9 @@ export const ticketTopic = (ticketId: string) => `ticket:${ticketId}`;
 /** The topic of changes to one User's Inbox. */
 export const inboxTopic = (userId: string) => `inbox:${userId}`;
 
+/** The topic of changes to Triage, which every signed-in User's Triage watches and filters for themselves. */
+export const TRIAGE_TOPIC = "triage";
+
 /** The topic of the work starting to wait for one Agent, which each of its live Agent Sessions may watch. */
 export const agentTopic = (agentId: string) => `agent:${agentId}`;
 
