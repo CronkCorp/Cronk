@@ -444,6 +444,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         from: ref("Status"),
         to: ref("Status"),
         sentBack: { type: "boolean", description: "True for the move back to a Started Status a User made sending the Ticket back from review." },
+        reopened: { type: "boolean", description: "True for the move back to a Started Status a User made Reopening an Agent's Unverified completion." },
       }),
       object({ change: { const: "priority" }, from: priority, to: priority }),
       object({ change: { const: "labels" }, from: labels, to: labels }),

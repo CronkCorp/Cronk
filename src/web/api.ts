@@ -38,6 +38,7 @@ import type {
   RelationKind,
   Relations,
   Report,
+  ReopenChoice,
   Role,
   SearchKind,
   Storage,
@@ -100,6 +101,7 @@ export type {
   RelationKind,
   Relations,
   Report,
+  ReopenChoice,
   Role,
   SearchKind,
   Storage,
@@ -441,6 +443,12 @@ export const api = {
   /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
   rejectSuggestion: (id: string, reason: string) =>
     request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),
+  /**
+   * Reopens an Agent's Unverified completion back to its Delegate in a Started Status, with a Comment saying why, and a choice
+   * for each Ticket it blocks that already continued on the work.
+   */
+  reopen: (key: string, input: { comment: string; dependents: Record<string, ReopenChoice> }) =>
+    request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/reopen`, input),
 
   /** Accepts an Agent's Unverified completion, recording the User's Verification. */
   accept: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/accept`).then((r) => r.ticket),
