@@ -205,7 +205,8 @@ async function snapshot(admin: Client): Promise<unknown> {
             return { version, served };
           }),
         );
-        return { artifact, versions, protection: await get(`/api/artifacts/${a.id}/protection`) };
+        const { comments } = await get(`/api/artifacts/${a.id}/comments`);
+        return { artifact, versions, protection: await get(`/api/artifacts/${a.id}/protection`), comments, attachments: await attachments(`/api/artifacts/${a.id}/attachments`) };
       }),
     );
   const projects = [...(await get("/api/projects")).projects, ...(await get("/api/projects?archived=true")).projects];
@@ -267,6 +268,10 @@ async function busyWorkspace() {
   const extraOrigins = encodeURIComponent(JSON.stringify([{ origin: "https://cdn.plot.ly", uses: ["scripts", "connect"], reason: "Plotly draws it" }]));
   await admin.upload(`/api/artifacts/${prototype.id}/versions?baseVersion=1&title=Cache%20dashboard&extraOrigins=${extraOrigins}`, await tarGz({ "index.html": "<p>v2</p>", "data.json": "[1,2]" }));
   await admin.post(`/api/artifacts/${prototype.id}/protection`, { protected: true });
+  // Ada comments on its first Version, with a file, and the Agent replies on the second.
+  const onPrototype = (await admin.post(`/api/artifacts/${prototype.id}/comments`, { body: "The chart needs a legend.", version: 1 })).body.comment;
+  await admin.upload(`/api/comments/${onPrototype.id}/attachments?name=legend.txt`, Buffer.from("legend"), "text/plain");
+  await agent.post(`/api/artifacts/${prototype.id}/comments`, { body: "Version 2 has one.", replyToCommentId: onPrototype.id, version: 2 });
   await admin.patch("/api/workspace", { artifactExtraOriginsAllowed: false });
   // Attachments: the Agent's binary screenshot, and two of Ada's, one named as a hidden file would be.
   await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
@@ -1045,7 +1050,9 @@ describe("Artifacts in an export", () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     const { artifact } = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<p>v1</p>" }))).body;
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Too dark.", version: 1 });
     await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "<p>v2</p>" }));
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Better.", version: 2 });
 
     const files = await untarGz((await admin.download("/api/export?versions=false")).body);
     expect(markdown(files["projects/CRONK/artifacts/1-limits.md"]).data).toMatchObject({ id: artifact.id, title: "Limits", version: 2, versions: [{ number: 2 }] });
@@ -1056,6 +1063,11 @@ describe("Artifacts in an export", () => {
     const moved = (await elsewhere.get(`/api/artifacts/${artifact.id}`)).body.artifact;
     expect(moved).toMatchObject({ version: 2, url: `${OWN_ORIGIN}/artifacts/${artifact.id}` });
     expect(moved.versions.map((v: { number: number }) => v.number)).toEqual([2]);
+    // A Comment on a Version the export left out comes along on the oldest Version it holds after it.
+    expect((await elsewhere.get(`/api/artifacts/${artifact.id}/comments`)).body.comments).toEqual([
+      expect.objectContaining({ body: "Too dark.", artifactVersion: 2 }),
+      expect.objectContaining({ body: "Better.", artifactVersion: 2 }),
+    ]);
     const page = await elsewhere.download(`${new URL(moved.frameUrl).pathname}index.html`, { host: ARTIFACT_HOST });
     expect(page.body.toString()).toBe("<p>v2</p>");
   });
