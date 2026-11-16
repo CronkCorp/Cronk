@@ -23,6 +23,8 @@ import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
+import { AttachmentViewer, FilesPanel, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
+import type { Attachment } from "./api.js";
 import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
 /**
@@ -37,6 +39,7 @@ export function TicketPage(props: { ticketKey: string }) {
   const key = props.ticketKey;
   const [detail, reloadDetail] = useLoad(() => api.ticket(key), [key]);
   const [changes, reloadChanges] = useLoad(() => api.ticketChanges(key), [key]);
+  const [attachments, reloadAttachments] = useLoad(() => api.attachments(key), [key]);
   const [loaded, reloadLists] = useLoad(
     async () => {
       const [activities, reports, comments] = await Promise.all([api.activities(key), api.ticketReports(key), api.ticketComments(key)]);
@@ -57,11 +60,13 @@ export function TicketPage(props: { ticketKey: string }) {
         reloadDetail();
         reloadChanges();
         reloadLists();
+        reloadAttachments();
       },
       on: {
         changed: () => {
           reloadDetail();
           reloadChanges();
+          reloadAttachments();
         },
         activity: ({ activity }) => setArrived((a) => ({ ...a, activities: [...a.activities, activity] })),
         report: ({ report }) => setArrived((a) => ({ ...a, reports: [...a.reports, report] })),
@@ -76,6 +81,8 @@ export function TicketPage(props: { ticketKey: string }) {
       {(d) => (
         <TicketView
           detail={d}
+          attachments={attachments.kind === "loaded" ? attachments.value : []}
+          onAttached={reloadAttachments}
           live={<LiveIndicator state={live} />}
           // An Agent Session's calls keep its Claim but aren't pushed, so the page reads the Claim again when it would lapse.
           onClaimDue={reloadDetail}
@@ -130,15 +137,29 @@ const never = () => false;
 
 function TicketView(props: {
   detail: TicketDetail;
+  attachments: Attachment[];
+  onAttached: () => void;
   live: ReactNode;
   timeline: (canWrite: boolean) => ReactNode;
   onClaimDue: () => void;
 }) {
   const t = props.detail.ticket;
   const [project] = useLoad(() => api.project(t.projectKey), [t.projectKey]);
+  const [workspace] = useLoad(api.workspace, []);
   const [editing, setEditing] = useState(false);
+  const [opened, setOpened] = useState<Attachment>();
   const archived = project.kind === "loaded" && project.value.project.archived;
   const canWrite = project.kind === "loaded" && project.value.project.access === "write";
+  const attaching = useAttach(t.key, props.onAttached);
+  const dragging = usePageDrop(canWrite, (files) => void attaching.attach(files));
+  const files = {
+    attachments: props.attachments,
+    canWrite,
+    attaching,
+    maxBytes: workspace.kind === "loaded" ? workspace.value.attachmentMaxBytes : undefined,
+    dragging,
+    onOpen: setOpened,
+  };
 
   return (
     <article className="ticket">
@@ -164,12 +185,14 @@ function TicketView(props: {
               {t.description.trim() ? <CronkMarkdown>{t.description}</CronkMarkdown> : <p className="muted">No description.</p>}
             </div>
           )}
+          <TicketAttachments {...files} />
           <h2>Timeline</h2>
           {props.timeline(canWrite)}
         </div>
         <aside className="ticket-side" aria-label="Ticket fields">
           <TicketFields ticket={t} canWrite={canWrite} statuses={project.kind === "loaded" ? project.value.statuses : [t.status]} />
           {props.detail.claim && <ClaimCard claim={props.detail.claim} onDue={props.onClaimDue} />}
+          <FilesPanel {...files} />
           <section className="side-panel side-related">
             <ParentEditor ticket={t} readOnly={!canWrite} />
             {props.detail.subTickets.length > 0 && (
@@ -183,6 +206,15 @@ function TicketView(props: {
           </section>
         </aside>
       </div>
+      <AttachmentViewer
+        attachment={opened}
+        canWrite={canWrite}
+        onClose={() => setOpened(undefined)}
+        onDeleted={() => {
+          setOpened(undefined);
+          props.onAttached();
+        }}
+      />
     </article>
   );
 }

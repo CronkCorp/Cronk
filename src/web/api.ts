@@ -9,6 +9,7 @@ import type {
   AgentSession,
   AgentToken,
   AgentRecordEntry,
+  Attachment,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -33,6 +34,7 @@ import type {
   Report,
   Role,
   SearchKind,
+  Storage,
   SearchResult,
   Status,
   StatusCategory,
@@ -59,6 +61,7 @@ export type {
   AgentSession,
   AgentToken,
   AgentRecordEntry,
+  Attachment,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -83,6 +86,7 @@ export type {
   Report,
   Role,
   SearchKind,
+  Storage,
   SearchResult,
   Status,
   StatusCategory,
@@ -159,6 +163,23 @@ async function upload<T>(path: string, file: Blob): Promise<T> {
   return data as T;
 }
 
+/** Uploads `file` as an Attachment on the Ticket `key`, sent as itself with its own media type. */
+async function attach(key: string, file: File): Promise<Attachment> {
+  const res = await fetch(`/api/tickets/${encodeURIComponent(key)}/attachments?${new URLSearchParams({ name: file.name || "pasted" })}`, {
+    method: "POST",
+    headers: { "content-type": file.type || "application/octet-stream" },
+    body: file,
+    credentials: "same-origin",
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : undefined;
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
+  return (data as { attachment: Attachment }).attachment;
+}
+
+/** Where an Attachment's file is served: shown in the page when it is an image, video, audio or plain text, saved otherwise. */
+export const attachmentFileUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}/file`;
+
 /** Where the whole Workspace's export downloads from; it holds every Version. */
 export const workspaceExportUrl = "/api/export";
 
@@ -185,7 +206,15 @@ export const api = {
   signOut: () => request<void>("DELETE", "/api/sign-in"),
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
-  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
+  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; attachmentMaxBytes?: number }) =>
+    request<Workspace>("PATCH", "/api/workspace", changes),
+  /** How much storage the Workspace's files take; Admins only. */
+  storage: () => request<Storage>("GET", "/api/workspace/storage"),
+  /** A Ticket's Attachments, in the order they were attached. */
+  attachments: (key: string) =>
+    request<{ attachments: Attachment[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/attachments`).then((r) => r.attachments),
+  attach,
+  deleteAttachment: (id: string) => request<void>("DELETE", `/api/attachments/${encodeURIComponent(id)}`),
 
   /** The Workspace's Guidance, or with `projectKey` that Project's. */
   guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),
