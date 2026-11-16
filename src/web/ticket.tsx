@@ -204,8 +204,9 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
   // Show the current Assignee and Delegate even before the lists arrive, or when the lists leave them out.
   const known = users.kind === "loaded" ? users.value.filter((u) => u.active) : [];
   const assignees = [...(t.assignee && !known.some((u) => u.id === t.assignee!.id) ? [t.assignee] : []), ...known];
-  // Only the signed-in User's own Agents are listed to them, so this offers Agents only on their own Tickets.
-  const own = agents.kind === "loaded" ? agents.value.filter((a) => a.owner.id === t.assignee?.id) : [];
+  // Only the signed-in User's own Agents are listed to them, so this offers Agents only on their own Tickets,
+  // and on unassigned ones, which delegating assigns to them.
+  const own = agents.kind === "loaded" ? agents.value.filter((a) => !t.assignee || a.owner.id === t.assignee.id) : [];
   const delegates = [...(t.delegate && !own.some((a) => a.id === t.delegate!.id) ? [t.delegate] : []), ...own];
   const labels = [...new Set([...t.labels, ...(projectLabels.kind === "loaded" ? projectLabels.value : [])])].sort((a, b) => a.localeCompare(b));
 
@@ -249,11 +250,11 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
       />
       <FieldPicker
         label="Delegate"
-        value={t.delegate ? <Actor actor={agentActor(t.delegate)} owner={false} /> : none(t.assignee ? "Not delegated" : "Assign it first")}
+        value={t.delegate ? <Actor actor={agentActor(t.delegate)} owner={false} /> : none("Not delegated")}
         options={delegateOptions}
         selected={[t.delegate?.id ?? ""]}
-        disabled={disabled || !t.assignee}
-        empty="None of the Assignee's Agents match"
+        disabled={disabled}
+        empty={t.assignee ? "None of the Assignee's Agents match" : "None of your Agents match"}
         onPick={(id) => id !== (t.delegate?.id ?? "") && void update.run({ delegateId: id || null })}
       />
       <FieldPicker
