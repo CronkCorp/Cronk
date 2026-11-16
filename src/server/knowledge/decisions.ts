@@ -44,6 +44,8 @@ export interface Decision {
   supersededBy: DecisionRef | null;
   /** Who recorded it: the Actor of its first Version. */
   proposedBy: RecordedActor;
+  /** Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given. */
+  statusReason: string | null;
   /** When, and by whom, it took its current status. */
   statusChangedAt: Date;
   statusChangedBy: RecordedActor;
@@ -52,7 +54,7 @@ export interface Decision {
 }
 
 /** A Decision as its register lists it, without its body. */
-export type DecisionSummary = Omit<Decision, "body" | "supersedes" | "proposedBy" | "statusChangedAt" | "statusChangedBy">;
+export type DecisionSummary = Omit<Decision, "body" | "supersedes" | "proposedBy" | "statusReason" | "statusChangedAt" | "statusChangedBy">;
 
 /** The ADR sections a new Decision's body starts with when none is given. */
 export const DECISION_TEMPLATE = `What was decided, and why.
@@ -86,6 +88,7 @@ interface DecisionRow {
   title: string;
   body: string;
   status: DecisionStatus;
+  status_reason: string | null;
   group_name: string | null;
   supersedes: number[];
   superseded_by: number | null;
@@ -138,6 +141,7 @@ async function toDecision(db: Queryable, row: DecisionRow): Promise<Decision> {
     supersedes: [...row.supersedes].sort((a, b) => a - b).flatMap((n) => refs.get(n) ?? []),
     supersededBy,
     proposedBy: toRecordedActor(actors[0]!),
+    statusReason: row.status_reason,
     statusChangedAt: statusChange.at,
     statusChangedBy: toRecordedActor(statusChange),
   };
@@ -160,6 +164,8 @@ export interface DecisionContent {
   title: string;
   body: string;
   status: DecisionStatus;
+  /** Why it took its status; a change of status replaces it. */
+  statusReason: string | null;
   group: string | null;
   /** Numbers of Decisions of the same scope. */
   supersedes: number[];
@@ -172,9 +178,9 @@ export async function insertDecisionVersion(
   v: DecisionContent & { number: number; actor: Actor | StoredActor; now: Date },
 ): Promise<void> {
   await db.query(
-    `INSERT INTO decision_versions (decision_id, number, title, body, status, group_name, supersedes, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [decisionId, v.number, v.title, v.body, v.status, v.group, v.supersedes, v.now, ...actorColumns(v.actor)],
+    `INSERT INTO decision_versions (decision_id, number, title, body, status, status_reason, group_name, supersedes, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [decisionId, v.number, v.title, v.body, v.status, v.statusReason, v.group, v.supersedes, v.now, ...actorColumns(v.actor)],
   );
 }
 
@@ -193,9 +199,9 @@ async function nextNumber(db: Queryable, scope: DecisionScope): Promise<number> 
 export async function insertDecision(db: Queryable, scope: DecisionScope, content: DecisionContent, actor: Actor, now: Date): Promise<Decision> {
   const number = await nextNumber(db, scope);
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, group_name, supersedes, version, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $9) RETURNING id`,
-    [scope.workspaceId, scope.projectId, number, content.title, content.body, content.status, content.group, content.supersedes, now],
+    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, status_reason, group_name, supersedes, version, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $10) RETURNING id`,
+    [scope.workspaceId, scope.projectId, number, content.title, content.body, content.status, content.statusReason, content.group, content.supersedes, now],
   );
   const id = rows[0]!.id;
   await insertDecisionVersion(db, id, { ...content, number: 1, actor, now });
@@ -212,6 +218,7 @@ export const contentOf = (decision: Decision): DecisionContent => ({
   title: decision.title,
   body: decision.body,
   status: decision.status,
+  statusReason: decision.statusReason,
   group: decision.group,
   supersedes: decision.supersedes.map((ref) => parseDecisionKey(ref.key)!.number),
 });
@@ -230,6 +237,7 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
     content.title === current.title &&
     content.body === current.body &&
     content.status === current.status &&
+    content.statusReason === current.statusReason &&
     content.group === current.group &&
     sameNumbers(content.supersedes, current.supersedes);
   if (unchanged) return decision;
@@ -238,9 +246,9 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
   await db.query(
     // Only a superseded Decision names what superseded it.
     `UPDATE decisions SET title = $2, body = $3, status = $4, group_name = $5, supersedes = $6, version = $7, updated_at = $8,
-       superseded_by = CASE WHEN $4 = 'superseded' THEN superseded_by END
+       superseded_by = CASE WHEN $4 = 'superseded' THEN superseded_by END, status_reason = $9
      WHERE id = $1`,
-    [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now],
+    [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now, content.statusReason],
   );
   return (await findDecisionById(db, decision.id))!;
 }
@@ -251,6 +259,8 @@ export interface DecisionVersion {
   title: string;
   body: string;
   status: DecisionStatus;
+  /** Why it had that status, as given when it took it. */
+  statusReason: string | null;
   group: string | null;
   /** Keys of the Decisions it superseded at this Version. */
   supersedes: string[];
@@ -263,13 +273,14 @@ interface DecisionVersionRow extends RecordedActorRow {
   title: string;
   body: string;
   status: DecisionStatus;
+  status_reason: string | null;
   group_name: string | null;
   supersedes: number[];
   at: Date;
 }
 
 const SELECT_DECISION_VERSIONS = `
-  SELECT v.number, v.title, v.body, v.status, v.group_name, v.supersedes, v.at,
+  SELECT v.number, v.title, v.body, v.status, v.status_reason, v.group_name, v.supersedes, v.at,
          u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, v.actor_session_id AS session_id
   FROM decision_versions v JOIN users u ON u.id = v.actor_user_id LEFT JOIN agents a ON a.id = v.actor_agent_id`;
 
@@ -278,6 +289,7 @@ const toDecisionVersion = (decision: Decision, row: DecisionVersionRow): Decisio
   title: row.title,
   body: row.body,
   status: row.status,
+  statusReason: row.status_reason,
   group: row.group_name,
   supersedes: [...row.supersedes].sort((a, b) => a - b).map((n) => decisionKey(decision.projectKey, n)),
   at: row.at,
@@ -342,7 +354,7 @@ export async function applySuperseding(
   const dropped = before.supersedes.filter((n) => !numbers.includes(n));
   if (decision.status === "accepted" && added.length > 0) {
     for (const older of await lockedIn(db, scope, added, "d.status NOT IN ('superseded', 'rejected')")) {
-      await saveDecision(db, older, { ...contentOf(older), status: "superseded" }, actor, now);
+      await saveDecision(db, older, { ...contentOf(older), status: "superseded", statusReason: null }, actor, now);
       await db.query("UPDATE decisions SET superseded_by = $2 WHERE id = $1", [older.id, decision.number]);
     }
   }
@@ -352,7 +364,7 @@ export async function applySuperseding(
         "SELECT status FROM decision_versions WHERE decision_id = $1 AND status <> 'superseded' ORDER BY number DESC LIMIT 1",
         [older.id],
       );
-      await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted" }, actor, now);
+      await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted", statusReason: null }, actor, now);
     }
   }
 }
@@ -386,9 +398,9 @@ export async function insertDecisionRow(
   d: DecisionContent & { number: number; supersededBy: number | null; version: number; createdAt: Date; updatedAt: Date },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, group_name, supersedes, superseded_by, version, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-    [scope.workspaceId, scope.projectId, d.number, d.title, d.body, d.status, d.group, d.supersedes, d.supersededBy, d.version, d.createdAt, d.updatedAt],
+    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, status_reason, group_name, supersedes, superseded_by, version, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+    [scope.workspaceId, scope.projectId, d.number, d.title, d.body, d.status, d.statusReason, d.group, d.supersedes, d.supersededBy, d.version, d.createdAt, d.updatedAt],
   );
   return rows[0]!.id;
 }

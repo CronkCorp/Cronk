@@ -144,6 +144,7 @@ const decisionFields = {
   body: { type: "string", description: "Markdown." },
   supersedes: { type: "array", items: decisionRef, description: "The Decisions it replaces once accepted, of the same Project or Workspace." },
   proposedBy: { ...recordedActor, description: "Who recorded it." },
+  statusReason: { ...nullable({ type: "string" }), description: "Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given." },
   statusChangedAt: { ...timestamp, description: "When it took its current status." },
   statusChangedBy: { ...recordedActor, description: "Who gave it its current status." },
 };
@@ -153,6 +154,7 @@ const decisionVersionFields = {
   number: { type: "integer", description: "Counts from 1 per Decision." },
   title: { type: "string" },
   status: decisionStatus,
+  statusReason: { ...nullable({ type: "string" }), description: "Why it had that status, as given when it took it." },
   group: nullable({ type: "string" }),
   supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
   at: timestamp,

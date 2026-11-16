@@ -105,13 +105,13 @@ export function decisionRoutes(ctx: AppContext) {
       return saved;
     };
 
-    /** Creates a proposed Decision in `scope`, which the caller has Write in. Only a User records one. */
+    /** Creates a proposed Decision in `scope`, which the caller has Write in. A User or an Agent may; it starts proposed either way. */
     const create = async (tx: Queryable, actor: Actor, scope: DecisionScope, input: NewDecision) => {
-      requireUserActor(actor, "record a Decision");
       const content: DecisionContent = {
         title: input.title.trim(),
         body: input.body ?? DECISION_TEMPLATE,
         status: "proposed",
+        statusReason: null,
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
@@ -224,7 +224,9 @@ export function decisionRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const decision = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          requireUserActor(actor, "edit a Decision");
+          if (actor.kind === "agent" && current.status !== "proposed") {
+            throw new HttpError(403, `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}; only Users change it now`);
+          }
           await requireCurrent(tx, current, request.body.baseVersion);
           const { title: newTitle, body: newBody, group: newGroup, supersedes: newSupersedes } = request.body;
           const content = {
@@ -240,7 +242,7 @@ export function decisionRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { status: DecisionStatus } }>(
+    app.post<{ Params: { key: string }; Body: { status: DecisionStatus; reason?: string } }>(
       "/api/decisions/:key/status",
       {
         schema: {
@@ -255,6 +257,11 @@ export function decisionRoutes(ctx: AppContext) {
                 enum: DECISION_STATUSES,
                 description: "The new status. A Decision becomes superseded only when one superseding it is accepted, so superseded is refused here.",
               },
+              reason: {
+                type: "string",
+                maxLength: 10_000,
+                description: "Why, in Markdown; required when rejecting. It reaches the Agent that proposed the Decision as Waiting Work.",
+              },
             },
           },
           response: {
@@ -266,13 +273,15 @@ export function decisionRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { status } = request.body;
+        const reason = request.body.reason?.trim() || null;
+        if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
         const decision = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           requireUserActor(actor, "change a Decision's status");
           if (status === "superseded") {
             throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
           }
-          return save(tx, actor, current, { ...contentOf(current), status });
+          return save(tx, actor, current, { ...contentOf(current), status, statusReason: reason });
         });
         return { decision };
       },

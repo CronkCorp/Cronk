@@ -580,4 +580,12 @@ export const migrations: Migration[] = [
       ALTER TABLE tickets ADD COLUMN verification text CHECK (verification IN ('unverified', 'verified'));
     `,
   },
+  {
+    id: "0024_proposed_decisions",
+    sql: `
+      -- Why a Decision took its status, as the User gave it; required when rejecting one. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN status_reason text;
+      ALTER TABLE decision_versions ADD COLUMN status_reason text;
+    `,
+  },
 ];

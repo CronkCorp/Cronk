@@ -259,7 +259,7 @@ async function busyWorkspace() {
   await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
   await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
   await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the proxy", group: "Security" });
-  await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected" });
+  await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected", reason: "The proxy sees no accounts." });
   await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits", supersedes: ["CRONK-D1"] });
   cronk.clock.advance(60_000);
   await grace.post("/api/decisions/CRONK-D3/status", { status: "accepted" });

@@ -17,6 +17,7 @@ interface DecisionRow {
   title: string;
   body: string;
   status: DecisionStatus;
+  status_reason: string | null;
   group_name: string | null;
   supersedes: number[];
   superseded_by: number | null;
@@ -45,6 +46,7 @@ export async function exportDecisions(ctx: ExportContext, dir: string, projectId
         key: decisionKey(projectKey, d.number),
         title: d.title,
         status: d.status,
+        statusReason: d.status_reason ?? undefined,
         group: d.group_name ?? undefined,
         supersedes: keys(projectKey, d.supersedes),
         supersededBy: d.superseded_by === null ? undefined : decisionKey(projectKey, d.superseded_by),
@@ -60,7 +62,7 @@ export async function exportDecisions(ctx: ExportContext, dir: string, projectId
       for (const v of versions) {
         ctx.add(
           `${base}.versions/${v.number}.md`,
-          { title: v.title, status: v.status, group: v.group_name ?? undefined, supersedes: keys(projectKey, v.supersedes), at: iso(v.at), by: ctx.actor(v) },
+          { title: v.title, status: v.status, statusReason: v.status_reason ?? undefined, group: v.group_name ?? undefined, supersedes: keys(projectKey, v.supersedes), at: iso(v.at), by: ctx.actor(v) },
           v.body,
         );
       }
@@ -83,10 +85,13 @@ function numbersIn(file: File, field: string, projectKey: string | null): number
 function contentIn(file: File, projectKey: string | null) {
   const group = file.data.group;
   if (group !== undefined && group !== null && typeof group !== "string") refuse(`${file.path} group must be text`);
+  const statusReason = file.data.statusReason;
+  if (statusReason !== undefined && statusReason !== null && typeof statusReason !== "string") refuse(`${file.path} statusReason must be text`);
   return {
     title: text(file.data.title, `${file.path} title`),
     body: file.body,
     status: oneOf(file.data.status, DECISION_STATUSES, `${file.path} status`),
+    statusReason: typeof statusReason === "string" && statusReason.trim() !== "" ? statusReason : null,
     group: typeof group === "string" && group.trim() !== "" ? group.trim() : null,
     supersedes: numbersIn(file, "supersedes", projectKey),
   };
