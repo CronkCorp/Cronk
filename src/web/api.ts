@@ -169,6 +169,9 @@ export const staleVersionOf = (err: unknown): Version | undefined =>
 
 /** Where a Project's API lives, for its page tree or Decisions, or the Workspace's without a Project key. */
 const scopePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+/** Where the scope's own Decisions download as a `docs/adr/` archive. */
+export const decisionsExportUrl = (projectKey?: string) => `${scopePath(projectKey)}/decisions/export`;
+
 const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}`;
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;

@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
-import { Button } from "./components/button.js";
+import { Button, buttonClass } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
 import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip, ProtectedMark } from "./components/tags.js";
 import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
-import { api, type Decision, type DecisionStatus, type DecisionSummary, type DecisionVersion, type FieldConflict } from "./api.js";
+import { api, decisionsExportUrl, type Decision, type DecisionStatus, type DecisionSummary, type DecisionVersion, type FieldConflict } from "./api.js";
 import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, type Draft, type MergedField } from "./merge.js";
 import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
 import { MentionedIn } from "./mentions.js";
@@ -62,6 +62,8 @@ export function DecisionsPage(props: { projectKey?: string | undefined; filter: 
         </div>
         <div className="actions">
           <ScopeSwitch projectKey={projectKey} />
+          {/* For everyone who can read the register; the server builds the archive and names the file. */}
+          <a className={buttonClass("secondary")} href={decisionsExportUrl(projectKey)} download>Export docs/adr</a>
           {canWrite && !creating && <Button onClick={() => setCreating(true)}>New Decision</Button>}
         </div>
       </div>

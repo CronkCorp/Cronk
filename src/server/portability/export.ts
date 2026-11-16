@@ -61,3 +61,13 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
 }
 
 const rank = (path: string) => (path === "README.md" ? 0 : path === "people.md" ? 1 : 2);
+
+/**
+ * Builds the `docs/adr/` files of one scope's Decisions alone: the Workspace's own when `project`
+ * is null, else that Project's. Each file is what the full export writes for it, without Versions.
+ */
+export async function exportDecisionsFolder(db: Queryable, workspaceId: string, project: { id: string; key: string } | null, now: Date, files: FileStore): Promise<Folder> {
+  const ctx = await ExportContext.start(db, { workspaceId, projectId: project?.id ?? null, versions: false, now }, files);
+  await exportDecisions(ctx, "", project?.id ?? null, project?.key ?? null);
+  return ctx.folder;
+}

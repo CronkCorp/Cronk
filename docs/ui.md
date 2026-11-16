@@ -226,7 +226,7 @@ The Project page is shown in `docs/ui/frame.png`.
 
 ![Decisions](ui/phase-2-decisions.png)
 
-- **Register** (`/decisions`): the same scope switch, status and group filter chips with counts, and a table of key, title, status, group and date. A superseded Decision carries "→ CRONK-D7" after its title.
+- **Register** (`/decisions`): the page head holds the same scope switch, then **Export docs/adr**, for everyone who can read the register, and **New Decision**, for those with Write. Export downloads the scope's own Decisions as a `docs/adr/` archive. Below it, status and group filter chips with counts, and a table of key, title, status, group and date. A superseded Decision carries "→ CRONK-D7" after its title.
 - **A Decision's page**: key, status and Protected mark, the title at 24px, a banner for what it supersedes (`--info`) or what superseded it (`--warn`), the body at Document size, and a side panel with status, group, who proposed it, Mentioned in and Terms.
 
 ### Artifact
