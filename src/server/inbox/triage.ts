@@ -4,7 +4,7 @@ import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
-import { ticketItems, type SuggestionInboxItem, type UnverifiedItem } from "./inbox.js";
+import { ticketItems, type DiscoveredItem, type SuggestionInboxItem, type UnverifiedItem } from "./inbox.js";
 
 /**
  * Triage: the shared list of waiting items with no clear User to go to. Each User sees the items they could
@@ -14,10 +14,10 @@ import { ticketItems, type SuggestionInboxItem, type UnverifiedItem } from "./in
  */
 
 /** One item in Triage. */
-export type TriageItem = UnverifiedItem | SuggestionInboxItem;
+export type TriageItem = UnverifiedItem | SuggestionInboxItem | DiscoveredItem;
 
 /** The kinds of Triage item, which Triage filters by. */
-export const TRIAGE_KINDS = ["unverified", "suggestion"] as const;
+export const TRIAGE_KINDS = ["unverified", "suggestion", "discovered"] as const;
 
 /** Narrows Triage: an item matches when, for every field given, it has one of that field's values. */
 export interface TriageFilter {
@@ -34,6 +34,7 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
   const items = [
     ...(wants("unverified") ? await unverified(db, projectIds) : []),
     ...(wants("suggestion") ? await suggestions(db, user, projectIds, inWorkspace) : []),
+    ...(wants("discovered") ? await discovered(db, projectIds) : []),
   ];
   return items.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
@@ -41,6 +42,11 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
 /** The Unverified completions of Tickets with no Assignee in the Projects `projectIds`, which any User with Write there may Accept. */
 function unverified(db: Queryable, projectIds: string[]): Promise<UnverifiedItem[]> {
   return ticketItems(db, "unverified", { assigneeId: null, projectIds });
+}
+
+/** The Discovered Tickets with no Assignee waiting in the Projects `projectIds`, which any User with Write there may take. */
+function discovered(db: Queryable, projectIds: string[]): Promise<DiscoveredItem[]> {
+  return ticketItems(db, "discovered", { assigneeId: null, projectIds });
 }
 
 /**

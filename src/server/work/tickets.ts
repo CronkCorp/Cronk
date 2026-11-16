@@ -144,6 +144,23 @@ const SELECT_TICKETS = `
   LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id
   LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id`;
 
+/**
+ * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated and not kept there.
+ * Delegating, keeping, cancelling or moving it out of Backlog settles it. `isAwaitingDecisionSql` says the same in SQL.
+ */
+export const isAwaitingDecision = (ticket: Ticket): boolean =>
+  ticket.discovered !== null && !ticket.discovered.kept && ticket.delegate === null && ticket.status.category === "backlog";
+
+/** SQL condition: the Ticket `t`, in the Status `s`, is a Discovered Ticket waiting for a User (see `isAwaitingDecision`). */
+export const isAwaitingDecisionSql = (t: string, s: string) =>
+  `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog')`;
+
+/** Records a User's Keep in Backlog of a Discovered Ticket, which settles it; returns the Ticket as kept. */
+export async function keepDiscovery(db: Queryable, ticket: Ticket, now: Date): Promise<Ticket> {
+  await db.query("UPDATE tickets SET discovery_kept = true, updated_at = $2 WHERE id = $1", [ticket.id, now]);
+  return (await findTicketById(db, ticket.id))!;
+}
+
 /** What a Discovered Ticket records of where it came from, as `insertTicket` takes it. */
 export interface NewDiscovery {
   agentId: string;

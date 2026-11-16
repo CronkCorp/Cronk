@@ -109,3 +109,78 @@ describe("An Agent's own Discovered Ticket", () => {
     expect((await agent.patch("/api/tickets/CRONK-2", { statusId: started })).status).toBe(200);
   });
 });
+
+/** What `client`'s Inbox or Triage (`path`) holds, one line per item: its kind and the Ticket it is on. */
+async function waiting(client: { get: (path: string) => Promise<{ status: number; body: any }> }, path = "/api/inbox"): Promise<string[]> {
+  const res = await client.get(path);
+  if (res.status !== 200) throw new Error(`Listing ${path} failed: ${JSON.stringify(res.body)}`);
+  return res.body.items.map((item: any) => `${item.kind} ${item.ticket?.key ?? ""}`.trim());
+}
+
+/** The id of the CRONK Status in `category`. */
+async function statusIn(admin: { get: (path: string) => Promise<{ body: any }> }, category: string): Promise<string> {
+  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
+}
+
+describe("Discovered Tickets in the Inbox", () => {
+  it("wait in their Assignee's Inbox until a User delegates, keeps or cancels them", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    for (const title of ["One", "Two", "Three"]) {
+      await agent.post("/api/projects/CRONK/tickets", { title });
+      cronk.clock.advance(60_000);
+    }
+
+    const { items } = (await admin.get("/api/inbox?kind=discovered")).body;
+    expect(items[0]).toMatchObject({ kind: "discovered", ticket: { key: "CRONK-2", discovered: { agent: { id: claude.agentId } } } });
+    expect(await waiting(admin)).toEqual(["discovered CRONK-2", "discovered CRONK-3", "discovered CRONK-4"]);
+    expect(await waiting(admin, `/api/inbox?agent=${claude.agentId}`)).toEqual(["discovered CRONK-2", "discovered CRONK-3", "discovered CRONK-4"]);
+
+    expect((await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId })).status).toBe(200);
+    const kept = await admin.post("/api/tickets/CRONK-3/keep");
+    expect(kept.status).toBe(200);
+    expect(kept.body.ticket).toMatchObject({ status: { category: "backlog" }, delegate: null, discovered: { kept: true } });
+    expect((await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "canceled") })).status).toBe(200);
+
+    expect(await waiting(admin)).toEqual([]);
+  });
+
+  it("is kept only by a User with Write, and only while it waits", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+    const rita = await joinAs(cronk, admin, "rita@example.com");
+    await admin.put(`/api/projects/CRONK/members/${(await rita.get("/api/me")).body.user.id}`, { access: "read" });
+
+    expect((await agent.post("/api/tickets/CRONK-2/keep")).status).toBe(403);
+    expect((await rita.post("/api/tickets/CRONK-2/keep")).status).toBe(403);
+    expect((await admin.post("/api/tickets/CRONK-1/keep")).status).toBe(409);
+    expect((await admin.post("/api/tickets/CRONK-2/keep")).status).toBe(200);
+    expect((await admin.post("/api/tickets/CRONK-2/keep")).status).toBe(409);
+  });
+});
+
+describe("Discovered Tickets in Triage", () => {
+  it("lists an unassigned one waiting to the Users with Write in its Project, until one takes it into their Inbox", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const rita = await joinAs(cronk, admin, "rita@example.com");
+    await admin.put(`/api/projects/CRONK/members/${(await rita.get("/api/me")).body.user.id}`, { access: "read" });
+    expect(await waiting(bob, "/api/triage")).toEqual([]);
+
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: null });
+
+    expect(await waiting(bob, "/api/triage")).toEqual(["discovered CRONK-2"]);
+    expect(await waiting(admin, "/api/triage?kind=discovered")).toEqual(["discovered CRONK-2"]);
+    expect(await waiting(rita, "/api/triage")).toEqual([]);
+    expect(await waiting(admin)).toEqual([]);
+
+    // Take it: Bob assigns it to himself.
+    expect((await bob.patch("/api/tickets/CRONK-2", { assigneeId: bobId })).status).toBe(200);
+    expect(await waiting(admin, "/api/triage")).toEqual([]);
+    expect(await waiting(bob)).toEqual(["discovered CRONK-2"]);
+  });
+});

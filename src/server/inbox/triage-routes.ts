@@ -31,6 +31,20 @@ const unverifiedItem = {
   },
 } as const;
 
+const discoveredItem = {
+  type: "object",
+  required: ["kind", "at", "ticket", "reports"],
+  description:
+    "A Discovered Ticket with no Assignee, in Backlog and undelegated. A User with Write in its Project takes it by assigning it to themselves, " +
+    "which moves it to their Inbox. `reports` is empty.",
+  properties: {
+    kind: { type: "string", const: "discovered" },
+    at: { ...timestamp, description: "When the Agent filed it." },
+    ticket: ref("Ticket"),
+    reports: { type: "array", items: ref("Report") },
+  },
+} as const;
+
 /** Triage: the shared list of waiting items with no clear User, each User seeing those they could act on. */
 export function triageRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -52,7 +66,7 @@ export function triageRoutes(ctx: AppContext) {
           response: {
             200: answer(
               "The waiting items with no clear User that the signed-in User could act on, which takes Write where the item lives (Admins see all), oldest first",
-              { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [unverifiedItem, suggestionItem] } } } },
+              { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [unverifiedItem, suggestionItem, discoveredItem] } } } },
             ),
             ...errors(400, 401, 403, 410),
           },

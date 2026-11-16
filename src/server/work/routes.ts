@@ -48,6 +48,8 @@ import {
   findTicketByKey,
   findTicketsByIds,
   insertTicket,
+  isAwaitingDecision,
+  keepDiscovery,
   listChanges,
   listLabels,
   moveTicketsBetweenStatuses,
@@ -852,6 +854,36 @@ export function workRoutes(ctx: AppContext) {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (ticket.verification !== "unverified") throw new HttpError(409, `${ticket.key} isn't an Unverified completion, so there is nothing to Accept`);
           return updateTicket(tx, ticket, { verification: "verified" }, actor, ctx.clock.now());
+        });
+        waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
+        ticketsChanged(ctx.live, [ticket]);
+        return { ticket };
+      },
+    );
+
+    // An Inbox action: settles a Discovered Ticket in Backlog without delegating it.
+    app.post<{ Params: { key: string } }>(
+      "/api/tickets/:key/keep",
+      {
+        schema: {
+          params: ticketParams,
+          response: {
+            200: answer(
+              "The Discovered Ticket, kept in Backlog, which takes it out of the Inbox and Triage. Only Users with Write keep one, and only while it waits: " +
+                "in Backlog, undelegated and not kept already.",
+              holding("ticket", "Ticket"),
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "keep a Discovered Ticket in Backlog");
+        const ticket = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (!isAwaitingDecision(ticket)) throw new HttpError(409, `${ticket.key} isn't a Discovered Ticket waiting in Backlog, so there is nothing to keep`);
+          return keepDiscovery(tx, ticket, ctx.clock.now());
         });
         waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         ticketsChanged(ctx.live, [ticket]);
