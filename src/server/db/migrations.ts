@@ -941,7 +941,7 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0035_term_search",
+    id: "0037_term_search",
     sql: `
       -- The searchable text of a Term: its name, definition and words to avoid. array_to_string is only STABLE, so an index can't
       -- use it directly; joining text with a space is immutable, which this function declares so the index below can be built on it.

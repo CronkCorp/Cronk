@@ -7,7 +7,7 @@ import type { SearchKind } from "../../shared/values.js";
 /**
  * Full-text search over what an Actor may read, with Postgres's own text search (no extra
  * service). Each kind of thing is searched by the same expression its index is built on
- * (see migrations 0014 and 0035), so the indexes serve these queries.
+ * (see migrations 0014 and 0037), so the indexes serve these queries.
  */
 
 /** One thing a search found, with an excerpt of its text around the match. */
