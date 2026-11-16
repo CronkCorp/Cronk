@@ -35,7 +35,10 @@ export default async function setup(project: TestProject) {
 async function startPostgres(): Promise<{ url: string; container?: StartedPostgreSqlContainer }> {
   const existing = process.env.TEST_POSTGRES_URL;
   if (existing) return { url: existing };
-  const container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  const container = await new PostgreSqlContainer("postgres:17-alpine")
+    // A disposable database needs no durability: not waiting for disk speeds up every commit and every CREATE DATABASE.
+    .withCommand(["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"])
+    .start();
   return { url: container.getConnectionUri(), container };
 }
 
