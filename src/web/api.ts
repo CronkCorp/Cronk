@@ -237,7 +237,10 @@ export const api = {
   createProject: (input: { name: string; key: string }) =>
     request<{ project: Project }>("POST", "/api/projects", input).then((r) => r.project),
   project: (key: string) => request<{ project: Project; statuses: Status[] }>("GET", `/api/projects/${encodeURIComponent(key)}`),
-  updateProject: (key: string, changes: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess }) =>
+  updateProject: (
+    key: string,
+    changes: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess; autonomousByDefault?: boolean },
+  ) =>
     request<{ project: Project }>("PATCH", `/api/projects/${encodeURIComponent(key)}`, changes).then((r) => r.project),
   members: (key: string) =>
     request<{ members: Member[] }>("GET", `/api/projects/${encodeURIComponent(key)}/members`).then((r) => r.members),
@@ -338,6 +341,9 @@ export const api = {
   /** Sends a Ticket under review back to a Started Status (the Project's first, unless named), with a Comment. */
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
+
+  /** Accepts an Agent's Unverified completion, recording the User's Verification. */
+  accept: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/accept`).then((r) => r.ticket),
 
   ticketChanges: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/changes`).then((r) => r.changes),

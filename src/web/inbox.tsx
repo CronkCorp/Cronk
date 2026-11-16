@@ -1,3 +1,4 @@
+import { Banner } from "./components/banner.js";
 import { Button, buttonClass } from "./components/button.js";
 import { Chip, KindLabel, StatusPill, type Kind } from "./components/tags.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
@@ -14,7 +15,7 @@ import { Show, TextArea, useAction, useLoad } from "./ui.js";
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
 // one on the right, where the User reads it in full and acts on it without leaving the Inbox.
 
-const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "To review" };
+const KIND_NAMES: Record<InboxKind, string> = { question: "Questions", review: "To review", unverified: "Unverified" };
 
 /** Where the Inbox is: its filter, and the item selected in it, if the address names one. */
 export interface InboxAddress {
@@ -44,19 +45,21 @@ const inboxPath = (address: InboxAddress) => {
 
 type QuestionItem = Extract<InboxItem, { kind: "question" }>;
 type ReviewItem = Extract<InboxItem, { kind: "review" }>;
+type UnverifiedItem = Extract<InboxItem, { kind: "unverified" }>;
 
 /** An item's id in the address: stable across reloads, and readable for a review. */
-const itemId = (item: InboxItem) => (item.kind === "question" ? `question-${item.question.id}` : `review-${item.ticket.key}`);
+const itemId = (item: InboxItem) => (item.kind === "question" ? `question-${item.question.id}` : `${item.kind}-${item.ticket.key}`);
 
-/** The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews. */
+/** The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews, then Unverified completions. */
 const GROUPS: { name: string; holds: (item: InboxItem) => boolean }[] = [
   { name: "Blocking", holds: (item) => item.kind === "question" && item.question.blocking },
   { name: "Questions", holds: (item) => item.kind === "question" && !item.question.blocking },
   { name: "To review", holds: (item) => item.kind === "review" },
+  { name: "Unverified", holds: (item) => item.kind === "unverified" },
 ];
 
 /**
- * The signed-in User's Inbox: Tickets In Review they are Assignee of and their Agents' open questions. It
+ * The signed-in User's Inbox: Tickets In Review they are Assignee of, Agents' Unverified completions of them, and their Agents' open questions. It
  * loads again whenever the server says it may have changed. The kind filter narrows what the API returned
  * for the Project and Agent filters, so each kind's chip can show its count.
  */
@@ -165,7 +168,12 @@ interface Seen {
 }
 
 /** The empty state's heading, by the kind the Inbox is narrowed to. */
-const NOTHING: Record<InboxKind | "all", string> = { all: "Nothing waiting on you", question: "No questions waiting", review: "Nothing to review" };
+const NOTHING: Record<InboxKind | "all", string> = {
+  all: "Nothing waiting on you",
+  question: "No questions waiting",
+  review: "Nothing to review",
+  unverified: "No Unverified completions",
+};
 
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
 function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; address: InboxAddress; onChanged: () => void }) {
@@ -256,7 +264,7 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
     return (
       <div className="empty">
         <h2>{NOTHING[props.kind ?? "all"]}</h2>
-        <p className="muted">Agents' questions and Tickets handed over for review show up here.</p>
+        <p className="muted">Agents' questions, Tickets handed over for review and Agents' Unverified completions show up here.</p>
       </div>
     );
   }
@@ -289,12 +297,14 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
           </Link>
           {selected.kind === "question" ? (
             <QuestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
+          ) : selected.kind === "unverified" ? (
+            <UnverifiedDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           ) : (
             <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
           )}
         </section>
       </div>
-      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes, S sends back.</p>
+      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes or Accepts, S sends back.</p>
     </div>
   );
 }
@@ -311,6 +321,7 @@ const inOverlay = (target: EventTarget | null) => target instanceof Element && !
 /** What an item's kind label says, short in the list and in full in the detail pane, and how it is coloured. */
 function kindOf(item: InboxItem): { kind: Kind; label: string; full: string } {
   if (item.kind === "review") return { kind: "review", label: "To review", full: "To review" };
+  if (item.kind === "unverified") return { kind: "unverified", label: "Unverified", full: "Unverified completion" };
   return item.question.blocking
     ? { kind: "blocking", label: "Blocking", full: "Blocking question" }
     : { kind: "question", label: "Question", full: "Question" };
@@ -447,6 +458,52 @@ function ReviewDetail(props: DetailProps<ReviewItem>) {
           <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Started, In Review or finished: work that went on after its blocker was completed. */
+const CONTINUED = ["started", "in_review", "completed"];
+
+/**
+ * An Agent's Unverified completion: the Reports like a review, the Tickets that already continued on it,
+ * and Accept and a link to the Ticket.
+ */
+function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
+  const { ticket, reports } = props.item;
+  const [detail] = useLoad(() => api.ticket(ticket.key), [ticket.key]);
+  const continued = detail.kind === "loaded" ? detail.value.relations.blocks.filter((t) => CONTINUED.includes(t.status.category)) : [];
+  const accept = useAction(() => props.acting(() => api.accept(ticket.key)), props.onDone);
+  const runAccept = () => {
+    if (!accept.busy) void accept.run();
+  };
+  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept });
+
+  return (
+    <div className="inbox-detail-body">
+      <DetailHead item={props.item} />
+      {props.resolved && <ResolvedElsewhere />}
+      <div className="inbox-detail-who">
+        <StatusPill status={ticket.status} />
+        {ticket.delegate && <span className="muted">by <Actor actor={agentActor(ticket.delegate)} /> on its own</span>}
+      </div>
+      {continued.length > 0 && (
+        <Banner tone="info" role="status">
+          <p>{`Already continued on it: ${continued.map((t) => `${t.key} (${t.status.name})`).join(", ")}`}</p>
+        </Banner>
+      )}
+      {reports.length > 0 ? (
+        <div className="inbox-reports">
+          {reports.map((r) => <ReportCard key={r.id} report={r} />)}
+        </div>
+      ) : (
+        <p className="muted">No Report.</p>
+      )}
+      {accept.error && <p className="error" role="alert">{accept.error}</p>}
+      <div className="actions">
+        <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+        <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
+      </div>
     </div>
   );
 }

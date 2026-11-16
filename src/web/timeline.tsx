@@ -326,6 +326,12 @@ export function describeChange(change: RecordedChange): ReactNode {
       return `linked the Document “${change.document.title}”`;
     case "document unlinked":
       return `unlinked the Document “${change.document.title}”`;
+    case "autonomous":
+      return change.to ? "turned on Autonomous Delegation" : "turned off Autonomous Delegation";
+    case "verification":
+      if (change.to === "unverified") return "completed it on its own, Unverified until a User Accepts it";
+      if (change.to === "verified") return "Accepted the completion";
+      return "ended its Verification";
   }
 }
 
