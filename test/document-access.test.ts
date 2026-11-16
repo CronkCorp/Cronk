@@ -137,7 +137,7 @@ describe("Deleting a Document", () => {
 
     const refused = await claude.delete(`/api/documents/${id}?baseVersion=2`);
     expect(refused.status).toBe(403);
-    expect(refused.body.error).toMatch(/a User decides/);
+    expect(refused.body.error).toBe("Only a User can delete a Document, not an Agent");
     expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "v2", version: 2 });
     expect((await admin.get(`/api/documents/${id}/versions`)).body.versions).toHaveLength(2);
 
@@ -152,7 +152,7 @@ describe("Deleting a Document", () => {
 
     const refused = await claude.delete(`/api/documents/${id}?baseVersion=1`);
     expect(refused.status).toBe(403);
-    expect(refused.body.error).toMatch(/a User decides/);
+    expect(refused.body.error).toBe("Only a User can delete a Document, not an Agent");
     expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "v1", version: 1 });
 
     expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(204);

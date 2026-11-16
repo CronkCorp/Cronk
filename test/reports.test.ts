@@ -197,7 +197,7 @@ describe("Deleting a Report", () => {
 
     const refused = await agent.delete(`/api/documents/${report.id}?baseVersion=1`);
     expect(refused.status).toBe(403);
-    expect(refused.body.error).toMatch(/Report on CRONK-1; a User decides/);
+    expect(refused.body.error).toBe("Only a User can delete a Document, not an Agent");
     expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toHaveLength(1);
     expect((await admin.get("/api/tickets/CRONK-1")).body).toEqual(ticket);
     expect((await agent.patch("/api/tickets/CRONK-1", { title: "Still editable" })).status).toBe(200);

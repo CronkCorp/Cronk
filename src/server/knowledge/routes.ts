@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { requireClaimHolder } from "../coordination/claims.js";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { inboxesChanged } from "../inbox/inbox.js";
@@ -92,10 +92,7 @@ export function knowledgeRoutes(ctx: AppContext) {
      */
     const lockForDelete = async (tx: Queryable, actor: Actor, id: string) => {
       const document = await documentFor(tx, actor, id, "write");
-      if (actor.kind === "agent") {
-        const why = document.ticketKey === null ? `${document.title} and its Versions would be gone for good` : `it is the Report on ${document.ticketKey}`;
-        throw new HttpError(403, `Only a User can delete this Document, not an Agent: ${why}; a User decides`);
-      }
+      requireUserActor(actor, "delete a Document");
       if (document.ticketKey === null) return documentFor(tx, actor, id, "write", { forUpdate: true });
       await findTicketByKey(tx, actingUser(actor).workspaceId, document.ticketKey, { forUpdate: true });
       return documentFor(tx, actor, id, "write", { forUpdate: true });
