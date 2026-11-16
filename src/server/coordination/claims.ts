@@ -1,7 +1,7 @@
 import type { AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { FINISHED_CATEGORIES, PRIORITIES } from "../../shared/values.js";
+import { FINISHED_CATEGORIES, PRIORITIES, WORKABLE_CATEGORIES } from "../../shared/values.js";
 import { ticketKeySql, type AgentRef, type Ticket } from "../work/tickets.js";
 import { isLiveAt, silenceWindow, WITH_WORKSPACE } from "./agent-sessions.js";
 
@@ -150,17 +150,23 @@ const hasLiveClaim = (nowParam: string) => `EXISTS (
 /** SQL list of the finished Status Categories, for `IN`. */
 const FINISHED = `(${FINISHED_CATEGORIES.map((c) => `'${c}'`).join(", ")})`;
 
+/** SQL list of the Status Categories of work an Agent can take up, for `IN`. */
+const WORKABLE = `(${WORKABLE_CATEGORIES.map((c) => `'${c}'`).join(", ")})`;
+
 /**
  * SQL condition: the Ticket `t`, in the Status `s`, is Ready for the Agent `agentParam` among the
- * Projects `projectsParam`: delegated to it, not Completed or Canceled, not blocked by an
+ * Projects `projectsParam`: delegated to it, in a Backlog, Unstarted or Started Status, not blocked by an
  * unfinished Ticket, and without a live Claim.
  */
 const isReady = (agentParam: string, projectsParam: string, nowParam: string) => `
   t.delegate_id = ${agentParam} AND t.project_id = ANY(${projectsParam}::uuid[]) AND ${hasNothingInTheWay(nowParam)}`;
 
-/** SQL condition: nothing keeps the Ticket `t`, in the Status `s`, from being worked on: it isn't finished, blocked or Claimed. */
+/**
+ * SQL condition: nothing keeps the Ticket `t`, in the Status `s`, from being worked on: it isn't
+ * In Review (waiting on a User) or finished, blocked or Claimed.
+ */
 const hasNothingInTheWay = (nowParam: string) => `
-  s.category NOT IN ${FINISHED}
+  s.category IN ${WORKABLE}
   AND NOT EXISTS (
     SELECT 1 FROM ticket_relations r JOIN tickets b ON b.id = r.from_ticket_id JOIN statuses bs ON bs.id = b.status_id
     WHERE r.kind = 'blocks' AND r.to_ticket_id = t.id AND bs.category NOT IN ${FINISHED})
@@ -187,8 +193,8 @@ export async function listReadyTicketIds(db: Queryable, scope: ReadyScope, now: 
 }
 
 /**
- * Those of these Tickets that have a Delegate and nothing in their way (unfinished, unblocked,
- * unclaimed at `now`), each with its Delegate, Project and Workspace: whether one is Ready for its
+ * Those of these Tickets that have a Delegate and nothing in their way (neither In Review nor
+ * finished, unblocked, unclaimed at `now`), each with its Delegate, Project and Workspace: whether one is Ready for its
  * Delegate then rests only on the Delegate's access to the Project.
  */
 export async function findDelegatedTicketsInTheClear(

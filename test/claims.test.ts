@@ -197,6 +197,22 @@ describe("Asking for the next Ready Ticket", () => {
     expect((await agent.post("/api/agent-sessions/current/next")).body.next.ticket.key).toBe("CRONK-4");
   });
 
+  it("leaves out Tickets In Review, which wait on a User, until they are Sent back", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(2);
+    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
+    const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: inCategory("in_review") });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: inCategory("in_review") });
+
+    const welcomed = await cronk.client(claude.secret).post("/api/agent-sessions");
+    expect(welcomed.body.welcome.readyTickets).toEqual([]);
+    const agent = await session();
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next).toBeNull();
+
+    expect((await admin.post("/api/tickets/CRONK-2/send-back", { comment: "Needs tests" })).status).toBe(200);
+    expect((await agent.post("/api/agent-sessions/current/next")).body.next.ticket.key).toBe("CRONK-2");
+  });
+
   it("never gives two concurrent Agent Sessions the same Ticket", async () => {
     const { session } = await delegatedSetup(5);
     const sessions = await Promise.all(Array.from({ length: 8 }, () => session()));
