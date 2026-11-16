@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup } from "./harness.js";
+import { delegatedSetup, type Client } from "./harness.js";
 
 describe("Autonomous Delegation", () => {
   it("is off on a Ticket until a User turns it on, recorded as a Change", async () => {
@@ -95,5 +95,91 @@ describe("A Project's Autonomous Delegation default", () => {
     await admin.patch("/api/projects/CRONK", { autonomousByDefault: false });
     await admin.patch("/api/tickets/CRONK-3", { autonomous: true });
     expect((await admin.patch("/api/tickets/CRONK-3", { delegateId: claude.agentId })).body.ticket.autonomous).toBe(false);
+  });
+});
+
+/** The id of the CRONK Status in `category`. */
+async function statusIn(admin: Client, category: string): Promise<string> {
+  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
+}
+
+describe("An Agent's completion under Autonomous Delegation", () => {
+  it("needs a Report written during its Claim, then is recorded Unverified and ends the Claim", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    const done = await statusIn(admin, "completed");
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const refused = await agent.patch("/api/tickets/CRONK-1", { statusId: done });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/Write a Report on CRONK-1/);
+
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+    const completed = await agent.patch("/api/tickets/CRONK-1", { statusId: done });
+    expect(completed.status).toBe(200);
+    expect(completed.body.ticket).toMatchObject({ status: { category: "completed" }, verification: "unverified" });
+    const detail = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(detail.ticket.verification).toBe("unverified");
+    expect(detail.claim).toBeNull();
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes.slice(-2)).toMatchObject([
+      { actor: { kind: "agent", session: { id: agent.sessionId } }, change: "status", to: { category: "completed" } },
+      { actor: { kind: "agent", session: { id: agent.sessionId } }, change: "verification", from: null, to: "unverified" },
+    ]);
+  });
+
+  it("is refused once a User turns Autonomous Delegation off, and for every Agent without it", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    const done = await statusIn(admin, "completed");
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: false });
+    const refused = await agent.patch("/api/tickets/CRONK-1", { statusId: done });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Autonomous Delegation/);
+    expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "canceled") })).status).toBe(403);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.status.category).toBe("backlog");
+  });
+
+  it("can't cancel or shelve work: completing is all Autonomous Delegation adds", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+
+    expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "canceled") })).status).toBe(403);
+    expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "started") })).status).toBe(200);
+    expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "backlog") })).status).toBe(403);
+  });
+
+  it("isn't how a User's completion is recorded: theirs needs no Verification", async () => {
+    const { admin } = await delegatedSetup();
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.verification).toBeNull();
+    const completed = await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") });
+    expect(completed.body.ticket.verification).toBeNull();
+  });
+});
+
+describe("An Unverified completion", () => {
+  it("counts as finished for blocking: the Tickets it blocked become Ready for their Delegate", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    const agent = await session();
+    expect((await agent.post("/api/tickets/CRONK-2/claim")).status).toBe(409);
+
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+    const events = await agent.events("/api/agent-sessions/current/events");
+    expect((await events.next())?.event).toBe("ready");
+    await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") });
+
+    expect(await events.next()).toMatchObject({ event: "ticketReady", data: { ticket: { key: "CRONK-2" } } });
+    expect((await agent.post("/api/tickets/CRONK-2/claim")).status).toBe(200);
   });
 });

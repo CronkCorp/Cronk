@@ -1,4 +1,4 @@
-import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, VERIFICATIONS } from "../../shared/values.js";
 import { recordChange, type TicketChange } from "../work/tickets.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, isUuid, list, oneOf, refuse, text, type File } from "./fields.js";
@@ -108,6 +108,7 @@ async function importedChange(change: TicketChange["change"], fields: Record<str
     } else if (nullable && value === null) recorded[field] = null;
     else if (holds === "title") recorded[field] = text(value, at);
     else if (holds === "text") recorded[field] = typeof value === "string" ? value : refuse(`${at} must be text`);
+    else if (holds === "verification") recorded[field] = oneOf(value, VERIFICATIONS, at);
     else if (holds === "priority") recorded[field] = oneOf(value, PRIORITIES, at);
     else if (holds === "relation kind") recorded[field] = oneOf(value, RELATION_KINDS, at);
     else if (holds === "labels") {

@@ -743,6 +743,9 @@ export function workRoutes(ctx: AppContext) {
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
             if (actor.kind === "agent" && status.id !== ticket.status.id) await requireAgentMayMove(tx, actor, ticket, status, ctx.clock.now());
             changes.status = status;
+            // An Agent's completion stays Unverified until a User Accepts it; leaving Completed ends its Verification.
+            if (actor.kind === "agent" && status.category === "completed") changes.verification = "unverified";
+            else if (status.category !== "completed") changes.verification = null;
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
           // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it,
@@ -821,7 +824,7 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
   return { id: assignee.id, name: assignee.name };
 }
 
-/** The Status Categories an Agent may move a Ticket into; only Users complete, cancel or shelve work. */
+/** The Status Categories an Agent may move a Ticket into; only Users cancel or shelve work, and complete it unless it is autonomous. */
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
 
 /**
@@ -832,16 +835,22 @@ const endsClaim = (status: Status) => !WORKABLE_CATEGORIES.includes(status.categ
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
- * In Review (a 403) and the Agent calls within the Agent Session holding the Ticket's live Claim (a 409).
- * Moving into In Review hands the work over, so it also needs a Report written during that Claim (a 409).
- * (Agents can't complete Tickets yet; once Autonomous Delegation lets them, completing needs one too.)
+ * In Review, or Completed under Autonomous Delegation (a 403), and the Agent calls within the Agent
+ * Session holding the Ticket's live Claim (a 409). Moving into In Review or completing hands the work
+ * over, so it also needs a Report written during that Claim (a 409).
  */
 async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Ticket, status: Status, now: Date): Promise<void> {
-  if (!AGENT_CATEGORIES.includes(status.category)) {
-    throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
+  const completes = status.category === "completed" && ticket.autonomous;
+  if (!AGENT_CATEGORIES.includes(status.category) && !completes) {
+    throw new HttpError(
+      403,
+      status.category === "completed"
+        ? `${ticket.key} isn't under Autonomous Delegation, so move it to In Review for a User to complete`
+        : "Agents may only move Tickets into Unstarted, Started or In Review Statuses, or complete them under Autonomous Delegation; a User decides the rest",
+    );
   }
   const claimId = await requireClaimHolder(db, agent, ticket, now, "moving it");
-  if (status.category === "in_review" && !(await hasReportFromClaim(db, ticket.id, claimId))) {
+  if ((status.category === "in_review" || completes) && !(await hasReportFromClaim(db, ticket.id, claimId))) {
     throw new HttpError(
       409,
       `Write a Report on ${ticket.key} before moving it to ${status.name}: handing work over needs a Report written during your current Claim`,

@@ -18,7 +18,7 @@ export type ActorRef = string | { agent: string; session: string | null };
  * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true;
  * a `boolean` always.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag" | "boolean";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag" | "boolean" | "verification";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -36,6 +36,7 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   delegate: fromTo("agent", true),
   parent: fromTo("ticket", true),
   autonomous: fromTo("boolean"),
+  verification: fromTo("verification", true),
   "relation added": relation,
   "relation removed": relation,
   "document linked": { document: { holds: "document" } },

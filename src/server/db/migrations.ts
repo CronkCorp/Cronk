@@ -472,6 +472,8 @@ export const migrations: Migration[] = [
       ALTER TABLE tickets ADD COLUMN autonomous boolean NOT NULL DEFAULT false;
       -- What delegating one of the Project's Tickets sets Autonomous Delegation to, unless the User says otherwise.
       ALTER TABLE projects ADD COLUMN autonomous_by_default boolean NOT NULL DEFAULT false;
+      -- Verification of an Agent's completion: Unverified until a User Accepts it (Verified). Null for any other Ticket.
+      ALTER TABLE tickets ADD COLUMN verification text CHECK (verification IN ('unverified', 'verified'));
     `,
   },
 ];
