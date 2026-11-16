@@ -49,6 +49,10 @@ export function transcriptRoutes(ctx: AppContext) {
             "an upload naming none that changed anything is refused with 422, so a hook may upload every chat. Uploading the same chat again " +
             "replaces the text when the new one continues it (starts with it), keeps the old text as well when it doesn't, and only ever adds " +
             "Sessions. The Transcript, all its texts together, may hold at most the Workspace's `transcriptMaxBytes`.\n\n" +
+            "Known secret patterns are scrubbed before anything is stored, and the originals never are: Cronk's own tokens, private keys, " +
+            "common provider tokens (GitHub, GitLab, Anthropic, OpenAI, AWS, Slack, Stripe, Google, npm, JWTs) and `Authorization` headers " +
+            "each become a note such as `[scrubbed: GitHub token]`. This is best-effort: it catches those shapes, not every secret a chat " +
+            "may hold, so its Owner may redact more by hand (POST /api/transcripts/{id}/redactions), which later uploads keep.\n\n" +
             "```sh\ncurl -X PUT -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: text/markdown\" --data-binary @chat.md \\\n" +
             "  $CRONK/api/transcripts/by-chat/$CHAT_ID\n```",
           consumes: MARKDOWN_TYPES,

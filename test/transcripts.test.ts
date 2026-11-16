@@ -367,6 +367,33 @@ describe("Redacting a Transcript by hand", () => {
     expect(redacted.body.transcript.markdown).toBe(read.markdown);
   });
 
+  it("keeps the redactions in later uploads of the chat, continuing or not", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const hook = cronk.client(claude.secret);
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const before = chat("Do it all", sessionId) + "\nThe door code is 4711-ALPHA.\n";
+    await upload(hook, "chat-1", before);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "4711-ALPHA" })).status).toBe(200);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "door code" })).status).toBe(200);
+
+    // The client uploads the whole chat again, the passages and all, with a new turn repeating one.
+    const continued = `${before}\n## Assistant\n\nNoted: 4711-ALPHA.\n`;
+    expect((await upload(hook, "chat-1", continued)).status).toBe(200);
+    let read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.earlier).toEqual([]);
+    expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nThe [redacted] is [redacted].\n\n## Assistant\n\nNoted: [redacted].\n");
+
+    // A rewrite is kept beside it, redacted too.
+    const compacted = chat("Summary: the door code is 4711-ALPHA", sessionId);
+    expect((await upload(hook, "chat-1", compacted)).status).toBe(200);
+    read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("Summary: the [redacted] is [redacted]", sessionId));
+    expect(read.earlier).toHaveLength(1);
+    // A late retry of the first upload changes nothing.
+    expect((await upload(hook, "chat-1", before)).status).toBe(200);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({ markdown: read.markdown, earlier: read.earlier });
+  });
+
   it("refuses a passage the Transcript doesn't hold", async () => {
     const { bob, id } = await transcriptAcrossProjects();
     const refused = await bob.post(`/api/transcripts/${id}/redactions`, { passage: "nowhere in it" });
@@ -479,6 +506,41 @@ describe("Exporting and importing Transcripts", () => {
       agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
       documents: [{ id: handbook.id, title: "Handbook" }],
     });
+  });
+
+  it("writes the texts as redacted, with what finds the passages again, so the import keeps redacting them", async () => {
+    const before = await transcriptAcrossProjects();
+    const sessionId = (await before.bob.get(`/api/transcripts/${before.id}`)).body.transcript.sessions[0].id;
+    const hook = before.cronk.client(before.claude.secret);
+    await upload(hook, "chat-1", chat("Do it all", sessionId) + "\nCall me on 555-0199.\n");
+    await upload(hook, "chat-1", chat("Again, call 555-0199", sessionId));
+    expect((await before.bob.post(`/api/transcripts/${before.id}/redactions`, { passage: "555-0199" })).status).toBe(200);
+
+    const archive = await before.admin.download("/api/export");
+    const files = await untarGz(archive.body);
+    const file = exported(files["transcripts/1.md"]);
+    expect(file.body).toBe(chat("Again, call [redacted]", sessionId));
+    expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId) + "\nCall me on [redacted].\n");
+    expect(JSON.stringify(files)).not.toContain("555-0199");
+    expect(file.data.redactions).toEqual([{ length: 8, fingerprint: expect.any(Number), digest: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", archive.body)).status).toBe(201);
+    const again = await untarGz((await admin.download("/api/export")).body);
+    expect(exported(again["transcripts/1.md"]).data.redactions).toEqual(file.data.redactions);
+  });
+
+  it("scrubs texts an import brings that still hold secrets, as from an export made before scrubbing", async () => {
+    const before = await transcriptAcrossProjects();
+    const archive = await untarGz((await before.admin.download("/api/export")).body);
+    const file = exported(archive["transcripts/1.md"]);
+    archive["transcripts/1.md"] = archive["transcripts/1.md"]! + `\nMy token: ${SECRETS.github}\n`;
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", await tarGz(archive))).status).toBe(201);
+    const listed = (await admin.get("/api/transcripts")).body.transcripts;
+    const restored = (await admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript;
+    expect(restored.markdown).toBe(`${file.body}\nMy token: [scrubbed: GitHub token]\n`);
   });
 });
 

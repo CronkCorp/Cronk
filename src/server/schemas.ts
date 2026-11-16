@@ -870,7 +870,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       "and so to everything those Sessions changed.",
     ...object({
       ...transcriptFields,
-      markdown: { type: "string", description: "The text of the latest upload, in the turn convention (Markdown)." },
+      markdown: {
+        type: "string",
+        description:
+          "The text of the latest upload, in the turn convention (Markdown), with known secrets scrubbed (best-effort) and its Owner's hand redactions applied.",
+      },
       earlier: {
         type: "array",
         items: { type: "string" },
