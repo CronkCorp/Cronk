@@ -924,4 +924,20 @@ export const migrations: Migration[] = [
         CHECK (reason IN ('answer', 'mention', 'comment', 'published', 'rejected', 'suggestion_rejected'));
     `,
   },
+  {
+    id: "0036_transcript_redactions",
+    sql: `
+      -- Passages a Transcript's Owner redacted by hand (transcripts/redact.ts), in the order they were made. The passage is
+      -- never kept, only what finds it again in a later upload: its length, rolling fingerprint and SHA-256 digest.
+      CREATE TABLE transcript_redactions (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        seq integer NOT NULL,
+        length integer NOT NULL CHECK (length > 0),
+        fingerprint bigint NOT NULL,
+        digest text NOT NULL,
+        created_at timestamptz NOT NULL,
+        PRIMARY KEY (transcript_id, seq)
+      );
+    `,
+  },
 ];

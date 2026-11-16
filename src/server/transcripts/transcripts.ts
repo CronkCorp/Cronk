@@ -3,6 +3,8 @@ import type { Queryable } from "../db/database.js";
 import { readablePlaces } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
+import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
+import { scrubSecrets } from "./scrub.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -180,6 +182,45 @@ export function afterUpload(existing: Upload | undefined, markdown: string, name
     return { markdown: existing.markdown, earlier: existing.earlier, sessionIds };
   }
   return { markdown, earlier: [...existing.earlier, existing.markdown], sessionIds };
+}
+
+/**
+ * What a Transcript keeps of an uploaded text: the text with known secrets scrubbed and then the Owner's `redactions` applied,
+ * as they were applied to its earlier texts, so a re-upload continuing one still starts with it.
+ */
+export const textToKeep = (markdown: string, redactions: Redaction[]): string => applyRedactions(scrubSecrets(markdown), redactions);
+
+/** The Transcript's hand redactions, in the order they were made. */
+export async function redactionsOf(db: Queryable, transcriptId: string): Promise<Redaction[]> {
+  const { rows } = await db.query<{ length: number; fingerprint: string; digest: string }>(
+    "SELECT length, fingerprint, digest FROM transcript_redactions WHERE transcript_id = $1 ORDER BY seq",
+    [transcriptId],
+  );
+  return rows.map((r) => ({ length: r.length, fingerprint: Number(r.fingerprint), digest: r.digest }));
+}
+
+/** Keeps `redactions` as the Transcript's next ones, after any it has. */
+export async function storeRedactions(db: Queryable, transcriptId: string, redactions: Redaction[], at: Date): Promise<void> {
+  for (const r of redactions) {
+    await db.query(
+      `INSERT INTO transcript_redactions (transcript_id, seq, length, fingerprint, digest, created_at)
+       SELECT $1, coalesce(max(seq), 0) + 1, $2, $3, $4, $5 FROM transcript_redactions WHERE transcript_id = $1`,
+      [transcriptId, r.length, r.fingerprint, r.digest, at],
+    );
+  }
+}
+
+/**
+ * Redacts the passage `r` finds in every text of `stored`, for good, and keeps `r` to redact later uploads too. False, changing
+ * nothing, when no text holds it.
+ */
+export async function redactTranscript(db: Queryable, stored: StoredTranscript, r: Redaction, at: Date): Promise<boolean> {
+  const markdown = applyRedaction(stored.markdown, r);
+  const earlier = stored.earlier.map((t) => applyRedaction(t, r));
+  if (!markdown.found && !earlier.some((e) => e.found)) return false;
+  await db.query("UPDATE transcripts SET markdown = $2, earlier = $3 WHERE id = $1", [stored.id, markdown.text, earlier.map((e) => e.text)]);
+  await storeRedactions(db, stored.id, [r], at);
+  return true;
 }
 
 /** The bytes a Transcript's texts take, as the Workspace's limit counts them. */

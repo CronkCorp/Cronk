@@ -17,7 +17,11 @@ import {
   sessionsNamedIn,
   sizeOf,
   storeTranscript,
+  redactionsOf,
+  redactTranscript,
+  textToKeep,
 } from "./transcripts.js";
+import { redactionOf } from "./redact.js";
 
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
@@ -45,6 +49,10 @@ export function transcriptRoutes(ctx: AppContext) {
             "an upload naming none that changed anything is refused with 422, so a hook may upload every chat. Uploading the same chat again " +
             "replaces the text when the new one continues it (starts with it), keeps the old text as well when it doesn't, and only ever adds " +
             "Sessions. The Transcript, all its texts together, may hold at most the Workspace's `transcriptMaxBytes`.\n\n" +
+            "Known secret patterns are scrubbed before anything is stored, and the originals never are: Cronk's own tokens, private keys, " +
+            "common provider tokens (GitHub, GitLab, Anthropic, OpenAI, AWS, Slack, Stripe, Google, npm, JWTs) and `Authorization` headers " +
+            "each become a note such as `[scrubbed: GitHub token]`. This is best-effort: it catches those shapes, not every secret a chat " +
+            "may hold, so its Owner may redact more by hand (POST /api/transcripts/{id}/redactions), which later uploads keep.\n\n" +
             "```sh\ncurl -X PUT -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: text/markdown\" --data-binary @chat.md \\\n" +
             "  $CRONK/api/transcripts/by-chat/$CHAT_ID\n```",
           consumes: MARKDOWN_TYPES,
@@ -71,7 +79,10 @@ export function transcriptRoutes(ctx: AppContext) {
           // One upload of a chat at a time, so neither loses the other's text or Sessions.
           await lockUntilCommit(tx, `transcript:${actor.agent.id}:${chatId}`);
           const existing = await findForUpdate(tx, actor.agent.id, chatId);
-          const upload = afterUpload(existing, markdown, await sessionsNamedIn(tx, { id: actor.agent.id, workspaceId }, markdown));
+          // Sessions are found in the text as sent; only the scrubbed and redacted text is kept.
+          const named = await sessionsNamedIn(tx, { id: actor.agent.id, workspaceId }, markdown);
+          const kept = textToKeep(markdown, existing ? await redactionsOf(tx, existing.id) : []);
+          const upload = afterUpload(existing, kept, named);
           const size = sizeOf(upload);
           if (size > limit) throw tooBig(size, limit);
           if (!(await changedAnything(tx, upload.sessionIds))) {
@@ -121,6 +132,49 @@ export function transcriptRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const stored = await findTranscript(ctx.db, actingUser(actor).workspaceId, request.params.id);
         const transcript = stored && (await readTranscript(ctx.db, actor, stored));
+        if (!transcript) throw new HttpError(404, "No such Transcript");
+        return { transcript };
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: { passage: string } }>(
+      "/api/transcripts/:id/redactions",
+      {
+        schema: {
+          description:
+            "Redacts a passage of a Transcript by hand: every occurrence of `passage`, exactly as written, in the latest text and the earlier ones becomes " +
+            "`[redacted]`, for good, and so it does in every later upload of the chat and in exports. Only the Transcript's Owner may, not their Agents. " +
+            "The passage isn't kept, only its length and digests to find it again. Known secret patterns are already scrubbed on upload, best-effort, " +
+            "so this is for what that misses.",
+          params: transcriptParams,
+          body: {
+            type: "object",
+            additionalProperties: false,
+            required: ["passage"],
+            properties: { passage: { type: "string", minLength: 1, description: "The text to redact, as the Transcript holds it." } },
+          },
+          response: { 200: answer("The Transcript, redacted", holding("transcript", "Transcript")), ...errors(400, 401, 403, 404, 410, 422) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "redact a Transcript");
+        const workspaceId = actor.user.workspaceId;
+        const found = await findTranscript(ctx.db, workspaceId, request.params.id);
+        if (!found || !(await readTranscript(ctx.db, actor, found))) throw new HttpError(404, "No such Transcript");
+        if (found.ownerId !== actor.user.id) throw new HttpError(403, "Only a Transcript's Owner can redact it");
+        await transaction(ctx.db, async (tx) => {
+          // Not while an upload of the chat is changing its texts.
+          await lockUntilCommit(tx, `transcript:${found.agentId}:${found.chatId}`);
+          const stored = await findForUpdate(tx, found.agentId, found.chatId);
+          // Deleted meanwhile.
+          if (stored?.id !== found.id) throw new HttpError(404, "No such Transcript");
+          if (!(await redactTranscript(tx, stored, redactionOf(request.body.passage), ctx.clock.now()))) {
+            throw new HttpError(422, "This Transcript doesn't hold that passage");
+          }
+        });
+        const redacted = await findTranscript(ctx.db, workspaceId, found.id);
+        const transcript = redacted && (await readTranscript(ctx.db, actor, redacted));
         if (!transcript) throw new HttpError(404, "No such Transcript");
         return { transcript };
       },
