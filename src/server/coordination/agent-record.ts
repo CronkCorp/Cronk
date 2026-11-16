@@ -5,16 +5,16 @@ import { ticketKeySql, type RecordedChange } from "../work/tickets.js";
 import type { ActivityKind } from "../../shared/values.js";
 
 /**
- * Everything an Agent did, across the Workspace, as one feed: the changes it made to Tickets,
+ * An Agent's record: everything it did across the Workspace, as one feed: the Changes it made to Tickets,
  * the Activities and Comments it wrote, and the Document Versions it saved. It answers
- * "what did my Agents do this week?" without opening every Ticket's history.
+ * "what did my Agents do this week?" without opening every Ticket's timeline.
  */
 
 /** One thing an Agent did. `kind` says which; the field named after it holds what, and the others are null. */
-export interface AgentWorkEntry {
+export interface AgentRecordEntry {
   kind: "change" | "activity" | "comment" | "version";
   at: Date;
-  /** The Agent Session it was done in; null for history imported from an export that didn't name one. */
+  /** The Agent Session it was done in; null for what an import brought in from an export that didn't name one. */
   session: { id: string } | null;
   /** Null for a Document in the Workspace outside any Project. */
   projectKey: string | null;
@@ -28,8 +28,8 @@ export interface AgentWorkEntry {
   version: { number: number } | null;
 }
 
-interface WorkRow {
-  kind: AgentWorkEntry["kind"];
+interface RecordRow {
+  kind: AgentRecordEntry["kind"];
   at: Date;
   session_id: string | null;
   project_key: string | null;
@@ -83,17 +83,17 @@ const SELECTS = [
  * What `agent` did, as far as `actor` may read, newest first: at most `limit` entries,
  * from `since` on when given.
  */
-export async function listAgentWork(
+export async function listAgentRecord(
   db: Queryable,
   actor: Actor,
   agent: { id: string; name: string; owner: { id: string; name: string } },
   input: { since?: Date | undefined; limit: number },
-): Promise<AgentWorkEntry[]> {
+): Promise<AgentRecordEntry[]> {
   const readable = await readablePlaces(db, actor);
-  const { rows } = await db.query<WorkRow>(
-    `SELECT * FROM (${SELECTS.join("\n UNION ALL ")}) work
-     WHERE $4::timestamptz IS NULL OR work.at >= $4
-     ORDER BY work.at DESC, work.kind, work.seq DESC
+  const { rows } = await db.query<RecordRow>(
+    `SELECT * FROM (${SELECTS.join("\n UNION ALL ")}) entries
+     WHERE $4::timestamptz IS NULL OR entries.at >= $4
+     ORDER BY entries.at DESC, entries.kind, entries.seq DESC
      LIMIT $5`,
     [agent.id, readable.projectIds, readable.workspaceId, input.since ?? null, input.limit],
   );
@@ -108,15 +108,15 @@ export async function listAgentWork(
       ticket: row.ticket_key === null ? null : { key: row.ticket_key, title: row.ticket_title! },
       document: row.document_id === null ? null : { id: row.document_id, title: row.document_title! },
       change: row.kind === "change" ? toChange(row, by) : null,
-      activity: row.kind === "activity" ? (row.data as AgentWorkEntry["activity"]) : null,
-      comment: row.kind === "comment" ? (row.data as AgentWorkEntry["comment"]) : null,
-      version: row.kind === "version" ? (row.data as AgentWorkEntry["version"]) : null,
+      activity: row.kind === "activity" ? (row.data as AgentRecordEntry["activity"]) : null,
+      comment: row.kind === "comment" ? (row.data as AgentRecordEntry["comment"]) : null,
+      version: row.kind === "version" ? (row.data as AgentRecordEntry["version"]) : null,
     };
   });
 }
 
-/** A change row as a Ticket's history shows it: a status change always says whether it was a Send back. */
-function toChange(row: WorkRow, actor: RecordedActor): RecordedChange {
+/** A Change row as a Ticket's timeline shows it: a status change always says whether it was a Send back. */
+function toChange(row: RecordRow, actor: RecordedActor): RecordedChange {
   const { change, ...data } = row.data as { change: string };
   return { at: row.at, actor, change, ...data, ...(change === "status" && { sentBack: (data as { sentBack?: boolean }).sentBack === true }) } as RecordedChange;
 }

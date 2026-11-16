@@ -18,11 +18,12 @@ describe("What an Agent did", () => {
     cronk.clock.advance(1000);
     await admin.post("/api/tickets/CRONK-1/comments", { body: "Thanks" });
 
-    const res = await admin.get(`/api/agents/${claude.agentId}/work`);
+    const res = await admin.get(`/api/agents/${claude.agentId}/record`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).not.toHaveProperty("work");
     const ticket = { key: "CRONK-1", title: "Ticket 1" };
     const inSession = { id: agent.sessionId };
-    expect(res.body.work).toMatchObject([
+    expect(res.body.record).toMatchObject([
       { kind: "version", at: "2026-01-01T09:00:04.000Z", session: inSession, projectKey: "CRONK", ticket, document: { id: report.id, title: "Findings" }, version: { number: 1 } },
       { kind: "change", at: "2026-01-01T09:00:03.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, change: { change: "status", to: { id: started.id } } },
       { kind: "comment", at: "2026-01-01T09:00:02.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, comment: { body: "Picking this up" } },
@@ -56,8 +57,8 @@ describe("What an Agent did, as each User may see it", () => {
     expect((await agent.post(`/api/tickets/CRONK-1/documents/${secretPlan}`)).status).toBe(201);
 
     const seen = async (who: Client) =>
-      (await who.get(`/api/agents/${claude.agentId}/work`)).body.work.map(
-        (w: { kind: string; ticket: { key: string } | null; document: { title: string } | null }) => `${w.kind} ${w.ticket?.key ?? w.document?.title}`,
+      (await who.get(`/api/agents/${claude.agentId}/record`)).body.record.map(
+        (e: { kind: string; ticket: { key: string } | null; document: { title: string } | null }) => `${e.kind} ${e.ticket?.key ?? e.document?.title}`,
       );
     const everything = ["change CRONK-1", "version Handbook", "activity SECRET-1", "activity CRONK-1"];
     expect(await seen(bob)).toEqual(everything);
@@ -66,8 +67,8 @@ describe("What an Agent did, as each User may see it", () => {
     expect(await seen(bob)).toEqual(["version Handbook", "activity CRONK-1"]);
     expect(await seen(admin)).toEqual(everything);
 
-    expect((await carol.get(`/api/agents/${claude.agentId}/work`)).status).toBe(404);
-    expect((await agent.get(`/api/agents/${claude.agentId}/work`)).status).toBe(403);
+    expect((await carol.get(`/api/agents/${claude.agentId}/record`)).status).toBe(404);
+    expect((await agent.get(`/api/agents/${claude.agentId}/record`)).status).toBe(403);
   });
 
   it("narrows to what it did since a time, and to at most a number of entries", async () => {
@@ -79,10 +80,15 @@ describe("What an Agent did, as each User may see it", () => {
       await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body });
     }
     const bodies = async (query: string) =>
-      (await admin.get(`/api/agents/${claude.agentId}/work?${query}`)).body.work.map((w: { activity: { body: string } }) => w.activity.body);
+      (await admin.get(`/api/agents/${claude.agentId}/record?${query}`)).body.record.map((e: { activity: { body: string } }) => e.activity.body);
 
     expect(await bodies("since=2026-01-01T09:02:00.000Z")).toEqual(["three", "two"]);
     expect(await bodies("limit=1")).toEqual(["three"]);
-    expect((await admin.get(`/api/agents/${claude.agentId}/work?limit=0`)).status).toBe(400);
+    expect((await admin.get(`/api/agents/${claude.agentId}/record?limit=0`)).status).toBe(400);
+  });
+
+  it("is no longer served at the old /work path", async () => {
+    const { admin, claude } = await delegatedSetup();
+    expect((await admin.get(`/api/agents/${claude.agentId}/work`)).status).toBe(404);
   });
 });

@@ -117,7 +117,7 @@ async function snapshot(admin: Client): Promise<unknown> {
             ticket: await get(`/api/tickets/${t.key}`),
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
-            history: await get(`/api/tickets/${t.key}/history`),
+            changes: await get(`/api/tickets/${t.key}/changes`),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -228,7 +228,7 @@ describe("importing an export", () => {
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
     expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
-    const moves = (await admin.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
+    const moves = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
     expect(moves.map((c: { to: { name: string } }) => c.to.name)).toEqual(["In Progress"]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
@@ -294,7 +294,7 @@ describe("importing a Project export", () => {
     await elsewhere.admin.post("/api/projects/OTHER/tickets", { title: "Not that one" });
     expect((await elsewhere.admin.upload("/api/import", exported.body)).status).toBe(201);
 
-    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes).toContainEqual(expect.objectContaining({ change: "assignee", from: null, to: { id: bobId, name: "Bob" } }));
     expect(changes).toContainEqual(expect.objectContaining({ change: "assignee", from: { id: bobId, name: "Bob" }, to: { id: expect.any(String), name: "Ada" } }));
     expect(changes).toContainEqual(expect.objectContaining({ change: "delegate", from: { id: helper.agentId, name: "helper" }, to: null }));
@@ -484,7 +484,7 @@ describe("a change Cronk made itself", () => {
 
     const elsewhere = await startInstalledCronk("Elsewhere");
     expect((await elsewhere.admin.upload("/api/import", exported.body)).status).toBe(201);
-    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: { name: "Ada" } });
   });
 });

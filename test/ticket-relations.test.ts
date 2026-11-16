@@ -23,7 +23,7 @@ describe("Sub-Tickets", () => {
     expect((await admin.patch("/api/tickets/CRONK-2", { parentKey: null })).body.ticket.parent).toBeNull();
     expect(keys((await admin.get("/api/tickets/CRONK-1")).body.subTickets)).toEqual(["CRONK-3"]);
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-2/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-2/changes")).body;
     expect(changes.slice(1)).toMatchObject([
       { change: "parent", from: null, to: { key: "CRONK-1", title: "Ticket 1" } },
       { change: "parent", from: { key: "CRONK-1", title: "Ticket 1" }, to: null },
@@ -101,12 +101,12 @@ describe("Ticket relations", () => {
     await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
     await admin.delete("/api/tickets/CRONK-1/relations/blocks/CRONK-2");
 
-    const one = (await admin.get("/api/tickets/CRONK-1/history")).body.changes;
+    const one = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes;
     expect(one.slice(1)).toMatchObject([
       { change: "relation added", kind: "blocks", ticket: { key: "CRONK-2", title: "Ticket 2" } },
       { change: "relation removed", kind: "blocks", ticket: { key: "CRONK-2", title: "Ticket 2" } },
     ]);
-    const two = (await admin.get("/api/tickets/CRONK-2/history")).body.changes;
+    const two = (await admin.get("/api/tickets/CRONK-2/changes")).body.changes;
     expect(two.slice(1)).toMatchObject([
       { change: "relation added", kind: "blocked_by", ticket: { key: "CRONK-1" } },
       { change: "relation removed", kind: "blocked_by", ticket: { key: "CRONK-1" } },

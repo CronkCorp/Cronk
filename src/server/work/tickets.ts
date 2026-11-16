@@ -277,12 +277,12 @@ export function normalizeLabels(labels: string[]): string[] {
   return result;
 }
 
-/** One change in a Ticket's history. */
+/** One Change to a Ticket: `change` says which; the other fields depend on it. */
 export type TicketChange =
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
-  | { change: "status"; from: Status; to: Status; /** Stored only when true; history reads give it always. */ sentBack?: boolean }
+  | { change: "status"; from: Status; to: Status; /** Stored only when true; reads of Changes give it always. */ sentBack?: boolean }
   | { change: "priority"; from: Priority; to: Priority }
   | { change: "labels"; from: string[]; to: string[] }
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
@@ -293,9 +293,10 @@ export type TicketChange =
 
 export type { ChangeActor, RecordedActor };
 
+/** A Change to a Ticket with the Actor who made it (Cronk itself for a system Change) and when. */
 export type RecordedChange = { at: Date; actor: ChangeActor } & TicketChange;
 
-/** Records a change in the Ticket's history: by `actor` as it calls now, as an import stored it, or by Cronk itself. */
+/** Records a Change to the Ticket: by `actor` as it calls now, as an import stored it, or by Cronk itself. */
 export async function recordChange(
   db: Queryable,
   ticketId: string,
@@ -311,7 +312,7 @@ export async function recordChange(
   );
 }
 
-interface HistoryRow extends Omit<RecordedActorRow, "user_id" | "user_name"> {
+interface ChangeRow extends Omit<RecordedActorRow, "user_id" | "user_name"> {
   /** Null for a change Cronk itself made. */
   user_id: string | null;
   user_name: string | null;
@@ -320,9 +321,9 @@ interface HistoryRow extends Omit<RecordedActorRow, "user_id" | "user_name"> {
   data: object;
 }
 
-/** A Ticket's history, oldest first. */
-export async function listHistory(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
-  const { rows } = await db.query<HistoryRow>(
+/** A Ticket's Changes, oldest first. */
+export async function listChanges(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
+  const { rows } = await db.query<ChangeRow>(
     `SELECT c.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id, c.change, c.data
      FROM ticket_changes c LEFT JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
      WHERE c.ticket_id = $1 ORDER BY c.id`,
