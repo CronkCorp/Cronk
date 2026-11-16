@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { attachmentKey, insertAttachment, type AttachmentTarget } from "../files/attachments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
-import { bytesOf } from "./archive.js";
+import { HttpError } from "../context.js";
+import { sizeOf } from "./archive.js";
+import { formatBytes } from "../files/sizes.js";
 import { date, list, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
 
@@ -44,7 +46,7 @@ export async function exportAttachments(ctx: ExportContext, base: string, target
   for (const [i, a] of rows.entries()) {
     // Numbered, so two files of the same name stay apart, and none is hidden as a name starting with a dot would be.
     const file = `${i + 1}-${safeFileName(a.name)}`;
-    await ctx.addStoredFile(`${base}.attachments/${file}`, attachmentKey(a.id));
+    ctx.addStoredFile(`${base}.attachments/${file}`, attachmentKey(a.id), Number(a.size));
     index.push({ id: a.id, file, name: a.name, contentType: a.content_type, size: Number(a.size), at: iso(a.at), by: ctx.actor(a) });
   }
   ctx.add(`${base}.attachments/index.md`, { attachments: index });
@@ -58,16 +60,19 @@ export async function importAttachments(ctx: ImportContext, base: string, target
     const where = `${index.path} attachments[${i}]`;
     const path = `${base}.attachments/${text(entry.file, `${where} file`)}`;
     const contents = ctx.folder.get(path) ?? refuse(`${where} names ${path}, which the export doesn't hold`);
-    const bytes = bytesOf(contents);
+    const { attachmentMaxBytes } = await ctx.fileLimits();
+    if (sizeOf(contents) > attachmentMaxBytes) {
+      throw new HttpError(413, `${path} is larger than ${formatBytes(attachmentMaxBytes)}, the most an Attachment may take in this Workspace`);
+    }
     const id = await freeId(ctx, entry.id);
-    await ctx.storeFile(attachmentKey(id), bytes);
+    const size = await ctx.storeFile(attachmentKey(id), contents);
     await insertAttachment(ctx.db, {
       id,
       workspaceId: ctx.workspaceId,
       target,
       name: text(entry.name, `${where} name`),
       contentType: text(entry.contentType, `${where} contentType`),
-      size: bytes.length,
+      size,
       actor: await ctx.actor(entry.by, `${where} by`),
       now: date(entry.at, `${where} at`),
     });

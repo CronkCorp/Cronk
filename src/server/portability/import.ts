@@ -1,6 +1,6 @@
 import { HttpError } from "../context.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
-import { unwrapFolder, type Folder } from "./archive.js";
+import { unwrapFolder, type StoredFolder } from "./archive.js";
 import { natural, refuse } from "./fields.js";
 import { FORMAT } from "./format.js";
 import { importGuidance } from "./guidance.js";
@@ -43,7 +43,7 @@ export interface Imported {
  * files of its Attachments go into `files.store`, each key added to `files.stored` as it is, for the caller to remove
  * should the transaction fail.
  */
-export async function importExport(db: Queryable, workspaceId: string, archived: Folder, now: Date, files: ImportedFiles): Promise<Imported> {
+export async function importExport(db: Queryable, workspaceId: string, archived: StoredFolder, now: Date, files: ImportedFiles): Promise<Imported> {
   const ctx = new ImportContext(db, workspaceId, unwrapFolder(archived), now, files);
   const scope = readScope(ctx);
   // One import at a time per Workspace, so two can't both find it empty or a key free.

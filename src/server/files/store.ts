@@ -25,6 +25,8 @@ export interface FileStore {
   put(key: string, bytes: Readable | Buffer, opts?: { maxBytes?: number }): Promise<number>;
   /** The bytes stored under `key`, or only `range` of them; a key with no file throws. */
   get(key: string, range?: ByteRange): Readable;
+  /** Moves the file under `from` to `to`, replacing any file there; moving a key with no file throws. */
+  move(from: string, to: string): Promise<void>;
   /** Removes the file under `key`; removing one that isn't there does nothing. */
   delete(key: string): Promise<void>;
   /** The keys of every file under the folder `prefix`, however deep, in order. */
@@ -94,6 +96,12 @@ export class LocalDiskStore implements FileStore {
 
   get(key: string, range?: ByteRange): Readable {
     return createReadStream(this.path(key), range ? { start: range.start, end: range.end } : {});
+  }
+
+  async move(from: string, to: string): Promise<void> {
+    const path = this.path(to);
+    await mkdir(dirname(path), { recursive: true });
+    await rename(this.path(from), path);
   }
 
   async delete(key: string): Promise<void> {

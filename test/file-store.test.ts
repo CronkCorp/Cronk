@@ -65,6 +65,21 @@ function storageContract(name: string, open: () => Promise<FileStore>, skip = fa
       expect(await store.list("attachments")).toEqual(["attachments/large"]);
     });
 
+    it("moves a file to another key, replacing the file there, and fails moving a key with no file", async () => {
+      const store = await open();
+      await store.put("imports/x/1", Buffer.from("moved"));
+      await store.put("attachments/a2", Buffer.from("replaced"));
+
+      await store.move("imports/x/1", "attachments/a1");
+      await store.move("attachments/a1", "attachments/a2");
+
+      expect((await read(store.get("attachments/a2"))).toString()).toBe("moved");
+      expect(await store.list("imports")).toEqual([]);
+      expect(await store.list("attachments")).toEqual(["attachments/a2"]);
+      await expect(store.move("imports/x/missing", "attachments/a3")).rejects.toThrow();
+      expect(await store.list("attachments")).toEqual(["attachments/a2"]);
+    });
+
     it("removes a file, and does nothing removing one that isn't there", async () => {
       const store = await open();
       await store.put("attachments/a1", Buffer.from("gone"));

@@ -1,17 +1,19 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
-import { ARCHIVE_TYPES, archiveBody, packFolder, unpackFolder, type Folder } from "./archive.js";
+import { getWorkspace } from "../workspace/workspaces.js";
+import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
+import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
 import { exportDecisionsFolder, exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 import { listRenamedIds } from "./renamed-ids.js";
 
-/** The largest archive an import takes. */
-const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
 /** The request body of an import: an archive, which the content-type parser hands over as bytes (so it has no type to check). */
 const archiveBodySchema = { description: "The folder as a zip archive, or a tar archive gzipped or not." };
@@ -31,12 +33,18 @@ const importedAnswer = answer(
  */
 export function portabilityRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    // Archives arrive as raw bytes; this parser applies only to the routes registered here.
-    app.addContentTypeParser(ARCHIVE_TYPES, { parseAs: "buffer", bodyLimit: MAX_ARCHIVE_BYTES }, (_request, body, done) => done(null, body));
     exportRoutes(app, ctx);
     decisionExportRoutes(app, ctx);
-    importRoute(app, ctx);
-    markdownImportRoutes(app, ctx);
+    // An export's archive is read as it streams in, its large files going straight into the file store; these parsers apply only to the routes registered with them.
+    await app.register(async (streamed) => {
+      streamed.addContentTypeParser(ARCHIVE_TYPES, (_request, payload, done) => done(null, payload));
+      importRoute(streamed, ctx);
+    });
+    // A folder of Markdown files arrives as raw bytes, held whole.
+    await app.register(async (buffered) => {
+      buffered.addContentTypeParser(ARCHIVE_TYPES, { parseAs: "buffer", bodyLimit: MAX_PACKED_BYTES }, (_request, body, done) => done(null, body));
+      markdownImportRoutes(buffered, ctx);
+    });
   };
 }
 
@@ -44,7 +52,7 @@ export function portabilityRoutes(ctx: AppContext) {
 function exportRoutes(app: FastifyInstance, ctx: AppContext) {
   /** Answers with the export of the Workspace, or of one Project, as a gzipped tar archive to save. */
   const sendExport = (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null, versions: boolean) =>
-    sendArchive(ctx, reply, project?.key ?? "workspace", (tx, now) => exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }, ctx.files));
+    sendArchive(ctx, reply, project?.key ?? "workspace", (tx, now) => exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }));
 
   app.get<{ Querystring: { versions?: boolean } }>(
     "/api/export",
@@ -85,7 +93,7 @@ function exportRoutes(app: FastifyInstance, ctx: AppContext) {
 function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
   /** Answers with the Decisions of the Workspace (project null) or a Project, as a gzipped tar archive to save. */
   const sendDecisions = (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null) =>
-    sendArchive(ctx, reply, `${project?.key ?? "workspace"}-adr`, (tx, now) => exportDecisionsFolder(tx, workspaceId, project, now, ctx.files));
+    sendArchive(ctx, reply, `${project?.key ?? "workspace"}-adr`, (tx, now) => exportDecisionsFolder(tx, workspaceId, project, now));
 
   app.get(
     "/api/workspace/decisions/export",
@@ -121,9 +129,10 @@ function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
 
 /**
  * Answers with the folder `build` makes as a gzipped tar archive to save, named `cronk-<name>-<stamp>.tar.gz`.
- * It is built in a read-only, repeatable-read transaction so its files agree with each other.
+ * It is built in a read-only, repeatable-read transaction so its files agree with each other, and streamed: the files
+ * of Attachments and Artifacts are read from the file store only as the archive reaches them.
  */
-async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<Folder>) {
+async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<StoredFolder>) {
   const now = ctx.clock.now();
   const folder = await transaction(ctx.db, async (tx) => {
     await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
@@ -133,7 +142,7 @@ async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, b
   return reply
     .header("content-type", "application/gzip")
     .header("content-disposition", `attachment; filename="cronk-${name}-${stamp}.tar.gz"`)
-    .send(await packFolder(folder));
+    .send(packFolderStream(folder, ctx.files));
 }
 
 /** Importing an export. */
@@ -141,7 +150,6 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
   app.post(
     "/api/import",
     {
-      bodyLimit: MAX_ARCHIVE_BYTES,
       schema: {
         consumes: ARCHIVE_TYPES,
         body: archiveBodySchema,
@@ -151,6 +159,9 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           "Users are matched by email and Agents by Owner and name; Users not found are created deactivated, since they have no password here, until an Admin invites them and they accept, " +
           "and Agents not found are created without tokens. Agents and Agent Sessions keep their ids, unless an id is already taken here: then they get a new one, " +
           "and the import answers and keeps which id became which (GET /api/import/renamed-ids). Relations to Tickets outside the export are left out. " +
+          "The archive is read as it streams in. Its Markdown files may take up to 200 MB packed and 512 MB unpacked; every other file, such as an Attachment's, " +
+          "is streamed into storage and may be as large as the Workspace allows an Attachment (or an Artifact Version) to be, under the export's own workspace.md limits " +
+          "for a Workspace export. A file over its limit refuses the import with a 413 naming it. " +
           archiveUpload,
         response: {
           201: answer("What the import brought in", {
@@ -162,25 +173,42 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
               renamedIds: { type: "array", items: ref("RenamedId"), description: "The Agents and Agent Sessions it gave new ids, because their ids were taken." },
             },
           }),
-          ...errors(400, 401, 403, 409, 410),
+          ...errors(400, 401, 403, 409, 410, 413),
         },
       },
     },
     async (request, reply) => {
       const user = await requireUser(ctx, request);
       requireAdmin(user, "import an export");
-      const folder = await unpackFolder(archiveBody(request.body));
-      // The files the import stores, so none stays if it fails, even at the commit.
+      const body = archiveStream(request.body);
+      const workspace = await getWorkspace(ctx.db, user.workspaceId);
+      // The keys of the files the import streams in, held there until moved to their places, and of those places, so
+      // none stays if it fails at any point: unpacking, a refused value, the commit or a dropped connection.
+      const importId = randomUUID();
+      const temporary: string[] = [];
       const stored: string[] = [];
       try {
+        const folder = await unpackFolderStream(body, {
+          store: ctx.files,
+          temporaryKey: () => {
+            const key = `imports/${importId}/${temporary.length + 1}`;
+            temporary.push(key);
+            return key;
+          },
+          isMarkdown: isExportMarkdown,
+          limit: (path, markdown) => streamedFileLimit(path, markdown, workspace),
+        });
         const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
         return reply.code(201).send(imported);
       } catch (err) {
-        for (const key of stored) await ctx.files.delete(key);
+        await removeFiles(request, ctx, stored);
         // The database refusing a value (a constraint or a malformed value) means the export holds data Cronk can't take.
         const code = (err as { code?: unknown }).code;
         if (typeof code === "string" && /^2[23]/.test(code)) throw new HttpError(400, `The export holds data Cronk can't take: ${(err as Error).message}`);
         throw err;
+      } finally {
+        // Those moved to their places are gone already; any left, such as a file no index names, go now.
+        await removeFiles(request, ctx, temporary);
       }
     },
   );
@@ -208,7 +236,7 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post(
     "/api/workspace/documents/import",
     {
-      bodyLimit: MAX_ARCHIVE_BYTES,
+      bodyLimit: MAX_PACKED_BYTES,
       schema: {
         consumes: ARCHIVE_TYPES,
         body: archiveBodySchema,
@@ -229,7 +257,7 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post<{ Params: { key: string } }>(
     "/api/projects/:key/documents/import",
     {
-      bodyLimit: MAX_ARCHIVE_BYTES,
+      bodyLimit: MAX_PACKED_BYTES,
       schema: {
         consumes: ARCHIVE_TYPES,
         body: archiveBodySchema,
@@ -249,6 +277,19 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
       return reply.code(201).send({ documents });
     },
   );
+}
+
+/** Removes the files under `keys`, each tried even if another fails, so one failure hides neither the rest nor why the import failed. */
+async function removeFiles(request: FastifyRequest, ctx: AppContext, keys: string[]): Promise<void> {
+  const removed = await Promise.allSettled(keys.map((key) => ctx.files.delete(key)));
+  for (const [i, result] of removed.entries()) {
+    if (result.status === "rejected") request.log.error({ err: result.reason, key: keys[i] }, "An import couldn't remove a file it stored");
+  }
+}
+
+/** The uploaded archive as a stream; a body sent as another type, such as JSON, is refused. */
+function archiveStream(body: unknown): Readable {
+  return body instanceof Readable ? body : Readable.from([archiveBody(body)]);
 }
 
 const EXPORT_FORMAT =

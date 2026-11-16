@@ -2,8 +2,8 @@ import { bareOrigins } from "../files/origins.js";
 import { agentAccessSchema } from "../schemas.js";
 import { getWorkspace, pickSettings, updateWorkspace, WORKSPACE_SETTINGS, type WorkspaceSettings } from "../workspace/workspaces.js";
 import type { ExportContext } from "./export-context.js";
-import { integer, oneOf, refuse, text } from "./fields.js";
-import type { ImportContext } from "./import-context.js";
+import { integer, oneOf, refuse, text, type File } from "./fields.js";
+import type { FileLimits, ImportContext } from "./import-context.js";
 
 /** `workspace.md`: the Workspace's settings, in a Workspace export only. */
 
@@ -38,6 +38,16 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
         typeof w.data.artifactExtraOriginsAllowed === "boolean" ? w.data.artifactExtraOriginsAllowed : refuse("workspace.md artifactExtraOriginsAllowed must be true or false"),
     }),
   });
+}
+
+/** The limits on files `workspace.md` sets, read as importing it does; a limit it leaves out is left out. */
+export function fileLimitsIn(w: File): Partial<FileLimits> {
+  const { attachmentMaxBytes, artifactMaxBytes, artifactMaxFiles } = importedSettings(w.data);
+  return {
+    ...(attachmentMaxBytes !== undefined && { attachmentMaxBytes }),
+    ...(artifactMaxBytes !== undefined && { artifactMaxBytes }),
+    ...(artifactMaxFiles !== undefined && { artifactMaxFiles }),
+  };
 }
 
 /**

@@ -2,6 +2,9 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import type { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 import tar from "tar-stream";
@@ -153,6 +156,28 @@ export class Client {
       payload: bytes,
     });
     return { status: res.statusCode, body: (res.body ? JSON.parse(res.body) : undefined) as T };
+  }
+
+  /**
+   * Calls `path` over real HTTP, as a browser or `curl` does, streaming `body` if given rather than holding it, and
+   * answers the response unread, so a test can stream a large download too. (`fetch` holds a streamed request body.)
+   */
+  async send(path: string, init: { method?: string; body?: Readable; headers?: Record<string, string> } = {}): Promise<IncomingMessage> {
+    const url = new URL(path, await this.cronk.url());
+    // Sent from Cronk's own page, which is wherever it is reached over HTTP.
+    const origin = this.headers.origin === OWN_ORIGIN ? { origin: url.origin } : {};
+    const request = httpRequest(url, { method: init.method ?? "GET", headers: { ...this.authHeaders(), ...origin, ...init.headers } });
+    const answered = new Promise<IncomingMessage>((resolve, reject) => {
+      request.once("response", resolve);
+      request.once("error", reject);
+    });
+    if (init.body) {
+      // A server answering before it has read the whole body, as it does refusing one, stops the upload; the answer still counts.
+      await pipeline(init.body, request).catch(() => {});
+    } else {
+      request.end();
+    }
+    return answered;
   }
 
   private authHeaders(): Record<string, string> {
@@ -638,16 +663,16 @@ export async function startSession(cronk: Cronk, secret: string): Promise<Client
 }
 
 /**
- * A zip archive holding `files` (path to text; a path ending in `/` is a folder entry), as a file manager's
+ * A zip archive holding `files` (path to text or bytes; a path ending in `/` is a folder entry), as a file manager's
  * "Compress" makes of a folder: each file deflated, or stored when `stored` is set.
  */
-export function zip(files: Record<string, string>, { stored = false } = {}): Buffer {
+export function zip(files: Record<string, string | Buffer>, { stored = false } = {}): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const [name, text] of Object.entries(files)) {
     const nameBytes = Buffer.from(name, "utf8");
-    const data = Buffer.from(text, "utf8");
+    const data = typeof text === "string" ? Buffer.from(text, "utf8") : text;
     const method = stored || name.endsWith("/") ? 0 : 8;
     const packed = method === 8 ? deflateRawSync(data) : data;
     const header = (signature: number, size: number) => {
