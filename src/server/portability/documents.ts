@@ -4,6 +4,7 @@ import { exportComments, importComments } from "./comments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, integer, isUuid, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
+import { importProtection, protectionToExport } from "./protection.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -18,6 +19,7 @@ export interface DocumentRow {
   title: string;
   body: string;
   version: number;
+  protected: boolean;
   created_at: Date;
   updated_at: Date;
   claim_id?: string | null;
@@ -38,6 +40,7 @@ export async function exportDocument(ctx: ExportContext, base: string, d: Docume
       title: d.title,
       claim: d.claim_id ?? undefined,
       version: d.version,
+      ...(await protectionToExport(ctx, { kind: "document", id: d.id }, d.protected)),
       createdAt: iso(d.created_at),
       createdBy: ctx.actor(first),
       updatedAt: iso(d.updated_at),
@@ -100,6 +103,7 @@ export async function importDocument(ctx: ImportContext, base: string, place: Do
     claimId,
   });
   ctx.documentIds.set(`${base}.md`, id);
+  await importProtection(ctx, { kind: "document", id }, d.data, d.path);
   if (versions.length === 0) {
     // Without its Versions, it starts at Version 1 by whoever first wrote it, so a Report keeps its Agent.
     const by = await ctx.actor(d.data.createdBy, `${d.path} createdBy`);

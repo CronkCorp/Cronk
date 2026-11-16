@@ -36,6 +36,11 @@ export async function setProtected(db: Queryable, item: ProtectableItem, value: 
   return true;
 }
 
+/** Sets the item's mark as given without recording it, as an import does before writing the history it holds. */
+export async function setProtectedFlag(db: Queryable, item: ProtectableItem, value: boolean): Promise<void> {
+  await db.query(`UPDATE ${TABLE[item.kind]} SET protected = $2 WHERE id = $1`, [item.id, value]);
+}
+
 /** Records one marking or unmarking in an item's protection history, as an import writes it; changes no mark. */
 export async function insertProtectionChange(db: Queryable, item: ProtectableItem, change: { protected: boolean; at: Date; userId: string }): Promise<void> {
   await db.query(`INSERT INTO protection_changes (${COLUMN[item.kind]}, protected, at, actor_user_id) VALUES ($1, $2, $3, $4)`, [

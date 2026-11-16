@@ -241,3 +241,32 @@ describe("a Protected Decision", () => {
     expect(edit.body.error).toMatch(/^D1 is Protected.*Suggestion/);
   });
 });
+
+describe("upgrading an installation with accepted Decisions", () => {
+  it("marks each Protected, as by the User who accepted it, then; other Decisions stay unmarked", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
+    const graceId = (await grace.get("/api/me")).body.user.id;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Accepted", body: "v1" });
+    cronk.clock.advance(60_000);
+    await grace.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    cronk.clock.advance(60_000);
+    await admin.patch("/api/decisions/CRONK-D1", { baseVersion: 2, body: "v2" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Proposed" });
+
+    await cronk.undoMigration(
+      "0024_protected",
+      `DROP TABLE protection_changes;
+       ALTER TABLE documents DROP COLUMN protected; ALTER TABLE terms DROP COLUMN protected; ALTER TABLE decisions DROP COLUMN protected`,
+    );
+    await cronk.restart();
+
+    expect((await admin.get("/api/decisions/CRONK-D1")).body.decision.protected).toBe(true);
+    expect((await admin.get("/api/decisions/CRONK-D1/protection")).body.changes).toEqual([
+      { protected: true, at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: graceId, name: "Grace" } },
+    ]);
+    expect((await admin.get("/api/decisions/CRONK-D2")).body.decision.protected).toBe(false);
+    expect((await admin.get("/api/decisions/CRONK-D2/protection")).body.changes).toEqual([]);
+  });
+});

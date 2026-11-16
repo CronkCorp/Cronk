@@ -89,6 +89,9 @@ describe("exporting a Project", () => {
         group: "Security",
         supersededBy: "CRONK-D2",
         version: 3,
+        // Accepting it marked it Protected; being superseded since leaves the mark.
+        protected: true,
+        protection: [{ protected: true, at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" }],
         createdAt: "2026-01-01T09:00:00.000Z",
         createdBy: "ada@example.com",
         updatedAt: "2026-01-01T09:00:00.000Z",
@@ -130,6 +133,7 @@ async function snapshot(admin: Client): Promise<unknown> {
   };
   const document = async (id: string) => ({
     ...(await get(`/api/documents/${id}`)),
+    protection: await get(`/api/documents/${id}/protection`),
     versions: await Promise.all((await get(`/api/documents/${id}/versions`)).versions.map((v: { number: number }) => get(`/api/documents/${id}/versions/${v.number}`))),
     comments: await get(`/api/documents/${id}/comments`),
   });
@@ -138,6 +142,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     return Promise.all(
       listed.map(async (d: { key: string }) => ({
         ...(await get(`/api/decisions/${d.key}`)),
+        protection: await get(`/api/decisions/${d.key}/protection`),
         versions: await Promise.all((await get(`/api/decisions/${d.key}/versions`)).versions.map((v: { number: number }) => get(`/api/decisions/${d.key}/versions/${v.number}`))),
       })),
     );
@@ -147,7 +152,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     return { documents, contents: await Promise.all(documents.map((d: { id: string }) => document(d.id))) };
   };
   const terms = async (path: string) =>
-    Promise.all((await get(path)).terms.map(async (t: { id: string }) => ({ term: t, versions: await get(`/api/terms/${t.id}/versions`) })));
+    Promise.all((await get(path)).terms.map(async (t: { id: string }) => ({ term: t, versions: await get(`/api/terms/${t.id}/versions`), protection: await get(`/api/terms/${t.id}/protection`) })));
   const project = async (key: string) => {
     const { tickets } = await get(`/api/projects/${key}/tickets`);
     return {
@@ -273,6 +278,13 @@ async function busyWorkspace() {
   const customer = (await termWriter.post("/api/projects/CRONK/terms", { name: "customer", definition: "A billing account.", avoid: ["Client"], group: "Billing" })).body.term;
   await termWriter.patch(`/api/terms/${customer.id}`, { baseVersion: 1, avoid: ["Client", "account"] });
   await termWriter.delete("/api/agent-sessions/current");
+  // Protected marks: Grace's on the Guide branch, a Term marked and unmarked, a Term marked, and an accepted Decision unmarked.
+  cronk.clock.advance(60_000);
+  await grace.post(`/api/documents/${guide.id}/protection`, { protected: true });
+  await admin.post(`/api/terms/${customer.id}/protection`, { protected: true });
+  await admin.post(`/api/terms/${customer.id}/protection`, { protected: false });
+  await admin.post(`/api/terms/${ticketTerm.id}/protection`, { protected: true });
+  await admin.post("/api/decisions/CRONK-D1/protection", { protected: false });
 
   // A second, archived Project; a removed Agent.
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
@@ -598,6 +610,42 @@ describe("Terms in an export", () => {
   });
 });
 
+describe("Protected marks in an export", () => {
+  it("are written in the frontmatter of the items they belong to, with who marked and unmarked them", async () => {
+    const { admin } = await busyWorkspace();
+    const files = await untarGz((await admin.download("/api/export")).body);
+    const ada = "ada@example.com";
+
+    const guide = markdown(files[Object.keys(files).find((path) => /projects\/CRONK\/documents\/\d+-guide\.md$/.test(path))!]).data;
+    expect(guide).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:05:00.000Z", by: "grace@example.com" }] });
+    const docker = markdown(files[Object.keys(files).find((path) => /guide\/\d+-setup-docker\.md$/.test(path))!]).data;
+    expect(docker).toMatchObject({ protected: false });
+    expect(docker.protection).toBeUndefined();
+    const [customer] = markdown(files["projects/CRONK/terms.md"]).data.terms;
+    expect(customer).toMatchObject({ protected: false, protection: [{ protected: true, by: ada }, { protected: false, by: ada }] });
+    const accepted = markdown(files[Object.keys(files).find((path) => path.startsWith("projects/CRONK/docs/adr/0003-"))!]).data;
+    expect(accepted).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:04:00.000Z", by: "grace@example.com" }] });
+  });
+
+  it("leave an accepted Decision Protected when an older export, from before them, says nothing of them", async () => {
+    const before = await busyWorkspace();
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    for (const path of Object.keys(files).filter((p) => p.includes("/docs/adr/") && !p.includes(".versions/"))) {
+      files[path] = files[path]!.replace(/^protected: .*\n/m, "").replace(/^protection:\n(  .*\n)*/m, "");
+    }
+    expect(files["projects/CRONK/docs/adr/0003-per-email-limits.md"]).not.toMatch(/protect/);
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", await tarGz(files))).status).toBe(201);
+    const statuses = (await admin.get("/api/projects/CRONK/decisions")).body.decisions.map((d: { key: string; status: string; protected: boolean }) => [d.key, d.status, d.protected]);
+    expect(statuses).toEqual([
+      ["CRONK-D3", "accepted", true],
+      ["CRONK-D2", "rejected", false],
+      ["CRONK-D1", "superseded", false],
+    ]);
+  });
+});
+
 describe("an export taken apart and archived again", () => {
   it("imports with its folder around it, as `tar czf` of the extracted folder makes", async () => {
     const before = await busyWorkspace();
@@ -654,6 +702,10 @@ describe("an export edited by hand", () => {
     const disagrees = await admin.upload("/api/import", await edited(cronkTerms, (d) => (d.terms[0].definition = "Something else.")));
     expect(disagrees.status).toBe(400);
     expect(disagrees.body.error).toMatch(/CRONK\/terms\.md terms\[0\] must say what its Version 2 says/);
+
+    const vague = await admin.upload("/api/import", await edited(cronkTerms, (d) => (d.terms[0].protected = "yes")));
+    expect(vague.status).toBe(400);
+    expect(vague.body.error).toMatch(/CRONK\/terms\.md terms\[0\] protected must be true or false/);
 
     expect((await admin.get("/api/projects")).body.projects).toEqual([]);
   });
