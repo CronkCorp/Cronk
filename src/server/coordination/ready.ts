@@ -6,9 +6,12 @@ import { visibleProjects } from "../identity/access.js";
 import { listAgents } from "../identity/agents.js";
 import type { LiveEvent } from "../live/live-updates.js";
 import { agentTopic } from "../live/topics.js";
-import { listProjects } from "../work/projects.js";
+import { findProjectById, listProjects } from "../work/projects.js";
+import { listRelations } from "../work/relations.js";
+import { visibleRelations } from "../work/ticket-reads.js";
+import { FINISHED_CATEGORIES } from "../../shared/values.js";
 import { findTicketsByIds, type Ticket } from "../work/tickets.js";
-import { findDelegatedTicketsInTheClear, type ReadyScope } from "./claims.js";
+import { findDelegatedTicketsInTheClear, findLiveClaim, type ReadyScope } from "./claims.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 
 /**
@@ -25,6 +28,31 @@ import { ticketsChanged } from "../work/ticket-changes.js";
 export async function readyScope(db: Queryable, agent: AgentActor): Promise<ReadyScope> {
   const projects = await visibleProjects(db, agent, await listProjects(db, agent.owner.workspaceId, false));
   return { agentId: agent.agent.id, projectIds: projects.filter((p) => p.access === "write").map((p) => p.id) };
+}
+
+/**
+ * Why `ticket`, which isn't Ready for the Agent at `now` (`isTicketReady`), isn't, as a refusal
+ * to Claim it reads. Only explains: whether a Ticket is Ready is `isTicketReady`'s to say.
+ */
+export async function whyNotReady(db: Queryable, agent: AgentActor, scope: ReadyScope, ticket: Ticket, now: Date): Promise<string> {
+  if (ticket.delegate?.id !== agent.agent.id) return `${ticket.key} isn't delegated to ${agent.agent.name}`;
+  if (FINISHED_CATEGORIES.includes(ticket.status.category)) return `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`;
+  if (ticket.status.category === "in_review") return `${ticket.key} is ${ticket.status.name}, waiting until a User Sends it back`;
+  if (!scope.projectIds.includes(ticket.projectId)) {
+    const project = await findProjectById(db, ticket.projectId);
+    if (project?.archived) return `${ticket.key} is in the archived Project ${project.key}`;
+    return `${agent.agent.name} may not work in ${ticket.projectKey}`;
+  }
+  const blockers = (await listRelations(db, ticket.id)).blockedBy.filter((b) => !FINISHED_CATEGORIES.includes(b.status.category));
+  if (blockers.length > 0) {
+    const visible = (await visibleRelations(db, agent, { blocks: [], blockedBy: blockers, relatesTo: [] })).blockedBy.map((b) => b.key);
+    const hidden = blockers.length - visible.length;
+    const named = [...visible, ...(hidden > 0 ? [`${hidden} Ticket${hidden === 1 ? "" : "s"} you can't see`] : [])];
+    const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+    return `${ticket.key} is blocked by ${list}, which ${blockers.length === 1 ? "isn't" : "aren't"} finished`;
+  }
+  if (await findLiveClaim(db, ticket.id, now)) return `${ticket.key} is Claimed by another Agent Session`;
+  return `${ticket.key} isn't Ready`;
 }
 
 /** Which of these Tickets are Ready for their Delegate at `now`, as a map from Ticket id to Agent id. */

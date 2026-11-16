@@ -86,6 +86,24 @@ describe("An Agent Session's event stream", () => {
     expect(await stream.next()).toEqual(readyEvent("CRONK-3"));
   });
 
+  it("tells the Agent when its Ticket is Sent back from review, and not when it goes into review", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
+    const holder = await session();
+    await holder.post("/api/tickets/CRONK-1/claim");
+    await holder.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." });
+    const watcher = await session();
+    const stream = await watcher.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await holder.patch("/api/tickets/CRONK-1", { statusId: inReview });
+    await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Needs tests" });
+    // The Comment it was Sent back with waits for the Agent too; going into review told it nothing.
+    const told = [await stream.next(), await stream.next()];
+    expect(told.map((e) => e?.event).sort()).toEqual(["ticketReady", "waiting"]);
+    expect(told).toContainEqual(readyEvent("CRONK-1"));
+  });
+
   it("tells the Agent of a Sub-Ticket split off one of its Tickets", async () => {
     const { admin, session } = await delegatedSetup(1);
     const agent = await session();
@@ -106,6 +124,19 @@ describe("An Agent Session's event stream", () => {
 
     const backlog = (await admin.get("/api/projects/CRONK")).body.statuses[0].id;
     expect((await admin.delete(`/api/projects/CRONK/statuses/${shelved.id}?moveTo=${backlog}`)).status).toBe(204);
+    expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
+  });
+
+  it("tells the Agent of its Tickets that a removed In Review Status moves back into Started work", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const checking = (await admin.post("/api/projects/CRONK/statuses", { name: "Checking", category: "in_review" })).body.status;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: checking.id });
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const started = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "started").id;
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${checking.id}?moveTo=${started}`)).status).toBe(204);
     expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
   });
 

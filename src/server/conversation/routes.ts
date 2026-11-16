@@ -11,6 +11,7 @@ import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
+import { tellNewlyReady } from "../coordination/ready.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, type CommentPlace, type Positioned, type WaitingFor, type WaitingWork } from "../coordination/waiting-work.js";
@@ -213,6 +214,8 @@ export function conversationRoutes(ctx: AppContext) {
             ticketsChanged(ctx.live, [ticket]);
           },
         );
+        // Sending it back makes it Ready again; In Review, it wasn't Ready before.
+        await tellNewlyReady(ctx, [ticket.id], new Map());
         return { ticket, comment: publicComment(posted.comment) };
       },
     );

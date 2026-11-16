@@ -23,6 +23,8 @@ import { findUserById, type User } from "./users.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { agentsTopic } from "../live/topics.js";
 import { claimsEnded } from "../coordination/ready.js";
+import { clearDelegationsTo } from "../work/tickets.js";
+import { ticketsChanged } from "../work/ticket-changes.js";
 
 const agentId = { type: "string", format: "uuid", description: "The Agent's id." } as const;
 const agentParams = pathParams({ id: agentId });
@@ -133,21 +135,25 @@ export function agentRoutes(ctx: AppContext) {
         schema: {
           params: agentParams,
           response: {
-            204: noContent("The Agent is removed, its tokens revoked and its Agent Sessions ended"),
+            204: noContent("The Agent is removed, its tokens revoked, its Agent Sessions ended and it is cleared as Delegate of every Ticket"),
             ...errors(400, 401, 403, 404, 410),
           },
         },
       },
       async (request, reply) => {
         const user = await requireUser(ctx, request);
-        const { ticketIds } = await transaction(ctx.db, async (tx) => {
+        const { claimed, undelegated } = await transaction(ctx.db, async (tx) => {
           const agent = await ownAgent(ctx, user, request.params.id);
           const now = ctx.clock.now();
           await removeAgent(tx, agent, now);
-          return endAgentSessionsOf(tx, agent.id, now);
+          // Its Tickets are no longer delegated, as if its Owner had cleared each by hand.
+          const undelegated = await clearDelegationsTo(tx, agent.id, userActor(user), now);
+          const { ticketIds: claimed } = await endAgentSessionsOf(tx, agent.id, now);
+          return { claimed, undelegated };
         });
         // The Agent is gone, so nothing is Ready for it, but their Claims ended.
-        await claimsEnded(ctx, ticketIds);
+        await claimsEnded(ctx, claimed);
+        ticketsChanged(ctx.live, undelegated);
         // Its open questions leave its Owner's Inbox.
         inboxesChanged(ctx.live, [user.id]);
         return reply.code(204).send();

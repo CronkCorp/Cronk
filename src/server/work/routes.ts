@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import {
   accessSchema,
@@ -18,7 +18,7 @@ import {
 } from "../schemas.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
 import { addRelation, listRelations, removeRelation } from "./relations.js";
-import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
+import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
@@ -190,7 +190,8 @@ export function workRoutes(ctx: AppContext) {
         const { project, access } = await projectFor(ctx.db, actor, request.params.key, "write");
         const { name, archived, visibility, agentAccess } = request.body;
         if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
-        if (agentAccess !== undefined && actor.kind === "agent") throw new HttpError(403, "Only a User can change Agent Access");
+        if (agentAccess !== undefined) requireUserActor(actor, "change Agent Access");
+        if (name !== undefined || archived !== undefined) requireUserActor(actor, "rename or archive a Project");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
@@ -305,6 +306,7 @@ export function workRoutes(ctx: AppContext) {
         const name = request.body.name.trim();
         const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          requireUserActor(actor, "manage Statuses");
           await lockProject(tx, project.id);
           return { projectId: project.id, status: await insertStatus(tx, project.id, { name, category: request.body.category }) };
         });
@@ -333,6 +335,7 @@ export function workRoutes(ctx: AppContext) {
         const name = request.body.name?.trim();
         const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          requireUserActor(actor, "manage Statuses");
           await lockProject(tx, project.id);
           let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
           if (name !== undefined) {
@@ -367,6 +370,7 @@ export function workRoutes(ctx: AppContext) {
         const { moveTo } = request.query;
         const { projectId, moved, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          requireUserActor(actor, "manage Statuses");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
           const status = statusOr404(statuses, request.params.statusId);
@@ -382,8 +386,12 @@ export function workRoutes(ctx: AppContext) {
           let mayBecomeReady: string[] = [];
           let readyBefore = new Map<string, string>();
           if (target) {
-            // Moving Tickets into or out of finished work may make them, or the Tickets they block, Ready.
-            if (FINISHED_CATEGORIES.includes(status.category) !== FINISHED_CATEGORIES.includes(target.category)) {
+            // Moving Tickets between work an Agent can take up and work it can't (In Review or finished) may make
+            // them Ready, and moving them into or out of finished work may make the Tickets they block Ready.
+            if (
+              WORKABLE_CATEGORIES.includes(status.category) !== WORKABLE_CATEGORIES.includes(target.category) ||
+              FINISHED_CATEGORIES.includes(status.category) !== FINISHED_CATEGORIES.includes(target.category)
+            ) {
               const ids = (await listTickets(tx, project.id, { statusIds: [status.id] })).map((t) => t.id);
               mayBecomeReady = [...ids, ...(await ticketsBlockedBy(tx, ids))];
               readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
@@ -787,10 +795,10 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
 
 /**
- * Whether moving a Ticket into `status` ends its Claim: a finished Ticket has no work left to Claim,
- * and only Users finish work.
+ * Whether moving a Ticket into `status` ends its Claim: a Ticket In Review is handed over, so its
+ * Report and the Ticket mustn't change under the reviewer, and a finished one has no work left to Claim.
  */
-const endsClaim = (status: Status) => FINISHED_CATEGORIES.includes(status.category);
+const endsClaim = (status: Status) => !WORKABLE_CATEGORIES.includes(status.category);
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
