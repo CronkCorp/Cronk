@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { api, ApiError, type Artifact, type ArtifactVersion } from "./api.js";
+import { useEffect, useState } from "react";
+import { api, ApiError, watchArtifact, type Artifact, type ArtifactVersion, type Attachment } from "./api.js";
+import { AttachmentViewer, PageAttachments } from "./attachments.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
+import { ArtifactCommentsDrawer } from "./timeline.js";
 import { Actor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { formatBytes } from "./components/files.js";
@@ -108,6 +111,25 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
   const canWrite = useCanWrite(a.projectKey);
   const [publishing, setPublishing] = useState(false);
   const protect = useAction((value: boolean) => api.protectArtifact(a.id, value), (changed) => props.onChanged({ ...a, protected: changed.protected }));
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [comments, reloadComments] = useLoad(() => api.artifactComments(a.id), [a.id]);
+  const [attachments, reloadAttachments] = useLoad(() => api.artifactAttachments(a.id), [a.id]);
+  const [opened, setOpened] = useState<Attachment>();
+  const [live, onLive] = useLiveState();
+  useEffect(
+    () =>
+      watchArtifact(a.id, {
+        onLive,
+        // On (re)connecting, catch up on what was posted meanwhile.
+        ready: () => {
+          reloadComments();
+          reloadAttachments();
+        },
+        on: { comment: () => reloadComments(), attachments: () => reloadAttachments() },
+      }),
+    [a.id],
+  );
+  const loadedComments = comments.kind === "loaded" ? comments.value : [];
   return (
     <section className="artifact-page">
       {a.projectKey ? (
@@ -138,6 +160,9 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
           <span className="grow" />
           <CopyLink url={shown?.url ?? a.versionUrl} label={`Copy link to Version ${number}`} />
           <a className={buttonClass("secondary")} href={frameUrl} target="_blank" rel="noopener noreferrer">Open full size</a>
+          <Button variant="secondary" aria-pressed={drawerOpen} aria-controls="artifact-comments" onClick={() => setDrawerOpen((o) => !o)}>
+            Comments {loadedComments.length}
+          </Button>
           {canWrite && (
             <Menu
               label="More actions"
@@ -150,8 +175,38 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
           )}
         </div>
         {protect.error && <p className="error" role="alert">{protect.error}</p>}
-        <iframe key={frameUrl} className="artifact-frame" title={`${a.title}, Version ${number}`} src={frameUrl} sandbox={FRAME_SANDBOX} />
+        <div className="artifact-body">
+          <iframe key={frameUrl} className="artifact-frame" title={`${a.title}, Version ${number}`} src={frameUrl} sandbox={FRAME_SANDBOX} />
+          {drawerOpen && (
+            <PageAttachments.Provider value={{ attachments: attachments.kind === "loaded" ? attachments.value : [], onOpen: setOpened }}>
+              <div id="artifact-comments" className="artifact-drawer-slot">
+                <Show state={comments}>
+                  {(all) => (
+                    <ArtifactCommentsDrawer
+                      artifactId={a.id}
+                      version={number}
+                      publisher={shown?.actor}
+                      comments={all}
+                      canWrite={canWrite}
+                      onPosted={() => reloadComments()}
+                      live={<LiveIndicator state={live} />}
+                    />
+                  )}
+                </Show>
+              </div>
+            </PageAttachments.Provider>
+          )}
+        </div>
       </div>
+      <AttachmentViewer
+        attachment={opened}
+        canWrite={canWrite}
+        onClose={() => setOpened(undefined)}
+        onDeleted={() => {
+          setOpened(undefined);
+          reloadAttachments();
+        }}
+      />
       <p className="muted hint artifact-note">
         {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame. It loads
         scripts only from itself and a few CDNs, and network requests are blocked.
