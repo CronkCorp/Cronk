@@ -44,6 +44,8 @@ import type {
   SearchResult,
   Status,
   StatusCategory,
+  SuggestedContent,
+  Suggestion,
   Term,
   TermVersion,
   Ticket,
@@ -104,6 +106,8 @@ export type {
   SearchResult,
   Status,
   StatusCategory,
+  SuggestedContent,
+  Suggestion,
   Term,
   TermVersion,
   Ticket,
@@ -427,6 +431,16 @@ export const api = {
   /** Sends a Ticket under review back to a Started Status (the Project's first, unless named), with a Comment. */
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
+
+  /**
+   * Accepts a Suggestion: as suggested, credited to its Agent, or with `content` as the User edited it, which credits the new
+   * Version to them if it differs.
+   */
+  acceptSuggestion: (id: string, content?: SuggestedContent) =>
+    request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/accept`, content === undefined ? {} : { content }).then((r) => r.suggestion),
+  /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
+  rejectSuggestion: (id: string, reason: string) =>
+    request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),
 
   /** Accepts an Agent's Unverified completion, recording the User's Verification. */
   accept: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/accept`).then((r) => r.ticket),
