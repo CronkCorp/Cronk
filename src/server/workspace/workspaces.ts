@@ -7,7 +7,7 @@ const MB = 1024 * 1024;
 export const MAX_TRANSCRIPT_BYTES = 100 * MB;
 
 /** The smallest Transcript limit a Workspace may set: 1 KB. */
-export const MIN_TRANSCRIPT_BYTES = 1024;
+const MIN_TRANSCRIPT_BYTES = 1024;
 
 /** One numeric Workspace setting: all the API, the `Workspace` schema and `workspace.md` need to know of it. */
 interface WorkspaceSetting {
@@ -19,8 +19,8 @@ interface WorkspaceSetting {
   bigint: boolean;
   /** What the API accepts, which an import checks too. */
   schema: { type: "integer"; minimum: number; maximum: number; description: string };
-  /** What the setting is, as the `Workspace` the API returns describes it. */
-  returned: string;
+  /** What the setting is, as the `Workspace` schema of API responses describes it, without the bounds. */
+  responseDescription: string;
 }
 
 /**
@@ -38,14 +38,14 @@ export const WORKSPACE_SETTINGS = [
       maximum: 86_400,
       description: "How long an Agent Session may stay silent before it ends and its Claims lapse: one minute to one day.",
     },
-    returned: "How long an Agent Session may stay silent before it ends and its Claims lapse.",
+    responseDescription: "How long an Agent Session may stay silent before it ends and its Claims lapse.",
   },
   {
     name: "attachmentMaxBytes",
     column: "attachment_max_bytes",
     bigint: true,
     schema: { type: "integer", minimum: MB, maximum: 10 * 1024 * MB, description: "The largest file an Attachment may be, in bytes: 1 MB to 10 GB." },
-    returned: "The largest file an Attachment may be, in bytes.",
+    responseDescription: "The largest file an Attachment may be, in bytes.",
   },
   {
     name: "transcriptMaxBytes",
@@ -57,7 +57,7 @@ export const WORKSPACE_SETTINGS = [
       maximum: MAX_TRANSCRIPT_BYTES,
       description: "The most a Transcript may hold, all its texts together, in bytes: 1 KB to 100 MB; 10 MB unless changed.",
     },
-    returned: "The most a Transcript may hold, all its texts together, in bytes of UTF-8.",
+    responseDescription: "The most a Transcript may hold, all its texts together, in bytes of UTF-8.",
   },
   {
     name: "artifactMaxBytes",
@@ -69,18 +69,18 @@ export const WORKSPACE_SETTINGS = [
       maximum: 500 * MB,
       description: "The most bytes one Version of an Artifact may hold, all its files together: 1 MB to 500 MB; 25 MB unless changed.",
     },
-    returned: "The most bytes one Version of an Artifact may hold, all its files together.",
+    responseDescription: "The most bytes one Version of an Artifact may hold, all its files together.",
   },
   {
     name: "artifactMaxFiles",
     column: "artifact_max_files",
     bigint: false,
     schema: { type: "integer", minimum: 1, maximum: 10_000, description: "The most files one Version of an Artifact may hold: 1 to 10,000; 500 unless changed." },
-    returned: "The most files one Version of an Artifact may hold.",
+    responseDescription: "The most files one Version of an Artifact may hold.",
   },
 ] as const satisfies readonly WorkspaceSetting[];
 
-export type WorkspaceSettingName = (typeof WORKSPACE_SETTINGS)[number]["name"];
+type WorkspaceSettingName = (typeof WORKSPACE_SETTINGS)[number]["name"];
 type WorkspaceSettingColumn = (typeof WORKSPACE_SETTINGS)[number]["column"];
 
 /** The Workspace's numeric settings, by name. */
@@ -141,6 +141,14 @@ export async function getWorkspace(db: Queryable, id: string): Promise<Workspace
   return toWorkspace(rows[0]!);
 }
 
+/** What an Admin, or an import, may change about the Workspace. */
+export interface WorkspaceChanges extends Partial<WorkspaceSettings> {
+  name?: string;
+  agentAccess?: AgentAccess;
+  artifactAllowedOrigins?: string[];
+  artifactExtraOriginsAllowed?: boolean;
+}
+
 /**
  * Renames the Workspace and/or changes its Agent Access, any of its numeric settings, or the origins Artifacts may
  * load from. Whatever `changes` leaves out keeps the Workspace's value.
@@ -148,12 +156,7 @@ export async function getWorkspace(db: Queryable, id: string): Promise<Workspace
 export async function updateWorkspace(
   db: Queryable,
   id: string,
-  changes: Partial<WorkspaceSettings> & {
-    name?: string;
-    agentAccess?: AgentAccess;
-    artifactAllowedOrigins?: string[];
-    artifactExtraOriginsAllowed?: boolean;
-  },
+  changes: WorkspaceChanges,
 ): Promise<Workspace> {
   const columns: [string, unknown][] = [
     ["name", changes.name],

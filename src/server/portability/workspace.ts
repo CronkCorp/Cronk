@@ -25,7 +25,7 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
   await updateWorkspace(ctx.db, ctx.workspaceId, {
     name: text(w.data.name, "workspace.md name"),
     agentAccess: oneOf(w.data.agentAccess, agentAccessSchema.enum, "workspace.md agentAccess"),
-    ...settings(w.data),
+    ...importedSettings(w.data),
     // Exports from before the Admin's allow-list leave it out, keeping the Workspace's own.
     ...(w.data.artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: bareOrigins(
         Array.isArray(w.data.artifactAllowedOrigins) && w.data.artifactAllowedOrigins.every((v) => typeof v === "string")
@@ -44,7 +44,7 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
  * The numeric settings `workspace.md` sets, each within the bounds the API allows. One it leaves out, as an export
  * from before that setting does, keeps the Workspace's own value.
  */
-function settings(data: Record<string, unknown>): Partial<WorkspaceSettings> {
+function importedSettings(data: Record<string, unknown>): Partial<WorkspaceSettings> {
   const set: Partial<WorkspaceSettings> = {};
   for (const { name, schema } of WORKSPACE_SETTINGS) {
     if (data[name] === undefined) continue;

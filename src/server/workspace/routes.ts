@@ -3,21 +3,13 @@ import { actingUser } from "../actor.js";
 import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
 import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.js";
-import { getWorkspace, pickSettings, publicWorkspace, updateWorkspace, WORKSPACE_SETTINGS, type WorkspaceSettings } from "./workspaces.js";
+import { getWorkspace, pickSettings, publicWorkspace, updateWorkspace, WORKSPACE_SETTINGS, type WorkspaceChanges } from "./workspaces.js";
 import { attachmentStorage } from "../files/attachments.js";
 import { artifactStorage } from "../files/artifacts.js";
 import { bareOrigins } from "../files/origins.js";
 
 /** The most origins the Workspace's allow-list may hold. */
 const MAX_ALLOWED_ORIGINS = 50;
-
-/** What an Admin may change about the Workspace. */
-interface WorkspaceChanges extends Partial<WorkspaceSettings> {
-  name?: string;
-  agentAccess?: AgentAccess;
-  artifactAllowedOrigins?: string[];
-  artifactExtraOriginsAllowed?: boolean;
-}
 
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {

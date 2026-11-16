@@ -306,7 +306,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   Workspace: object({
     name: { type: "string" },
     agentAccess: agentAccessSchema,
-    ...Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, { type: "integer", description: s.returned }])),
+    ...Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, { type: "integer", description: s.responseDescription }])),
     artifactAllowedOrigins: {
       type: "array",
       items: { type: "string" },
