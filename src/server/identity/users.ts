@@ -119,7 +119,7 @@ export async function listUsers(db: Queryable, workspaceId: string): Promise<Use
 
 /**
  * Changes a User's role and/or deactivates or reactivates them, refusing to leave
- * the Workspace without an active Admin. Deactivating ends all their sign-ins and their
+ * the Workspace without an active Admin. Deactivating ends all their sign-ins, password reset link and
  * Agents' Sessions, so the Claims those held lapse at once.
  * Making them an Admin drops their Project listings, since Admins have Write everywhere;
  * demoting them later starts them with only the open Projects.
@@ -154,6 +154,7 @@ export async function updateUser(
   let endedClaims: ClaimHolders = { ticketIds: [] };
   if (changes.active === false) {
     await db.query("DELETE FROM sign_ins WHERE user_id = $1", [id]);
+    await db.query("DELETE FROM password_resets WHERE user_id = $1", [id]);
     endedClaims = await endAgentSessionsOfOwner(db, id, now);
   }
   if (changes.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [id]);

@@ -430,4 +430,19 @@ export const migrations: Migration[] = [
       ALTER TABLE comments ADD COLUMN send_back boolean NOT NULL DEFAULT false CHECK (NOT send_back OR ticket_id IS NOT NULL);
     `,
   },
+  {
+    id: "0018_password_resets",
+    sql: `
+      -- A one-time link letting a User choose a new password (identity/password-resets.ts), issued by an Admin
+      -- or, with no issuer, by the server command. Only the token's hash is stored; issuing again replaces it.
+      CREATE TABLE password_resets (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        issued_by uuid REFERENCES users(id),
+        created_at timestamptz NOT NULL,
+        expires_at timestamptz NOT NULL
+      );
+    `,
+  },
 ];
