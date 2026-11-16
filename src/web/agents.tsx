@@ -158,7 +158,7 @@ function AgentCard(props: { agent: Agent; onChanged: () => void }) {
         open={removing}
         onOpenChange={setRemoving}
         title={`Remove ${a.name}?`}
-        description="Its tokens are revoked and its live Agent Sessions end. What it did stays on the Tickets and Documents it was on, but its Agent Record is no longer shown."
+        description="Its tokens are revoked and its live Agent Sessions end. What it did stays on the Tickets and Documents it was on, but its Agent Record goes with it."
         confirmLabel="Remove Agent"
         busy={remove.busy}
         onConfirm={() => void remove.run().then(() => setRemoving(false))}
