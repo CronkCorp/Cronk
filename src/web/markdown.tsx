@@ -8,7 +8,7 @@ import { useLoad } from "./ui.js";
 import { alignCodeToSource, alignToSource, encodeBounds, type Container, type SourceBounds } from "./source-map.js";
 import { replaceReferenceText, TICKET_REFERENCE, type MarkdownNode, type MarkdownPoint } from "../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../shared/knowledge-references.js";
-import { ARTIFACT_ADDRESS, replaceArtifactEmbeds, type ArtifactAt } from "../shared/artifact-embeds.js";
+import { ARTIFACT_ADDRESS, embedKey, replaceArtifactEmbeds, type ArtifactAt } from "../shared/artifact-embeds.js";
 import { ArtifactEmbed } from "./artifacts.js";
 
 /** The mdast nodes this file touches; react-markdown hands its plugins trees of these. */
@@ -107,21 +107,29 @@ function linkReferences(targets: LinkTargets, source: string) {
   return () => (tree: MdNode) => replaceReferenceText(tree, split);
 }
 
-/** The key an embed is listed by: its Artifact and the Version it names. */
-const embedKey = (at: ArtifactAt) => `${at.artifactId}@${at.version ?? ""}`;
-
 /**
  * A remark plugin that turns each line holding an Artifact's address alone into an embed of it, when the API listed
- * it among what the text embeds (`embeds`); any other such line stays a link.
+ * it among what the text embeds (`embeds`); any other such line stays a link. Text around an embed keeps where it
+ * sits in `source`.
  */
-function embedArtifacts(embeds: ArtifactAt[]) {
+function embedArtifacts(embeds: ArtifactAt[], source: string) {
   const listed = new Set(embeds.map(embedKey));
   return () => (tree: MdNode) =>
-    replaceArtifactEmbeds(tree, (at) =>
-      listed.has(embedKey(at))
-        ? ({ type: "artifactEmbed", children: [], data: { hName: "artifact-embed", hProperties: { artifactId: at.artifactId, version: at.version ?? "" } } } as MdNode)
-        : undefined,
+    replaceArtifactEmbeds(
+      tree,
+      (at, address) =>
+        listed.has(embedKey(at))
+          ? ({ type: "artifactEmbed", children: [], data: { hName: "artifact-embed", hProperties: { artifactId: at.artifactId, version: at.version ?? "", address } } } as MdNode)
+          : undefined,
+      source,
     );
+}
+
+/** An embedded Artifact as `embedArtifacts` marks it, shown by `ArtifactEmbed`. */
+function EmbedElement({ node }: { node?: { properties?: Record<string, unknown> } }) {
+  const props = node?.properties ?? {};
+  const version = props.version ? Number(props.version) : null;
+  return <ArtifactEmbed artifactId={String(props.artifactId ?? "")} version={version} address={String(props.address ?? "")} />;
 }
 
 /** Whether every run of text a hast node shows was parsed from between `start` and `end` in the source. */
@@ -431,19 +439,16 @@ const NO_TARGETS: LinkTargets = { projectKeys: new Set(), workspaceDecisions: ne
  * How rendered Markdown shows its elements. Defined once, not per render: a new component each render
  * would remount every link, and a selection ending inside one would lose its end.
  */
-const COMPONENTS = {
+const COMPONENTS: Components = {
   a: ({ href, children }) =>
     href?.startsWith("/") ? (
       <Link to={href} className="link">{children}</Link>
     ) : (
       <a href={href} className="link">{children}</a>
     ),
-  "artifact-embed": ({ node }: { node?: { properties?: Record<string, unknown> } }) => {
-    const id = String(node?.properties?.artifactId ?? "");
-    const version = node?.properties?.version ? Number(node.properties.version) : null;
-    return <ArtifactEmbed artifactId={id} version={version} address={`${location.origin}/artifacts/${id}${version === null ? "" : `?version=${version}`}`} />;
-  },
-} as Components;
+  // Not an HTML element, so react-markdown's types don't know it.
+  ...({ "artifact-embed": EmbedElement } as Components),
+};
 
 /**
  * Renders Cronk Markdown: CommonMark plus Artifacts' addresses, Ticket and Decision keys and Term names as links, the Terms
@@ -465,7 +470,7 @@ export function CronkMarkdown(props: {
   const [targets] = useLoad(() => loadLinkTargets(projectKey), [projectKey]);
   return (
     <Markdown
-      remarkPlugins={[embedArtifacts(props.embeds ?? []), linkReferences(targets.kind === "loaded" ? targets.value : NO_TARGETS, props.children)]}
+      remarkPlugins={[embedArtifacts(props.embeds ?? [], props.children), linkReferences(targets.kind === "loaded" ? targets.value : NO_TARGETS, props.children)]}
       rehypePlugins={props.sourceOffsets ? [markSourceAndHighlights(props.children, props.highlights ?? [])] : []}
       components={COMPONENTS}
     >

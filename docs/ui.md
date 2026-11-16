@@ -232,7 +232,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Full bleed** under a thin bar: title, Protected mark, the Version menu (which also lists Versions, **Copy link to latest**, and where the Artifact is embedded), its source Ticket and who published the Version, any declared extra origins as a `--warn` pill, **Copy link to Version n**, Open full size, **Comments n**, and a "…" menu with Publish new Version and Protect or Unprotect for those with Write. Its protection history is under the frame.
 - **The list** (`/projects/:key/artifacts`, `/artifacts`): one row per Artifact, most recently published first, with its title, lock, Version chip, source Ticket, publisher and time; **Publish Artifact** is the primary action. Publishing, there or from the "…" menu, opens a dialog to pick a folder holding `index.html`, which is packed and sent whole.
 - **Comments** open in a 300px drawer on the right, each saying which Version it was on. Below 900px the drawer moves under the Artifact.
-- **Embedded** in a Report or Document: a bordered block with a bar (kind label, title, Version chip, Open full size) above the sandboxed frame.
+- **Embedded** in a Report, Document or Comment, where its address stands alone on a line: a bordered block with a bar (kind label, title, Version chip, Open full size) above the sandboxed frame. An address naming a Version keeps showing that Version; one the reader can't open stays a link, as does an address inside a sentence.
 
 ### Ticket Attachments
 

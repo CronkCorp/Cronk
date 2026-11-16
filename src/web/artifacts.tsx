@@ -270,7 +270,12 @@ function VersionMenu(props: { artifact: Artifact; shown: number }) {
 const embeddedInPage = (e: EmbeddedIn) =>
   e.kind !== "comment" ? `/documents/${e.id}` : e.ticketKey ? `/tickets/${e.ticketKey}` : `/documents/${e.documentId}`;
 
-const EMBED_KIND_LABELS: Record<EmbeddedIn["kind"], string> = { document: "Document", report: "Report", comment: "Comment" };
+/** Each kind of place's label, with the class its kind label takes. */
+const EMBED_KINDS: Record<EmbeddedIn["kind"], { label: string; className: string }> = {
+  document: { label: "Document", className: "kind-label" },
+  report: { label: "Report", className: "kind-label report" },
+  comment: { label: "Comment", className: "kind-label comment" },
+};
 
 /** The Documents, Reports and Comments embedding an Artifact, each with the Version it shows; loaded again on each publish. */
 function EmbeddedInList(props: { artifactId: string; version: number }) {
@@ -286,7 +291,7 @@ function EmbeddedInList(props: { artifactId: string; version: number }) {
               <li key={`${e.kind}:${e.id}:${e.version ?? ""}`}>
                 <Link to={embeddedInPage(e)} className="version-row">
                   <span className="embedded-in-head">
-                    <span className={`kind-label${e.kind === "report" ? " report" : e.kind === "comment" ? " comment" : ""}`}>{EMBED_KIND_LABELS[e.kind]}</span>
+                    <span className={EMBED_KINDS[e.kind].className}>{EMBED_KINDS[e.kind].label}</span>
                     {e.ticketKey && <span className="key">{e.ticketKey}</span>}
                   </span>
                   <span>{e.title}</span>
