@@ -10,6 +10,9 @@ export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
 /** The Status Categories of finished work: nothing is left to do on a Ticket in one, and it blocks nothing. */
 export const FINISHED_CATEGORIES: readonly StatusCategory[] = ["completed", "canceled"];
 
+/** The Status Categories of work an Agent can take up: a Ticket In Review waits on a User, and finished work has nothing left to do. */
+export const WORKABLE_CATEGORIES: readonly StatusCategory[] = ["backlog", "unstarted", "started"];
+
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];
