@@ -435,12 +435,13 @@ export const migrations: Migration[] = [
     sql: `
       -- An Agent or Agent Session an import (portability/people.ts) couldn't give the id it had in the
       -- export, because the id was taken here: the id it had there and the one it got. Transcripts name
-      -- Agent Sessions by id, so linking one written before a move looks its ids up here too.
+      -- Agent Sessions by id, so linking one written before the import looks its ids up here too.
+      -- from_id is text: an export edited by hand may name them by anything.
       CREATE TABLE renamed_ids (
         seq bigserial PRIMARY KEY,
         workspace_id uuid NOT NULL REFERENCES workspaces(id),
         kind text NOT NULL CHECK (kind IN ('agent', 'agent_session')),
-        from_id uuid NOT NULL,
+        from_id text NOT NULL,
         to_id uuid NOT NULL,
         at timestamptz NOT NULL
       );

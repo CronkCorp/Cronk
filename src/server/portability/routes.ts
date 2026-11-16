@@ -152,7 +152,7 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
       schema: {
         description:
           "Every Agent and Agent Session an import gave a new id because the id it had in the export was taken here, oldest first, " +
-          "so something naming the old id, such as a chat written before a move, can be matched to it.",
+          "so something naming the old id, such as a Transcript uploaded before the import, can be matched to it.",
         response: { 200: answer("The ids imports renamed, in the order they did", listing("renamedIds", ref("RenamedId"))), ...errors(401, 403, 410) },
       },
     },

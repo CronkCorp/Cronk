@@ -408,6 +408,11 @@ describe("Agent and Agent Session ids across an import", () => {
     const [looking] = (await admin.get("/api/tickets/COPY-1/comments")).body.comments;
     expect(looking.actor).toMatchObject({ id: renamedIds[0].to, session: { id: renamedIds[1].to } });
     expect((await admin.get("/api/import/renamed-ids")).body.renamedIds).toEqual(renamedIds);
+    // An export edited by hand may name an Agent Session by an id Cronk can't hold; it gets a new one, kept as well.
+    const edited = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", "HAND"), text.replaceAll("CRONK", "HAND").replaceAll(sessionId, "my-session")])));
+    const byHand = await admin.upload("/api/import", edited);
+    expect(byHand.status).toBe(201);
+    expect(byHand.body.renamedIds).toContainEqual(expect.objectContaining({ kind: "agentSession", from: "my-session", to: (await lastChangeBy(admin, "HAND-1")).session }));
     // The first import's Project still names the ids it kept.
     expect(await lastChangeBy(admin, "CRONK-1")).toEqual({ agent: claudeId, session: sessionId });
   });

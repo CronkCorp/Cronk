@@ -30,7 +30,7 @@ export class ImportContext {
   ) {}
 
   /** Records that the Agent or Agent Session with id `from` in the export has the id `to` here, if they differ. */
-  async renamed(kind: RenamedId["kind"], from: string, to: string): Promise<void> {
+  async keepRenamedId(kind: RenamedId["kind"], from: string, to: string): Promise<void> {
     if (from === to) return;
     const renamed = { kind, from, to, at: this.now };
     this.renamedIds.push(renamed);

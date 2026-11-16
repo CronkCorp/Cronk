@@ -13,7 +13,9 @@ export interface RenamedId {
   at: Date;
 }
 
+/** Each kind as the `kind` column stores it. */
 const KIND_COLUMN = { agent: "agent", agentSession: "agent_session" } as const;
+const KIND_OF_COLUMN = Object.fromEntries(Object.entries(KIND_COLUMN).map(([kind, column]) => [column, kind])) as Record<string, RenamedId["kind"]>;
 
 /** Records that `renamed.from` is `renamed.to` in the Workspace `workspaceId` now. */
 export async function recordRenamedId(db: Queryable, workspaceId: string, renamed: RenamedId): Promise<void> {
@@ -28,9 +30,9 @@ export async function recordRenamedId(db: Queryable, workspaceId: string, rename
 
 /** Every id the Workspace's imports renamed, in the order they did. */
 export async function listRenamedIds(db: Queryable, workspaceId: string): Promise<RenamedId[]> {
-  const { rows } = await db.query<{ kind: "agent" | "agent_session"; from_id: string; to_id: string; at: Date }>(
+  const { rows } = await db.query<{ kind: string; from_id: string; to_id: string; at: Date }>(
     "SELECT kind, from_id, to_id, at FROM renamed_ids WHERE workspace_id = $1 ORDER BY seq",
     [workspaceId],
   );
-  return rows.map((r) => ({ kind: r.kind === "agent" ? "agent" : "agentSession", from: r.from_id, to: r.to_id, at: r.at }));
+  return rows.map((r) => ({ kind: KIND_OF_COLUMN[r.kind]!, from: r.from_id, to: r.to_id, at: r.at }));
 }

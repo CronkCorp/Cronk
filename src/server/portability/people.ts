@@ -2,7 +2,7 @@ import { insertAgent } from "../identity/agents.js";
 import { insertUserWithoutPassword } from "../identity/users.js";
 import { roleSchema } from "../schemas.js";
 import { iso, type ExportContext } from "./export-context.js";
-import { date, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
+import { date, isUuid, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -94,7 +94,7 @@ async function importAgents(ctx: ImportContext, people: File): Promise<void> {
         })
       ).id;
     ctx.agentIds.set(exportedId, { id, ownerId });
-    await ctx.renamed("agent", exportedId, id);
+    await ctx.keepRenamedId("agent", exportedId, id);
   }
 }
 
@@ -115,15 +115,13 @@ async function importSessions(ctx: ImportContext, people: File): Promise<void> {
       ],
     );
     ctx.sessionIds.set(exportedId, rows[0]!.id);
-    await ctx.renamed("agentSession", exportedId, rows[0]!.id);
+    await ctx.keepRenamedId("agentSession", exportedId, rows[0]!.id);
   }
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** `id`, the id an Agent or Agent Session had in the export, if it can keep it here: no row of `table` has it yet. */
 async function freeId(ctx: ImportContext, table: "agents" | "agent_sessions", id: string): Promise<string | undefined> {
-  if (!UUID.test(id)) return undefined;
+  if (!isUuid(id)) return undefined;
   const { rows } = await ctx.db.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id]);
   return rows.length === 0 ? id : undefined;
 }
