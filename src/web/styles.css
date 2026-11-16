@@ -323,6 +323,11 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .tl-report-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--agent-soft); font-size: 13px; }
 .tl-report-title { margin: 0; font-size: 14px; }
 .tl-report-body { padding: 8px 12px; }
+.tl-report-decisions { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.tl-report-decisions h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.tl-report-decisions ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.inbox-decision-body { border-left: 3px solid var(--agent); padding: 4px 12px; background: var(--surface); }
+.decision-status-reason { margin-top: 4px; font-size: 13px; }
 .tl-report-body > :first-child { margin-top: 0; }
 .tl-report-body > :last-child { margin-bottom: 0; }
 .tl-report-body h1, .tl-report-body h2, .tl-report-body h3, .tl-report-body h4, .tl-report-body h5, .tl-report-body h6 { font-size: 14px; font-weight: 600; margin: 12px 0 4px; }
@@ -507,7 +512,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label.finding { color: var(--ok); }
 .kind-label.question { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
-.kind-label.report { color: var(--agent); }
+.kind-label.report, .kind-label.decision { color: var(--agent); }
 .kind-label.comment { color: var(--accent); }
 .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; color: var(--muted); }
 .priority.urgent { color: var(--on-accent); background: var(--danger); }

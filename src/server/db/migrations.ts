@@ -665,4 +665,26 @@ export const migrations: Migration[] = [
     `,
     backfill: (db) => recordAllMentions(db),
   },
+  {
+    id: "0027_proposed_decisions",
+    sql: `
+      -- Why a Decision took its status, as the User gave it; required when rejecting one. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN status_reason text;
+      ALTER TABLE decision_versions ADD COLUMN status_reason text;
+      -- An Agent's proposed Decision: the Ticket whose Claim its Agent Session held when proposing it, and that
+      -- Claim's id (see tickets.claim_id), which a Report written in the same Claim lists it by. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      ALTER TABLE decisions ADD COLUMN source_claim_id uuid;
+      CREATE INDEX decisions_source_claim ON decisions (source_claim_id) WHERE source_claim_id IS NOT NULL;
+      -- Waiting Work is also a rejection of a Decision the Agent proposed: the Version that rejected it, with its reason.
+      ALTER TABLE waiting_work ALTER COLUMN comment_id DROP NOT NULL;
+      ALTER TABLE waiting_work ADD COLUMN decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE;
+      ALTER TABLE waiting_work ADD COLUMN decision_version integer;
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check CHECK (reason IN ('answer', 'mention', 'comment', 'rejected'));
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_on_one CHECK (
+        (comment_id IS NULL) = (reason = 'rejected') AND (decision_id IS NULL) = (reason <> 'rejected') AND (decision_version IS NULL) = (decision_id IS NULL));
+      ALTER TABLE waiting_work ADD UNIQUE (agent_id, decision_id, decision_version);
+    `,
+  },
 ];

@@ -309,6 +309,42 @@ describe("the decisions tool", () => {
     expect(await callTool(mcp, "decisions", { action: "get", key: "SECRET-D1" })).toEqual({ isError: true, body: "No such Decision" });
     expect(await callTool(mcp, "decisions", { action: "get" })).toEqual({ isError: true, body: "The get action needs a key" });
   });
+  it("proposes Decisions, from the Ticket the Agent holds the Claim on, and refines them only while proposed", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const proposed = await callTool(mcp, "decisions", { action: "propose", project: "CRONK", title: "Markdown for Decisions", body: "v1", group: "Storage" });
+    expect(proposed.body.decision).toMatchObject({ key: "CRONK-D1", status: "proposed", group: "Storage", sourceTicket: { key: "CRONK-1" } });
+    expect((await callTool(mcp, "decisions", { action: "propose", title: "Compose for installs" })).body.decision.key).toBe("D1");
+    const refined = await callTool(mcp, "decisions", { action: "update", key: "CRONK-D1", baseVersion: 1, body: "v2" });
+    expect(refined.body.decision).toMatchObject({ body: "v2", version: 2 });
+    expect(await callTool(mcp, "decisions", { action: "update", key: "CRONK-D1", body: "v3" })).toEqual({ isError: true, body: "The update action needs a baseVersion" });
+
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    const refused = await callTool(mcp, "decisions", { action: "update", key: "CRONK-D1", baseVersion: 3, body: "v3" });
+    expect(refused.isError).toBe(true);
+    expect(refused.body).toMatch(/only while it is proposed/);
+  });
+
+  it("offers a read-only token only list, get and mentions", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    const action = tools.find((t) => t.name === "decisions")!.inputSchema.properties!.action as { enum: string[] };
+    expect(action.enum).toEqual(["list", "get", "mentions"]);
+  });
+
+  it("welcomes the Agent with the reason a User rejected a Decision it proposed", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const first = await connectMcp(cronk, claude.secret);
+    await callTool(first, "decisions", { action: "propose", title: "Compose for installs" });
+    await first.disconnect();
+    await admin.post("/api/decisions/D1/status", { status: "rejected", reason: "We ship a single binary.\nCompose is too much." });
+
+    const instructions = (await connectMcp(cronk, claude.secret)).client.getInstructions()!;
+    expect(instructions).toContain("- D1: Compose for installs: Ada rejected it, which you proposed, saying why:\n  > We ship a single binary.\n  > Compose is too much.");
+  });
 
   it("and the terms tool list what mentions a Decision or Term", async () => {
     const { cronk, admin } = await startInstalledCronk();

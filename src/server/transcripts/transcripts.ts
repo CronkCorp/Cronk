@@ -2,6 +2,7 @@ import { actingUser, type Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { readablePlaces } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
+import { decisionKeySql } from "../knowledge/decisions.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -33,6 +34,8 @@ export interface Transcript {
   documents: { id: string; title: string }[];
   /** The Terms its Sessions saved, that the reader can read. */
   terms: { id: string; name: string }[];
+  /** The Decisions its Sessions proposed or refined, that the reader can read. */
+  decisions: { key: string; title: string }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -133,18 +136,22 @@ function hasWord(text: string, word: string): boolean {
 }
 
 /**
- * Everything the Agent Sessions `$1` did, as the Ticket, Document or Term each record is on: the Ticket changes they made, the
- * Activities, Comments and Attachments they added and the Document and Term Versions they saved.
+ * Everything the Agent Sessions `$1` did, as the Ticket, Document, Term or Decision each record is on: the Ticket changes they
+ * made, the Activities, Comments and Attachments they added and the Document, Term and Decision Versions they saved.
  */
 const SESSION_RECORDS = `
-  SELECT ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, NULL, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, document_id, NULL FROM comments WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT NULL, document_id, NULL FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, NULL, NULL FROM attachments WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT NULL, NULL, term_id FROM term_versions WHERE actor_session_id = ANY($1::uuid[])`;
+  SELECT ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, NULL, NULL, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, document_id, NULL, NULL FROM comments WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT NULL, document_id, NULL, NULL FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, NULL, NULL, NULL FROM attachments WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT NULL, NULL, term_id, NULL FROM term_versions WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT NULL, NULL, NULL, decision_id FROM decision_versions WHERE actor_session_id = ANY($1::uuid[])`;
 
-/** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, an Attachment, or a Document or Term Version. */
+/**
+ * Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, an Attachment, or a Document, Term or
+ * Decision Version.
+ */
 export async function changedAnything(db: Queryable, sessionIds: string[]): Promise<boolean> {
   if (sessionIds.length === 0) return false;
   const { rows } = await db.query(`SELECT 1 FROM (${SESSION_RECORDS}) r LIMIT 1`, [sessionIds]);
@@ -223,7 +230,15 @@ const CHANGED_TERMS = `
   SELECT tm.id, tm.name, tm.project_id, p.key AS project_key FROM terms tm LEFT JOIN projects p ON p.id = tm.project_id
   WHERE tm.id IN (SELECT term_id FROM (${SESSION_RECORDS}) r)`;
 
-/** What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents in the order they were created. */
+/** The Decisions changed by these Sessions (`$1`), with the Project each lies in; null for the Workspace. */
+const CHANGED_DECISIONS = `
+  SELECT dc.id, ${decisionKeySql("p", "dc")} AS key, dc.title, dc.project_id FROM decisions dc LEFT JOIN projects p ON p.id = dc.project_id
+  WHERE dc.id IN (SELECT decision_id FROM (${SESSION_RECORDS}) r)`;
+
+/**
+ * What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents in the order they
+ * were created, Terms and Decisions the Workspace's first.
+ */
 export async function changedItems(db: Queryable, sessionIds: string[]) {
   const { rows: tickets } = await db.query<{ id: string; key: string; title: string; project_id: string }>(
     `${CHANGED_TICKETS} ORDER BY p.key, t.number`,
@@ -237,14 +252,18 @@ export async function changedItems(db: Queryable, sessionIds: string[]) {
     `${CHANGED_TERMS} ORDER BY p.key NULLS FIRST, lower(tm.name), tm.id`,
     [sessionIds],
   );
-  return { tickets, documents, terms };
+  const { rows: decisions } = await db.query<{ id: string; key: string; title: string; project_id: string | null }>(
+    `${CHANGED_DECISIONS} ORDER BY p.key NULLS FIRST, dc.number`,
+    [sessionIds],
+  );
+  return { tickets, documents, terms, decisions };
 }
 
 /** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
 function placesOf(items: Awaited<ReturnType<typeof changedItems>>): Places {
   const projectIds = new Set<string>(items.tickets.map((t) => t.project_id));
   let workspace = false;
-  for (const item of [...items.documents, ...items.terms]) {
+  for (const item of [...items.documents, ...items.terms, ...items.decisions]) {
     if (item.project_id === null) workspace = true;
     else projectIds.add(item.project_id);
   }
@@ -287,6 +306,7 @@ export async function readTranscript(
     tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title })),
     documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title })),
     terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name })),
+    decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title })),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };

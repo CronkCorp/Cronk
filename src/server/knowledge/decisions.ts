@@ -1,6 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { PROJECT_KEY_PATTERN } from "../work/projects.js";
+import { ticketKeySql } from "../work/tickets.js";
 import type { DecisionStatus } from "../../shared/values.js";
 import { recordMentions } from "./mentions.js";
 
@@ -43,8 +44,12 @@ export interface Decision {
   supersedes: DecisionRef[];
   /** The accepted Decision that replaced it, if it is superseded. */
   supersededBy: DecisionRef | null;
+  /** The Ticket an Agent was working on when it proposed it: the one its Agent Session held the Claim on. Null otherwise. */
+  sourceTicket: { key: string; title: string } | null;
   /** Who recorded it: the Actor of its first Version. */
   proposedBy: RecordedActor;
+  /** Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given. */
+  statusReason: string | null;
   /** When, and by whom, it took its current status. */
   statusChangedAt: Date;
   statusChangedBy: RecordedActor;
@@ -53,7 +58,7 @@ export interface Decision {
 }
 
 /** A Decision as its register lists it, without its body. */
-export type DecisionSummary = Omit<Decision, "body" | "supersedes" | "proposedBy" | "statusChangedAt" | "statusChangedBy">;
+export type DecisionSummary = Omit<Decision, "body" | "supersedes" | "sourceTicket" | "proposedBy" | "statusReason" | "statusChangedAt" | "statusChangedBy">;
 
 /** The ADR sections a new Decision's body starts with when none is given. */
 export const DECISION_TEMPLATE = `What was decided, and why.
@@ -75,11 +80,11 @@ export function parseDecisionKey(key: string): { projectKey: string | null; numb
   return match ? { projectKey: match[1]?.toUpperCase() ?? null, number: Number(match[2]) } : undefined;
 }
 
-/** A Decision's key from its Project key (null for the Workspace) and number. */
 /** SQL for the key of the Decision aliased `decision`, whose Project, if any, is aliased `project`. */
 export const decisionKeySql = (project: string, decision: string) =>
   `CASE WHEN ${project}.key IS NULL THEN 'D' || ${decision}.number ELSE ${project}.key || '-D' || ${decision}.number END`;
 
+/** A Decision's key from its Project key (null for the Workspace) and number. */
 export const decisionKey = (projectKey: string | null, number: number) => (projectKey === null ? `D${number}` : `${projectKey}-D${number}`);
 
 interface DecisionRow {
@@ -91,15 +96,21 @@ interface DecisionRow {
   title: string;
   body: string;
   status: DecisionStatus;
+  status_reason: string | null;
   group_name: string | null;
   supersedes: number[];
   superseded_by: number | null;
   version: number;
   created_at: Date;
   updated_at: Date;
+  source_ticket_key: string | null;
+  source_ticket_title: string | null;
 }
 
-const SELECT_DECISIONS = `SELECT d.*, p.key AS project_key FROM decisions d LEFT JOIN projects p ON p.id = d.project_id`;
+const SELECT_DECISIONS = `
+  SELECT d.*, p.key AS project_key, ${ticketKeySql("sp", "st")} AS source_ticket_key, st.title AS source_ticket_title
+  FROM decisions d LEFT JOIN projects p ON p.id = d.project_id
+    LEFT JOIN tickets st ON st.id = d.source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id`;
 const IN_SCOPE = "d.workspace_id = $1 AND d.project_id IS NOT DISTINCT FROM $2";
 
 const summarize = (row: DecisionRow, refs: Map<number, DecisionRef>): DecisionSummary => ({
@@ -142,7 +153,9 @@ async function toDecision(db: Queryable, row: DecisionRow): Promise<Decision> {
     body: row.body,
     supersedes: [...row.supersedes].sort((a, b) => a - b).flatMap((n) => refs.get(n) ?? []),
     supersededBy,
+    sourceTicket: row.source_ticket_key === null ? null : { key: row.source_ticket_key, title: row.source_ticket_title! },
     proposedBy: toRecordedActor(actors[0]!),
+    statusReason: row.status_reason,
     statusChangedAt: statusChange.at,
     statusChangedBy: toRecordedActor(statusChange),
   };
@@ -165,6 +178,8 @@ export interface DecisionContent {
   title: string;
   body: string;
   status: DecisionStatus;
+  /** Why it took its status; a change of status replaces it. */
+  statusReason: string | null;
   group: string | null;
   /** Numbers of Decisions of the same scope. */
   supersedes: number[];
@@ -177,9 +192,9 @@ export async function insertDecisionVersion(
   v: DecisionContent & { number: number; actor: Actor | StoredActor; now: Date },
 ): Promise<void> {
   await db.query(
-    `INSERT INTO decision_versions (decision_id, number, title, body, status, group_name, supersedes, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [decisionId, v.number, v.title, v.body, v.status, v.group, v.supersedes, v.now, ...actorColumns(v.actor)],
+    `INSERT INTO decision_versions (decision_id, number, title, body, status, status_reason, group_name, supersedes, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [decisionId, v.number, v.title, v.body, v.status, v.statusReason, v.group, v.supersedes, v.now, ...actorColumns(v.actor)],
   );
 }
 
@@ -194,13 +209,26 @@ async function nextNumber(db: Queryable, scope: DecisionScope): Promise<number> 
   return rows[0]!.number;
 }
 
-/** Creates a Decision with the next number of its scope, at Version 1. Run inside a transaction. */
-export async function insertDecision(db: Queryable, scope: DecisionScope, content: DecisionContent, actor: Actor, now: Date): Promise<Decision> {
+/** The Claim an Agent proposed a Decision in, and its Ticket. */
+export interface DecisionSource {
+  ticketId: string;
+  claimId: string;
+}
+
+/** Creates a Decision with the next number of its scope, at Version 1, proposed in `source` if an Agent proposed it during a Claim. Run inside a transaction. */
+export async function insertDecision(
+  db: Queryable,
+  scope: DecisionScope,
+  content: DecisionContent,
+  actor: Actor,
+  now: Date,
+  source: DecisionSource | null = null,
+): Promise<Decision> {
   const number = await nextNumber(db, scope);
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, group_name, supersedes, version, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $9) RETURNING id`,
-    [scope.workspaceId, scope.projectId, number, content.title, content.body, content.status, content.group, content.supersedes, now],
+    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, status_reason, group_name, supersedes, version, created_at, updated_at, source_ticket_id, source_claim_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $10, $11, $12) RETURNING id`,
+    [scope.workspaceId, scope.projectId, number, content.title, content.body, content.status, content.statusReason, content.group, content.supersedes, now, source?.ticketId ?? null, source?.claimId ?? null],
   );
   const id = rows[0]!.id;
   await insertDecisionVersion(db, id, { ...content, number: 1, actor, now });
@@ -218,6 +246,7 @@ export const contentOf = (decision: Decision): DecisionContent => ({
   title: decision.title,
   body: decision.body,
   status: decision.status,
+  statusReason: decision.statusReason,
   group: decision.group,
   supersedes: decision.supersedes.map((ref) => parseDecisionKey(ref.key)!.number),
 });
@@ -236,6 +265,7 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
     content.title === current.title &&
     content.body === current.body &&
     content.status === current.status &&
+    content.statusReason === current.statusReason &&
     content.group === current.group &&
     sameNumbers(content.supersedes, current.supersedes);
   if (unchanged) return decision;
@@ -244,9 +274,9 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
   await db.query(
     // Only a superseded Decision names what superseded it.
     `UPDATE decisions SET title = $2, body = $3, status = $4, group_name = $5, supersedes = $6, version = $7, updated_at = $8,
-       superseded_by = CASE WHEN $4 = 'superseded' THEN superseded_by END
+       superseded_by = CASE WHEN $4 = 'superseded' THEN superseded_by END, status_reason = $9
      WHERE id = $1`,
-    [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now],
+    [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now, content.statusReason],
   );
   await recordMentions(db, { kind: "decision", id: decision.id });
   return (await findDecisionById(db, decision.id))!;
@@ -258,6 +288,8 @@ export interface DecisionVersion {
   title: string;
   body: string;
   status: DecisionStatus;
+  /** Why it had that status, as given when it took it. */
+  statusReason: string | null;
   group: string | null;
   /** Keys of the Decisions it superseded at this Version. */
   supersedes: string[];
@@ -270,13 +302,14 @@ interface DecisionVersionRow extends RecordedActorRow {
   title: string;
   body: string;
   status: DecisionStatus;
+  status_reason: string | null;
   group_name: string | null;
   supersedes: number[];
   at: Date;
 }
 
 const SELECT_DECISION_VERSIONS = `
-  SELECT v.number, v.title, v.body, v.status, v.group_name, v.supersedes, v.at,
+  SELECT v.number, v.title, v.body, v.status, v.status_reason, v.group_name, v.supersedes, v.at,
          u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, v.actor_session_id AS session_id
   FROM decision_versions v JOIN users u ON u.id = v.actor_user_id LEFT JOIN agents a ON a.id = v.actor_agent_id`;
 
@@ -285,6 +318,7 @@ const toDecisionVersion = (decision: Decision, row: DecisionVersionRow): Decisio
   title: row.title,
   body: row.body,
   status: row.status,
+  statusReason: row.status_reason,
   group: row.group_name,
   supersedes: [...row.supersedes].sort((a, b) => a - b).map((n) => decisionKey(decision.projectKey, n)),
   at: row.at,
@@ -334,7 +368,7 @@ async function scopeKey(db: Queryable, projectId: string): Promise<string> {
  * change by `actor`: once accepted, each Decision it newly supersedes (all of them, when it has just
  * become accepted) is marked superseded, unless superseded or rejected already; and each Decision it
  * no longer supersedes that it had superseded goes back to the status it had before. Run inside the
- * transaction that saved it.
+ * transaction that saved it. Returns the Decisions it changed.
  */
 export async function applySuperseding(
   db: Queryable,
@@ -343,13 +377,14 @@ export async function applySuperseding(
   decision: Decision,
   actor: Actor | StoredActor,
   now: Date,
-): Promise<void> {
+): Promise<Decision[]> {
+  const changed: Decision[] = [];
   const numbers = contentOf(decision).supersedes;
   const added = before.status === "accepted" ? numbers.filter((n) => !before.supersedes.includes(n)) : numbers;
   const dropped = before.supersedes.filter((n) => !numbers.includes(n));
   if (decision.status === "accepted" && added.length > 0) {
     for (const older of await lockedIn(db, scope, added, "d.status NOT IN ('superseded', 'rejected')")) {
-      await saveDecision(db, older, { ...contentOf(older), status: "superseded" }, actor, now);
+      changed.push(await saveDecision(db, older, { ...contentOf(older), status: "superseded", statusReason: null }, actor, now));
       await db.query("UPDATE decisions SET superseded_by = $2 WHERE id = $1", [older.id, decision.number]);
     }
   }
@@ -359,9 +394,10 @@ export async function applySuperseding(
         "SELECT status FROM decision_versions WHERE decision_id = $1 AND status <> 'superseded' ORDER BY number DESC LIMIT 1",
         [older.id],
       );
-      await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted" }, actor, now);
+      changed.push(await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted", statusReason: null }, actor, now));
     }
   }
+  return changed;
 }
 
 /** The Decisions of a scope with these numbers that meet `condition` (SQL on `d`), locked until the transaction ends, in number order. */
@@ -386,6 +422,26 @@ export async function listDecisions(db: Queryable, scope: DecisionScope, filters
   return rows.map((row) => summarize(row, refs));
 }
 
+/**
+ * The Decisions Agents proposed during each of these Claims, oldest first, each with its Project (null for
+ * the Workspace), by Claim id.
+ */
+export async function listDecisionsProposedIn(db: Queryable, claimIds: string[]): Promise<Map<string, (DecisionRef & { projectId: string | null })[]>> {
+  const { rows } = await db.query<{ claim_id: string; project_id: string | null; project_key: string | null; number: number; title: string; status: DecisionStatus }>(
+    `SELECT d.source_claim_id AS claim_id, d.project_id, p.key AS project_key, d.number, d.title, d.status
+     FROM decisions d LEFT JOIN projects p ON p.id = d.project_id
+     WHERE d.source_claim_id = ANY($1::uuid[]) ORDER BY d.created_at, d.project_id IS NULL, d.number`,
+    [claimIds],
+  );
+  const byClaim = new Map<string, (DecisionRef & { projectId: string | null })[]>();
+  for (const r of rows) {
+    const list = byClaim.get(r.claim_id) ?? [];
+    byClaim.set(r.claim_id, list);
+    list.push({ key: decisionKey(r.project_key, r.number), title: r.title, status: r.status, projectId: r.project_id });
+  }
+  return byClaim;
+}
+
 /** A Decision's row as an import writes it, keeping its number and times; the caller records its Versions. */
 export async function insertDecisionRow(
   db: Queryable,
@@ -393,9 +449,9 @@ export async function insertDecisionRow(
   d: DecisionContent & { number: number; supersededBy: number | null; version: number; createdAt: Date; updatedAt: Date },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, group_name, supersedes, superseded_by, version, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-    [scope.workspaceId, scope.projectId, d.number, d.title, d.body, d.status, d.group, d.supersedes, d.supersededBy, d.version, d.createdAt, d.updatedAt],
+    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, status_reason, group_name, supersedes, superseded_by, version, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+    [scope.workspaceId, scope.projectId, d.number, d.title, d.body, d.status, d.statusReason, d.group, d.supersedes, d.supersededBy, d.version, d.createdAt, d.updatedAt],
   );
   return rows[0]!.id;
 }

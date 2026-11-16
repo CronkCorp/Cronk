@@ -1,37 +1,73 @@
 import type { Nodes } from "mdast";
-import type { LiveEvent } from "../live/live-updates.js";
+import type { LiveEvent, LiveUpdates } from "../live/live-updates.js";
+import { agentTopic } from "../live/topics.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
-import type { Actor, AgentActor } from "../actor.js";
+import type { Actor, AgentActor, RecordedActor } from "../actor.js";
 import { actingUser } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, transaction, type Database, type Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
 import { listAgents, type Agent } from "../identity/agents.js";
 import type { User } from "../identity/users.js";
 import { findCommentsByIds, publicComment, type Comment, type CommentOn } from "../conversation/comments.js";
 import { WAITING_REASONS, type WaitingReason } from "../../shared/values.js";
+import { findDecisionById, findDecisionVersion, type Decision, type DecisionVersion } from "../knowledge/decisions.js";
 
 export type { WaitingReason };
 
 /**
  * Work waiting for an Agent (ADR 0005): Cronk never starts an Agent, so when a Comment
- * concerns one, Cronk marks it as waiting for that Agent. It is listed in the welcome of the
- * Agent's next Agent Session, which takes it, and pushed to the Agent's live Agent Sessions.
+ * concerns one, or a User rejects a Decision it proposed, Cronk marks it as waiting for that
+ * Agent. It is listed in the welcome of the Agent's next Agent Session, which takes it, and
+ * pushed to the Agent's live Agent Sessions.
  */
 
 /** One Agent a Comment now waits for, and why. */
 export interface WaitingFor {
   agentId: string;
-  reason: WaitingReason;
+  reason: CommentWork["reason"];
   /** Its position in the order work starts waiting, which only grows; its stream event's id. */
   seq: string;
 }
 
+/** Work waiting for an Agent: a Comment, or the rejection of a Decision it proposed. */
+export type WaitingWork = CommentWork | RejectionWork;
+
 /** A Comment waiting for an Agent, with why and what it is on. */
-export interface WaitingWork {
-  reason: WaitingReason;
+export interface CommentWork {
+  reason: Exclude<WaitingReason, "rejected">;
   comment: ReturnType<typeof publicComment>;
   ticket: CommentOn["ticket"];
   document: CommentOn["document"];
+}
+
+/** A User's rejection of a Decision the Agent proposed, with their reason and the Ticket it came from. */
+export interface RejectionWork {
+  reason: "rejected";
+  comment: null;
+  decision: RejectedDecision;
+  ticket: { key: string; title: string } | null;
+  document: null;
+}
+
+/** A Decision as its rejection reaches the Agent that proposed it: the Version that rejected it. */
+export interface RejectedDecision {
+  key: string;
+  title: string;
+  /** Why the User rejected it. */
+  reason: string;
+  rejectedBy: RecordedActor;
+  at: Date;
+}
+
+/** The rejection of `decision` at Version `rejecting` as Waiting Work: as that Version says it. */
+export function rejectionOf(decision: Pick<Decision, "key" | "sourceTicket">, rejecting: DecisionVersion): RejectionWork {
+  return {
+    reason: "rejected",
+    comment: null,
+    decision: { key: decision.key, title: rejecting.title, reason: rejecting.statusReason ?? "", rejectedBy: rejecting.actor, at: rejecting.at },
+    ticket: decision.sourceTicket,
+    document: null,
+  };
 }
 
 /** The `waiting` event that pushes `work` to the Agent's live Agent Sessions, with its position as the event's id. */
@@ -111,8 +147,30 @@ function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, 
   });
 }
 
-/** Told each position `markWaiting` takes for an Agent, before the transaction taking it commits. */
+/** Told each position `markWaiting` or `markRejected` takes for an Agent, before the transaction taking it commits. */
 export type Positioned = (agentId: string, seq: string) => void;
+
+/**
+ * Runs `fn` in a transaction, passing it what to tell `markWaiting` or `markRejected` about the positions
+ * it takes, then `committed` with its result. Each position is expected on its Agent's stream
+ * (`LiveUpdates.expect`) before it commits, until `committed` pushes it. If the transaction rolls back
+ * or `committed` throws, they are forgotten, so they never hold a stream's `ready` back for good.
+ */
+export async function withWaitingWork<T>(
+  ctx: { db: Database; live: LiveUpdates },
+  fn: (tx: Queryable, positioned: Positioned) => Promise<T>,
+  committed: (result: T) => void,
+): Promise<T> {
+  const forget: (() => void)[] = [];
+  try {
+    const result = await transaction(ctx.db, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
+    committed(result);
+    return result;
+  } catch (err) {
+    for (const f of forget) f();
+    throw err;
+  }
+}
 
 /**
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the
@@ -135,6 +193,7 @@ export async function markWaiting(
     answer: answered ? [answered.agentId] : [],
     mention: mentionedAgents(agents, actor, mentionsIn(comment.body)),
     comment: place.delegateId ? [place.delegateId] : [],
+    rejected: [],
   };
   const poster = actor.kind === "agent" ? actor.agent.id : null;
   const marked = new Map<string, WaitingReason>();
@@ -142,11 +201,11 @@ export async function markWaiting(
   for (const reason of WAITING_REASONS) {
     for (const agentId of candidates[reason]) if (agentId !== poster && !marked.has(agentId)) marked.set(agentId, reason);
   }
-  const concerned: { agentId: string; reason: WaitingReason }[] = [];
+  const concerned: { agentId: string; reason: CommentWork["reason"] }[] = [];
   for (const [agentId, reason] of marked) {
     const found = agents.find((a) => a.agent.id === agentId);
     if (!found?.owner.active) continue;
-    if (await canRead(db, agentReading(found.agent, found.owner), place.projectId)) concerned.push({ agentId, reason });
+    if (await canRead(db, agentReading(found.agent, found.owner), place.projectId)) concerned.push({ agentId, reason: reason as CommentWork["reason"] });
   }
   // Posts concerning the same Agent take positions and commit one after another, so a position
   // is never passed by one still uncommitted (see `missedWaitingWork`). Other Agents' posts don't
@@ -166,24 +225,49 @@ export async function markWaiting(
 }
 
 /**
+ * Marks the rejection of `decision`, which the Agent `agentId` proposed, as waiting for it, at the
+ * Version that rejected it, if the Agent can still see it and its Owner is active. Returns its
+ * position, which `positioned` hears first, before the transaction commits.
+ */
+export async function markRejected(
+  db: Queryable,
+  workspaceId: string,
+  decision: Decision,
+  agentId: string,
+  at: Date,
+  positioned: Positioned,
+): Promise<string | undefined> {
+  const found = (await listAgents(db, workspaceId)).find((a) => a.agent.id === agentId);
+  if (!found?.owner.active || !(await canRead(db, agentReading(found.agent, found.owner), decision.projectId))) return undefined;
+  // As in `markWaiting`: one Agent's work takes positions and commits in order.
+  await lockUntilCommit(db, `waiting-work:${agentId}`);
+  const { rows } = await db.query<{ seq: string }>(
+    "INSERT INTO waiting_work (agent_id, decision_id, decision_version, reason, at) VALUES ($1, $2, $3, 'rejected', $4) ON CONFLICT DO NOTHING RETURNING seq",
+    [agentId, decision.id, decision.version, at],
+  );
+  if (!rows[0]) return undefined;
+  positioned(agentId, rows[0].seq);
+  return rows[0].seq;
+}
+
+/**
  * The work waiting for the Agent, oldest first, for the welcome of its Agent Session
  * `sessionId`, leaving out what the Agent can't see right now (it keeps waiting until it can).
  * A full token's welcome takes what it lists, so it no longer waits; a read-only token, which
  * can't act on it, leaves it waiting.
  */
 export async function takeWaitingWork(db: Queryable, agent: AgentActor, sessionId: string, now: Date): Promise<WaitingWork[]> {
-  const { rows } = await db.query<{ comment_id: string; reason: WaitingReason }>(
-    "SELECT comment_id, reason FROM waiting_work WHERE agent_id = $1 AND taken_at IS NULL",
-    [agent.agent.id],
-  );
-  const work = await waitingWorkFor(db, agent, rows.map((r) => ({ commentId: r.comment_id, reason: r.reason })));
+  const { rows } = await db.query<WaitingRow>(`${SELECT_WAITING} WHERE agent_id = $1 AND taken_at IS NULL ORDER BY seq`, [agent.agent.id]);
+  const work = await waitingWorkFor(db, agent, rows);
   if (!agent.readOnly && work.length > 0) {
-    await db.query(
-      "UPDATE waiting_work SET taken_at = $2, taken_by_session_id = $3 WHERE agent_id = $1 AND comment_id = ANY($4) AND taken_at IS NULL",
-      [agent.agent.id, now, sessionId, work.map((w) => w.comment.id)],
-    );
+    await db.query("UPDATE waiting_work SET taken_at = $2, taken_by_session_id = $3 WHERE agent_id = $1 AND seq = ANY($4::bigint[]) AND taken_at IS NULL", [
+      agent.agent.id,
+      now,
+      sessionId,
+      work.map((w) => w.seq),
+    ]);
   }
-  return work;
+  return work.map((w) => w.work);
 }
 
 /**
@@ -196,12 +280,8 @@ export async function takeWaitingWork(db: Queryable, agent: AgentActor, sessionI
  * `afterSeq` was seen has a higher position, so it is never skipped.
  */
 export async function missedWaitingWork(db: Queryable, agent: AgentActor, afterSeq: string): Promise<{ seq: string; work: WaitingWork }[]> {
-  const { rows } = await db.query<{ seq: string; comment_id: string; reason: WaitingReason }>(
-    "SELECT seq, comment_id, reason FROM waiting_work WHERE agent_id = $1 AND taken_at IS NULL AND seq > $2 ORDER BY seq",
-    [agent.agent.id, afterSeq],
-  );
-  const work = new Map((await waitingWorkFor(db, agent, rows.map((r) => ({ commentId: r.comment_id, reason: r.reason })))).map((w) => [w.comment.id, w]));
-  return rows.filter((r) => work.has(r.comment_id)).map((r) => ({ seq: r.seq, work: work.get(r.comment_id)! }));
+  const { rows } = await db.query<WaitingRow>(`${SELECT_WAITING} WHERE agent_id = $1 AND taken_at IS NULL AND seq > $2 ORDER BY seq`, [agent.agent.id, afterSeq]);
+  return waitingWorkFor(db, agent, rows);
 }
 
 /**
@@ -218,19 +298,33 @@ export async function latestWaitingSeq(db: Queryable, agentId: string): Promise<
   return rows[0]?.seq ?? "0";
 }
 
-/** The waiting work for these Comments, in the order they were posted, leaving out those `agent` can't see. */
-export async function waitingWorkFor(db: Queryable, agent: AgentActor, items: { commentId: string; reason: WaitingReason }[]): Promise<WaitingWork[]> {
-  const reasons = new Map(items.map((i) => [i.commentId, i.reason]));
-  const comments = await findCommentsByIds(db, [...reasons.keys()]);
-  const work: WaitingWork[] = [];
-  for (const { comment, on } of comments) {
-    if (!(await canRead(db, agent, on.projectId))) continue;
-    work.push({
-      reason: reasons.get(comment.id)!,
-      comment: publicComment(comment),
-      ticket: on.ticket,
-      document: on.document,
-    });
+/** A row of `waiting_work`, as `SELECT_WAITING` reads it. */
+interface WaitingRow {
+  seq: string;
+  reason: WaitingReason;
+  comment_id: string | null;
+  decision_id: string | null;
+  decision_version: number | null;
+}
+
+const SELECT_WAITING = "SELECT seq::text AS seq, reason, comment_id, decision_id, decision_version FROM waiting_work";
+
+/** The waiting work these rows hold, each with its position, in their order, leaving out what `agent` can't see. */
+async function waitingWorkFor(db: Queryable, agent: AgentActor, rows: WaitingRow[]): Promise<{ seq: string; work: WaitingWork }[]> {
+  const comments = new Map((await findCommentsByIds(db, rows.flatMap((r) => (r.comment_id ? [r.comment_id] : [])))).map((c) => [c.comment.id, c]));
+  const work: { seq: string; work: WaitingWork }[] = [];
+  for (const row of rows) {
+    if (row.comment_id !== null) {
+      const found = comments.get(row.comment_id);
+      if (!found || !(await canRead(db, agent, found.on.projectId))) continue;
+      const reason = row.reason as CommentWork["reason"];
+      work.push({ seq: row.seq, work: { reason, comment: publicComment(found.comment), ticket: found.on.ticket, document: found.on.document } });
+    } else {
+      const decision = await findDecisionById(db, row.decision_id!);
+      const version = decision && (await findDecisionVersion(db, decision, row.decision_version!));
+      if (!decision || !version || !(await canRead(db, agent, decision.projectId))) continue;
+      work.push({ seq: row.seq, work: rejectionOf(decision, version) });
+    }
   }
   return work;
 }

@@ -34,7 +34,7 @@ import type { SearchResult } from "./search/search.js";
 import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { QuestionItem, DecisionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
 import type {
   Decision as StoredDecision,
   DecisionSummary as StoredDecisionSummary,
@@ -157,8 +157,12 @@ export type Merge = StoredMerge & { onto: Version };
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
-/** One item in a User's Inbox: a Ticket to review, an Unverified completion, or an open question of one of their Agents. */
-export type InboxItem = Serialized<ReviewItem> | Serialized<UnverifiedItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
+/** One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, or a Decision an Agent proposed. */
+export type InboxItem =
+  | Serialized<ReviewItem>
+  | Serialized<UnverifiedItem>
+  | (Serialized<Omit<QuestionItem, "question">> & { question: Activity })
+  | Serialized<DecisionItem>;
 export type InboxKind = InboxItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */

@@ -97,6 +97,7 @@ describe("editing a Decision", () => {
       title: "Postgres",
       body: "v1",
       status: "proposed",
+      statusReason: null,
       group: null,
       supersedes: [],
       at: "2026-01-01T09:00:00.000Z",
@@ -145,11 +146,12 @@ describe("a Decision's status", () => {
     expect(edited.body.decision).toMatchObject({ version: 3, statusChangedBy: { id: graceId }, statusChangedAt: "2026-01-01T09:01:00.000Z" });
 
     for (const status of ["deprecated", "rejected", "proposed"]) {
-      expect((await admin.post("/api/decisions/CRONK-D1/status", { status })).body.decision.status).toBe(status);
+      const reason = status === "rejected" ? { reason: "Not after all." } : {};
+      expect((await admin.post("/api/decisions/CRONK-D1/status", { status, ...reason })).body.decision.status).toBe(status);
     }
   });
 
-  it("is never changed by an Agent, which may only read Decisions", async () => {
+  it("is never changed by an Agent, which may only propose Decisions and refine them while proposed", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     await admin.post("/api/projects/CRONK/decisions", { title: "Postgres" });
@@ -159,8 +161,7 @@ describe("a Decision's status", () => {
     const refused = await claude.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
     expect(refused.status).toBe(403);
     expect(refused.body.error).toMatch(/Only a User/);
-    expect((await claude.post("/api/projects/CRONK/decisions", { title: "Mine" })).status).toBe(403);
-    expect((await claude.patch("/api/decisions/CRONK-D1", { baseVersion: 1, body: "Mine" })).status).toBe(403);
+    expect((await claude.post("/api/decisions/CRONK-D1/status", { status: "rejected", reason: "Not mine to keep" })).status).toBe(403);
     expect((await admin.get("/api/decisions/CRONK-D1")).body.decision).toMatchObject({ status: "proposed", version: 1 });
   });
 
@@ -211,7 +212,7 @@ describe("superseding a Decision", () => {
   it("is set by editing the newer Decision, and applies at once if it is already accepted", async () => {
     const { admin } = await startInstalledCronk();
     for (const title of ["Old", "Rejected idea", "New"]) await admin.post("/api/workspace/decisions", { title });
-    await admin.post("/api/decisions/D2/status", { status: "rejected" });
+    await admin.post("/api/decisions/D2/status", { status: "rejected", reason: "Too risky." });
     await admin.post("/api/decisions/D3/status", { status: "accepted" });
 
     const edited = await admin.patch("/api/decisions/D3", { baseVersion: 2, supersedes: ["D1", "D2"] });

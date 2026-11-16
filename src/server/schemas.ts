@@ -113,6 +113,11 @@ const transcriptFields = {
     items: object({ id, name: { type: "string" } }),
     description: "The Terms its Sessions saved, that the caller can read.",
   },
+  decisions: {
+    type: "array",
+    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    description: "The Decisions its Sessions proposed or refined, that the caller can read.",
+  },
   createdAt: timestamp,
   updatedAt: timestamp,
 };
@@ -175,7 +180,12 @@ const decisionFields = {
   ...decisionSummaryFields,
   body: { type: "string", description: "Markdown." },
   supersedes: { type: "array", items: decisionRef, description: "The Decisions it replaces once accepted, of the same Project or Workspace." },
+  sourceTicket: {
+    ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
+    description: "The Ticket an Agent was working on when it proposed it, holding its Claim; null otherwise.",
+  },
   proposedBy: { ...recordedActor, description: "Who recorded it." },
+  statusReason: { ...nullable({ type: "string" }), description: "Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given." },
   statusChangedAt: { ...timestamp, description: "When it took its current status." },
   statusChangedBy: { ...recordedActor, description: "Who gave it its current status." },
 };
@@ -185,6 +195,7 @@ const decisionVersionFields = {
   number: { type: "integer", description: "Counts from 1 per Decision." },
   title: { type: "string" },
   status: decisionStatus,
+  statusReason: { ...nullable({ type: "string" }), description: "Why it had that status, as given when it took it." },
   group: nullable({ type: "string" }),
   supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
   at: timestamp,
@@ -462,17 +473,33 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   WaitingWork: {
-    description: "A Comment waiting for an Agent (ADR 0005), with why and what it is on.",
-    ...object({
-      reason: {
-        type: "string",
-        enum: WAITING_REASONS,
-        description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
+    description:
+      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed, with their reason.",
+    ...object(
+      {
+        reason: {
+          type: "string",
+          enum: WAITING_REASONS,
+          description:
+            "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why.",
+        },
+        comment: { ...nullable(ref("Comment")), description: "The Comment; null for a rejection." },
+        decision: {
+          ...object({
+            key: { type: "string" },
+            title: { type: "string" },
+            reason: { type: "string", description: "Why the User rejected it, in Markdown." },
+            rejectedBy: recordedActor,
+            at: timestamp,
+          }),
+          description: "For a rejection only: the Decision, as the Version that rejected it holds it.",
+        },
+        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision came from; null otherwise." },
+        document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
       },
-      comment: ref("Comment"),
-      ticket: { ...nullable(ticketName), description: "The Ticket it is on; null on a Document." },
-      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document it is on; null on a Ticket." },
-    }),
+      ["decision"],
+    ),
   },
   Document: {
     description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",
@@ -521,6 +548,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       createdAt: timestamp,
       updatedAt: timestamp,
       ...writtenBy,
+      decisions: {
+        type: "array",
+        items: decisionRef,
+        description: "The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the Workspace, oldest first.",
+      },
     }),
   },
   LinkedDocument: {
