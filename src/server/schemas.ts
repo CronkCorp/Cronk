@@ -75,6 +75,7 @@ export type SharedSchemaName =
   | "Attachment"
   | "Artifact"
   | "ArtifactVersion"
+  | "ExtraOrigin"
   | "StaleArtifact"
   | "AvoidedWord"
   | "Suggestion";
@@ -818,6 +819,18 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       actor: { ...recordedActor, description: "Who attached it." },
     }),
   },
+  ExtraOrigin: {
+    description: "An origin a publish declared for its Version beyond the Workspace's allow-list: what the page loads from there, and why.",
+    ...object({
+      origin: { type: "string", description: "A bare origin, such as `https://cdn.plot.ly`." },
+      uses: {
+        type: "array",
+        items: { type: "string", enum: ["scripts", "styles", "fonts", "images", "media", "connect"] },
+        description: "What the page may load from it; `connect` lets it send requests there.",
+      },
+      reason: { type: "string", description: "Why the page needs it, as the publisher wrote it." },
+    }),
+  },
   Artifact: {
     description:
       "A folder of files with `index.html`, such as a prototype or dashboard, published by a User or an Agent and served in isolation " +
@@ -839,6 +852,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: {
           ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
           description: "The Ticket the latest Version came from: the one whose Claim the publishing Agent Session held.",
+        },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins the latest Version's publish declared; served with it only while the Workspace allows extra origins.",
         },
         createdAt: timestamp,
         updatedAt: { ...timestamp, description: "When its latest Version was published." },
@@ -862,6 +880,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: { ...nullable(object({ key: { type: "string" }, title: { type: "string" } })), description: "The Ticket it came from, if any." },
         fileCount: { type: "integer", description: "How many files it holds." },
         size: { type: "integer", description: "How many bytes its files take." },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins its publish declared, never carried over from an earlier Version; served with it only while the Workspace allows extra origins.",
+        },
         url: { type: "string", description: "Its address in Cronk." },
         frameUrl: { type: "string", description: "Where it is served on the Artifact hostname, signed for the caller and valid for 12 hours; only when one Version is asked for." },
         files: {

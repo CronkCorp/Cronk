@@ -311,3 +311,84 @@ describe("The Workspace's allow-list", () => {
     expect(res.body.artifactAllowedOrigins).toEqual(["https://cdn.example", "http://localhost:8080"]);
   });
 });
+
+/** `extras` as the `extraOrigins` query parameter of a publish. */
+const declaring = (extras: unknown) => `extraOrigins=${encodeURIComponent(JSON.stringify(extras))}`;
+const plotly = { origin: "https://cdn.plot.ly", uses: ["scripts"], reason: "Plotly draws the chart" };
+const statusApi = { origin: "https://status.example.com", uses: ["connect", "images"], reason: "The dashboard reads live sign-in counts" };
+
+describe("Extra origins a publish declares", () => {
+  it("are added to that Version's content policy for what each was declared for, and shown on the Version and the Artifact", async () => {
+    const { admin } = await setup();
+    const res = await admin.upload(`/api/projects/CRONK/artifacts?title=Limits&${declaring([plotly, statusApi])}`, await tarGz(site));
+    expect(res.status).toBe(201);
+    expect(res.body.artifact.extraOrigins).toEqual([plotly, statusApi]);
+    const { artifact } = (await admin.get(`/api/artifacts/${res.body.artifact.id}`)).body;
+    expect(artifact.extraOrigins).toEqual([plotly, statusApi]);
+    expect(artifact.versions[0].extraOrigins).toEqual([plotly, statusApi]);
+    expect((await admin.get(`/api/artifacts/${artifact.id}/versions/1`)).body.version.extraOrigins).toEqual([plotly, statusApi]);
+
+    const policy = await servedPolicy(admin, artifact.id);
+    expect(sourcesOf(policy, "script-src")).toContain("https://cdn.plot.ly");
+    expect(sourcesOf(policy, "style-src")).not.toContain("https://cdn.plot.ly");
+    expect(sourcesOf(policy, "connect-src")).toEqual(["https://status.example.com"]);
+    expect(sourcesOf(policy, "img-src")).toContain("https://status.example.com");
+    expect(sourcesOf(policy, "script-src")).not.toContain("https://status.example.com");
+    // Still no same origin and no popups, whatever was declared.
+    expect(sourcesOf(policy, "sandbox")).toEqual(["allow-scripts", "allow-modals", "allow-downloads"]);
+  });
+
+  it("are never carried over: the next Version has only what its own publish declared, and earlier Versions keep theirs", async () => {
+    const { admin } = await setup();
+    const { artifact } = (await admin.upload(`/api/projects/CRONK/artifacts?title=Limits&${declaring([plotly])}`, await tarGz(site))).body;
+
+    const next = await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz(site));
+    expect(next.status).toBe(201);
+    expect(next.body.artifact.extraOrigins).toEqual([]);
+    expect(sourcesOf(await servedPolicy(admin, artifact.id), "script-src")).not.toContain("https://cdn.plot.ly");
+    expect(sourcesOf(await servedPolicy(admin, artifact.id, 1), "script-src")).toContain("https://cdn.plot.ly");
+
+    const third = await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=2&${declaring([statusApi])}`, await tarGz(site));
+    expect(third.body.artifact.extraOrigins).toEqual([statusApi]);
+    expect((await admin.get(`/api/artifacts/${artifact.id}`)).body.artifact.versions.map((v: { extraOrigins: unknown[] }) => v.extraOrigins)).toEqual([[statusApi], [], [plotly]]);
+  });
+
+  it("must each be a bare origin, declared once, for at least one use and with a reason", async () => {
+    const { admin } = await setup();
+    const refused = async (extras: unknown) => {
+      const res = await admin.upload(`/api/projects/CRONK/artifacts?title=Limits&${declaring(extras)}`, await tarGz(site));
+      expect(res.status, JSON.stringify(extras)).toBe(400);
+      return res.body.error as string;
+    };
+    expect(await refused([{ ...plotly, reason: "  " }])).toMatch(/reason/);
+    expect(await refused([{ ...plotly, uses: [] }])).toMatch(/uses/);
+    expect(await refused([{ ...plotly, uses: ["frames"] }])).toMatch(/uses/);
+    expect(await refused([{ ...plotly, origin: "https://cdn.plot.ly/plotly.js" }])).toMatch(/origin/);
+    expect(await refused([{ ...plotly, origin: "*" }])).toMatch(/origin/);
+    expect(await refused([plotly, plotly])).toMatch(/more than once/);
+    expect(await refused({ origin: "https://cdn.plot.ly" })).toMatch(/list/);
+    expect((await admin.upload("/api/projects/CRONK/artifacts?title=Limits&extraOrigins=nope", await tarGz(site))).status).toBe(400);
+  });
+});
+
+describe("An Admin turning declared extras off", () => {
+  it("refuses publishes that declare some, and serves Versions that did without them", async () => {
+    const { admin } = await setup();
+    const { artifact } = (await admin.upload(`/api/projects/CRONK/artifacts?title=Limits&${declaring([plotly, statusApi])}`, await tarGz(site))).body;
+
+    expect((await admin.patch("/api/workspace", { artifactExtraOriginsAllowed: false })).body.artifactExtraOriginsAllowed).toBe(false);
+    const refused = await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1&${declaring([plotly])}`, await tarGz(site));
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/extra origins/);
+
+    // What was declared stays on record and shown, but no longer applies.
+    expect((await admin.get(`/api/artifacts/${artifact.id}`)).body.artifact.extraOrigins).toEqual([plotly, statusApi]);
+    const policy = await servedPolicy(admin, artifact.id);
+    expect(sourcesOf(policy, "script-src")).not.toContain("https://cdn.plot.ly");
+    expect(sourcesOf(policy, "connect-src")).toEqual(["'none'"]);
+    expect(sourcesOf(policy, "img-src")).not.toContain("https://status.example.com");
+
+    await admin.patch("/api/workspace", { artifactExtraOriginsAllowed: true });
+    expect(sourcesOf(await servedPolicy(admin, artifact.id), "connect-src")).toEqual(["https://status.example.com"]);
+  });
+});

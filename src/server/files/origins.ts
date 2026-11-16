@@ -29,3 +29,53 @@ export function bareOrigins(values: string[], what: string): string[] {
   }
   return origins;
 }
+
+/** What a declared extra origin may be loaded from for, each opening one directive of the content policy. */
+export const EXTRA_ORIGIN_USES = ["scripts", "styles", "fonts", "images", "media", "connect"] as const;
+export type ExtraOriginUse = (typeof EXTRA_ORIGIN_USES)[number];
+
+/** An origin a publish declared for its Version beyond the Workspace's allow-list: what the page loads from there, and why. */
+export interface ExtraOrigin {
+  origin: string;
+  uses: ExtraOriginUse[];
+  reason: string;
+}
+
+/** The most extra origins one publish may declare, and the longest reason for one. */
+const MAX_EXTRA_ORIGINS = 20;
+const MAX_REASON_LENGTH = 500;
+
+/**
+ * The extra origins a publish's `extraOrigins` parameter declares, a JSON list of `{origin, uses, reason}`; none
+ * without it. Otherwise a 400 saying what is wrong.
+ */
+export function parseExtraOrigins(raw: string | undefined): ExtraOrigin[] {
+  if (raw === undefined) return [];
+  const refuse = (why: string): never => {
+    throw new HttpError(400, `extraOrigins ${why}`);
+  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return refuse('must be a JSON list such as [{"origin": "https://cdn.example", "uses": ["scripts"], "reason": "Draws the chart"}]');
+  }
+  if (!Array.isArray(parsed)) return refuse('must be a JSON list such as [{"origin": "https://cdn.example", "uses": ["scripts"], "reason": "Draws the chart"}]');
+  if (parsed.length > MAX_EXTRA_ORIGINS) refuse(`may declare at most ${MAX_EXTRA_ORIGINS} origins`);
+  const extras: ExtraOrigin[] = [];
+  for (const [i, item] of parsed.entries()) {
+    const at = `[${i}]`;
+    if (typeof item !== "object" || item === null) return refuse(`${at} must be an object with origin, uses and reason`);
+    const { origin, uses, reason } = item as Record<string, unknown>;
+    const bare = typeof origin === "string" ? bareOrigin(origin) : undefined;
+    if (!bare) return refuse(`${at} origin must be a bare http or https origin, such as https://cdn.example`);
+    if (extras.some((e) => e.origin === bare)) refuse(`declares ${bare} more than once`);
+    if (!Array.isArray(uses) || uses.length === 0 || !uses.every((u) => (EXTRA_ORIGIN_USES as readonly unknown[]).includes(u))) {
+      return refuse(`${at} uses must list what the page loads from ${bare}: ${EXTRA_ORIGIN_USES.join(", ")}`);
+    }
+    if (typeof reason !== "string" || reason.trim() === "") return refuse(`${at} reason must say why the page needs ${bare}`);
+    if (reason.trim().length > MAX_REASON_LENGTH) refuse(`${at} reason must be at most ${MAX_REASON_LENGTH} characters`);
+    extras.push({ origin: bare, uses: [...new Set(uses as ExtraOriginUse[])], reason: reason.trim() });
+  }
+  return extras;
+}
