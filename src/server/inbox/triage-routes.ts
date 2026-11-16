@@ -53,7 +53,7 @@ const unattendedItem = {
 
 const discoveredItem = {
   type: "object",
-  required: ["kind", "at", "ticket", "reports"],
+  required: ["kind", "at", "ticket", "reports", "blocks"],
   description:
     "A Discovered Ticket in Backlog and undelegated, with no Assignee or one who is deactivated or has no access to its Project. " +
     "A User with Write in its Project takes it by assigning it to themselves, " +
@@ -63,6 +63,11 @@ const discoveredItem = {
     at: { ...timestamp, description: "When the Agent filed it." },
     ticket: ref("Ticket"),
     reports: { type: "array", items: ref("Report") },
+    blocks: {
+      type: "array",
+      items: ref("BlockingRef"),
+      description: "The Tickets it blocks that the User can see, in key order, each with the Agent that added the block and why: what it pauses until finished or the block is removed.",
+    },
   },
 } as const;
 

@@ -109,3 +109,35 @@ describe("Removing a block from a Discovered Ticket", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
   });
 });
+
+describe("A Discovered Ticket in the Inbox and Triage", () => {
+  it("lists the Tickets it blocks, with why", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-2", reason }, { ticketKey: "CRONK-1", reason: "Same." }] });
+    await agent.post("/api/projects/CRONK/tickets", { title: "Docs are stale" });
+
+    const { items } = (await admin.get("/api/inbox?kind=discovered")).body;
+
+    expect(items.map((i: any) => [i.ticket.key, i.blocks.map((b: any) => `${b.key}: ${b.block.reason}`)])).toEqual([
+      ["CRONK-3", ["CRONK-1: Same.", `CRONK-2: ${reason}`]],
+      ["CRONK-4", []],
+    ]);
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: null });
+    const triage = (await admin.get("/api/triage?kind=discovered")).body.items;
+    expect(triage).toMatchObject([{ ticket: { key: "CRONK-3" }, blocks: [{ key: "CRONK-1" }, { key: "CRONK-2" }] }]);
+  });
+
+  it("changes live as blocks are added and removed later", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans" });
+    const stream = await admin.events("/api/inbox/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await agent.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1", reason });
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    await admin.delete("/api/tickets/CRONK-1/relations/blocked_by/CRONK-2");
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+  });
+});

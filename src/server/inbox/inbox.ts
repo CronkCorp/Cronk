@@ -7,6 +7,8 @@ import { userActor } from "../actor.js";
 import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
+import { listRelations, type BlockingRef } from "../work/relations.js";
+import { visibleRelations } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -33,8 +35,11 @@ export type ReviewItem = TicketItem<"review">;
 /** An Agent's completion under Autonomous Delegation, waiting for its Assignee to Accept it. */
 export type UnverifiedItem = TicketItem<"unverified">;
 
-/** A Discovered Ticket waiting for its Assignee to delegate it, keep it in Backlog or cancel it. `at` is when it was filed. */
-export type DiscoveredItem = TicketItem<"discovered">;
+/**
+ * A Discovered Ticket waiting for its Assignee to delegate it, keep it in Backlog or cancel it, with the Tickets it blocks
+ * that the User can see: what it pauses. `at` is when it was filed.
+ */
+export type DiscoveredItem = TicketItem<"discovered"> & { blocks: BlockingRef[] };
 
 /** An open question of one of the User's Agents, with the Ticket it is on. `at` is when it was asked. */
 export interface QuestionItem {
@@ -119,7 +124,7 @@ export async function listInbox(db: Queryable, user: User, filter: InboxFilter =
     ...(wants("unverified") ? await unverified(db, user, projectIds) : []),
     ...(wants("decision") ? await proposedDecisions(db, user, projectIds, !filter.projectKeys?.length) : []),
     ...(wants("suggestion") ? await openSuggestions(db, user, projectIds) : []),
-    ...(wants("discovered") ? await ticketItems(db, "discovered", { assigneeId: user.id, projectIds }) : []),
+    ...(wants("discovered") ? await withBlocks(db, user, await ticketItems(db, "discovered", { assigneeId: user.id, projectIds })) : []),
   ].filter((item) => !agents || agents.has(agentOf(item) ?? ""));
   const pinned = (item: InboxItem) => (item.kind === "question" && item.question.blocking ? 0 : 1);
   return items.sort((a, b) => pinned(a) - pinned(b) || a.at.getTime() - b.at.getTime());
@@ -201,6 +206,14 @@ export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
     [which.assigneeId, which.projectIds],
   );
   return asTicketItems(db, kind, rows);
+}
+
+/** Discovered items, each with the Tickets it blocks that `user` can see. */
+export async function withBlocks(db: Queryable, user: User, items: TicketItem<"discovered">[]): Promise<DiscoveredItem[]> {
+  const viewer = userActor(user);
+  return Promise.all(
+    items.map(async (item) => ({ ...item, blocks: (await visibleRelations(db, viewer, await listRelations(db, item.ticket.id))).blocks })),
+  );
 }
 
 /** When the Ticket `t` entered its Status, as SQL. */

@@ -73,7 +73,7 @@ const suggestionItem = {
 
 const discoveredItem = {
   type: "object",
-  required: ["kind", "at", "ticket", "reports"],
+  required: ["kind", "at", "ticket", "reports", "blocks"],
   description:
     "A Discovered Ticket the User is Assignee of, in Backlog and undelegated, waiting for them to delegate it, keep it in Backlog (POST /api/tickets/{key}/keep) " +
     "or cancel it. Its `discovered` marker says which Agent filed it and from which Ticket. `reports` is empty.",
@@ -82,6 +82,11 @@ const discoveredItem = {
     at: { ...timestamp, description: "When the Agent filed it." },
     ticket: ref("Ticket"),
     reports: { type: "array", items: ref("Report") },
+    blocks: {
+      type: "array",
+      items: ref("BlockingRef"),
+      description: "The Tickets it blocks that the User can see, in key order, each with the Agent that added the block and why: what it pauses until finished or the block is removed.",
+    },
   },
 } as const;
 

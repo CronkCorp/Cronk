@@ -107,6 +107,11 @@ interface TicketQuery {
 }
 
 export function workRoutes(ctx: AppContext) {
+  /** Tells the Inbox and Triage of any waiting Discovered Ticket among these that what it blocks changed. */
+  const discoveriesChanged = (tickets: Ticket[]) => {
+    const waiting = tickets.filter(isWaitingDiscovery);
+    if (waiting.length > 0) waitingItemsChanged(ctx.live, waiting.map((t) => t.assignee?.id));
+  };
   return async (app: FastifyInstance) => {
     app.get<{ Querystring: { archived?: boolean } }>(
       "/api/projects",
@@ -720,6 +725,7 @@ export function workRoutes(ctx: AppContext) {
           return { ends: [ticket, other], relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
         });
         ticketsChanged(ctx.live, ends);
+        discoveriesChanged(ends);
         return reply.code(201).send({ relations });
       },
     );
@@ -759,6 +765,7 @@ export function workRoutes(ctx: AppContext) {
           return { ends: [ticket, other], readyBefore, relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
         });
         ticketsChanged(ctx.live, ends);
+        discoveriesChanged(ends);
         await tellNewlyReady(ctx, ends.map((t) => t.id), readyBefore);
         return { relations };
       },
