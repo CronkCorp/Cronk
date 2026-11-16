@@ -27,6 +27,7 @@ import { watchSilence } from "./coordination/lapses.js";
 import { refuseWritesFromOtherSites } from "./identity/same-site.js";
 import { attachmentRoutes } from "./files/attachment-routes.js";
 import { createFileStore, type StorageConfig } from "./files/storage.js";
+import { cachedSerializers } from "./serializers.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
@@ -62,6 +63,7 @@ export async function buildApp(opts: {
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
+    schemaController: { compilersFactory: { buildSerializer: cachedSerializers } },
     // Refuse fields a route doesn't declare (its schema's `additionalProperties: false`) instead of
     // silently dropping them, so a caller never hears that a change worked when nothing changed.
     // `allErrors` so an unknown field is named even when a required one is missing too: a misspelt field is both.
