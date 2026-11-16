@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
 
 describe("A Project's live updates", () => {
   it("tell its watchers which Ticket changed when one is edited", async () => {
@@ -109,6 +109,45 @@ describe("A Project's live updates", () => {
     await (await startSession(cronk, secret)).post("/api/tickets/CRONK-2/claim");
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
     await admin.delete(`/api/agents/${claude.agentId}`);
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
+  });
+
+  it("tell which Tickets changed when their Claims lapse because the Agents' Owner is deactivated", async () => {
+    const { cronk, admin } = await delegatedSetup(2);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId: string = (await bob.get("/api/me")).body.user.id;
+    const first = await registerAgent(bob, "bob-laptop");
+    const second = await registerAgent(bob, "bob-desktop");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: first.agentId });
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: bobId, delegateId: second.agentId });
+    expect((await (await startSession(cronk, first.secret)).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    expect((await (await startSession(cronk, second.secret)).post("/api/tickets/CRONK-2/claim")).status).toBe(200);
+    const project = await admin.events("/api/projects/CRONK/events");
+    const ticket = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await project.next())?.event).toBe("ready");
+    expect((await ticket.next())?.event).toBe("ready");
+
+    expect((await admin.patch(`/api/users/${bobId}`, { active: false })).status).toBe(200);
+    const changed = [await project.next(), await project.next()].map((e) => e?.data.ticket).sort();
+    expect(changed).toEqual(["CRONK-1", "CRONK-2"]);
+    expect(await ticket.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+  });
+
+  it("don't tell again of a Claim that had lapsed before its Agent's Owner was deactivated", async () => {
+    const { cronk, admin } = await delegatedSetup(2);
+    const threshold = (await admin.get("/api/workspace")).body.silenceThresholdSeconds;
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId: string = (await bob.get("/api/me")).body.user.id;
+    const laptop = await registerAgent(bob, "bob-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: laptop.agentId });
+    expect((await (await startSession(cronk, laptop.secret)).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    const stream = await admin.events("/api/projects/CRONK/events");
+    expect((await stream.next())?.event).toBe("ready");
+    cronk.clock.advance(threshold * 1000 + 1);
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+
+    expect((await admin.patch(`/api/users/${bobId}`, { active: false })).status).toBe(200);
+    await admin.patch("/api/tickets/CRONK-2", { title: "After" });
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
   });
 

@@ -98,12 +98,15 @@ export async function findLiveAgentSession(db: Queryable, caller: SessionCaller,
   return rows[0] && toAgentSession(rows[0]);
 }
 
-/** Ends the Sessions `column` picks, and returns the Tickets whose live Claims they held. */
-async function endSessions(db: Queryable, column: "id" | "token_id" | "agent_id", value: string, now: Date): Promise<ClaimHolders> {
+/** The column picking the Sessions to end: by their own id, their token, their Agent, or their Agent's Owner. */
+const SESSIONS_BY = { session: "s.id", token: "s.token_id", agent: "s.agent_id", owner: "a.owner_id" } as const;
+
+/** Ends the Sessions `by` picks with `value`, and returns the Tickets whose live Claims they held. */
+async function endSessions(db: Queryable, by: keyof typeof SESSIONS_BY, value: string, now: Date): Promise<ClaimHolders> {
   const { rows } = await db.query<{ id: string }>(
     `WITH ended AS (
        UPDATE agent_sessions s SET ended_at = $2 FROM agents a JOIN workspaces w ON w.id = a.workspace_id
-       WHERE a.id = s.agent_id AND s.${column} = $1 AND s.ended_at IS NULL
+       WHERE a.id = s.agent_id AND ${SESSIONS_BY[by]} = $1 AND s.ended_at IS NULL
        RETURNING s.id, s.last_seen_at > $2::timestamptz - make_interval(secs => w.silence_threshold_seconds) AS was_live)
      SELECT t.id FROM tickets t JOIN ended ON ended.id = t.claim_session_id WHERE ended.was_live`,
     [value, now],
@@ -118,25 +121,22 @@ export interface ClaimHolders {
 
 /** Ends a Session now. */
 export async function endAgentSession(db: Queryable, id: string, now: Date): Promise<ClaimHolders> {
-  return endSessions(db, "id", id, now);
+  return endSessions(db, "session", id, now);
 }
 
 /** Ends every Session a token started, as when it is revoked. */
 export async function endAgentSessionsOfToken(db: Queryable, tokenId: string, now: Date): Promise<ClaimHolders> {
-  return endSessions(db, "token_id", tokenId, now);
+  return endSessions(db, "token", tokenId, now);
 }
 
 /** Ends every Session of an Agent, as when it is removed. */
 export async function endAgentSessionsOf(db: Queryable, agentId: string, now: Date): Promise<ClaimHolders> {
-  return endSessions(db, "agent_id", agentId, now);
+  return endSessions(db, "agent", agentId, now);
 }
 
 /** Ends every Session of every Agent `ownerId` owns, as when the Owner is deactivated. */
-export async function endAgentSessionsOfOwner(db: Queryable, ownerId: string, now: Date): Promise<void> {
-  await db.query(
-    "UPDATE agent_sessions SET ended_at = $2 WHERE agent_id IN (SELECT id FROM agents WHERE owner_id = $1) AND ended_at IS NULL",
-    [ownerId, now],
-  );
+export async function endAgentSessionsOfOwner(db: Queryable, ownerId: string, now: Date): Promise<ClaimHolders> {
+  return endSessions(db, "owner", ownerId, now);
 }
 
 /** The live Sessions of each of these Agents, oldest first. */
