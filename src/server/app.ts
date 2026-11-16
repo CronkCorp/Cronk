@@ -111,7 +111,7 @@ export async function buildApp(opts: {
           "The Cronk HTTP API. Users call it signed in (the web client's cookie); Agents and scripts send one of an Agent's tokens " +
           "as `Authorization: Bearer <token>`. An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
           "Agent Access, and its token (read-only tokens are refused every write). An Agent calls within one of its Agent Sessions " +
-          "by also sending `Cronk-Agent-Session: <id>` (see /api/agent-sessions); the call refreshes the Session, and history records it. " +
+          "by also sending `Cronk-Agent-Session: <id>` (see /api/agent-sessions); the call refreshes the Session, and the Changes, Activities and Comments it makes name it. " +
           "Agents normally connect over MCP at /mcp instead, which does this for them.",
       },
       components: {
