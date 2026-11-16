@@ -851,4 +851,20 @@ export const migrations: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
     `,
   },
+  {
+    id: "0032_transcript_redactions",
+    sql: `
+      -- Passages a Transcript's Owner redacted by hand (transcripts/redact.ts), in the order they were made. The passage is
+      -- never kept, only what finds it again in a later upload: its length, rolling fingerprint and SHA-256 digest.
+      CREATE TABLE transcript_redactions (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        seq integer NOT NULL,
+        length integer NOT NULL CHECK (length > 0),
+        fingerprint bigint NOT NULL,
+        digest text NOT NULL,
+        created_at timestamptz NOT NULL,
+        PRIMARY KEY (transcript_id, seq)
+      );
+    `,
+  },
 ];

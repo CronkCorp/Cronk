@@ -341,6 +341,41 @@ describe("Who may read a Transcript", () => {
   });
 });
 
+describe("Redacting a Transcript by hand", () => {
+  it("replaces every occurrence of a passage in every text, for its Owner only", async () => {
+    const { cronk, admin, bob, carol, claude, id } = await transcriptAcrossProjects();
+    const hook = cronk.client(claude.secret);
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const first = chat("Do it all", sessionId);
+    // A rewrite keeps the first text as an earlier one; both hold the passage.
+    const rewritten = chat("My address is 12 Elm Street, as I said: 12 Elm Street", sessionId);
+    await upload(hook, "chat-1", first + "\nI live at 12 Elm Street.\n");
+    await upload(hook, "chat-1", rewritten);
+    const redaction = { passage: "12 Elm Street" };
+
+    expect((await carol.post(`/api/transcripts/${id}/redactions`, redaction)).status).toBe(404);
+    const byAdmin = await admin.post(`/api/transcripts/${id}/redactions`, redaction);
+    expect(byAdmin.status).toBe(403);
+    expect(byAdmin.body.error).toMatch(/Owner/);
+    expect((await (await startSession(cronk, claude.secret)).post(`/api/transcripts/${id}/redactions`, redaction)).status).toBe(403);
+
+    const redacted = await bob.post(`/api/transcripts/${id}/redactions`, redaction);
+    expect(redacted.status, JSON.stringify(redacted.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("My address is [redacted], as I said: [redacted]", sessionId));
+    expect(read.earlier).toEqual([first + "\nI live at [redacted].\n"]);
+    expect(redacted.body.transcript.markdown).toBe(read.markdown);
+  });
+
+  it("refuses a passage the Transcript doesn't hold", async () => {
+    const { bob, id } = await transcriptAcrossProjects();
+    const refused = await bob.post(`/api/transcripts/${id}/redactions`, { passage: "nowhere in it" });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatch(/doesn't hold/);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "" })).status).toBe(400);
+  });
+});
+
 describe("Deleting a Transcript", () => {
   it("is for its Owner only", async () => {
     const { cronk, admin, bob, carol, claude, id } = await transcriptAcrossProjects();
