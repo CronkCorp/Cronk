@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, type Client } from "./harness.js";
 
 describe("Autonomous Delegation", () => {
   it("is off on a Ticket until a User turns it on, recorded as a Change", async () => {
@@ -181,5 +181,85 @@ describe("An Unverified completion", () => {
 
     expect(await events.next()).toMatchObject({ event: "ticketReady", data: { ticket: { key: "CRONK-2" } } });
     expect((await agent.post("/api/tickets/CRONK-2/claim")).status).toBe(200);
+  });
+});
+
+/** Has the Agent of `session` complete CRONK-`n` under Autonomous Delegation, with a Report. */
+async function completeAutonomously(admin: Client, agent: Client, key = "CRONK-1") {
+  await admin.patch(`/api/tickets/${key}`, { autonomous: true });
+  await agent.post(`/api/tickets/${key}/claim`);
+  const report = (await agent.post(`/api/tickets/${key}/reports`, { title: `Done with ${key}`, body: "Fixed the cache." })).body.report;
+  const moved = await agent.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "completed") });
+  if (moved.status !== 200) throw new Error(`Completing ${key} failed: ${JSON.stringify(moved.body)}`);
+  return report;
+}
+
+describe("The Inbox's Unverified group", () => {
+  it("holds the Assignee's Unverified completions with their Reports, until a User Accepts them", async () => {
+    const { admin, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    const report = await completeAutonomously(admin, agent);
+    // A User's own completion needs no Verification, so it never reaches the Inbox.
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "completed") });
+
+    const { items } = (await admin.get("/api/inbox")).body;
+    expect(items).toMatchObject([
+      { kind: "unverified", at: "2026-01-01T09:00:00.000Z", ticket: { key: "CRONK-1", verification: "unverified" }, reports: [{ id: report.id, title: "Done with CRONK-1" }] },
+    ]);
+    expect((await admin.get("/api/inbox?kind=review")).body.items).toEqual([]);
+    expect((await admin.get(`/api/inbox?kind=unverified&agent=${claude.agentId}`)).body.items).toHaveLength(1);
+
+    const accepted = await admin.post("/api/tickets/CRONK-1/accept");
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.ticket).toMatchObject({ status: { category: "completed" }, verification: "verified" });
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes.at(-1)).toMatchObject({
+      actor: { kind: "user", name: "Ada" },
+      change: "verification",
+      from: "unverified",
+      to: "verified",
+    });
+    expect((await admin.get("/api/inbox")).body.items).toEqual([]);
+  });
+
+  it("tells the Assignee's open Inbox when a completion arrives and when it is Accepted", async () => {
+    const { admin, session } = await delegatedSetup();
+    const inbox = await admin.events("/api/inbox/events");
+    expect((await inbox.next())?.event).toBe("ready");
+    const agent = await session();
+    await completeAutonomously(admin, agent);
+    expect((await inbox.next())?.event).toBe("changed");
+    await admin.post("/api/tickets/CRONK-1/accept");
+    expect((await inbox.next())?.event).toBe("changed");
+  });
+});
+
+describe("Accept", () => {
+  it("is only for an Unverified completion, and only for Users with Write", async () => {
+    const { cronk, admin, session } = await delegatedSetup(2);
+    expect((await admin.post("/api/tickets/CRONK-2/accept")).status).toBe(409);
+    const agent = await session();
+    await completeAutonomously(admin, agent);
+
+    const byAgent = await agent.post("/api/tickets/CRONK-1/accept");
+    expect(byAgent.status).toBe(403);
+    const reader = await joinAs(cronk, admin, "rita@example.com");
+    const ritaId = (await reader.get("/api/me")).body.user.id;
+    await admin.put(`/api/projects/CRONK/members/${ritaId}`, { access: "read" });
+    expect((await reader.post("/api/tickets/CRONK-1/accept")).status).toBe(403);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.verification).toBe("unverified");
+
+    expect((await admin.post("/api/tickets/CRONK-1/accept")).status).toBe(200);
+    const again = await admin.post("/api/tickets/CRONK-1/accept");
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/isn't an Unverified completion/);
+  });
+
+  it("is ended by moving the Ticket out of Completed, which ends its Verification", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await completeAutonomously(admin, agent);
+    const moved = await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "started") });
+    expect(moved.body.ticket.verification).toBeNull();
+    expect((await admin.get("/api/inbox")).body.items).toEqual([]);
   });
 });

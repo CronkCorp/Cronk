@@ -791,6 +791,32 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
+    // An Inbox action: records a User's Verification of an Agent's completion under Autonomous Delegation.
+    app.post<{ Params: { key: string } }>(
+      "/api/tickets/:key/accept",
+      {
+        schema: {
+          params: ticketParams,
+          response: {
+            200: answer("The Ticket, its completion now Verified. Only Users with Write Accept, and only an Unverified completion.", holding("ticket", "Ticket")),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "Accept a completion");
+        const ticket = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (ticket.verification !== "unverified") throw new HttpError(409, `${ticket.key} isn't an Unverified completion, so there is nothing to Accept`);
+          return updateTicket(tx, ticket, { verification: "verified" }, actor, ctx.clock.now());
+        });
+        inboxesChanged(ctx.live, [ticket.assignee?.id]);
+        ticketsChanged(ctx.live, [ticket]);
+        return { ticket };
+      },
+    );
+
     app.get<{ Params: { key: string } }>(
       "/api/tickets/:key/changes",
       {
