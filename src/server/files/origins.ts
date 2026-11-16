@@ -51,19 +51,24 @@ const MAX_REASON_LENGTH = 500;
  */
 export function parseExtraOrigins(raw: string | undefined): ExtraOrigin[] {
   if (raw === undefined) return [];
-  const refuse = (why: string): never => {
-    throw new HttpError(400, `extraOrigins ${why}`);
-  };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return refuse('must be a JSON list such as [{"origin": "https://cdn.example", "uses": ["scripts"], "reason": "Draws the chart"}]');
+    parsed = undefined;
   }
-  if (!Array.isArray(parsed)) return refuse('must be a JSON list such as [{"origin": "https://cdn.example", "uses": ["scripts"], "reason": "Draws the chart"}]');
-  if (parsed.length > MAX_EXTRA_ORIGINS) refuse(`may declare at most ${MAX_EXTRA_ORIGINS} origins`);
+  return extraOrigins(parsed, "extraOrigins");
+}
+
+/** `value` as a list of declared extra origins, or a 400 naming `where` and saying what is wrong. */
+export function extraOrigins(value: unknown, where: string): ExtraOrigin[] {
+  const refuse = (why: string): never => {
+    throw new HttpError(400, `${where} ${why}`);
+  };
+  if (!Array.isArray(value)) return refuse('must be a JSON list such as [{"origin": "https://cdn.example", "uses": ["scripts"], "reason": "Draws the chart"}]');
+  if (value.length > MAX_EXTRA_ORIGINS) refuse(`may declare at most ${MAX_EXTRA_ORIGINS} origins`);
   const extras: ExtraOrigin[] = [];
-  for (const [i, item] of parsed.entries()) {
+  for (const [i, item] of value.entries()) {
     const at = `[${i}]`;
     if (typeof item !== "object" || item === null) return refuse(`${at} must be an object with origin, uses and reason`);
     const { origin, uses, reason } = item as Record<string, unknown>;
