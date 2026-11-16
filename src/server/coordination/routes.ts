@@ -4,6 +4,7 @@ import { AGENT_SESSION_HEADER, HttpError, requireActor, type AppContext } from "
 import { requireWorkspaceAccess, visibleProjects } from "../identity/access.js";
 import { publicAgent } from "../identity/agents.js";
 import { getGuidance, projectGuidanceMarkdown } from "../knowledge/guidance.js";
+import { listTerms, termNamesByProject } from "../knowledge/terms.js";
 import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
@@ -41,8 +42,12 @@ const welcomeSchema = {
       anyOf: [
         {
           type: "object",
-          required: ["name", "guidance"],
-          properties: { name: { type: "string" }, guidance: { type: "string", description: "The Workspace's Guidance, as Markdown." } },
+          required: ["name", "guidance", "terms"],
+          properties: {
+            name: { type: "string" },
+            guidance: { type: "string", description: "The Workspace's Guidance, as Markdown." },
+            terms: { type: "array", items: { type: "string" }, description: "The names of the Workspace's Terms, by name; get one with the terms tool." },
+          },
         },
         { type: "null" },
       ],
@@ -55,12 +60,17 @@ const welcomeSchema = {
       description: "The unarchived Projects the Agent can see, with its access and the Project's Guidance in each.",
       items: {
         type: "object",
-        required: ["key", "name", "access", "guidance"],
+        required: ["key", "name", "access", "guidance", "terms"],
         properties: {
           key: { type: "string" },
           name: { type: "string" },
           access: accessSchema,
           guidance: { type: "string", description: "The Project's Guidance, as Markdown; it layers over the Workspace's." },
+          terms: {
+            type: "array",
+            items: { type: "string" },
+            description: "The names of the Project's own Terms, by name; within the Project each replaces the Workspace Term of the same name, ignoring case.",
+          },
         },
       },
     },
@@ -453,12 +463,14 @@ export async function welcome(ctx: AppContext, agent: AgentActor & { session: Ag
   const workspace = readable && {
     name: (await getWorkspace(ctx.db, workspaceId)).name,
     guidance: (await getGuidance(ctx.db, { workspaceId, projectId: null })).markdown,
+    terms: (await listTerms(ctx.db, { workspaceId, projectId: null })).map((t) => t.name),
   };
+  const projectTerms = await termNamesByProject(ctx.db, projects.map((p) => p.id));
   return {
     workspace: workspace || null,
     agent: publicAgent(agent.agent, agent.owner),
     readOnly: agent.readOnly,
-    projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access, guidance: guidance.get(p.id)! })),
+    projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access, guidance: guidance.get(p.id)!, terms: projectTerms.get(p.id)! })),
     readyTickets: await readyTickets(ctx, agent),
     waitingWork: await takeWaitingWork(ctx.db, agent, agent.session.id, ctx.clock.now()),
   };

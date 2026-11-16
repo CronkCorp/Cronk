@@ -63,8 +63,13 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
 
 - \`README.md\`: this file; its frontmatter says what the export holds and which version of the format it is.
 - \`people.md\`: the Users (by email) and Agents (by id) the other files name, and the Agent Sessions Agents worked in.
-- \`workspace.md\`, \`guidance.md\`, \`documents/\`: the Workspace's settings, Guidance and page tree (Workspace exports only).
-- \`projects/<KEY>/project.md\`: a Project's settings, Statuses and members; beside it its \`guidance.md\`, \`documents/\` and \`tickets/\`.
+- \`workspace.md\`, \`guidance.md\`, \`documents/\`, \`GLOSSARY.md\`, \`terms.md\`: the Workspace's settings, Guidance, page tree and
+  Terms (Workspace exports only).
+- \`projects/<KEY>/project.md\`: a Project's settings, Statuses and members; beside it its \`guidance.md\`, \`documents/\`,
+  \`GLOSSARY.md\`, \`terms.md\` and \`tickets/\`.
+- \`GLOSSARY.md\`: a place's Terms as a glossary to read, or keep in a repository; a Project's replace the Workspace's of the
+  same name within it. \`terms.md\` beside it holds the same Terms whole in its frontmatter, with their Versions when the export
+  includes them; an import reads that, not the glossary.
 - \`documents/\`: the page tree. Each Document is \`<n>-<title>.md\`, numbered in tree order, with the Documents under it in a
   folder of the same name. \`<name>.versions/\` holds its Versions when the export includes them, \`<name>.comments/\` its Comments.
 - \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key, and \`documents\` lists the

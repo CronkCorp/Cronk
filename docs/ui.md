@@ -29,7 +29,7 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
 - **Below 760px** the sidebar becomes a wrapping strip with the main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
 - **Page head:** breadcrumbs (13px, muted), then a row holding the `h1`, the view switcher and the actions. The primary action comes last. Destructive actions such as Archive and Delete go in a "…" menu, never next to the primary action.
 - **Project views:** List, Board and Reports are a segmented control in the page head. Statuses, Guidance and Access move into the Project's settings.
-- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. The signed-out link pages, `/invite/:token` and `/reset-password/:token`, show their card whoever is signed in.
+- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. The signed-out link pages, `/invite/:token` and `/reset-password/:token`, show their card whoever is signed in. Terms live at `/terms` (`?project=KEY` for a Project's scope) and `/terms/:id`.
 
 ## Design tokens
 
@@ -213,8 +213,8 @@ The Project page is shown in `docs/ui/frame.png`.
 |---|---|---|
 | ![Terms](ui/phase-2-terms.png) | ![Term](ui/phase-2-term.png) | ![Terms, dark](ui/phase-2-terms-dark.png) |
 
-- **Terms page** (`/terms`): reads like a glossary. The page head holds a Workspace / Project scope switch, preselecting the Project the User came from, then Export and **New Term**. A filter box matches names and words to avoid.
-- **Each Term**, under its group: the name, the Protected mark, "Overrides the Workspace Term" in `--info` where it does, its scope, a Suggestion count in `--agent`, and "used in n · Version n". Then the definition, and "Avoid:" with the words struck through.
+- **Terms page** (`/terms`): reads like a glossary. The page head holds a Workspace / Project scope switch, preselecting the Project the User came from (the sidebar's Terms link carries it from a Project's pages and Tickets), then Export and **New Term**. Export downloads the scope's own Terms as `GLOSSARY.md`. A filter box matches names and words to avoid. Terms without a group come first, then each group by name.
+- **Each Term**, under its group: the name, the Protected mark, "Overrides the Workspace Term" in `--info` where it does (on a Workspace Term, "Replaced in CRONK"), its scope, a Suggestion count in `--agent`, and "used in n · Version n". Then the definition, and "Avoid:" with the words struck through.
 - **A Term's page**: the name, Protected mark and actions, an `--info` banner for an override linking the other Term, the definition, words to avoid and group, then Mentioned in, Decisions and History.
 
 ### Decisions

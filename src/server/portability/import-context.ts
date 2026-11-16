@@ -3,6 +3,7 @@ import type { Queryable } from "../db/database.js";
 import type { Folder } from "./archive.js";
 import { natural, refuse, type File } from "./fields.js";
 import { readFrontmatter } from "./frontmatter.js";
+import { recordRenamedId, type RenamedId } from "./renamed-ids.js";
 
 /**
  * What every part of an import shares: the export's files, and the ids the Users, Agents and
@@ -15,6 +16,8 @@ export class ImportContext {
   readonly agentIds = new Map<string, { id: string; ownerId: string }>();
   /** Agent Sessions by their id in the export. */
   readonly sessionIds = new Map<string, string>();
+  /** The Agents and Agent Sessions that got a new id here, because theirs was taken. */
+  readonly renamedIds: RenamedId[] = [];
   /** Documents and Reports imported so far, by the path of their file in the export. */
   readonly documentIds = new Map<string, string>();
 
@@ -25,6 +28,14 @@ export class ImportContext {
     readonly folder: Folder,
     readonly now: Date,
   ) {}
+
+  /** Records that the Agent or Agent Session with id `from` in the export has the id `to` here, if they differ. */
+  async keepRenamedId(kind: RenamedId["kind"], from: string, to: string): Promise<void> {
+    if (from === to) return;
+    const renamed = { kind, from, to, at: this.now };
+    this.renamedIds.push(renamed);
+    await recordRenamedId(this.db, this.workspaceId, renamed);
+  }
 
   /** The file at `path`, read, if the export has it. */
   read(path: string): File | undefined {

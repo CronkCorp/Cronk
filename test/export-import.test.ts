@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
-import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, tarGz, untarGz, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
-  const match = /^---\n([\s\S]*?)---\n/.exec(text ?? "");
+  // The closing --- starts its own line, so an indented --- inside a block scalar doesn't end the frontmatter.
+  const match = /^---\n([\s\S]*?\n)?---\n/.exec(text ?? "");
   if (!match) throw new Error(`Not Markdown with frontmatter: ${text}`);
-  return { data: parse(match[1]!), body: text!.slice(match[0].length) };
+  return { data: parse(match[1] ?? ""), body: text!.slice(match[0].length) };
 }
 
 describe("exporting a Project", () => {
@@ -77,6 +78,7 @@ describe("exporting a Project", () => {
 
     expect((await member.download("/api/projects/CRONK/export")).status).toBe(403);
     expect((await member.download("/api/export")).status).toBe(403);
+    expect((await member.get("/api/import/renamed-ids")).status).toBe(403);
     expect((await admin.download("/api/projects/NOPE/export")).status).toBe(404);
   });
 });
@@ -102,6 +104,8 @@ async function snapshot(admin: Client): Promise<unknown> {
     const { documents } = await get(path);
     return { documents, contents: await Promise.all(documents.map((d: { id: string }) => document(d.id))) };
   };
+  const terms = async (path: string) =>
+    Promise.all((await get(path)).terms.map(async (t: { id: string }) => ({ term: t, versions: await get(`/api/terms/${t.id}/versions`) })));
   const project = async (key: string) => {
     const { tickets } = await get(`/api/projects/${key}/tickets`);
     return {
@@ -109,6 +113,7 @@ async function snapshot(admin: Client): Promise<unknown> {
       members: await get(`/api/projects/${key}/members`),
       guidance: await get(`/api/projects/${key}/guidance`),
       guidanceVersions: await get(`/api/projects/${key}/guidance/versions`),
+      terms: await terms(`/api/projects/${key}/terms`),
       documents: await tree(`/api/projects/${key}/documents`),
       tickets: await Promise.all(
         tickets.map(async (t: { key: string }) => {
@@ -132,6 +137,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     agents: await get("/api/agents?all=true"),
     guidance: await get("/api/workspace/guidance"),
     guidanceVersions: await get("/api/workspace/guidance/versions"),
+    terms: await terms("/api/workspace/terms"),
     documents: await tree("/api/workspace/documents"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
   };
@@ -205,6 +211,15 @@ async function busyWorkspace() {
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
   await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
 
+  // Terms in both places, with Versions, one saved by an Agent; a Project Term overriding a Workspace Term.
+  const ticketTerm = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["Issue", "task"], group: "Work" })).body.term;
+  await admin.patch(`/api/terms/${ticketTerm.id}`, { baseVersion: 1, definition: "A unit of work\n---\ntracked within a *Project*." });
+  await admin.post("/api/workspace/terms", { name: "Customer", definition: "A paying organization." });
+  const termWriter = await session();
+  const customer = (await termWriter.post("/api/projects/CRONK/terms", { name: "customer", definition: "A billing account.", avoid: ["Client"], group: "Billing" })).body.term;
+  await termWriter.patch(`/api/terms/${customer.id}`, { baseVersion: 1, avoid: ["Client", "account"] });
+  await termWriter.delete("/api/agent-sessions/current");
+
   // A second, archived Project; a removed Agent.
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
   await admin.post("/api/projects/OLD/tickets", { title: "Legacy" });
@@ -235,7 +250,10 @@ describe("importing an export", () => {
     const { admin } = await startInstalledCronk("Elsewhere");
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
-    expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
+    expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"], renamedIds: [] });
+    // Agents keep their ids, which the snapshot below can't tell apart.
+    const agentIds = async (client: Client) => (await client.get("/api/agents?all=true")).body.agents.map((a: { id: string }) => a.id);
+    expect(await agentIds(admin)).toEqual(await agentIds(before.admin));
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
     expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
     const moves = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
@@ -253,6 +271,7 @@ describe("importing a Project export", () => {
   it("adds the Project, matching Users by email and Agents by Owner and name", async () => {
     const before = await busyWorkspace();
     const exported = await before.admin.download("/api/projects/CRONK/export");
+    const [exportedLaptop] = (await before.admin.get("/api/agents?all=true")).body.agents;
 
     const { cronk, admin } = await startInstalledCronk("Elsewhere");
     const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
@@ -261,7 +280,12 @@ describe("importing a Project export", () => {
 
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
-    expect(imported.body).toEqual({ scope: "project", projects: ["CRONK"] });
+    // The claude-laptop found here has another id than the export's, so the import keeps which became which.
+    expect(imported.body).toEqual({
+      scope: "project",
+      projects: ["CRONK"],
+      renamedIds: [{ kind: "agent", from: exportedLaptop.id, to: laptop.id, at: "2026-01-01T09:00:00.000Z" }],
+    });
     expect((await admin.get("/api/users")).body.users.map((u: { email: string; active: boolean }) => [u.email, u.active])).toEqual([
       ["ada@example.com", true],
       ["grace@example.com", true],
@@ -344,6 +368,80 @@ describe("importing a Project export", () => {
   });
 });
 
+describe("Agent and Agent Session ids across an import", () => {
+  /** A Project where the since removed old-bot commented on CRONK-1, then claude-laptop retitled it, each in an Agent Session. */
+  async function agentWork() {
+    const { cronk, admin, claude, session } = await delegatedSetup(1);
+    const old = await registerAgent(admin, "old-bot");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: old.agentId });
+    const oldSession = await startSession(cronk, old.secret);
+    expect((await oldSession.post("/api/tickets/CRONK-1/comments", { body: "Looking." })).status).toBe(201);
+    await oldSession.delete("/api/agent-sessions/current");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId });
+    await admin.delete(`/api/agents/${old.agentId}`);
+    cronk.clock.advance(60_000);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    expect((await agent.patch("/api/tickets/CRONK-1", { title: "Built" })).status).toBe(200);
+    return { cronk, admin, claudeId: claude.agentId, oldId: old.agentId, oldSessionId: oldSession.sessionId, sessionId: agent.sessionId };
+  }
+
+  /** Who made the last change to `key`: the Agent's id and its Agent Session's. */
+  async function lastChangeBy(admin: Client, key: string): Promise<{ agent: string; session: string }> {
+    const { actor } = (await admin.get(`/api/tickets/${key}/changes`)).body.changes.at(-1);
+    return { agent: actor.id, session: actor.session?.id };
+  }
+
+  it("are kept when the installation has none of them", async () => {
+    const { admin: before, claudeId, sessionId } = await agentWork();
+    const exported = await before.download("/api/projects/CRONK/export");
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    const imported = await admin.upload("/api/import", exported.body);
+    expect(imported.status).toBe(201);
+    expect(await lastChangeBy(admin, "CRONK-1")).toEqual({ agent: claudeId, session: sessionId });
+    expect(imported.body.renamedIds).toEqual([]);
+    expect((await admin.get("/api/import/renamed-ids")).body.renamedIds).toEqual([]);
+  });
+
+  it("are new when taken, as importing the same export twice finds them, and the import keeps which became which", async () => {
+    const { admin: before, claudeId, oldId, oldSessionId, sessionId } = await agentWork();
+    const files = await untarGz((await before.download("/api/projects/CRONK/export")).body);
+    // The same export again, under a key the Workspace doesn't have yet.
+    const copy = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", "COPY"), text.replaceAll("CRONK", "COPY")])));
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", await tarGz(files))).status).toBe(201);
+    cronk.clock.advance(60_000);
+    const again = await admin.upload("/api/import", copy);
+    expect(again.status).toBe(201);
+
+    // claude-laptop is found by Owner and name, so it is the same Agent; the removed old-bot and both Agent Sessions come in again under new ids.
+    const copied = await lastChangeBy(admin, "COPY-1");
+    expect(copied.agent).toBe(claudeId);
+    expect(copied.session).not.toBe(sessionId);
+    const { renamedIds } = again.body;
+    expect(renamedIds).toEqual([
+      { kind: "agent", from: oldId, to: expect.any(String), at: "2026-01-01T09:01:00.000Z" },
+      { kind: "agentSession", from: oldSessionId, to: expect.any(String), at: "2026-01-01T09:01:00.000Z" },
+      { kind: "agentSession", from: sessionId, to: copied.session, at: "2026-01-01T09:01:00.000Z" },
+    ]);
+    expect(renamedIds[0].to).not.toBe(oldId);
+    expect(renamedIds[1].to).not.toBe(oldSessionId);
+    // The copied Comment is old-bot's under its new ids.
+    const [looking] = (await admin.get("/api/tickets/COPY-1/comments")).body.comments;
+    expect(looking.actor).toMatchObject({ id: renamedIds[0].to, session: { id: renamedIds[1].to } });
+    expect((await admin.get("/api/import/renamed-ids")).body.renamedIds).toEqual(renamedIds);
+    // An export edited by hand may name an Agent Session by an id Cronk can't hold; it gets a new one, kept as well.
+    const edited = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", "HAND"), text.replaceAll("CRONK", "HAND").replaceAll(sessionId, "my-session")])));
+    const byHand = await admin.upload("/api/import", edited);
+    expect(byHand.status).toBe(201);
+    expect(byHand.body.renamedIds).toContainEqual(expect.objectContaining({ kind: "agentSession", from: "my-session", to: (await lastChangeBy(admin, "HAND-1")).session }));
+    // The first import's Project still names the ids it kept.
+    expect(await lastChangeBy(admin, "CRONK-1")).toEqual({ agent: claudeId, session: sessionId });
+  });
+});
+
 describe("a Ticket's history in an export", () => {
   it("is refused when a change in it isn't one Cronk records", async () => {
     const before = await busyWorkspace();
@@ -386,6 +484,60 @@ describe("an export without Versions", () => {
       anchor: { passage: "Start here", version: 1, inCurrentVersion: true },
     });
     expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Be kind. Be brief.", version: 1 });
+  });
+});
+
+describe("Terms in an export", () => {
+  it("are written as GLOSSARY.md per place, and beside it a terms.md holding them whole", async () => {
+    const { admin } = await busyWorkspace();
+    const files = await untarGz((await admin.download("/api/export")).body);
+
+    expect(files["GLOSSARY.md"]).toBe(
+      "# Acme Labs glossary\n\n" +
+        "**Customer**:\nA paying organization.\n\n" +
+        "## Work\n\n" +
+        "**Ticket**:\nA unit of work\n---\ntracked within a *Project*.\n_Avoid_: Issue, task\n",
+    );
+    expect(files["projects/CRONK/GLOSSARY.md"]).toBe(
+      "# CRONK glossary\n\nWithin CRONK, these Terms replace the Workspace's of the same name.\n\n" +
+        "## Billing\n\n" +
+        "**customer**:\nA billing account.\n_Avoid_: Client, account\n",
+    );
+    const { data } = markdown(files["projects/CRONK/terms.md"]);
+    expect(data.terms).toEqual([
+      expect.objectContaining({
+        name: "customer",
+        definition: "A billing account.",
+        avoid: ["Client", "account"],
+        group: "Billing",
+        version: 2,
+        versions: [expect.objectContaining({ number: 1, avoid: ["Client"] }), expect.objectContaining({ number: 2, avoid: ["Client", "account"] })],
+      }),
+    ]);
+  });
+
+  it("downloads a place's GLOSSARY.md on its own", async () => {
+    const { admin } = await busyWorkspace();
+
+    const res = await admin.download("/api/projects/CRONK/terms/glossary");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/^text\/markdown/);
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="GLOSSARY.md"');
+    expect(res.body.toString()).toBe((await untarGz((await admin.download("/api/export")).body))["projects/CRONK/GLOSSARY.md"]);
+    expect((await admin.download("/api/workspace/terms/glossary")).body.toString()).toMatch(/^# Acme Labs glossary/);
+  });
+
+  it("without Versions import each Term at a single Version holding what it says now", async () => {
+    const before = await busyWorkspace();
+    const exported = await before.admin.download("/api/export?versions=false");
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", exported.body)).status).toBe(201);
+    const [customer] = (await admin.get("/api/projects/CRONK/terms?name=customer")).body.terms;
+    expect(customer).toMatchObject({ avoid: ["Client", "account"], version: 1 });
+    expect((await admin.get(`/api/terms/${customer.id}/versions`)).body.versions).toMatchObject([
+      { number: 1, avoid: ["Client", "account"], actor: { kind: "agent", name: "claude-laptop" } },
+    ]);
   });
 });
 
@@ -432,6 +584,19 @@ describe("an export edited by hand", () => {
     const twice = await admin.upload("/api/import", await edited("projects/CRONK/project.md", (d) => d.members.push(d.members[0])));
     expect(twice.status).toBe(400);
     expect(twice.body.error).toMatch(/project\.md lists .* as a member twice/);
+
+    const cronkTerms = "projects/CRONK/terms.md";
+    const sameName = await admin.upload("/api/import", await edited(cronkTerms, (d) => d.terms.push({ ...d.terms[0], name: "CUSTOMER" })));
+    expect(sameName.status).toBe(400);
+    expect(sameName.body.error).toMatch(/CRONK\/terms\.md terms\[1\] has the name CUSTOMER, which another Term there has/);
+
+    const missingVersion = await admin.upload("/api/import", await edited(cronkTerms, (d) => d.terms[0].versions.shift()));
+    expect(missingVersion.status).toBe(400);
+    expect(missingVersion.body.error).toMatch(/CRONK\/terms\.md terms\[0\] versions must be numbered 1, 2, 3/);
+
+    const disagrees = await admin.upload("/api/import", await edited(cronkTerms, (d) => (d.terms[0].definition = "Something else.")));
+    expect(disagrees.status).toBe(400);
+    expect(disagrees.body.error).toMatch(/CRONK\/terms\.md terms\[0\] must say what its Version 2 says/);
 
     expect((await admin.get("/api/projects")).body.projects).toEqual([]);
   });

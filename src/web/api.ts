@@ -36,6 +36,8 @@ import type {
   SearchResult,
   Status,
   StatusCategory,
+  Term,
+  TermVersion,
   Ticket,
   TicketChanges,
   TicketDetail,
@@ -86,6 +88,8 @@ export type {
   SearchResult,
   Status,
   StatusCategory,
+  Term,
+  TermVersion,
   Ticket,
   TicketChanges,
   TicketDetail,
@@ -165,7 +169,29 @@ export const workspaceExportUrl = "/api/export";
 /** Where one Project's export downloads from; it holds every Version. */
 export const projectExportUrl = (projectKey: string) => `/api/projects/${encodeURIComponent(projectKey)}/export`;
 
+/** The fields of a Term a User writes. */
+export interface TermInput {
+  name: string;
+  definition: string;
+  avoid: string[];
+  group: string | null;
+}
+
+/** Where a place's GLOSSARY.md downloads from: a Project's own Terms, or the Workspace's without a Project key. */
+export const glossaryUrl = (projectKey?: string) => `${treePath(projectKey)}/terms/glossary`;
+
+const termPath = (id: string) => `/api/terms/${encodeURIComponent(id)}`;
+
 export const api = {
+  /** The Terms that apply in a Project (its own and the Workspace's it doesn't replace), or the Workspace's without a Project key. */
+  terms: (projectKey?: string) => request<{ terms: Term[] }>("GET", `${treePath(projectKey)}/terms`).then((r) => r.terms),
+  term: (id: string) => request<{ term: Term }>("GET", termPath(id)).then((r) => r.term),
+  termVersions: (id: string) => request<{ versions: TermVersion[] }>("GET", `${termPath(id)}/versions`).then((r) => r.versions),
+  createTerm: (projectKey: string | undefined, input: TermInput) =>
+    request<{ term: Term }>("POST", `${treePath(projectKey)}/terms`, input).then((r) => r.term),
+  /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
+  saveTerm: (id: string, baseVersion: number, input: TermInput) => request<{ term: Term }>("PATCH", termPath(id), { baseVersion, ...input }).then((r) => r.term),
+  deleteTerm: (id: string, baseVersion: number) => request<void>("DELETE", `${termPath(id)}?baseVersion=${baseVersion}`),
   /** Imports an export of the Workspace or a Project; Admins only. */
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
   /** Imports a .zip, .tar.gz or .tar of a folder of Markdown files as Documents of a Project's tree, or the Workspace's. */

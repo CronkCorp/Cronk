@@ -466,7 +466,63 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0020_autonomous_delegation",
+    id: "0020_renamed_ids",
+    sql: `
+      -- An Agent or Agent Session an import (portability/people.ts) couldn't give the id it had in the
+      -- export, because the id was taken here: the id it had there and the one it got. Transcripts name
+      -- Agent Sessions by id, so linking one written before the import looks its ids up here too.
+      -- from_id is text: an export edited by hand may name them by anything.
+      CREATE TABLE renamed_ids (
+        seq bigserial PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        kind text NOT NULL CHECK (kind IN ('agent', 'agent_session')),
+        from_id text NOT NULL,
+        to_id uuid NOT NULL,
+        at timestamptz NOT NULL
+      );
+      CREATE INDEX renamed_ids_from ON renamed_ids (workspace_id, from_id);
+    `,
+  },
+  {
+    id: "0021_terms",
+    sql: `
+      -- Terms (knowledge/terms.ts): the glossary of the Workspace (project_id NULL) or a Project. Names
+      -- are unique per place ignoring case, so a Project Term overrides the Workspace Term of the same name.
+      CREATE TABLE terms (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        definition text NOT NULL,
+        avoid text[] NOT NULL,
+        group_name text,
+        version integer NOT NULL,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE UNIQUE INDEX terms_name ON terms (workspace_id, project_id, lower(name)) NULLS NOT DISTINCT;
+      CREATE INDEX terms_lower_name ON terms (workspace_id, lower(name));
+
+      -- Every saved state of a Term, with the Actor who saved it.
+      CREATE TABLE term_versions (
+        term_id uuid NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        number integer NOT NULL,
+        name text NOT NULL,
+        definition text NOT NULL,
+        avoid text[] NOT NULL,
+        group_name text,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        PRIMARY KEY (term_id, number),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+    `,
+  },
+  {
+    id: "0022_autonomous_delegation",
     sql: `
       -- Autonomous Delegation (work/routes.ts): whether the Delegate may complete the Ticket itself. Only Users set it.
       ALTER TABLE tickets ADD COLUMN autonomous boolean NOT NULL DEFAULT false;

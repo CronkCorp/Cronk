@@ -29,6 +29,7 @@ import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { SearchResult } from "./search/search.js";
+import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
 import type { QuestionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
 
@@ -124,6 +125,10 @@ export type WaitingWork = Serialized<StoredWaitingWork>;
 export type Document = Serialized<StoredDocument>;
 /** One saved state of a Document. */
 export type Version = Serialized<StoredVersion>;
+/** A Term of the Workspace or a Project, with what overrides it or what it overrides. */
+export type Term = Serialized<StoredTerm>;
+/** One saved state of a Term, with the Actor who saved it. */
+export type TermVersion = Serialized<StoredTermVersion>;
 /** A Version without its body, as a Document's Version list shows it. */
 export type VersionSummary = Omit<Version, "body">;
 /** A Document as its page tree lists it. */

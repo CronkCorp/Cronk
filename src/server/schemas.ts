@@ -58,7 +58,11 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
-  | "AgentRecordEntry";
+  | "AgentRecordEntry"
+  | "Term"
+  | "TermVersion"
+  | "StaleTermVersion"
+  | "RenamedId";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -107,6 +111,14 @@ const versionFields = {
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
   restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+};
+
+/** What a Term says, as each of its Versions records it. */
+const termFields = {
+  name: { type: "string" },
+  definition: { type: "string", description: "Markdown." },
+  avoid: { type: "array", items: { type: "string" }, description: "The words to avoid for it, in the order given." },
+  group: { ...nullable({ type: "string" }), description: "The group the glossary lists it under; null for none." },
 };
 
 /** Each side's text of a part both sides of a merge changed differently. */
@@ -475,6 +487,51 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       sections: mergedSections("Markdown"),
     }),
   },
+  Term: {
+    description:
+      "One concept of the glossary: its name, definition and the words to avoid for it. Belongs to the Workspace or a Project; " +
+      "within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case.",
+    ...object({
+      id,
+      projectId: { ...nullable(id), description: "Null for a Workspace Term." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Term." },
+      ...termFields,
+      version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      overrides: {
+        ...nullable(object({ id, name: { type: "string" }, definition: { type: "string" } })),
+        description: "For a Project Term: the Workspace Term of the same name it replaces within its Project; null if none, or if the caller can't read the Workspace.",
+      },
+      overriddenBy: {
+        type: "array",
+        items: object({ id, name: { type: "string" }, projectKey: { type: "string" } }),
+        description: "For a Workspace Term: the Project Terms of the same name that replace it within their Projects, in Projects the caller can read, by Project key.",
+      },
+    }),
+  },
+  TermVersion: {
+    description: "One saved state of a Term, recording which Actor produced it. Never changes.",
+    ...object({
+      number: { type: "integer", description: "Counts from 1 per Term." },
+      ...termFields,
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who saved it." },
+    }),
+  },
+  StaleTermVersion: {
+    description: "A save or delete of a Term refused because the Version it is based on is no longer current, with the current Version.",
+    ...object({ error: { type: "string" }, current: ref("TermVersion") }),
+  },
+  RenamedId: {
+    description: "An Agent or Agent Session an import gave a new id, because the id it had in the export was taken.",
+    ...object({
+      kind: { type: "string", enum: ["agent", "agentSession"], description: "Whether it is an Agent or an Agent Session." },
+      from: { type: "string", description: "Its id in the export, usually a UUID; an export edited by hand may hold anything." },
+      to: { ...id, description: "Its id here." },
+      at: { ...timestamp, description: "When it was imported." },
+    }),
+  },
   AgentRecordEntry: {
     description: "One entry in an Agent's record: one thing it did. `kind` says which; the field named after it holds what, and the other three are null.",
     ...object({
@@ -554,6 +611,9 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
+
+/** A Term's id. */
+export const termIdParam = { type: "string", format: "uuid", description: "The Term's id." } as const;
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
