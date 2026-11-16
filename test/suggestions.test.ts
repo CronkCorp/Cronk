@@ -473,6 +473,17 @@ describe("accepting a Suggestion of a new Document", () => {
     });
   });
 
+  it("still creates it once the branch is no longer Protected, now open to Agents", async () => {
+    const { admin, agent, architectureId, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+    await admin.post(`/api/documents/${architectureId}/protection`, { protected: false });
+
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({ state: "open", item: { protected: false }, outdated: false });
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+
+    expect(accepted.body.suggestion).toMatchObject({ state: "accepted", item: { title: "Backups", version: 1, protected: false } });
+  });
+
   it("names where the Document sits now, once moved", async () => {
     const { admin, agent, storageId } = await protectedBranch();
     const suggestion = await suggestNew(agent, storageId);

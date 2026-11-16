@@ -81,7 +81,7 @@ export function knowledgeRoutes(ctx: AppContext) {
     /** Creates a Document in `tree`, which the caller has Write in. */
     const create = async (tx: Queryable, actor: Actor, tree: Tree, input: NewDocument) => {
       const parentId = input.parentId ?? null;
-      await requireOpenToAgentsUnder(tx, actor, parentId, "add Documents under it", parentId && suggestNewDocumentInstead(parentId));
+      await requireOpenToAgentsUnder(tx, actor, parentId, "add Documents under it", suggestNewDocumentInstead);
       const created = await insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
       if (created === "no such parent") throw notInTree();
       return { document: created, avoidedWords: await avoidedWordsIn(tx, actor, tree.projectId, titleAndBody(input)) };
@@ -90,12 +90,12 @@ export function knowledgeRoutes(ctx: AppContext) {
     /**
      * Refuses an Agent's putting a Document under `parentId` when the branch there is Protected, so
      * Agents can't add to a protected branch, or move a Document into one, pointing it to what it may
-     * do `instead`. A parent that isn't a Document of the tree is left for the caller to refuse.
+     * do instead, given the parent's id. A parent that isn't a Document of the tree is left for the caller to refuse.
      */
-    const requireOpenToAgentsUnder = async (tx: Queryable, actor: Actor, parentId: string | null, change: string, instead?: string | null) => {
+    const requireOpenToAgentsUnder = async (tx: Queryable, actor: Actor, parentId: string | null, change: string, instead?: (parentId: string) => string) => {
       if (actor.kind !== "agent" || parentId === null) return;
       const parent = await findDocument(tx, actingUser(actor).workspaceId, parentId);
-      if (parent) requireUnprotected(actor, parent, parent.title, change, instead ?? undefined);
+      if (parent) requireUnprotected(actor, parent, parent.title, change, instead?.(parentId));
     };
 
     /**

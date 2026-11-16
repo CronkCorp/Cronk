@@ -140,8 +140,8 @@ const textOf = (v: unknown) => v as string;
 /** What a Document held before its first Version: what a Suggestion of a new Document starts from, at Version 0. */
 const EMPTY_DOCUMENT: SuggestedContent = { title: "", body: "" };
 
-/** The Document `id`, with the Document it sits under when `created` by a Suggestion of a new Document. */
-async function documentItem(db: Queryable, workspaceId: string, id: string, created = false): Promise<Suggestable | undefined> {
+/** The Document `id`; with the Document it sits under when `createdBySuggestion`, made by accepting a Suggestion of a new Document. */
+async function documentItem(db: Queryable, workspaceId: string, id: string, createdBySuggestion = false): Promise<Suggestable | undefined> {
   const d = await findDocument(db, workspaceId, id);
   if (!d) return undefined;
   return {
@@ -154,11 +154,12 @@ async function documentItem(db: Queryable, workspaceId: string, id: string, crea
       return v && { title: v.title, body: v.body };
     },
     save: async (q, c, actor, now) => ({ version: (await saveVersion(q, d, { title: textOf(c.title), body: textOf(c.body), actor, now })).version }),
-    ...(created && { parent: d.parentId === null ? null : named(await findDocument(db, workspaceId, d.parentId)) }),
+    ...(createdBySuggestion && { parent: d.parentId === null ? null : idAndTitle(await findDocument(db, workspaceId, d.parentId)) }),
   };
 }
 
-const named = (d: Document | undefined) => d && { id: d.id, title: d.title };
+/** A Document as `Suggestion.parent` names it. */
+const idAndTitle = (d: Document | undefined) => d && { id: d.id, title: d.title };
 
 /**
  * A new Document titled `title` under the Document `parentId`, which an Agent may not create itself while the branch there
@@ -178,7 +179,7 @@ async function newDocumentItem(db: Queryable, workspaceId: string, parentId: str
       const created = await insertDocument(q, { tree, parentId, title: textOf(c.title), body: textOf(c.body), actor, now });
       return created === "no such parent" ? `${parent.title} is gone` : { version: created.version, documentId: created.id };
     },
-    parent: named(parent)!,
+    parent: idAndTitle(parent)!,
   };
 }
 
@@ -281,6 +282,7 @@ const nameOf = (item: SuggestionItem) =>
 /** The stored item a Suggestion row is on, with no access check. */
 async function itemOf(db: Queryable, row: SuggestionRow): Promise<Suggestable> {
   if (row.kind === "document" && row.document_id === null) return (await newDocumentItem(db, row.workspace_id, row.parent_document_id!, textOf(row.content.title)))!;
+  // A Document Suggestion based on Version 0 created its Document.
   if (row.kind === "document") return (await documentItem(db, row.workspace_id, row.document_id!, row.base_version === 0))!;
   if (row.kind === "term") return (await termItem(db, row.workspace_id, row.term_id!))!;
   if (row.kind === "decision") return decisionItem(await findDecisionById(db, row.decision_id!))!;
