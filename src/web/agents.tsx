@@ -198,11 +198,14 @@ function TokenSummary(props: { tokens: Loaded<AgentToken[]> }) {
 function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open: boolean) => void; tokens: Loaded<AgentToken[]>; onChanged: () => void }) {
   const a = props.agent;
   const [secret, setSecret] = useState<string>();
+  // Whether the token just issued is read-only, so it isn't shown a script that writes.
+  const [secretReadOnly, setSecretReadOnly] = useState(false);
   const [copied, setCopied] = useState(false);
   const issue = useAction(
     (readOnly: boolean) => api.issueAgentToken(a.id, readOnly),
     (issued) => {
       setSecret(issued.secret);
+      setSecretReadOnly(issued.token.readOnly);
       setCopied(false);
       props.onChanged();
     },
@@ -254,11 +257,22 @@ function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open:
             aria-label="Command to connect Claude Code"
             onFocus={(e) => e.target.select()}
           />
-          <p>
-            A script can read with the token alone, but an Agent changes things only within an Agent Session: start one, send its id
-            as <code>Cronk-Agent-Session</code> on every change, and end it when done.
-          </p>
-          <textarea className="copy script" readOnly rows={4} value={scriptSession(secret)} aria-label="Script using an Agent Session" onFocus={(e) => e.target.select()} />
+          {!secretReadOnly && (
+            <>
+              <p>
+                A script can read with the token alone, but an Agent changes things only within an Agent Session: start one, send its
+                id as <code>Cronk-Agent-Session</code> on every write, and end it when done.
+              </p>
+              <textarea
+                className="copy script"
+                readOnly
+                rows={4}
+                value={scriptSession(secret)}
+                aria-label="Script using an Agent Session"
+                onFocus={(e) => e.target.select()}
+              />
+            </>
+          )}
         </div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
