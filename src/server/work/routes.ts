@@ -787,10 +787,10 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
 
 /**
- * Whether moving a Ticket into `status` ends its Claim: a finished Ticket has no work left to Claim,
- * and only Users finish work.
+ * Whether moving a Ticket into `status` ends its Claim: a Ticket In Review is handed over, so its
+ * Report and the Ticket mustn't change under the reviewer, and a finished one has no work left to Claim.
  */
-const endsClaim = (status: Status) => FINISHED_CATEGORIES.includes(status.category);
+const endsClaim = (status: Status) => status.category === "in_review" || FINISHED_CATEGORIES.includes(status.category);
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
