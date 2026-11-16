@@ -55,7 +55,7 @@ A Transcript is the chat that led an Agent to change things, kept beside what it
 
 Each time Claude finishes answering, and when the chat ends, the hook converts the whole chat to Markdown and uploads it under Claude Code's session id. Cronk keeps only chats in which the Agent changed something, so the hook uploads every chat and stays quiet about the ones Cronk turns down for that; anything else that goes wrong is shown in Claude Code without stopping Claude. To see what it would upload, run `node cronk-transcript.mjs --print <chat.jsonl>` on a chat file from `~/.claude/projects/`.
 
-The conversion leaves out Claude's reasoning, chats of subagents, and Claude Code's own bookkeeping, shows images as `[image]`, and trims a tool call or result over 4,000 characters to its first 3,000 and last 1,000. Cronk scrubs known secret patterns from what it receives, but only on a best-effort basis: don't rely on it for secrets you paste into a chat.
+The conversion leaves out Claude's reasoning, subagents' chats, and what Claude Code adds itself (commands' output, notifications and the summary that continues a compacted chat), shows images as `[image]`, and trims a tool call or result over 4,000 characters to its first 3,000 and last 1,000. Because subagents' chats are left out, a change only a subagent made through Cronk doesn't link the chat. A chat you rewound keeps the turns you went back on, in the order they happened. Cronk scrubs known secret patterns from what it receives, but only on a best-effort basis: don't rely on it for secrets you paste into a chat.
 
 #### The turn convention
 
