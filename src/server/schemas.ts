@@ -508,7 +508,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   WaitingWork: {
     description:
-      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed, with their reason.",
+      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed or of a " +
+      "Suggestion it made, with their reason.",
     ...object(
       {
         reason: {
@@ -516,7 +517,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           enum: WAITING_REASONS,
           description:
             "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
-            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why.",
+            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why. " +
+            "`suggestion_rejected`: a User rejected a Suggestion the Agent made; `suggestion` says which and why.",
         },
         comment: { ...nullable(ref("Comment")), description: "The Comment; null for a rejection." },
         decision: {
@@ -529,10 +531,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           }),
           description: "For a rejection only: the Decision, as the Version that rejected it holds it.",
         },
-        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision came from; null otherwise." },
+        suggestion: {
+          ...object({
+            id,
+            item: object({
+              kind: { type: "string", enum: ["document", "term", "decision", "guidance"] },
+              id: nullable(id),
+              key: nullable({ type: "string" }),
+              title: { type: "string" },
+              projectKey: nullable({ type: "string" }),
+            }),
+            reason: { type: "string", description: "Why the User rejected it, in Markdown." },
+            rejectedBy: recordedActor,
+            at: timestamp,
+          }),
+          description: "For a rejected Suggestion only: which, and why.",
+        },
+        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision or Suggestion came from; null otherwise." },
         document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
       },
-      ["decision"],
+      ["decision", "suggestion"],
     ),
   },
   Document: {

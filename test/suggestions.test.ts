@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, joinAs, startInstalledCronk, type Client } from "./harness.js";
+import { joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
 
 /** Ada, the Admin, with the Project CRONK holding the Protected Document "Sign-in limits" at Version 1, and her Agent claude-laptop. */
 async function protectedDocument() {
@@ -7,8 +7,9 @@ async function protectedDocument() {
   await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
   const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Sign-in limits", body: "Five per minute.\n" })).body;
   await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
-  const agent = await agentOf(cronk, admin, "claude-laptop");
-  return { cronk, admin, agent, documentId: document.id as string };
+  const { secret } = await registerAgent(admin, "claude-laptop");
+  const agent = await startSession(cronk, secret);
+  return { cronk, admin, agent, secret, documentId: document.id as string };
 }
 
 describe("an Agent suggesting a new Version of a Protected Document", () => {
@@ -118,5 +119,52 @@ describe("accepting a Suggestion", () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/outdated/);
     expect((await admin.get(`/api/documents/${documentId}`)).body.document.body).toBe("Six per minute.\n");
+  });
+});
+
+describe("rejecting a Suggestion", () => {
+  it("needs a reason, which the Suggestion keeps and which reaches the Agent as Waiting Work in its next Agent Session", async () => {
+    const { cronk, admin, agent, secret, documentId } = await protectedDocument();
+    const ada = (await admin.get("/api/me")).body.user;
+    const suggestion = await suggestBody(agent, documentId, "Fifty per IP.\n");
+    cronk.clock.advance(60_000);
+
+    for (const reason of ["", "   "]) expect((await admin.post(`/api/suggestions/${suggestion.id}/reject`, { reason })).status).toBe(400);
+    const rejected = await admin.post(`/api/suggestions/${suggestion.id}/reject`, { reason: "  The proxy still hides IPs.  " });
+
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.suggestion).toMatchObject({ state: "rejected", reason: "The proxy still hides IPs.", decidedBy: { id: ada.id }, resultVersion: null });
+    expect((await admin.get(`/api/documents/${documentId}`)).body.document.version).toBe(1);
+    expect((await agent.get("/api/suggestions?state=rejected")).body.suggestions).toMatchObject([{ id: suggestion.id }]);
+    expect((await agent.get("/api/suggestions?state=open")).body.suggestions).toEqual([]);
+
+    const welcomed = await cronk.client(secret).post("/api/agent-sessions");
+    expect(welcomed.body.welcome.waitingWork).toEqual([
+      {
+        reason: "suggestion_rejected",
+        comment: null,
+        suggestion: {
+          id: suggestion.id,
+          item: { kind: "document", id: documentId, key: null, title: "Sign-in limits", projectKey: "CRONK" },
+          reason: "The proxy still hides IPs.",
+          rejectedBy: { kind: "user", id: ada.id, name: "Ada" },
+          at: "2026-01-01T09:01:00.000Z",
+        },
+        ticket: null,
+        document: null,
+      },
+    ]);
+    expect((await cronk.client(secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);
+  });
+
+  it("pushes the reason to the Agent's live Agent Sessions", async () => {
+    const { admin, agent, documentId } = await protectedDocument();
+    const suggestion = await suggestBody(agent, documentId, "Fifty per IP.\n");
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.post(`/api/suggestions/${suggestion.id}/reject`, { reason: "No." });
+
+    expect(await stream.next()).toMatchObject({ event: "waiting", data: { waiting: { reason: "suggestion_rejected", suggestion: { id: suggestion.id, reason: "No." } } } });
   });
 });

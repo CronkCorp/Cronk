@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { inboxesChanged } from "../inbox/inbox.js";
-import { documentTopic } from "../live/topics.js";
+import { agentTopic, documentTopic } from "../live/topics.js";
+import { markSuggestionRejected, suggestionRejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { answer, errors, holding, listing, pathParams, ref } from "../schemas.js";
 import {
   acceptSuggestion,
@@ -182,7 +183,18 @@ export function suggestionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const suggestion = await transaction(ctx.db, (tx) => rejectSuggestion(tx, user, request.params.id, request.body.reason, ctx.clock.now()));
+        // The rejection waits for the Agent that made it, pushed to it once committed.
+        const { suggestion } = await withWaitingWork(
+          ctx,
+          async (tx, positioned) => {
+            const suggestion = await rejectSuggestion(tx, user, request.params.id, request.body.reason, ctx.clock.now());
+            const seq = await markSuggestionRejected(tx, user.workspaceId, suggestion, ctx.clock.now(), positioned);
+            return { suggestion, seq };
+          },
+          ({ suggestion, seq }) => {
+            if (seq !== undefined) ctx.live.publish(agentTopic(suggestion.proposedBy.id), waitingEvent(seq, suggestionRejectionOf(suggestion)));
+          },
+        );
         changed(suggestion);
         return { suggestion };
       },
