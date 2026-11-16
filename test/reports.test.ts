@@ -219,7 +219,7 @@ describe("Editing a Report", () => {
     const refused = await other.patch(path, { baseVersion: 1, body: "Rewritten." });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/Claim CRONK-1/);
-    expect((await cronk.client(claude.secret).patch(path, { baseVersion: 1, body: "Rewritten." })).status).toBe(409);
+    expect((await cronk.client(claude.secret).patch(path, { baseVersion: 1, body: "Rewritten." })).status).toBe(403);
 
     const edited = await holder.patch(path, { baseVersion: 1, body: "Done, and tested." });
     expect(edited.status).toBe(200);

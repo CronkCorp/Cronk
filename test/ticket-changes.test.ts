@@ -57,7 +57,7 @@ describe("Ticket Changes", () => {
     await admin.delete(`/api/agents/${agent.id}`);
 
     const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
-    const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" }, session: null };
+    const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" }, session: { id: claude.sessionId } };
     expect(changes).toEqual([
       expect.objectContaining({ actor, change: "created" }),
       expect.objectContaining({ actor, change: "title", from: "Found a bug", to: "Fix the bug" }),
@@ -73,10 +73,11 @@ describe("Ticket Changes", () => {
 
     const inSession = await cronk.client(secret, { "cronk-agent-session": session.id }).patch("/api/tickets/CRONK-1", { title: "Add sign-in" });
     expect(inSession.status).toBe(200);
-    await cronk.client(secret).patch("/api/tickets/CRONK-1", { title: "Add sign-in and sign-out" });
+    // Outside any Agent Session the Agent can't change anything, so every change it makes names its Session.
+    expect((await cronk.client(secret).patch("/api/tickets/CRONK-1", { title: "Add sign-in and sign-out" })).status).toBe(403);
 
     const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
-    expect(changes.slice(1).map((c: { actor: { session: unknown } }) => c.actor.session)).toEqual([{ id: session.id }, null]);
+    expect(changes.slice(1).map((c: { actor: { session: unknown } }) => c.actor.session)).toEqual([{ id: session.id }]);
   });
 
   it("refuses a change in an Agent Session that has ended or isn't the Agent's", async () => {
