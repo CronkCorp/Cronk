@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Actor, userActor } from "./components/actor.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
-import { api, watchInbox, watchTriage, type Project, type User, type Workspace } from "./api.js";
+import { api, watchInboxAndTriage, type Project, type User, type Workspace } from "./api.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { decisionsAddress } from "./decisions.js";
 import { routeOf, projectKeyOf, projectKeyOfTicket, termsAddress, type Route } from "./routes.js";
@@ -65,9 +65,18 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
   const [projects] = useLoad(() => api.projects(), [path]);
   const [agents] = useLoad(() => api.agents(), [path]);
   const [inbox, reloadInbox] = useLoad(() => api.inbox(), []);
-  useEffect(() => watchInbox({ ready: reloadInbox, on: { changed: reloadInbox } }), []);
   const [triage, reloadTriage] = useLoad(() => api.triage(), []);
-  useEffect(() => watchTriage({ ready: reloadTriage, on: { changed: reloadTriage } }), []);
+  useEffect(
+    () =>
+      watchInboxAndTriage({
+        ready: () => {
+          reloadInbox();
+          reloadTriage();
+        },
+        on: { changed: reloadInbox, triage: reloadTriage },
+      }),
+    [],
+  );
 
   const waiting = inbox.kind === "loaded" ? inbox.value.length : 0;
   const untriaged = triage.kind === "loaded" ? triage.value.length : 0;

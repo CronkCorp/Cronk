@@ -204,7 +204,7 @@ export async function ticketItems<K extends "review" | "unverified">(db: Queryab
  */
 export function inboxesChanged(live: LiveUpdates, userIds: (string | null | undefined)[]): void {
   for (const id of new Set(userIds)) if (id) live.publish(inboxTopic(id), { event: "changed", data: {} });
-  live.publish(TRIAGE_TOPIC, { event: "changed", data: {} });
+  live.publish(TRIAGE_TOPIC, { event: "triage", data: {} });
 }
 
 /**

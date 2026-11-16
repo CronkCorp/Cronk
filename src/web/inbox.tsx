@@ -6,7 +6,7 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, watchTriage, type InboxFilter, type InboxItem, type InboxKind, type SuggestedContent, type TriageFilter, type TriageKind, type User } from "./api.js";
+import { api, watchInbox, watchInboxAndTriage, type InboxFilter, type InboxItem, type InboxKind, type SuggestedContent, type TriageFilter, type TriageKind, type User } from "./api.js";
 import { ContentEditor, contentText, creditNote, Diff, Reasoning, useDiffView } from "./suggestions.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CONTINUED, ReopenDialog } from "./components/reopen-dialog.js";
@@ -202,7 +202,7 @@ export function TriagePage(props: { address: TriageAddress; me: User }) {
   const [items, reload] = useLoad(() => api.triage({ project: filter.project }), [filter.project]);
   const [projects] = useLoad(() => api.projects(), []);
   const [live, onLive] = useLiveState();
-  useEffect(() => watchTriage({ ready: reload, onLive, on: { changed: reload } }), [filter.project]);
+  useEffect(() => watchInboxAndTriage({ ready: reload, onLive, on: { triage: reload } }), [filter.project]);
   const setFilter = (changes: TriageFilter) => navigate(triagePath({ filter: { ...filter, ...changes } }));
   const all = items.kind === "loaded" ? items.value : [];
   const count = (kind?: TriageKind) => all.filter((item) => !kind || item.kind === kind).length;

@@ -578,8 +578,12 @@ function watch<Events>(
 /** Watches the signed-in User's Inbox; `changed` arrives whenever it may have changed (see `watch`). */
 export const watchInbox = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/inbox/events", handlers);
 
-/** Watches Triage; `changed` arrives whenever it may have changed for anyone (see `watch`). */
-export const watchTriage = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/triage/events", handlers);
+/**
+ * Watches the signed-in User's Inbox and Triage on one stream, as browsers allow only a few per site: `changed` arrives whenever
+ * the Inbox may have changed, and `triage` whenever Triage may have, for anyone (see `watch`).
+ */
+export const watchInboxAndTriage = (handlers: Parameters<typeof watch<{ changed: object; triage: object }>>[1]) =>
+  watch<{ changed: object; triage: object }>("/api/inbox/events?triage=true", handlers);
 
 /** Watches the signed-in User's own Agents; `changed` arrives every few seconds while their live Agent Sessions change (see `watch`). */
 export const watchAgents = (handlers: Parameters<typeof watch<{ changed: object }>>[1]) => watch<{ changed: object }>("/api/agents/events", handlers);

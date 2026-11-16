@@ -121,16 +121,15 @@ describe("Triage's Unverified completions", () => {
 });
 
 describe("Triage's live updates", () => {
-  it("tell every signed-in User whenever Triage may have changed, so they can fetch it again", async () => {
+  it("reach every signed-in User's Inbox stream that asks for them as a triage event whenever Triage may have changed, so they can fetch it again", async () => {
     const { cronk, admin, bob, agent, handbookId } = await workspaceSetup();
-    const stream = await bob.events("/api/triage/events");
-    expect(stream.status).toBe(200);
+    const stream = await bob.events("/api/inbox/events?triage=true");
     expect((await stream.next())?.event).toBe("ready");
 
     const suggestion = await suggestBody(agent, handbookId, "v2");
-    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
     await admin.post(`/api/suggestions/${suggestion.id}/accept`);
-    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
 
     // A reviewer leaving sends a Project item's Suggestion to Triage.
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
@@ -138,14 +137,13 @@ describe("Triage's live updates", () => {
     await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
     const carol = await joinAs(cronk, admin, "carol@example.com");
     await suggestBody(await startSession(cronk, (await registerAgent(carol, "carol-bot")).secret), document.id, "v2");
-    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
     await admin.patch(`/api/users/${(await carol.get("/api/me")).body.user.id}`, { active: false });
-    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
   });
 
-  it("are refused to Agents", async () => {
+  it("is refused to Agents", async () => {
     const { agent } = await workspaceSetup();
     expect((await agent.get("/api/triage")).status).toBe(403);
-    expect((await agent.events("/api/triage/events")).status).toBe(403);
   });
 });
