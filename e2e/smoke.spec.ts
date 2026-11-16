@@ -281,24 +281,8 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
   expect(started.status()).toBe(201);
   const session = (await started.json()).session.id as string;
-  const renamed = await request.patch(`/api/tickets/${ticket.key}`, {
-    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
-    data: { title: "Filed and renamed by an Agent" },
-  });
-  expect(renamed.status()).toBe(200);
-  await page.reload();
-  // The Session goes by a readable two-word name, the same everywhere, with its full id in the tooltip.
-  const renamedBy = page.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "renamed it" });
-  await expect(renamedBy).toContainText(/claude-laptop [a-z]+-[a-z]+ for Ada renamed it/);
-  await expect(renamedBy.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
-  const sessionName = (await renamedBy.getByTitle(session).textContent())!;
-  await page.getByRole("link", { name: "Agents" }).click();
-  const liveSessions = page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" });
-  await expect(liveSessions).toContainText(`Live ${sessionName}`);
-  await expect(liveSessions.getByTitle(session)).toHaveText(sessionName);
   // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByRole("heading", { name: "Filed and renamed by an Agent" })).toBeVisible();
   await expect(page.getByTestId("ticket-claim")).toHaveCount(0);
   await pickField(page, "Assignee", "Ada");
   await pickField(page, "Delegate", "claude-laptop");
@@ -310,10 +294,26 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   expect(claimed.status()).toBe(200);
   // The Claim shows in the side panel as soon as it is made, without a reload.
   await expect(page.getByTestId("ticket-claim")).toContainText(`claude-laptop since`);
+  // Holding the Claim, the Session renames the Ticket.
+  const renamed = await request.patch(`/api/tickets/${ticket.key}`, {
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
+    data: { title: "Filed and renamed by an Agent" },
+  });
+  expect(renamed.status()).toBe(200);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Filed and renamed by an Agent" })).toBeVisible();
+  // The Session goes by a readable two-word name, the same everywhere, with its full id in the tooltip.
+  const renamedBy = page.getByRole("list", { name: "Timeline" }).getByRole("listitem").filter({ hasText: "renamed it" });
+  await expect(renamedBy).toContainText(/claude-laptop [a-z]+-[a-z]+ for Ada renamed it/);
+  await expect(renamedBy.getByTitle(session)).toHaveText(/^[a-z]+-[a-z]+$/);
+  const sessionName = (await renamedBy.getByTitle(session).textContent())!;
   await expect(page.getByTestId("ticket-claim").getByTitle(session)).toHaveText(sessionName);
+  await page.getByRole("link", { name: "Agents" }).click();
+  const liveSessions = page.getByRole("list", { name: "Live Agent Sessions of claude-laptop" });
+  await expect(liveSessions).toContainText(`Live ${sessionName}`);
+  await expect(liveSessions.getByTitle(session)).toHaveText(sessionName);
   // The open Agents page shows what the Session works on, and follows it as it releases and Claims again, without a reload.
   // The server notices Agent Session changes every 5 seconds, so these wait a little longer than usual.
-  await page.getByRole("link", { name: "Agents" }).click();
   await expect(liveSessions).toContainText(`Working on ${ticket.key}`);
   await expect(page.getByText("Live", { exact: true }).first()).toBeVisible();
   expect((await request.delete(`/api/tickets/${ticket.key}/claim`, { headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session } })).status()).toBe(204);

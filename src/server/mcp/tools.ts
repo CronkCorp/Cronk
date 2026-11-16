@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
@@ -77,13 +77,20 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description: "Tickets: the units of work tracked in a Project, keyed like CRONK-12.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK (list)"),
-      key: z.string().optional().describe("Ticket key, such as CRONK-12 (get, claim, release, move, create_sub_ticket)"),
+      key: z.string().optional().describe("Ticket key, such as CRONK-12 (get, claim, release, move, create_sub_ticket, edit, relate, unrelate)"),
       to: z.string().optional().describe("The Status to move into, by name or id (move)"),
-      title: z.string().optional().describe("The new Sub-Ticket's title (create_sub_ticket)"),
-      description: z.string().optional().describe("The new Sub-Ticket's Markdown description (create_sub_ticket)"),
+      title: z.string().optional().describe("The new Sub-Ticket's title (create_sub_ticket), or the Ticket's new title (edit)"),
+      description: z.string().optional().describe("The new Sub-Ticket's Markdown description (create_sub_ticket), or the Ticket's new one (edit)"),
+      labels: z.array(z.string()).optional().describe("The Ticket's new Labels, replacing all of its current ones (edit)"),
+      parent: z.string().optional().describe("The key of the Ticket's new parent in the same Project, or `none` to make it a top-level Ticket (edit)"),
+      relation: z.enum(RELATION_KINDS).optional().describe("How the Ticket relates to the other, read from the Ticket's side (relate, unrelate)"),
+      other: z.string().optional().describe("The other Ticket's key, such as CRONK-7 (relate, unrelate)"),
       status: z.array(z.string()).optional().describe("Only Tickets in one of these Status ids (list)"),
       category: z.array(z.enum(STATUS_CATEGORIES)).optional().describe("Only Tickets whose Status is in one of these Status Categories (list)"),
-      priority: z.array(z.enum(PRIORITIES)).optional().describe("Only Tickets with one of these Priorities (list)"),
+      priority: z
+        .union([z.enum(PRIORITIES), z.array(z.enum(PRIORITIES))])
+        .optional()
+        .describe("The Ticket's new Priority (edit), or only Tickets with one of these Priorities (list)"),
       label: z.array(z.string()).optional().describe("Only Tickets with one of these Labels, ignoring case (list)"),
       assignee: z.array(z.string()).optional().describe("Only Tickets assigned to one of these User ids, or `none` for unassigned (list)"),
       delegate: z.array(z.string()).optional().describe("Only Tickets delegated to one of these Agent ids, or `none` for undelegated (list)"),
@@ -94,7 +101,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         writes: false,
         run: (api, a) => {
           const project = required(a.project, "a project", "list");
-          const filters = query({ status: a.status, category: a.category, priority: a.priority, label: a.label, assignee: a.assignee, delegate: a.delegate });
+          const priority = typeof a.priority === "string" ? [a.priority] : a.priority;
+          const filters = query({ status: a.status, category: a.category, priority, label: a.label, assignee: a.assignee, delegate: a.delegate });
           return api("GET", `/api/projects/${encodeURIComponent(project)}/tickets${filters}`);
         },
       },
@@ -141,6 +149,40 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           const key = required(a.key, "a key", "create_sub_ticket");
           const title = required(a.title, "a title", "create_sub_ticket");
           return api("POST", `/api/tickets/${encodeURIComponent(key)}/sub-tickets`, { title, ...(a.description !== undefined && { description: a.description }) });
+        },
+      },
+      edit: {
+        description: "change the title, description, priority, labels or parent of a Ticket you hold the Claim on; fields left out stay as they are",
+        writes: true,
+        run: (api, a) => {
+          const key = required(a.key, "a key", "edit");
+          if (Array.isArray(a.priority)) throw new ToolError("The edit action takes one priority, not a list");
+          return api("PATCH", `/api/tickets/${encodeURIComponent(key)}`, {
+            ...(a.title !== undefined && { title: a.title }),
+            ...(a.description !== undefined && { description: a.description }),
+            ...(a.priority !== undefined && { priority: a.priority }),
+            ...(a.labels !== undefined && { labels: a.labels }),
+            ...(a.parent !== undefined && { parentKey: a.parent.trim().toLowerCase() === "none" ? null : a.parent }),
+          });
+        },
+      },
+      relate: {
+        description: "relate a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "relate"))}/relations`, {
+            kind: required(a.relation, "a relation", "relate"),
+            ticketKey: required(a.other, "an other Ticket", "relate"),
+          }),
+      },
+      unrelate: {
+        description: "remove a relation from a Ticket you hold the Claim on",
+        writes: true,
+        run: (api, a) => {
+          const key = required(a.key, "a key", "unrelate");
+          const kind = required(a.relation, "a relation", "unrelate");
+          const other = required(a.other, "an other Ticket", "unrelate");
+          return api("DELETE", `/api/tickets/${encodeURIComponent(key)}/relations/${kind}/${encodeURIComponent(other)}`);
         },
       },
     },

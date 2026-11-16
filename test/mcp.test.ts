@@ -264,6 +264,53 @@ describe("working a delegated Ticket over MCP", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
     expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.claim.session.id).toBe(mcp.transport.sessionId);
   });
+
+  it("edits each field of a Ticket only while holding its Claim, saying why when it doesn't", async () => {
+    const { admin, mcp } = await delegatedOverMcp(2);
+    const edits = [{ title: "Renamed" }, { description: "New description" }, { priority: "high" }, { labels: ["bug"] }, { parent: "CRONK-2" }];
+
+    for (const edit of edits) {
+      expect(await callTool(mcp, "tickets", { action: "edit", key: "CRONK-1", ...edit })).toEqual({
+        isError: true,
+        body: "Claim CRONK-1 in your Agent Session before editing it: it isn't Claimed",
+      });
+    }
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket).toMatchObject({ title: "Ticket 1", description: "", priority: "none", labels: [], parent: null });
+
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    for (const edit of edits) expect((await callTool(mcp, "tickets", { action: "edit", key: "CRONK-1", ...edit })).isError).toBe(false);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket).toMatchObject({
+      title: "Renamed",
+      description: "New description",
+      priority: "high",
+      labels: ["bug"],
+      parent: { key: "CRONK-2" },
+    });
+    const unparented = await callTool(mcp, "tickets", { action: "edit", key: "CRONK-1", parent: "none" });
+    expect(unparented.body.ticket.parent).toBeNull();
+  });
+
+  it("relates and unrelates a Ticket only while holding its Claim, saying why when it doesn't", async () => {
+    const { admin, mcp } = await delegatedOverMcp(2);
+    const relation = { key: "CRONK-1", relation: "relates_to", other: "CRONK-2" };
+
+    expect(await callTool(mcp, "tickets", { action: "relate", ...relation })).toEqual({
+      isError: true,
+      body: "Claim CRONK-1 in your Agent Session before changing its Relations: it isn't Claimed",
+    });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const related = await callTool(mcp, "tickets", { action: "relate", ...relation });
+    expect(related.body.relations.relatesTo).toMatchObject([{ key: "CRONK-2" }]);
+
+    await callTool(mcp, "tickets", { action: "release", key: "CRONK-1" });
+    expect(await callTool(mcp, "tickets", { action: "unrelate", ...relation })).toEqual({
+      isError: true,
+      body: "Claim CRONK-1 in your Agent Session before changing its Relations: it isn't Claimed",
+    });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.relatesTo).toMatchObject([{ key: "CRONK-2" }]);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    expect((await callTool(mcp, "tickets", { action: "unrelate", ...relation })).body.relations.relatesTo).toEqual([]);
+  });
 });
 
 describe("the activities tool", () => {
