@@ -41,7 +41,8 @@ export function artifactContentPolicy(own: string, cronk: string | undefined): s
     "form-action 'none'",
     "base-uri 'none'",
     ...(cronk ? [`frame-ancestors ${cronk}`] : []),
-    "sandbox allow-scripts allow-modals allow-popups allow-downloads",
+    // No popups either: a window it opened could carry data out to any site, where its own requests can't.
+    "sandbox allow-scripts allow-modals allow-downloads",
   ].join("; ");
 }
 
@@ -64,8 +65,11 @@ export async function frameUrl(ctx: AppContext, request: FastifyRequest, db: Que
   return `${artifactOrigin(ctx, request)}${ARTIFACT_PATH}${payload}.${sign(await artifactSigningKey(db, workspaceId), payload)}/`;
 }
 
-/** The hostname and port of an address, as a `Host` header names them; a default port is left off either way. */
-const hostOf = (address: string) => URL.parse(address)?.host.toLowerCase();
+/**
+ * The hostname of an address, without its port: a proxy may name the port it took a request on, and the Artifact
+ * hostname never shares Cronk's hostname on another port, since browsers send cookies whatever the port.
+ */
+const hostnameOf = (address: string) => URL.parse(address)?.hostname.toLowerCase();
 
 /**
  * Keeps the Artifact hostname apart: there, only Artifacts' files answer, and nothing else of Cronk's, its API and web
@@ -74,9 +78,9 @@ const hostOf = (address: string) => URL.parse(address)?.host.toLowerCase();
  */
 export function keepArtifactHostApart(app: FastifyInstance, artifactsUrl: string | undefined): void {
   if (artifactsUrl === undefined) return;
-  const artifactHost = hostOf(artifactsUrl);
+  const artifactHost = hostnameOf(artifactsUrl);
   app.addHook("onRequest", async (request) => {
-    const onArtifactHost = hostOf(`${request.protocol}://${request.headers.host ?? ""}`) === artifactHost;
+    const onArtifactHost = hostnameOf(`http://${request.headers.host ?? ""}`) === artifactHost;
     if (onArtifactHost !== request.url.startsWith(ARTIFACT_PATH)) throw new HttpError(404, "Not found");
   });
 }

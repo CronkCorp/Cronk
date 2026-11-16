@@ -21,7 +21,7 @@ const listAddress = (projectKey: string | null | undefined) => (projectKey ? `/p
 export const versionOf = (param: string | null): number | undefined => (param && /^[1-9][0-9]{0,8}$/.test(param) ? Number(param) : undefined);
 
 /** The `sandbox` an Artifact's frame gets: its scripts run, but in an origin of their own, away from Cronk's. */
-const FRAME_SANDBOX = "allow-scripts allow-modals allow-popups allow-downloads";
+const FRAME_SANDBOX = "allow-scripts allow-modals allow-downloads";
 
 /** The Artifacts of a Project, or of the Workspace without `projectKey`, with Publish for those who may write there. */
 export function ArtifactsPage(props: { projectKey?: string }) {

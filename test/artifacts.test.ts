@@ -70,7 +70,8 @@ describe("Serving an Artifact", () => {
     expect(policy).toMatch(/script-src [^;]*https:\/\/cdnjs\.cloudflare\.com[^;]*https:\/\/cdn\.jsdelivr\.net[^;]*https:\/\/unpkg\.com/);
     expect(policy).toMatch(/style-src [^;]*https:\/\/fonts\.googleapis\.com/);
     expect(policy).toMatch(/sandbox allow-scripts/);
-    expect(policy).not.toMatch(/allow-same-origin/);
+    // No same origin, so it reads no cookie or storage; no popups, which could carry data out where requests can't.
+    expect(policy).not.toMatch(/allow-same-origin|allow-popups/);
 
     const style = await fromArtifactHost(admin, frameUrl, "style.css");
     expect(style.status).toBe(200);
@@ -89,6 +90,8 @@ describe("Serving an Artifact", () => {
     expect((await admin.download("/", { host: ARTIFACT_HOST })).status).toBe(404);
     // The frame address alone opens the Artifact, as in a frame that sends no cookie.
     expect((await fromArtifactHost(cronk.client(), frameUrl)).status).toBe(200);
+    // A proxy naming the port it took the request on still reaches the Artifact hostname.
+    expect((await cronk.client().download(new URL(frameUrl).pathname, { host: `${ARTIFACT_HOST}:443` })).status).toBe(200);
     // Cronk's own hostname doesn't serve Artifacts, so their code never runs on its origin.
     expect((await admin.download(new URL(frameUrl).pathname)).status).toBe(404);
   });
