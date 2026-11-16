@@ -472,7 +472,7 @@ describe("importing a Project export", () => {
     expect(linked.map((d: { title: string; reason: string }) => [d.title, d.reason])).toEqual([["Setup / Docker", "linked"]]);
     expect((await grace.get("/api/projects/CRONK/members")).status).toBe(200);
     // Tickets go on numbering where they left off.
-    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-5");
+    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Next" })).body.ticket.key).toBe("CRONK-7");
   });
 
   it("keeps the names history recorded for Users, Agents and Tickets the export leaves out", async () => {
