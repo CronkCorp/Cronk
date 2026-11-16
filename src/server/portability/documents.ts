@@ -6,7 +6,7 @@ import { iso, type ActorColumns, type ExportContext } from "./export-context.js"
 import { date, integer, isUuid, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
-import { importSuggestions, suggestionsToExport } from "./suggestions.js";
+import { importSuggestions, suggestedDocumentsToExport, suggestionsToExport } from "./suggestions.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -44,6 +44,7 @@ export async function exportDocument(ctx: ExportContext, base: string, d: Docume
       version: d.version,
       ...(await protectionToExport(ctx, { kind: "document", id: d.id }, d.protected)),
       ...(await suggestionsToExport(ctx, { kind: "document", id: d.id })),
+      ...(await suggestedDocumentsToExport(ctx, d.id)),
       createdAt: iso(d.created_at),
       createdBy: ctx.actor(first),
       updatedAt: iso(d.updated_at),

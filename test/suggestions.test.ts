@@ -546,3 +546,32 @@ describe("making a Suggestion of a new Document", () => {
     expect(refused.status).toBe(403);
   });
 });
+
+describe("rejecting a Suggestion of a new Document", () => {
+  it("creates nothing and tells the Agent why in its next Agent Session", async () => {
+    const { cronk, admin, secret, agent, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+
+    const rejected = await admin.post(`/api/suggestions/${suggestion.id}/reject`, { reason: "Backups live in the runbook." });
+
+    expect(rejected.body.suggestion).toMatchObject({ state: "rejected", item: { id: null, title: "Backups", version: 0 }, parent: { id: storageId } });
+    expect((await admin.get("/api/projects/CRONK/documents")).body.documents).toHaveLength(3);
+    expect((await cronk.client(secret).post("/api/agent-sessions")).body.welcome.waitingWork).toMatchObject([
+      {
+        reason: "suggestion_rejected",
+        suggestion: { id: suggestion.id, item: { kind: "document", id: null, title: "Backups", projectKey: "CRONK" }, reason: "Backups live in the runbook." },
+      },
+    ]);
+  });
+
+  it("goes when the Document it would go under is deleted", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+
+    expect((await admin.delete(`/api/documents/${storageId}?baseVersion=1`)).status).toBe(204);
+
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).status).toBe(404);
+    expect((await admin.get("/api/inbox")).body.items).toEqual([]);
+    expect((await agent.get("/api/suggestions")).body.suggestions).toEqual([]);
+  });
+});

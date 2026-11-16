@@ -11,10 +11,15 @@ import type { ImportedTickets } from "./tickets.js";
  * Suggestions (ADR 0014), in the frontmatter of the item they belong to as `suggestions`, oldest first, left
  * out when there are none: each with its id, base Version, whole proposed content, reasoning, the Agent that
  * made it, the Ticket it came from, and where it stands. Their ids are kept, as Agents may have noted them.
+ * A Suggestion of a new Document not accepted (so with no Document) is in the frontmatter of the Document it
+ * goes under, as `suggestedDocuments`; once accepted, it is with the Document it created, at base Version 0.
  */
 
 /** The item a Suggestion is on: a Document, Term or Decision by id, or the Guidance of a Project (null for the Workspace's). */
 export type SuggestedItem = { kind: "document" | "term" | "decision"; id: string } | { kind: "guidance"; projectId: string | null };
+
+/** Where an export holds Suggestions: on an item, or of new Documents under the Document `parentId`, not accepted. */
+type SuggestionsOf = SuggestedItem | { kind: "new-document"; parentId: string };
 
 
 interface SuggestionRow {
@@ -37,16 +42,24 @@ interface SuggestionRow {
 
 /** The frontmatter field holding the Suggestions on `item`. */
 export async function suggestionsToExport(ctx: ExportContext, item: SuggestedItem) {
-  const [where, params] = suggestionsOnSql(item.kind === "guidance" ? { ...item, workspaceId: ctx.scope.workspaceId } : item);
+  return { suggestions: await exportSuggestions(ctx, suggestionsOnSql(item.kind === "guidance" ? { ...item, workspaceId: ctx.scope.workspaceId } : item)) };
+}
+
+/** The frontmatter field holding the Suggestions of new Documents under the Document `parentId`, not accepted. */
+export async function suggestedDocumentsToExport(ctx: ExportContext, parentId: string) {
+  return { suggestedDocuments: await exportSuggestions(ctx, ["s.parent_document_id = $1", [parentId]]) };
+}
+
+/** The Suggestions `where` picks, oldest first, as an export writes them; undefined when there are none. */
+async function exportSuggestions(ctx: ExportContext, [where, params]: [string, unknown[]]) {
   const { rows } = await ctx.db.query<SuggestionRow>(
     `SELECT s.*, ${ticketKeySql("tp", "t")} AS source_ticket
      FROM suggestions s LEFT JOIN tickets t ON t.id = s.source_ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
      WHERE ${where} ORDER BY s.at, s.id`,
     params,
   );
-  if (rows.length === 0) return { suggestions: undefined };
-  return {
-    suggestions: rows.map((s) => ({
+  if (rows.length === 0) return undefined;
+  return rows.map((s) => ({
       id: s.id,
       baseVersion: s.base_version,
       content: s.content,
@@ -60,40 +73,50 @@ export async function suggestionsToExport(ctx: ExportContext, item: SuggestedIte
       decidedAt: s.decided_at === null ? undefined : iso(s.decided_at),
       decidedBy: s.decided_by_user_id === null ? undefined : ctx.user(s.decided_by_user_id)!,
       reason: s.reason ?? undefined,
-    })),
-  };
+    }));
 }
 
 /**
  * Imports the Suggestions `data.suggestions` holds onto the imported `item` (in Project `projectId`, null for
- * the Workspace), once its Versions are in. Each keeps its id unless this installation already has it.
+ * the Workspace), once its Versions are in; for an imported Document, also those of new Documents under it that
+ * `data.suggestedDocuments` holds. Each keeps its id unless this installation already has it.
  */
 export async function importSuggestions(ctx: ImportContext, item: SuggestedItem, projectId: string | null, data: Record<string, unknown>, where: string): Promise<void> {
-  const entries = data.suggestions ?? [];
-  if (!Array.isArray(entries) || !entries.every(isRecord)) refuse(`${where} suggestions must be a list`);
+  await importEntries(ctx, item, projectId, data.suggestions, `${where} suggestions`);
+  if (item.kind === "document") await importEntries(ctx, { kind: "new-document", parentId: item.id }, projectId, data.suggestedDocuments, `${where} suggestedDocuments`);
+  else if (data.suggestedDocuments !== undefined) refuse(`${where} suggestedDocuments: only a Document has new Documents suggested under it`);
+}
+
+async function importEntries(ctx: ImportContext, item: SuggestionsOf, projectId: string | null, value: unknown, where: string): Promise<void> {
+  const entries = value ?? [];
+  if (!Array.isArray(entries) || !entries.every(isRecord)) refuse(`${where} must be a list`);
+  const kind = item.kind === "new-document" ? "document" : item.kind;
   for (const [i, s] of entries.entries()) {
-    const at = `${where} suggestions[${i}]`;
+    const at = `${where}[${i}]`;
     const by = await ctx.actor(s.by, `${at} by`);
     if (by.kind !== "agent") refuse(`${at} by must name an Agent: only Agents make Suggestions`);
     const state = oneOf(s.state, SUGGESTION_STATES, `${at} state`);
-    const content = contentOf(item.kind, s.content, `${at} content`);
+    const content = contentOf(kind, s.content, `${at} content`);
+    const baseVersion = integer(s.baseVersion, `${at} baseVersion`);
+    if (item.kind === "new-document" && state === "accepted") refuse(`${at} is accepted, so it belongs with the Document it created`);
+    if (item.kind === "new-document" && baseVersion !== 0) refuse(`${at} baseVersion must be 0: a new Document starts from nothing`);
     const decided = state !== "open";
     const decidedBy = decided ? await ctx.userId(s.decidedBy, `${at} decidedBy`) : null;
     const withEdits = state === "accepted" ? (typeof s.acceptedWithEdits === "boolean" ? s.acceptedWithEdits : refuse(`${at} acceptedWithEdits must be true or false`)) : null;
     const id = isUuid(s.id) && !(await taken(ctx, s.id)) ? s.id : null;
     const { rows } = await ctx.db.query<{ id: string }>(
       `INSERT INTO suggestions (id, workspace_id, kind, document_id, term_id, decision_id, project_id, base_version, content, reasoning, at,
-         actor_user_id, actor_agent_id, actor_session_id, state, with_edits, result_version, reason, decided_at, decided_by_user_id)
-       VALUES (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING id`,
+         actor_user_id, actor_agent_id, actor_session_id, state, with_edits, result_version, reason, decided_at, decided_by_user_id, parent_document_id)
+       VALUES (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id`,
       [
         id,
         ctx.workspaceId,
-        item.kind,
+        kind,
         item.kind === "document" ? item.id : null,
         item.kind === "term" ? item.id : null,
         item.kind === "decision" ? item.id : null,
         projectId,
-        integer(s.baseVersion, `${at} baseVersion`),
+        baseVersion,
         JSON.stringify(content),
         text(s.reasoning, `${at} reasoning`),
         date(s.at, `${at} at`),
@@ -106,6 +129,7 @@ export async function importSuggestions(ctx: ImportContext, item: SuggestedItem,
         state === "rejected" ? text(s.reason, `${at} reason`) : null,
         decided ? date(s.decidedAt, `${at} decidedAt`) : null,
         decidedBy,
+        item.kind === "new-document" ? item.parentId : null,
       ],
     );
     if (s.sourceTicket !== undefined && s.sourceTicket !== null) {
