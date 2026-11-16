@@ -902,18 +902,21 @@ describe("an export taken apart and archived again", () => {
   });
 });
 
+/** An export's files archived again with one Markdown file's frontmatter edited, and the file renamed if asked. */
+function editedExport(files: Record<string, string>, path: string, edit: (data: any) => void, rename?: string) {
+  const { data, body } = markdown(files[path]);
+  edit(data);
+  const copy = { ...files };
+  delete copy[path];
+  copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
+  return tarGz(copy);
+}
+
 describe("an export edited by hand", () => {
   it("is refused when it says what Cronk can't hold, naming the file", async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/export")).body);
-    const edited = async (path: string, edit: (data: any) => void, rename?: string) => {
-      const { data, body } = markdown(files[path]);
-      edit(data);
-      const copy = { ...files };
-      delete copy[path];
-      copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
-      return tarGz(copy);
-    };
+    const edited = (path: string, edit: (data: any) => void, rename?: string) => editedExport(files, path, edit, rename);
     const { admin } = await startInstalledCronk("Elsewhere");
 
     const answeredPlan = await admin.upload("/api/import", await edited("projects/CRONK/tickets/CRONK-1.activities/1.md", (d) => (d.answer = 1)));
@@ -1130,10 +1133,7 @@ describe("the Workspace's settings in an export", () => {
   /** A Workspace export from a fresh installation, with `workspace.md` edited. */
   async function exportWith(edit: (data: any) => void) {
     const { admin } = await startInstalledCronk("Acme");
-    const files = await untarGz((await admin.download("/api/export")).body);
-    const { data, body } = markdown(files["workspace.md"]);
-    edit(data);
-    return tarGz({ ...files, "workspace.md": `---\n${stringify(data)}---\n${body}` });
+    return editedExport(await untarGz((await admin.download("/api/export")).body), "workspace.md", edit);
   }
 
   it("are refused on import outside the bounds the API allows, naming the setting and its range", async () => {
