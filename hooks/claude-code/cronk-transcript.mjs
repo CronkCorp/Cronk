@@ -132,6 +132,8 @@ async function upload(event) {
     method: "PUT",
     headers: { authorization: `Bearer ${token}`, "content-type": "text/markdown; charset=utf-8" },
     body: markdown,
+    // An unreachable Cronk mustn't hold Claude Code up for long.
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   if (response.ok || response.status === 422) return undefined;
   const body = await response.text();
@@ -145,6 +147,9 @@ async function upload(event) {
   return `Cronk didn't take the Transcript (${response.status}): ${error}`;
 }
 
+/** How long an upload may take before the hook gives up on it. */
+const UPLOAD_TIMEOUT_MS = 20_000;
+
 /** @returns {Promise<string>} */
 async function readStdin() {
   let text = "";
@@ -153,8 +158,12 @@ async function readStdin() {
 }
 
 const [mode, file] = process.argv.slice(2);
-if (mode === "--print" && file) {
-  process.stdout.write(toMarkdown(readFileSync(file, "utf8")));
+if (mode === "--print") {
+  if (file) process.stdout.write(toMarkdown(readFileSync(file, "utf8")));
+  else {
+    process.stderr.write("Usage: node cronk-transcript.mjs --print <chat.jsonl>, or run it as a Claude Code hook\n");
+    process.exitCode = 1;
+  }
 } else {
   // A hook: Claude Code passes the event as JSON on stdin. A failure is reported but never blocks Claude (exit code 1, not 2).
   try {

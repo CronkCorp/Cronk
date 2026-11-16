@@ -48,6 +48,11 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(await convert(fixture("claude-code-entries.jsonl"))).toBe(await readFile(fixture("claude-code-entries.md"), "utf8"));
   });
 
+  it("says how to use it when asked to print without a chat file", async () => {
+    const ran = await promisify(execFile)(process.execPath, [HOOK, "--print"]).catch((err) => err);
+    expect(ran).toMatchObject({ code: 1, stderr: expect.stringMatching(/--print <chat.jsonl>/) });
+  });
+
   it("converts the same chat to the same text every run, and a chat that grows to text that continues it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
     for (const name of ["text-only.jsonl", "tools.jsonl", "long-output.jsonl", "claude-code-entries.jsonl"]) {
