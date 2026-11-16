@@ -5,7 +5,7 @@ import { DocumentPage, DocumentsPage } from "./documents.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
 import { inboxAddressFrom, InboxPage } from "./inbox.js";
-import { AcceptInvitationPage, AccountPage, ResetPasswordPage, UsersPage } from "./people.js";
+import { AcceptInvitationPage, ChangePasswordPage, ResetPasswordPage, UsersPage } from "./people.js";
 import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
 import { routeOf } from "./routes.js";
@@ -161,8 +161,8 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
       return props.workspace === undefined ? null : (
         <WorkspaceSettings current={props.workspace} onDone={props.onWorkspaceChange} onCancel={() => navigate("/")} />
       );
-    case "account":
-      return <AccountPage me={props.me} />;
+    case "password":
+      return <ChangePasswordPage me={props.me} />;
     case "agents":
       return <AgentsPage me={props.me} />;
     case "search":

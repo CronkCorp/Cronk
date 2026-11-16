@@ -25,7 +25,7 @@ Each connection is an Agent Session, listed under its Agent until it disconnects
 
 ## Forgotten passwords
 
-An Admin issues a password reset link from the Users page and passes it on; it works once, for 7 days. Signed-in Users change their own password from the account menu.
+An Admin issues a password reset link from the Users page and passes it on; it works once, for 7 days. Signed-in Users change their own password from the menu under their name in the sidebar.
 
 If no Admin can sign in, issue a link for any User from the server, with the same `DATABASE_URL` as Cronk:
 
@@ -33,7 +33,7 @@ If no Admin can sign in, issue a link for any User from the server, with the sam
 docker compose exec app node dist/server/reset-password.js ada@example.com --url https://cronk.example.com
 ```
 
-`--url` is Cronk's address as people open it (default `http://localhost:$PORT`). Either way, issuing a link ends the User's sign-ins; their Agents' Sessions keep running.
+`--url` is Cronk's address as people open it (default `http://localhost:$PORT`). Either way, issuing a link stops the User's old password and ends their sign-ins until they use it; their Agents' Sessions keep running.
 
 ## Configuration
 

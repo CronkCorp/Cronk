@@ -28,9 +28,9 @@ import {
   listInvitations,
   publicInvitation,
 } from "./invitations.js";
-import { issuePasswordReset, passwordHashOf, setPassword, usePasswordReset, userForPasswordReset } from "./password-resets.js";
-import { createSignIn, deleteSignIn } from "./sign-ins.js";
-import { claimUserWithoutPassword, countUsers, findUserByEmail, findUserById, insertUser, listUsers, publicUser, updateUser, type Role } from "./users.js";
+import { issuePasswordReset, usePasswordReset, userForPasswordReset, type ResetRefusal } from "./password-resets.js";
+import { createSignIn, deleteSignIn, endSignIns } from "./sign-ins.js";
+import { claimUserWithoutPassword, countUsers, findUserByEmail, findUserById, insertUser, listUsers, passwordHashOf, publicUser, setPasswordHash, updateUser, type Role } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -49,7 +49,14 @@ const INVITATION_GONE = "This invitation has expired or was withdrawn";
 /** The path parameters of the routes anyone holding a password reset link's token may call. */
 const resetTokenParams = pathParams({ token: { type: "string", description: "The secret token from the password reset link." } });
 
-const RESET_GONE = "This password reset link has expired, was used or was replaced";
+const RESET_GONE = "This password reset link has expired or no longer works";
+
+/** Why a User can't be given a reset link, as the API answers it. */
+const RESET_REFUSED: Record<ResetRefusal, HttpError> = {
+  "no such user": new HttpError(404, "No such User"),
+  deactivated: new HttpError(409, "This User is deactivated; reactivate them first"),
+  "not joined": new HttpError(409, "This User hasn't joined yet; invite them instead"),
+};
 
 const dummyHash = hashPassword("dummy password for unknown emails");
 
@@ -327,7 +334,7 @@ export function identityRoutes(ctx: AppContext) {
           params: pathParams({ id: userIdParam }),
           response: {
             201: answer(
-              "The reset link's secret token, only ever returned here, and when it expires. The User's sign-ins have ended; their Agents' Sessions keep running",
+              "The reset link's secret token, only ever returned here, and when it expires. Until the link is used the User's old password no longer works and their sign-ins have ended; their Agents' Sessions keep running",
               { type: "object", required: ["token", "expiresAt"], properties: { token: { type: "string" }, expiresAt: { type: "string", format: "date-time" } } },
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -339,10 +346,8 @@ export function identityRoutes(ctx: AppContext) {
         requireAdmin(user, "issue password reset links");
         const target = await findUserById(ctx.db, request.params.id);
         if (target?.workspaceId !== user.workspaceId) throw new HttpError(404, "No such User");
-        // A deactivated User couldn't sign in with the new password; one an import brought in joins by invitation.
-        if (!target.active) throw new HttpError(409, `${target.name} is deactivated; reactivate them first`);
         const issued = await transaction(ctx.db, (tx) => issuePasswordReset(tx, { userId: target.id, issuedBy: user.id, now: ctx.clock.now() }));
-        if (!issued) throw new HttpError(404, "No such User");
+        if (typeof issued === "string") throw RESET_REFUSED[issued];
         return reply.code(201).send(issued);
       },
     );
@@ -415,7 +420,10 @@ export function identityRoutes(ctx: AppContext) {
           throw new HttpError(403, "The current password is incorrect");
         }
         const passwordHash = await hashPassword(request.body.password);
-        await transaction(ctx.db, (tx) => setPassword(tx, user.id, passwordHash, request.cookies[SIGN_IN_COOKIE]));
+        await transaction(ctx.db, async (tx) => {
+          await setPasswordHash(tx, user.id, passwordHash);
+          await endSignIns(tx, user.id, { except: request.cookies[SIGN_IN_COOKIE] });
+        });
         return reply.code(204).send();
       },
     );

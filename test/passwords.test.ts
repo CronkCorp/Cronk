@@ -40,7 +40,7 @@ describe("password reset links", () => {
     expect(await signInStatus(cronk, "bob@example.com", "bob's new password")).toBe(200);
   });
 
-  it("ends the User's sign-ins when issued, while their Agents' Sessions keep running", async () => {
+  it("ends the User's sign-ins and stops their old password when issued, while their Agents' Sessions keep running", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const laptop = await joinAs(cronk, admin, "bob@example.com");
     const phone = cronk.client();
@@ -53,8 +53,8 @@ describe("password reset links", () => {
     expect((await laptop.get("/api/me")).status).toBe(401);
     expect((await phone.get("/api/me")).status).toBe(401);
     expect((await session.get("/api/agent-sessions/current")).status).toBe(200);
-    // Until the link is used, the old password still signs in.
-    expect(await signInStatus(cronk, "bob@example.com", memberPassword)).toBe(200);
+    // Until the link is used, nobody can sign in as Bob, so a reset secures the account.
+    expect(await signInStatus(cronk, "bob@example.com", memberPassword)).toBe(401);
     expect((await admin.get("/api/me")).status).toBe(200);
   });
 
@@ -93,7 +93,7 @@ describe("password reset links", () => {
     expect(refused.body.error).toMatch(/deactivated/);
   });
 
-  it("stops working when its User is deactivated", async () => {
+  it("stops working when its User is deactivated, so reactivating them needs a new link", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await joinAs(cronk, admin, "bob@example.com");
     const bob = await userId(admin, "bob@example.com");
@@ -101,9 +101,19 @@ describe("password reset links", () => {
 
     await admin.patch(`/api/users/${bob}`, { active: false });
     await admin.patch(`/api/users/${bob}`, { active: true });
-
     expect((await cronk.client().post(`/api/password-resets/by-token/${token}`, { password: "bob's new password" })).status).toBe(404);
-    expect(await signInStatus(cronk, "bob@example.com", memberPassword)).toBe(200);
+
+    const again = (await admin.post(`/api/users/${bob}/password-reset`)).body.token;
+    expect((await cronk.client().post(`/api/password-resets/by-token/${again}`, { password: "bob's new password" })).status).toBe(200);
+    expect(await signInStatus(cronk, "bob@example.com", "bob's new password")).toBe(200);
+  });
+
+  it("refuses a new password the rules refuse, leaving the link usable", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await joinAs(cronk, admin, "bob@example.com");
+    const { token } = (await admin.post(`/api/users/${await userId(admin, "bob@example.com")}/password-reset`)).body;
+    expect((await cronk.client().post(`/api/password-resets/by-token/${token}`, { password: "short" })).status).toBe(400);
+    expect((await cronk.client().post(`/api/password-resets/by-token/${token}`, { password: "long enough now" })).status).toBe(200);
   });
 });
 
@@ -123,6 +133,12 @@ describe("changing your own password", () => {
     expect((await phone.get("/api/me")).status).toBe(401);
     expect(await signInStatus(cronk, ada.email, ada.password)).toBe(401);
     expect(await signInStatus(cronk, ada.email, "a brand new password")).toBe(200);
+  });
+
+  it("refuses a new password the rules refuse, keeping the old one", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    expect((await admin.put("/api/me/password", { currentPassword: ada.password, password: "short" })).status).toBe(400);
+    expect(await signInStatus(cronk, ada.email, ada.password)).toBe(200);
   });
 
   it("is only for signed-in Users, not Agents", async () => {
@@ -159,6 +175,7 @@ describe("the server command for a reset link", () => {
     const link = /https:\/\/cronk\.example\.com\/reset-password\/(\S+)/.exec(run.stdout);
     expect(link).not.toBeNull();
     expect((await admin.get("/api/me")).status).toBe(401);
+    expect(await signInStatus(cronk, ada.email, ada.password)).toBe(401);
 
     const browser = cronk.client();
     const used = await browser.post(`/api/password-resets/by-token/${link![1]}`, { password: "back in at last" });

@@ -29,7 +29,7 @@ export function UsersPage(props: { me: User }) {
   const reset = (user: User, token: string) =>
     setLastLink({
       label: "Password reset link",
-      note: `Send this link to ${user.name}. It lets them choose a new password once, for 7 days. Their sign-ins have ended; their Agents' Sessions keep running.`,
+      note: `Send this link to ${user.name}. It lets them choose a new password once, for 7 days. Until then they can't sign in; their Agents' Sessions keep running.`,
       url: resetLink(token),
     });
 
@@ -169,8 +169,8 @@ function UserRow(props: {
           Invite
         </Button>
       )}
-      {/* Users change their own password from the account menu; a deactivated User couldn't sign in with a new one. */}
-      {u.active && !props.isMe && (
+      {/* Users change their own password themselves; a deactivated User couldn't sign in with a new one, and an imported one joins by invitation. */}
+      {u.active && u.joined && !props.isMe && (
         <>
           <Button variant="ghost" aria-label={`Reset password of ${u.name}`} disabled={reset.busy} onClick={() => setConfirmingReset(true)}>
             Reset password
@@ -179,7 +179,7 @@ function UserRow(props: {
             open={confirmingReset}
             onOpenChange={setConfirmingReset}
             title={`Reset ${u.name}'s password?`}
-            description="This signs them out everywhere and gives you a link to pass on, which lets them choose a new password once within 7 days. Their Agents' Sessions keep running."
+            description="Their current password stops working and they are signed out everywhere. You get a link to pass on, which lets them choose a new password once within 7 days. Their Agents' Sessions keep running."
             confirmLabel="Issue reset link"
             busy={reset.busy}
             onConfirm={() => void reset.run()}
@@ -330,8 +330,8 @@ export function ResetPasswordPage(props: { token: string; onDone: (user: User) =
   );
 }
 
-/** The signed-in User's own account, at `/account`: who they are, and changing their password. */
-export function AccountPage(props: { me: User }) {
+/** Where the signed-in User changes their own password, at `/password`. */
+export function ChangePasswordPage(props: { me: User }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [saved, setSaved] = useState(false);
@@ -348,11 +348,10 @@ export function AccountPage(props: { me: User }) {
   );
   return (
     <section className="panel">
-      <h1>Account</h1>
+      <h1>Change password</h1>
       <p>
         <Actor actor={userActor(props.me.name)} /> <span className="muted">{props.me.email} · {roleName(props.me.role)}</span>
       </p>
-      <h2>Change password</h2>
       <form onSubmit={submit}>
         <Field label="Current password" type="password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
         <Field label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
