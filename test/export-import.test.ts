@@ -883,3 +883,27 @@ describe("Artifacts in an export", () => {
     expect(page.body.toString()).toBe("<p>v2</p>");
   });
 });
+
+describe("Importing Artifacts", () => {
+  it("refuses an Artifact Version without index.html, as publishing it would be", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<p>v1</p>", "app.js": "1" }));
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    const edited = Object.fromEntries(
+      Object.entries(files)
+        .filter(([path]) => path !== "projects/CRONK/artifacts/1-limits/1/index.html")
+        .map(([path, text]) => {
+          if (!path.endsWith("1-limits.md")) return [path, text];
+          const { data } = markdown(text);
+          data.versions[0].files = data.versions[0].files.filter((f: { path: string }) => f.path !== "index.html");
+          return [path, `---\n${stringify(data)}---\n`];
+        }),
+    );
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    const res = await elsewhere.upload("/api/import", await tarGz(edited));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/index\.html/);
+  });
+});

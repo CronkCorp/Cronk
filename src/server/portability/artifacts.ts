@@ -106,6 +106,7 @@ export async function importArtifacts(ctx: ImportContext, dir: string, projectId
         await ctx.storeFile(artifactFileKey(fileId), bytes);
         files.push({ id: fileId, path: filePath, contentType: typeof f.contentType === "string" ? f.contentType : mediaTypeOf(filePath), size: bytes.length });
       }
+      if (!files.some((f) => f.path === "index.html")) refuse(`${at("files")} must list index.html, the page an Artifact opens on`);
       const sourceTicket = typeof v.sourceTicket === "string" ? (tickets.ids.get(v.sourceTicket.toUpperCase()) ?? null) : null;
       const title = text(v.title, at("title"));
       const published = await insertArtifactVersion(
