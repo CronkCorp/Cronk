@@ -179,17 +179,32 @@ export interface Publish {
 }
 
 /** Creates an Artifact in a Project or the Workspace with `publish` as its Version 1. Run inside a transaction. */
-export async function insertArtifact(db: Queryable, place: { workspaceId: string; projectId: string | null; id?: string }, publish: Publish): Promise<Artifact> {
-  const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO artifacts (id, workspace_id, project_id, title, created_at, updated_at) VALUES (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $5) RETURNING id`,
-    [place.id ?? null, place.workspaceId, place.projectId, publish.title, publish.now],
-  );
-  return insertArtifactVersion(db, (await findArtifactRow(db, rows[0]!.id))!, publish);
+export async function insertArtifact(db: Queryable, place: { workspaceId: string; projectId: string | null }, publish: Publish): Promise<Artifact> {
+  return insertArtifactVersion(db, await insertArtifactRow(db, { ...place, title: publish.title, now: publish.now }), publish);
 }
 
-/** Adds `publish` as the Artifact's next Version, which becomes its latest. Run inside a transaction holding the Artifact's lock. */
-export async function insertArtifactVersion(db: Queryable, artifact: { id: string; workspaceId: string; version: number }, publish: Publish): Promise<Artifact> {
-  const number = artifact.version + 1;
+/** Creates an Artifact with no Version yet, as an import does before adding the Versions it holds. Run inside a transaction. */
+export async function insertArtifactRow(
+  db: Queryable,
+  input: { id?: string; workspaceId: string; projectId: string | null; title: string; now: Date },
+): Promise<{ id: string; workspaceId: string; version: number }> {
+  const { rows } = await db.query<{ id: string }>(
+    "INSERT INTO artifacts (id, workspace_id, project_id, title, created_at, updated_at) VALUES (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $5) RETURNING id",
+    [input.id ?? null, input.workspaceId, input.projectId, input.title, input.now],
+  );
+  return { id: rows[0]!.id, workspaceId: input.workspaceId, version: 0 };
+}
+
+/**
+ * Adds `publish` as the Artifact's next Version, which becomes its latest, or with `number`, as that Version, as an
+ * import does when it brings in only some Versions. Run inside a transaction holding the Artifact's lock.
+ */
+export async function insertArtifactVersion(
+  db: Queryable,
+  artifact: { id: string; workspaceId: string; version: number },
+  publish: Publish,
+  number = artifact.version + 1,
+): Promise<Artifact> {
   await db.query(
     `INSERT INTO artifact_versions (artifact_id, number, title, source_ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,

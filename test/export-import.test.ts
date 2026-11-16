@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
-import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type Client } from "./harness.js";
+import { ARTIFACT_HOST, delegatedSetup, joinAs, OWN_ORIGIN, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
@@ -169,6 +169,7 @@ async function snapshot(admin: Client): Promise<unknown> {
       terms: await terms(`/api/projects/${key}/terms`),
       documents: await tree(`/api/projects/${key}/documents`),
       decisions: await decisions(`/api/projects/${key}/decisions`),
+      artifacts: await artifacts(`/api/projects/${key}/artifacts`),
       tickets: await Promise.all(
         tickets.map(async (t: { key: string }) => {
           const { reports } = await get(`/api/tickets/${t.key}/reports`);
@@ -190,6 +191,23 @@ async function snapshot(admin: Client): Promise<unknown> {
       ),
     };
   };
+  // An Artifact, its Versions and the files each serves; frame addresses are signed per installation, so only their files count.
+  const artifacts = async (path: string) =>
+    Promise.all(
+      (await get(path)).artifacts.map(async (a: { id: string }) => {
+        const { frameUrl: _latest, ...artifact } = (await get(`/api/artifacts/${a.id}`)).artifact;
+        const versions = await Promise.all(
+          artifact.versions.map(async (v: { number: number }) => {
+            const { frameUrl, ...version } = (await get(`/api/artifacts/${a.id}/versions/${v.number}`)).version;
+            const served = await Promise.all(
+              version.files.map(async (f: { path: string }) => (await admin.download(`${new URL(frameUrl).pathname}${f.path}`, { host: ARTIFACT_HOST })).body.toString("base64")),
+            );
+            return { version, served };
+          }),
+        );
+        return { artifact, versions, protection: await get(`/api/artifacts/${a.id}/protection`) };
+      }),
+    );
   const projects = [...(await get("/api/projects")).projects, ...(await get("/api/projects?archived=true")).projects];
   const raw = {
     workspace: await get("/api/workspace"),
@@ -201,6 +219,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     terms: await terms("/api/workspace/terms"),
     documents: await tree("/api/workspace/documents"),
     decisions: await decisions("/api/workspace/decisions"),
+    artifacts: await artifacts("/api/workspace/artifacts"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
   };
   const ids = new Map<string, string>();
@@ -241,6 +260,10 @@ async function busyWorkspace() {
   const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The *disk* one.", replyToActivityId: question.id })).body.comment;
   await agent.post("/api/tickets/CRONK-1/comments", { body: "Thanks.", replyToCommentId: answer.id });
   const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
+  // An Artifact the Agent published from CRONK-1, then Ada's second Version of it, with a binary file; she marks it Protected.
+  const prototype = (await agent.upload("/api/projects/CRONK/artifacts?title=Cache%20prototype", await tarGz({ "index.html": "<p>v1</p>", "img/chart.png": "\u0089PNG" }))).body.artifact;
+  await admin.upload(`/api/artifacts/${prototype.id}/versions?baseVersion=1&title=Cache%20dashboard`, await tarGz({ "index.html": "<p>v2</p>", "data.json": "[1,2]" }));
+  await admin.post(`/api/artifacts/${prototype.id}/protection`, { protected: true });
   // Attachments: the Agent's binary screenshot, and two of Ada's, one named as a hidden file would be.
   await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
   await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");
@@ -275,6 +298,7 @@ async function busyWorkspace() {
   const remark = (await grace.post(`/api/documents/${guide.id}/comments`, { body: "Which here?", anchor: { passage: "Start here" } })).body.comment;
   await admin.post(`/api/documents/${guide.id}/comments`, { body: "This one.", replyToCommentId: remark.id });
   await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome." });
+  await admin.upload("/api/workspace/artifacts?title=Team%20board", await tarGz({ "index.html": "<p>team</p>" }));
   // A line of dashes, as frontmatter ends with, in a title, a body and an anchored passage.
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
   await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
@@ -836,5 +860,26 @@ describe("Attachments in an export", () => {
     const file = await elsewhere.download(`/api/attachments/${id}/file`);
     expect(file.status).toBe(200);
     expect([...file.body]).toEqual([0x89, 0x50]);
+  });
+});
+
+describe("Artifacts in an export", () => {
+  it("keep their ids and Version numbers, so links to them still work after the move, with only the latest Version unless asked for all", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { artifact } = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<p>v1</p>" }))).body;
+    await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "<p>v2</p>" }));
+
+    const files = await untarGz((await admin.download("/api/export?versions=false")).body);
+    expect(markdown(files["projects/CRONK/artifacts/1-limits.md"]).data).toMatchObject({ id: artifact.id, title: "Limits", version: 2, versions: [{ number: 2 }] });
+    expect(files["projects/CRONK/artifacts/1-limits/2/index.html"]).toBe("<p>v2</p>");
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    expect((await elsewhere.upload("/api/import", (await admin.download("/api/export?versions=false")).body)).status).toBe(201);
+    const moved = (await elsewhere.get(`/api/artifacts/${artifact.id}`)).body.artifact;
+    expect(moved).toMatchObject({ version: 2, url: `${OWN_ORIGIN}/artifacts/${artifact.id}` });
+    expect(moved.versions.map((v: { number: number }) => v.number)).toEqual([2]);
+    const page = await elsewhere.download(`${new URL(moved.frameUrl).pathname}index.html`, { host: ARTIFACT_HOST });
+    expect(page.body.toString()).toBe("<p>v2</p>");
   });
 });
