@@ -49,7 +49,7 @@ describe("Project Agent Access", () => {
       await claude.get("/api/projects/CRONK"),
       await claude.get("/api/projects/CRONK/tickets"),
       await claude.get("/api/tickets/CRONK-1"),
-      await claude.get("/api/tickets/CRONK-1/history"),
+      await claude.get("/api/tickets/CRONK-1/changes"),
       await claude.post("/api/projects/CRONK/tickets", { title: "New" }),
     ]) {
       expect(res.status).toBe(404);

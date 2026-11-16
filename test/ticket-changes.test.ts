@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentOf, registerAgent, startInstalledCronk } from "./harness.js";
 
-describe("Ticket history", () => {
+describe("Ticket Changes", () => {
   it("records every change with the Actor who made it and when", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const ada = (await admin.get("/api/me")).body.user;
@@ -15,15 +15,22 @@ describe("Ticket history", () => {
     cronk.clock.advance(60_000);
     await admin.patch("/api/tickets/CRONK-1", { statusId: todo.id });
 
-    const history = await admin.get("/api/tickets/CRONK-1/history");
-    expect(history.status).toBe(200);
+    const res = await admin.get("/api/tickets/CRONK-1/changes");
+    expect(res.status).toBe(200);
     const actor = { kind: "user", id: ada.id, name: "Ada" };
-    expect(history.body.changes).toEqual([
+    expect(res.body.changes).toEqual([
       { at: "2026-01-01T09:00:00.000Z", actor, change: "created", title: "Add login", description: "v1", status: backlog },
       { at: "2026-01-01T09:01:00.000Z", actor, change: "title", from: "Add login", to: "Add sign-in" },
       { at: "2026-01-01T09:01:00.000Z", actor, change: "description", from: "v1", to: "v2" },
       { at: "2026-01-01T09:02:00.000Z", actor, change: "status", from: backlog, to: todo, sentBack: false },
     ]);
+  });
+
+  it("is no longer served at the old /history path", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add login" });
+    expect((await admin.get("/api/tickets/CRONK-1/history")).status).toBe(404);
   });
 
   it("leaves out edits that change nothing", async () => {
@@ -34,7 +41,7 @@ describe("Ticket history", () => {
 
     await admin.patch("/api/tickets/CRONK-1", { title: " Same ", description: "", statusId: backlog.id });
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.map((c: { change: string }) => c.change)).toEqual(["created"]);
   });
 
@@ -49,7 +56,7 @@ describe("Ticket history", () => {
     await claude.patch("/api/tickets/CRONK-1", { title: "Fix the bug" });
     await admin.delete(`/api/agents/${agent.id}`);
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" }, session: { id: claude.sessionId } };
     expect(changes).toEqual([
       expect.objectContaining({ actor, change: "created" }),
@@ -69,7 +76,7 @@ describe("Ticket history", () => {
     // Outside any Agent Session the Agent can't change anything, so every change it makes names its Session.
     expect((await cronk.client(secret).patch("/api/tickets/CRONK-1", { title: "Add sign-in and sign-out" })).status).toBe(403);
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.slice(1).map((c: { actor: { session: unknown } }) => c.actor.session)).toEqual([{ id: session.id }]);
   });
 

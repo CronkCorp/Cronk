@@ -107,7 +107,7 @@ export function InboxPage(props: { address: InboxAddress }) {
       </div>
       <Show state={items}>
         {(loaded) => (
-          <Triage
+          <InboxSplit
             key={`${filter.project ?? ""}/${filter.agent ?? ""}/${filter.kind ?? ""}`}
             items={loaded.filter((item) => !filter.kind || item.kind === filter.kind)}
             kind={filter.kind}
@@ -168,7 +168,7 @@ interface Seen {
 const NOTHING: Record<InboxKind | "all", string> = { all: "Nothing waiting on you", question: "No questions waiting", review: "Nothing to review" };
 
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
-function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; address: InboxAddress; onChanged: () => void }) {
+function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; address: InboxAddress; onChanged: () => void }) {
   const { items } = props;
   const pathTo = (item?: InboxItem) => inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) });
   // Items acted on here leave the list as the action succeeds rather than waiting for the reload, which would
@@ -262,7 +262,7 @@ function Triage(props: { items: InboxItem[]; kind: InboxKind | undefined; addres
   }
 
   return (
-    <div className="inbox-triage">
+    <div className="inbox-view">
       <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
         <section className="inbox-list" aria-label="Inbox items">
           {ordered.length === 0 && <p className="muted inbox-none">Nothing else is waiting.</p>}

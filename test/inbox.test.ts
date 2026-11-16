@@ -159,7 +159,7 @@ describe("Sending a Ticket back", () => {
       ["Add a test.", true],
     ]);
     // Its move back is marked in the history too; an ordinary move isn't.
-    const moves = (await admin.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { change: string }) => c.change === "status");
+    const moves = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { change: string }) => c.change === "status");
     expect(moves.map((c: { to: { category: string }; sentBack: boolean }) => [c.to.category, c.sentBack])).toEqual([
       ["in_review", false],
       ["started", true],

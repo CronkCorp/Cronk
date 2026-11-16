@@ -8,7 +8,7 @@ async function userId(client: { get: (path: string) => Promise<{ body: any }> },
 }
 
 describe("Ticket Delegate", () => {
-  it("can be one of the Assignee's own Agents, and is recorded in the history", async () => {
+  it("can be one of the Assignee's own Agents, and is recorded as a Change", async () => {
     const { admin } = await startInstalledCronk();
     await projectWithTickets(admin, "CRONK", 1);
     const claude = await registerAgent(admin, "claude-laptop");
@@ -21,7 +21,7 @@ describe("Ticket Delegate", () => {
 
     const cleared = await admin.patch("/api/tickets/CRONK-1", { delegateId: null });
     expect(cleared.body.ticket.delegate).toBeNull();
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.slice(1)).toMatchObject([
       { change: "assignee" },
       { change: "delegate", from: null, to: { id: claude.agentId, name: "claude-laptop" } },
@@ -81,7 +81,7 @@ describe("Ticket Delegate, further", () => {
 
     for (const key of ["CRONK-1", "CRONK-2"]) {
       expect((await admin.get(`/api/tickets/${key}`)).body.ticket.delegate).toBeNull();
-      const { changes } = (await admin.get(`/api/tickets/${key}/history`)).body;
+      const { changes } = (await admin.get(`/api/tickets/${key}/changes`)).body;
       expect(changes.at(-1)).toMatchObject({
         actor: { kind: "user", name: "Ada" },
         change: "delegate",
@@ -104,18 +104,18 @@ describe("Ticket Delegate, further", () => {
     await projectWithTickets(admin, "OLD", 1);
     await admin.patch("/api/tickets/OLD-1", { assigneeId: adaId, delegateId: claude.agentId });
     await admin.patch("/api/projects/OLD", { archived: true });
-    const historyLength = async (key: string) => (await admin.get(`/api/tickets/${key}/history`)).body.changes.length;
-    const before = { "CRONK-2": await historyLength("CRONK-2"), "CRONK-3": await historyLength("CRONK-3") };
+    const changeCount = async (key: string) => (await admin.get(`/api/tickets/${key}/changes`)).body.changes.length;
+    const before = { "CRONK-2": await changeCount("CRONK-2"), "CRONK-3": await changeCount("CRONK-3") };
 
     await admin.delete(`/api/agents/${claude.agentId}`);
 
     for (const key of ["CRONK-1", "OLD-1"]) {
       expect((await admin.get(`/api/tickets/${key}`)).body.ticket.delegate).toBeNull();
-      expect((await admin.get(`/api/tickets/${key}/history`)).body.changes.at(-1)).toMatchObject({ change: "delegate", to: null });
+      expect((await admin.get(`/api/tickets/${key}/changes`)).body.changes.at(-1)).toMatchObject({ change: "delegate", to: null });
     }
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.delegate).toEqual({ id: otherOfAdas.agentId, name: "claude-desktop" });
     expect((await admin.get("/api/tickets/CRONK-3")).body.ticket.delegate).toEqual({ id: bobsAgent.agentId, name: "bob-bot" });
-    for (const [key, length] of Object.entries(before)) expect(await historyLength(key)).toBe(length);
+    for (const [key, length] of Object.entries(before)) expect(await changeCount(key)).toBe(length);
   });
 
   it("stays, with the Agent, when clearing it fails partway through the removal", async () => {

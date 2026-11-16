@@ -397,7 +397,7 @@ describe("Claims and access", () => {
 });
 
 describe("Context on claim", () => {
-  it("gives the Claimed Ticket with its parent, Sub-Tickets, related Tickets, Reports and the Documents that mention it", async () => {
+  it("gives the Claimed Ticket with its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and the Documents that mention it", async () => {
     const { cronk, admin, session } = await delegatedSetup(2);
     await admin.post("/api/tickets/CRONK-1/sub-tickets", { title: "Wire the cache", description: "Put the cache in front of search." });
     await admin.post("/api/tickets/CRONK-3/sub-tickets", { title: "Measure hits" });
@@ -416,6 +416,8 @@ describe("Context on claim", () => {
     await admin.post("/api/projects", { name: "Hidden", key: "HIDDEN" });
     await admin.post("/api/projects/HIDDEN/documents", { title: "Hidden notes", body: "About CRONK-3." });
     await admin.patch("/api/projects/HIDDEN", { agentAccess: "none" });
+    const spec = (await admin.post("/api/projects/CRONK/documents", { title: "Spec", body: "No key in here." })).body.document.id;
+    expect((await admin.post(`/api/tickets/CRONK-3/documents/${spec}`)).status).toBe(201);
 
     const agent = await session();
     const claimed = (await agent.post("/api/tickets/CRONK-3/claim")).body;
@@ -424,6 +426,7 @@ describe("Context on claim", () => {
     expect(claimed.relations.relatesTo.map((t: { key: string }) => t.key)).toEqual(["CRONK-2"]);
     const documents = [
       { id: report, title: "First pass", projectKey: "CRONK", ticketKey: "CRONK-3", version: 1 },
+      { id: spec, title: "Spec", projectKey: "CRONK", ticketKey: null, version: 1 },
       { id: runbook, title: "Runbook", projectKey: null, ticketKey: null, version: 1 },
       { id: design, title: "Design", projectKey: "CRONK", ticketKey: null, version: 1 },
     ];

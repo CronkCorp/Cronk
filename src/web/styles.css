@@ -354,7 +354,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .others-badge { font-size: 12px; font-weight: 600; }
 .tokens-dialog { display: flex; flex-direction: column; gap: 12px; }
 .token-list { list-style: none; margin: 0; padding: 0; }
-.work-log { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); }
+.record-log { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); }
 .token { display: flex; align-items: center; gap: 8px; }
 .secret { display: flex; flex-direction: column; gap: 8px; }
 .secret p { margin: 0; }
@@ -501,7 +501,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .filter-chip { font: inherit; font-size: 12px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .filter-chip:hover { background: var(--surface-2); }
 .filter-chip.pressed { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.inbox-triage { display: flex; flex-direction: column; gap: 8px; }
+.inbox-view { display: flex; flex-direction: column; gap: 8px; }
 .inbox-split { display: flex; align-items: stretch; min-height: 560px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .inbox-list { width: 360px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .inbox-group-head { margin: 0; padding: 4px 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--border); }

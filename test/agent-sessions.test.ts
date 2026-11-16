@@ -98,8 +98,8 @@ describe("Agent Sessions", () => {
     const script = cronk.client(secret, { "cronk-agent-session": started.body.session.id });
     const created = await script.post("/api/projects/CRONK/tickets", { title: "Nightly report" });
     expect(created.status).toBe(201);
-    const history = (await admin.get(`/api/tickets/${created.body.ticket.key}/history`)).body.changes;
-    expect(history[0].actor).toMatchObject({ kind: "agent", name: "nightly-script", session: { id: started.body.session.id } });
+    const changes = (await admin.get(`/api/tickets/${created.body.ticket.key}/changes`)).body.changes;
+    expect(changes[0].actor).toMatchObject({ kind: "agent", name: "nightly-script", session: { id: started.body.session.id } });
 
     expect((await script.delete("/api/agent-sessions/current")).status).toBe(204);
     expect((await script.post("/api/projects/CRONK/tickets", { title: "After the end" })).status).toBe(410);
