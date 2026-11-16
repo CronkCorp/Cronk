@@ -9,14 +9,21 @@ import { TextArea, messageOf } from "./ui.js";
 
 /**
  * Settling a save refused because someone saved since: what changed between two Versions, and the
- * choice for each part both edits changed. Documents and Guidance share it, as they share the merge.
+ * choice for each part both edits changed. Documents, Decisions and Guidance share it, as they share the merge.
  */
 
-/** One side of a stale save, as `StaleSaveNotice` shows it: a Version's number and text, and a Document's title. */
+/**
+ * Fields beyond the title and text that merge whole, such as a Decision's group, by the label the
+ * editor shows them under, each as the text the User edits.
+ */
+export type Fields = Record<string, string>;
+
+/** One side of a stale save, as `StaleSaveNotice` shows it: a Version's number and text, a Document's title, and a Decision's other fields. */
 export interface SavedText {
   number: number;
   title?: string;
   body: string;
+  fields?: Fields;
 }
 
 /**
@@ -77,13 +84,14 @@ export function DiscardMine(props: { onClick: () => void; disabled?: boolean }) 
   );
 }
 
-/** A draft as settling a stale save sees it: its text, and for a Document its title. */
+/** A draft as settling a stale save sees it: its text, for a Document or Decision its title, and for a Decision its other fields. */
 export interface Draft {
   title?: string;
   text: string;
+  fields?: Fields;
 }
 
-/** A merge of a refused draft, adapted from a Document's or Guidance's to one shape. */
+/** A merge of a refused draft, adapted from a Document's, Decision's or Guidance's to one shape. */
 export interface StaleMerge {
   /** The Version editing started from. */
   base: SavedText;
@@ -109,7 +117,7 @@ interface OtherEdit extends Pick<StaleMerge, "base" | "theirs" | "by"> {
  * The draft of an editor whose save names the Version editing started from, and what to do when
  * that save is refused because someone saved since: show their edit, and merge it into the draft
  * section by section, leaving sections both changed differently for the User to choose or combine.
- * Documents and Guidance share it; each passes its own save and merge calls, adapted to a `Draft`.
+ * Documents, Decisions and Guidance share it; each passes its own save and merge calls, adapted to a `Draft`.
  * The merge call runs once per refused save and may also tell the page what the Version now is.
  * Hands back the draft, the save handler, and the props for `StaleSaveNotice`, `ResolveMerge` and
  * `DiscardMine` while there is a refused save to settle.
@@ -128,9 +136,14 @@ export function useStaleSave<D extends Draft, T>(options: {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
-  /** Replaces the draft's text, and its title when it has one. */
-  const replaceDraft = (text: string, title: string | undefined) =>
-    setDraft((d) => ({ ...d, text, ...(d.title !== undefined && title !== undefined && { title }) }));
+  /** Replaces the draft's text, and its title and other fields when it has them. */
+  const replaceDraft = (text: string, title: string | undefined, fields: Fields | undefined) =>
+    setDraft((d) => ({
+      ...d,
+      text,
+      ...(d.title !== undefined && title !== undefined && { title }),
+      ...(d.fields !== undefined && fields !== undefined && { fields: { ...d.fields, ...fields } }),
+    }));
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -148,7 +161,7 @@ export function useStaleSave<D extends Draft, T>(options: {
         const { base: started, theirs, by } = m;
         setOther({ base: started, theirs, by, conflicted: m.merged === null });
         if (m.merged) {
-          replaceDraft(m.merged.text, m.merged.title);
+          replaceDraft(m.merged.text, m.merged.title, m.merged.fields);
           setBase(m.theirs.number);
         } else {
           setResolving({ merge: m.merge, onto: m.theirs.number });
@@ -162,7 +175,7 @@ export function useStaleSave<D extends Draft, T>(options: {
   };
 
   const takeTheirs = (theirs: SavedText) => {
-    replaceDraft(theirs.body, theirs.title);
+    replaceDraft(theirs.body, theirs.title, theirs.fields);
     setBase(theirs.number);
     setResolving(undefined);
     setOther(undefined);
@@ -191,7 +204,7 @@ export function useStaleSave<D extends Draft, T>(options: {
       mine: draft.text,
       theirsLabel: `${other.by.name}, Version ${other.theirs.number}`,
       onResolved: (resolved) => {
-        replaceDraft(resolved.body, resolved.title);
+        replaceDraft(resolved.body, resolved.title, resolved.fields);
         setBase(resolving.onto);
         setResolving(undefined);
       },
@@ -206,7 +219,16 @@ export function useStaleSave<D extends Draft, T>(options: {
  * One conflicting part as a panel: the User's side and theirs next to each other, buttons to take
  * either or both, and the text to keep, which starts as the User's own.
  */
-function ConflictChoice(props: { label: string; theirsLabel: string; conflict: Conflict; value: string; onChange: (v: string) => void; rows: number }) {
+function ConflictChoice(props: {
+  label: string;
+  theirsLabel: string;
+  conflict: Conflict;
+  value: string;
+  onChange: (v: string) => void;
+  rows: number;
+  /** Whether to offer keeping both sides; true unless said otherwise. */
+  combinable?: boolean;
+}) {
   const c = props.conflict;
   const side = (name: string, text: string | null) => (
     <section className="merge-side" aria-label={name}>
@@ -227,7 +249,7 @@ function ConflictChoice(props: { label: string; theirsLabel: string; conflict: C
       <div className="actions merge-choices">
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.mine ?? "")}>Use mine</Button>
         <Button type="button" variant="secondary" onClick={() => props.onChange(c.theirs ?? "")}>Use theirs</Button>
-        <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>
+        {props.combinable !== false && <Button type="button" variant="secondary" onClick={() => props.onChange(c.both)}>Use both</Button>}
         <span className="muted">or edit below</span>
       </div>
       <TextArea label={`Keep for ${props.label}`} value={props.value} onChange={props.onChange} rows={props.rows} />
@@ -235,20 +257,33 @@ function ConflictChoice(props: { label: string; theirsLabel: string; conflict: C
   );
 }
 
-/** What `ResolveMerge` settles: a merge's sections, and for a Document its title. */
+/** A field of a merge that merges whole, such as a Decision's group: its merged text, or the conflict a User must settle. */
+export interface MergedField {
+  /** The label the editor shows it under, which names it in the draft's `fields`. */
+  label: string;
+  /** The merged text; null when it conflicts. */
+  text: string | null;
+  /** Set when both sides changed it differently. */
+  conflict: Conflict | null;
+  /** Whether keeping both sides makes sense, as it does for a list; false offers only one side or the other. */
+  combinable: boolean;
+}
+
+/** What `ResolveMerge` settles: a merge's sections, for a Document or Decision its title, and for a Decision its other fields. */
 interface Mergeable {
   title?: string | null;
   titleConflict?: Conflict | null;
+  fields?: MergedField[];
   sections: MergedSection[];
 }
 
-/** How many parts of a merge, its title included, need the User's choice. */
+/** How many parts of a merge, its title and other fields included, need the User's choice. */
 function conflictCount(m: Mergeable): number {
-  return (m.titleConflict ? 1 : 0) + m.sections.filter((s) => s.conflict).length;
+  return (m.titleConflict ? 1 : 0) + (m.fields ?? []).filter((f) => f.conflict).length + m.sections.filter((s) => s.conflict).length;
 }
 
 /**
- * Lets the User settle each conflict of a merge, then hands back the merged title (empty without one) and body.
+ * Lets the User settle each conflict of a merge, then hands back the merged title (empty without one), other fields and body.
  * What merged cleanly shows as a folded diff from `mine`, the User's draft; `theirsLabel` names the other side.
  * `onBack` leaves without settling, back to the User's own draft; `onDiscardMine` takes their Version instead.
  */
@@ -256,12 +291,13 @@ export function ResolveMerge(props: {
   merge: Mergeable;
   mine: string;
   theirsLabel: string;
-  onResolved: (r: { title: string; body: string }) => void;
+  onResolved: (r: { title: string; body: string; fields: Fields }) => void;
   onBack: () => void;
   onDiscardMine: () => void;
 }) {
   const m = props.merge;
   const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
+  const [fields, setFields] = useState<Fields>(Object.fromEntries((m.fields ?? []).map((f) => [f.label, f.text ?? f.conflict?.mine ?? ""])));
   const initial = m.sections.map((s) => s.text ?? s.conflict?.mine ?? "");
   const [kept, setKept] = useState<string[]>(initial);
   const keep = (i: number, text: string) => setKept(kept.map((k, at) => (at === i ? text : k)));
@@ -273,11 +309,25 @@ export function ResolveMerge(props: {
       className="resolve-merge"
       onSubmit={(event) => {
         event.preventDefault();
-        props.onResolved({ title, body: kept.join("") });
+        props.onResolved({ title, body: kept.join(""), fields });
       }}
     >
       {m.titleConflict && (
         <ConflictChoice label="Title" theirsLabel={props.theirsLabel} conflict={m.titleConflict} value={title} onChange={setTitle} rows={1} />
+      )}
+      {(m.fields ?? []).map((f) =>
+        f.conflict ? (
+          <ConflictChoice
+            key={f.label}
+            label={f.label}
+            theirsLabel={props.theirsLabel}
+            conflict={f.conflict}
+            combinable={f.combinable}
+            value={fields[f.label]!}
+            onChange={(v) => setFields((all) => ({ ...all, [f.label]: v }))}
+            rows={1}
+          />
+        ) : null,
       )}
       {m.sections.map((s, i) =>
         s.conflict ? (
@@ -303,7 +353,7 @@ export function ResolveMerge(props: {
 const CONTEXT = 3;
 
 /** What changed from one Version (or edit) to another, line by line. */
-export function VersionDiff(props: { before: { title?: string; body: string }; after: { title?: string; body: string }; label: string }) {
+export function VersionDiff(props: { before: { title?: string; body: string; fields?: Fields }; after: { title?: string; body: string; fields?: Fields }; label: string }) {
   const lines = diffLines(props.before.body, props.after.body);
   const changed = lines.map((l) => l.kind !== "same");
   const near = (i: number) => changed.slice(Math.max(0, i - CONTEXT), i + CONTEXT + 1).some(Boolean);
@@ -328,6 +378,12 @@ export function VersionDiff(props: { before: { title?: string; body: string }; a
       {props.before.title !== props.after.title && (
         <p>Title: <del>{props.before.title}</del> → <ins>{props.after.title}</ins></p>
       )}
+      {Object.entries(props.after.fields ?? {}).map(([label, after]) => {
+        const before = props.before.fields?.[label] ?? "";
+        return before === after ? null : (
+          <p key={label}>{label}: <del>{before || "(none)"}</del> → <ins>{after || "(none)"}</ins></p>
+        );
+      })}
       {changed.some(Boolean) ? (
         <ol className="diff-lines" aria-label={props.label}>{rows}</ol>
       ) : (

@@ -42,7 +42,7 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 - **Sign-in.** Email and password, with optional OIDC in Phase 3.
 - **Search.** Postgres full-text search plus context on claim. Semantic search is optional and off by default; Cronk must never require an extra AI service. Full-text search uses Postgres's `english` configuration; changing it means rebuilding the indexes.
 - **Notifications.** In-app live updates. Outside the app only from Phase 3, via webhooks or optional email, defaulting to urgent events only. No native apps for now.
-- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders. Export and import are Admin-only. Import gives Agents and Agent Sessions new ids.
+- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders. Export and import are Admin-only, except that anyone who can read a scope can download its Terms alone as `GLOSSARY.md` and its Decisions alone as `docs/adr/`. Import gives Agents and Agent Sessions new ids.
 - **Deployment.** Docker Compose first; standalone servers and Proxmox later, so nothing may assume Docker (ADR 0006).
 
 ## Phase 1: Core loop

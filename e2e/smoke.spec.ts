@@ -1552,3 +1552,18 @@ async function tarGz(files: Record<string, string>): Promise<Buffer> {
   for await (const chunk of pack) chunks.push(Buffer.from(chunk as Uint8Array));
   return gzipSync(Buffer.concat(chunks));
 }
+
+test("download a Project's Decisions as docs/adr from its register", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Decision export", key: "ADR" } });
+  await page.request.post("/api/projects/ADR/decisions", { data: { title: "Limits in the API", body: "Limit sign-ins." } });
+
+  await page.goto("/decisions?project=ADR");
+  const head = page.locator(".page-head .actions");
+  // Export comes before New Decision, the primary action, last.
+  await expect(head.getByRole("link").or(head.getByRole("button")).last()).toHaveText("New Decision");
+  const downloading = page.waitForEvent("download");
+  await head.getByRole("link", { name: "Export docs/adr" }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toMatch(/^cronk-ADR-adr-.*\.tar\.gz$/);
+});

@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
-import { transaction } from "../db/database.js";
+import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
-import { ARCHIVE_TYPES, archiveBody, packFolder, unpackFolder } from "./archive.js";
-import { exportFolder } from "./export.js";
+import { ARCHIVE_TYPES, archiveBody, packFolder, unpackFolder, type Folder } from "./archive.js";
+import { exportDecisionsFolder, exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 import { listRenamedIds } from "./renamed-ids.js";
@@ -34,6 +34,7 @@ export function portabilityRoutes(ctx: AppContext) {
     // Archives arrive as raw bytes; this parser applies only to the routes registered here.
     app.addContentTypeParser(ARCHIVE_TYPES, { parseAs: "buffer", bodyLimit: MAX_ARCHIVE_BYTES }, (_request, body, done) => done(null, body));
     exportRoutes(app, ctx);
+    decisionExportRoutes(app, ctx);
     importRoute(app, ctx);
     markdownImportRoutes(app, ctx);
   };
@@ -42,18 +43,8 @@ export function portabilityRoutes(ctx: AppContext) {
 /** Exporting the Workspace or one Project. */
 function exportRoutes(app: FastifyInstance, ctx: AppContext) {
   /** Answers with the export of the Workspace, or of one Project, as a gzipped tar archive to save. */
-  const sendExport = async (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null, versions: boolean) => {
-    const now = ctx.clock.now();
-    const folder = await transaction(ctx.db, async (tx) => {
-      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
-      return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }, ctx.files);
-    });
-    const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
-    return reply
-      .header("content-type", "application/gzip")
-      .header("content-disposition", `attachment; filename="cronk-${project ? project.key : "workspace"}-${stamp}.tar.gz"`)
-      .send(await packFolder(folder));
-  };
+  const sendExport = (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null, versions: boolean) =>
+    sendArchive(ctx, reply, project?.key ?? "workspace", (tx, now) => exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }, ctx.files));
 
   app.get<{ Querystring: { versions?: boolean } }>(
     "/api/export",
@@ -88,6 +79,61 @@ function exportRoutes(app: FastifyInstance, ctx: AppContext) {
       return sendExport(reply, user.workspaceId, project, request.query.versions ?? true);
     },
   );
+}
+
+/** Downloading one scope's Decisions as a `docs/adr/` folder, for anyone who can read them. */
+function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
+  /** Answers with the Decisions of the Workspace (project null) or a Project, as a gzipped tar archive to save. */
+  const sendDecisions = (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null) =>
+    sendArchive(ctx, reply, `${project?.key ?? "workspace"}-adr`, (tx, now) => exportDecisionsFolder(tx, workspaceId, project, now, ctx.files));
+
+  app.get(
+    "/api/workspace/decisions/export",
+    {
+      schema: {
+        description: `Exports the Workspace's own Decisions, those in no Project, as a \`docs/adr/\` folder. ${DECISIONS_EXPORT_FORMAT}`,
+        response: { 200: decisionsExportAnswer, ...errors(401, 403, 410) },
+      },
+    },
+    async (request, reply) => {
+      const actor = await requireActor(ctx, request);
+      await requireWorkspaceAccess(ctx.db, actor, "read");
+      return sendDecisions(reply, actingUser(actor).workspaceId, null);
+    },
+  );
+
+  app.get<{ Params: { key: string } }>(
+    "/api/projects/:key/decisions/export",
+    {
+      schema: {
+        description: `Exports one Project's Decisions as a \`docs/adr/\` folder. ${DECISIONS_EXPORT_FORMAT}`,
+        params: pathParams({ key: projectKeyParam }),
+        response: { 200: decisionsExportAnswer, ...errors(401, 403, 404, 410) },
+      },
+    },
+    async (request, reply) => {
+      const actor = await requireActor(ctx, request);
+      const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+      return sendDecisions(reply, actingUser(actor).workspaceId, project);
+    },
+  );
+}
+
+/**
+ * Answers with the folder `build` makes as a gzipped tar archive to save, named `cronk-<name>-<stamp>.tar.gz`.
+ * It is built in a read-only, repeatable-read transaction so its files agree with each other.
+ */
+async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<Folder>) {
+  const now = ctx.clock.now();
+  const folder = await transaction(ctx.db, async (tx) => {
+    await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    return build(tx, now);
+  });
+  const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
+  return reply
+    .header("content-type", "application/gzip")
+    .header("content-disposition", `attachment; filename="cronk-${name}-${stamp}.tar.gz"`)
+    .send(await packFolder(folder));
 }
 
 /** Importing an export. */
@@ -207,6 +253,15 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
 
 const EXPORT_FORMAT =
   "The answer is a gzipped tar archive of Markdown files with YAML frontmatter, laid out as its README.md describes; POST /api/import reads it back.";
+
+const DECISIONS_EXPORT_FORMAT =
+  "Any User or Agent who can read the Decisions can download it. The answer is a gzipped tar archive holding only `docs/adr/NNNN-<title>.md`, " +
+  "one per Decision, each the same file GET /api/export or GET /api/projects/{key}/export writes for it, without its Versions; empty when there are none.";
+
+const decisionsExportAnswer = {
+  description: "The Decisions, as a gzipped tar archive of `docs/adr/` to save",
+  content: { "application/gzip": { schema: { type: "string", format: "binary" } } },
+};
 
 const versionsQuery = {
   type: "object",

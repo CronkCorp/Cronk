@@ -21,6 +21,7 @@ import type {
   DocumentTreeEntry,
   Guidance,
   GuidanceMerge,
+  DecisionMerge,
   GuidanceVersion,
   InboxItem,
   InboxKind,
@@ -35,6 +36,7 @@ import type {
   Merge,
   MergedSection,
   Conflict,
+  FieldConflict,
   Priority,
   Project,
   ProtectionMarking,
@@ -90,6 +92,7 @@ export type {
   DocumentTreeEntry,
   Guidance,
   GuidanceMerge,
+  DecisionMerge,
   GuidanceVersion,
   InboxItem,
   InboxKind,
@@ -104,6 +107,7 @@ export type {
   Merge,
   MergedSection,
   Conflict,
+  FieldConflict,
   Priority,
   Project,
   ProtectionMarking,
@@ -167,6 +171,9 @@ export const staleVersionOf = (err: unknown): Version | undefined =>
 
 /** Where a Project's API lives, for its page tree or Decisions, or the Workspace's without a Project key. */
 const scopePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
+/** Where the scope's own Decisions download as a `docs/adr/` archive. */
+export const decisionsExportUrl = (projectKey?: string) => `${scopePath(projectKey)}/decisions/export`;
+
 const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}`;
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;
@@ -294,6 +301,12 @@ export const api = {
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveDecision: (key: string, input: { baseVersion: number; title?: string; body?: string; group?: string | null; supersedes?: string[] }) =>
     request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
+  /** Merges an edit started from `baseVersion` with the current Version, without saving: the body section by section, the other fields whole. */
+  mergeDecision: (key: string, input: { baseVersion: number; title: string; body: string; group: string | null; supersedes: string[] }) =>
+    request<{ merge: DecisionMerge }>("POST", `${decisionPath(key)}/merge`, input).then((r) => r.merge),
+  /** One Version of a Decision, with its body. */
+  decisionVersion: (key: string, number: number) =>
+    request<{ version: DecisionVersion }>("GET", `${decisionPath(key)}/versions/${number}`).then((r) => r.version),
   /** Changes a Decision's status; rejecting needs a `reason`, which reaches the Agent that proposed it. */
   setDecisionStatus: (key: string, status: DecisionStatus, reason?: string) =>
     request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status, ...(reason === undefined ? {} : { reason }) }).then((r) => r.decision),
