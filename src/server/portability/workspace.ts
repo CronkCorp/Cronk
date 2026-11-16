@@ -1,7 +1,6 @@
 import { bareOrigins } from "../files/origins.js";
 import { agentAccessSchema } from "../schemas.js";
-import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
-import { getWorkspace, updateWorkspace } from "../workspace/workspaces.js";
+import { getWorkspace, pickSettings, updateWorkspace, WORKSPACE_SETTINGS, type WorkspaceSettings } from "../workspace/workspaces.js";
 import type { ExportContext } from "./export-context.js";
 import { integer, oneOf, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -14,11 +13,7 @@ export async function exportWorkspaceSettings(ctx: ExportContext): Promise<void>
   ctx.add("workspace.md", {
     name: w.name,
     agentAccess: w.agentAccess,
-    silenceThresholdSeconds: w.silenceThresholdSeconds,
-    attachmentMaxBytes: w.attachmentMaxBytes,
-    transcriptMaxBytes: w.transcriptMaxBytes,
-    artifactMaxBytes: w.artifactMaxBytes,
-    artifactMaxFiles: w.artifactMaxFiles,
+    ...pickSettings(w),
     artifactAllowedOrigins: w.artifactAllowedOrigins,
     artifactExtraOriginsAllowed: w.artifactExtraOriginsAllowed,
   });
@@ -30,15 +25,8 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
   await updateWorkspace(ctx.db, ctx.workspaceId, {
     name: text(w.data.name, "workspace.md name"),
     agentAccess: oneOf(w.data.agentAccess, agentAccessSchema.enum, "workspace.md agentAccess"),
-    silenceThresholdSeconds: integer(w.data.silenceThresholdSeconds, "workspace.md silenceThresholdSeconds"),
-    // An export from before Attachments has none; the Workspace keeps its own.
-    ...(w.data.attachmentMaxBytes !== undefined && { attachmentMaxBytes: integer(w.data.attachmentMaxBytes, "workspace.md attachmentMaxBytes") }),
-    // Exports from before Transcripts leave it out, keeping the default.
-    ...(w.data.transcriptMaxBytes !== undefined && { transcriptMaxBytes: transcriptMaxBytes(w.data.transcriptMaxBytes) }),
-    // Exports from before Artifacts leave their limits out, keeping the defaults.
-    ...(w.data.artifactMaxBytes !== undefined && { artifactMaxBytes: positive(w.data.artifactMaxBytes, "workspace.md artifactMaxBytes") }),
-    ...(w.data.artifactMaxFiles !== undefined && { artifactMaxFiles: positive(w.data.artifactMaxFiles, "workspace.md artifactMaxFiles") }),
-    // ...and so do those from before the Admin's allow-list.
+    ...settings(w.data),
+    // Exports from before the Admin's allow-list leave it out, keeping the Workspace's own.
     ...(w.data.artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: bareOrigins(
         Array.isArray(w.data.artifactAllowedOrigins) && w.data.artifactAllowedOrigins.every((v) => typeof v === "string")
           ? (w.data.artifactAllowedOrigins as string[])
@@ -52,18 +40,18 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
   });
 }
 
-/** The Transcript limit `workspace.md` sets, within the bounds the API allows. */
-function transcriptMaxBytes(value: unknown): number {
-  const bytes = integer(value, "workspace.md transcriptMaxBytes");
-  if (bytes < MIN_TRANSCRIPT_BYTES || bytes > MAX_TRANSCRIPT_BYTES) {
-    refuse(`workspace.md transcriptMaxBytes must be from ${MIN_TRANSCRIPT_BYTES} to ${MAX_TRANSCRIPT_BYTES}`);
+/**
+ * The numeric settings `workspace.md` sets, each within the bounds the API allows. One it leaves out, as an export
+ * from before that setting does, keeps the Workspace's own value.
+ */
+function settings(data: Record<string, unknown>): Partial<WorkspaceSettings> {
+  const set: Partial<WorkspaceSettings> = {};
+  for (const { name, schema } of WORKSPACE_SETTINGS) {
+    if (data[name] === undefined) continue;
+    const where = `workspace.md ${name}`;
+    const value = integer(data[name], where);
+    if (value < schema.minimum || value > schema.maximum) refuse(`${where} must be from ${schema.minimum} to ${schema.maximum}`);
+    set[name] = value;
   }
-  return bytes;
-}
-
-/** A limit `workspace.md` sets, which must be a whole number above 0. */
-function positive(value: unknown, where: string): number {
-  const n = integer(value, where);
-  if (n < 1) refuse(`${where} must be above 0`);
-  return n;
+  return set;
 }

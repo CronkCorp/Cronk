@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
 import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
@@ -305,11 +306,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   Workspace: object({
     name: { type: "string" },
     agentAccess: agentAccessSchema,
-    silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
-    attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
-    transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
-    artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
-    artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
+    ...Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, { type: "integer", description: s.returned }])),
     artifactAllowedOrigins: {
       type: "array",
       items: { type: "string" },

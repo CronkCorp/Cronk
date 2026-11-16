@@ -1125,3 +1125,28 @@ describe("Importing Artifacts", () => {
     expect(res.body.error).toMatch(/index\.html/);
   });
 });
+
+describe("the Workspace's settings in an export", () => {
+  /** A Workspace export from a fresh installation, with `workspace.md` edited. */
+  async function exportWith(edit: (data: any) => void) {
+    const { admin } = await startInstalledCronk("Acme");
+    const files = await untarGz((await admin.download("/api/export")).body);
+    const { data, body } = markdown(files["workspace.md"]);
+    edit(data);
+    return tarGz({ ...files, "workspace.md": `---\n${stringify(data)}---\n${body}` });
+  }
+
+  it("are refused on import outside the bounds the API allows, naming the setting and its range", async () => {
+    const { admin } = await startInstalledCronk("Elsewhere");
+
+    const tooQuiet = await admin.upload("/api/import", await exportWith((d) => (d.silenceThresholdSeconds = 59)));
+    expect(tooQuiet.status).toBe(400);
+    expect(tooQuiet.body.error).toMatch(/workspace\.md silenceThresholdSeconds must be from 60 to 86400/);
+
+    const tooSmall = await admin.upload("/api/import", await exportWith((d) => (d.attachmentMaxBytes = 1024 * 1024 - 1)));
+    expect(tooSmall.status).toBe(400);
+    expect(tooSmall.body.error).toMatch(/workspace\.md attachmentMaxBytes must be from 1048576 to 10737418240/);
+
+    expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);
+  });
+});
