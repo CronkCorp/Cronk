@@ -519,12 +519,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerGroupedTool(server, ctx, {
     name: "attachments",
     description:
-      "Attachments: plain files on a Ticket, such as screenshots, recordings, logs or PDFs, kept as evidence with the work. " +
-      "Whoever can read the Ticket can read them. Attach one to a Ticket you hold the Claim on, as text (`content`) or as base64 " +
-      "(`contentBase64`) for anything else; each may be as large as the Workspace allows (100 MB unless an Admin changed it), " +
-      "and at most 100 MB through this tool. For a larger file, POST it to /api/tickets/{key}/attachments?name=<name> with the HTTP API.",
+      "Attachments: plain files on a Ticket, a Document or Report, or a Comment, such as screenshots, recordings, logs or PDFs, kept as " +
+      "evidence with the work. Whoever can read the item can read them, and listing a Ticket's includes those in its Comments and Reports. " +
+      "Attach one to a Ticket you hold the Claim on, a Document that isn't Protected (a Report only while holding its Ticket's Claim), or " +
+      "a Comment you posted, as text (`content`) or as base64 (`contentBase64`) for anything else; each may be as large as the Workspace " +
+      "allows (100 MB unless an Admin changed it), and at most 100 MB through this tool. For a larger file, POST it to " +
+      "/api/tickets/{key}/attachments, /api/documents/{id}/attachments or /api/comments/{id}/attachments with ?name=<name> over the HTTP API. " +
+      "To show an image in a Document, put ![name](/api/attachments/{id}/file) in its Markdown; every Version keeps showing it.",
     parameters: {
       key: z.string().optional().describe("Ticket key, such as CRONK-12 (attach, list)"),
+      documentId: z.string().optional().describe("Document or Report id, instead of a key (attach, list)"),
+      commentId: z.string().optional().describe("The id of a Comment you posted, instead of a key (attach)"),
       name: z.string().optional().describe("The file's name, such as sign-in-flood.log or proxy-ip.png (attach)"),
       content: z.string().optional().describe("The file's text, stored as UTF-8 (attach)"),
       contentBase64: z.string().optional().describe("The file's bytes as base64, instead of content (attach)"),
@@ -535,22 +540,27 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     actions: {
       list: {
-        description: "a Ticket's Attachments, in the order they were attached; download one at GET /api/attachments/{id}/file",
+        description:
+          "a Ticket's or Document's Attachments, those in its Comments (and a Ticket's Reports) included, in the order they were attached; " +
+          "download one at GET /api/attachments/{id}/file",
         writes: false,
-        run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "list"))}/attachments`),
+        run: (api, a) => {
+          if (a.commentId !== undefined || (a.key === undefined) === (a.documentId === undefined)) throw new ToolError("The list action needs a key or a documentId");
+          return api("GET", attachmentsPath(a, "list"));
+        },
       },
       attach: {
-        description: "attach a file to a Ticket you hold the Claim on",
+        description: "attach a file to a Ticket you hold the Claim on, a Document or Report, or a Comment you posted",
         writes: true,
         run: (api, a) => {
-          const key = required(a.key, "a key", "attach");
+          const path = attachmentsPath(a, "attach");
           const name = required(a.name, "a name", "attach");
           if ((a.content === undefined) === (a.contentBase64 === undefined)) throw new ToolError("The attach action needs either content or contentBase64, not both");
           const file =
             a.content !== undefined
               ? new FileBody(Buffer.from(a.content, "utf8"), a.contentType ?? "text/plain")
               : new FileBody(Buffer.from(a.contentBase64!, "base64"), a.contentType ?? "application/octet-stream");
-          return api("POST", `/api/tickets/${encodeURIComponent(key)}/attachments?name=${encodeURIComponent(name)}`, file);
+          return api("POST", `${path}?name=${encodeURIComponent(name)}`, file);
         },
       },
     },
@@ -583,6 +593,14 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
 function commentsPath(a: { key?: string | undefined; documentId?: string | undefined }, action: string): string {
   if ((a.key === undefined) === (a.documentId === undefined)) throw new ToolError(`The ${action} action needs a key or a documentId`);
   return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
+}
+
+/** Where the Attachments of the one Ticket (`key`), Document or Comment the arguments name are. */
+function attachmentsPath(a: { key?: string | undefined; documentId?: string | undefined; commentId?: string | undefined }, action: string): string {
+  if ([a.key, a.documentId, a.commentId].filter((v) => v !== undefined).length !== 1) throw new ToolError(`The ${action} action needs one of key, documentId or commentId`);
+  if (a.key !== undefined) return `/api/tickets/${encodeURIComponent(a.key)}/attachments`;
+  if (a.documentId !== undefined) return `/api/documents/${encodeURIComponent(a.documentId)}/attachments`;
+  return `/api/comments/${encodeURIComponent(a.commentId!)}/attachments`;
 }
 
 /** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */
