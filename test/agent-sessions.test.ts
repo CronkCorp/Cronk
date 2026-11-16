@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("Agent Sessions", () => {
   it("are started only by Agents, and shown with their Agent to its Owner and to Admins", async () => {
@@ -30,6 +30,56 @@ describe("Agent Sessions", () => {
 
     cronk.clock.advance(5 * 60_000);
     expect((await inSession.get("/api/agent-sessions/current")).status).toBe(410);
+  });
+
+  it("answer only the token that started them: another token of the same Agent is told the Session has ended", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const claude = await registerAgent(admin, "claude-laptop");
+    const a = await startSession(cronk, claude.secret);
+    const b = (await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).body.secret;
+    const bInA = cronk.client(b, { "cronk-agent-session": a.sessionId });
+
+    cronk.clock.advance(60_000);
+    const refused = await bInA.get("/api/agent-sessions/current");
+    expect(refused).toEqual({ status: 410, body: { error: "This Agent Session has ended; start a new one" } });
+    expect((await bInA.post("/api/projects/CRONK/tickets", { title: "From B" })).status).toBe(410);
+    expect((await admin.get("/api/projects/CRONK/tickets")).body.tickets).toHaveLength(1);
+    expect((await admin.get("/api/agents")).body.agents[0].sessions[0]).toMatchObject({ id: a.sessionId, lastSeenAt: "2026-01-01T09:00:00.000Z" });
+  });
+
+  it("can't be acted in by a read-only token of the same Agent", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const full = await startSession(cronk, claude.secret);
+    const reader = (await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret;
+
+    expect((await cronk.client(reader, { "cronk-agent-session": full.sessionId }).get("/api/projects")).status).toBe(410);
+    expect((await cronk.client(reader).get("/api/projects")).status).toBe(200);
+  });
+
+  it("can't be ended or followed by another token of the same Agent", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const a = await startSession(cronk, claude.secret);
+    const b = (await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).body.secret;
+    const bInA = cronk.client(b, { "cronk-agent-session": a.sessionId });
+
+    expect((await bInA.delete("/api/agent-sessions/current")).status).toBe(410);
+    expect((await bInA.events("/api/agent-sessions/current/events")).status).toBe(410);
+    expect((await a.get("/api/agent-sessions/current")).status).toBe(200);
+  });
+
+  it("end with their Claims when the token that started them is revoked, while the Agent's other tokens keep working", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const a = await session();
+    expect((await a.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    const b = cronk.client((await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).body.secret);
+
+    expect((await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`)).status).toBe(204);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    expect((await admin.get("/api/agents")).body.agents[0].sessions).toEqual([]);
+    expect((await b.get("/api/tickets/CRONK-1")).status).toBe(200);
   });
 
   it("are listed with their live Claims, leaving out Tickets in Projects the caller can't read", async () => {

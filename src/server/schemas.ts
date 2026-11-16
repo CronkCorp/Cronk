@@ -513,7 +513,7 @@ const ERROR_MEANINGS = {
   403: "The caller may not do this: an Admin-only change, Read access where Write is needed, or an Agent where only a User may act",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
-  410: "The Agent Session named in the Cronk-Agent-Session header has ended or isn't the Agent's",
+  410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",
 } as const;
 
 /** The error answers of a route, each with the shared `Error` shape. */
