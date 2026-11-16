@@ -4,9 +4,10 @@ import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSessio
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
-  const match = /^---\n([\s\S]*?)---\n/.exec(text ?? "");
+  // The closing --- starts its own line, so an indented --- inside a block scalar doesn't end the frontmatter.
+  const match = /^---\n([\s\S]*?\n)?---\n/.exec(text ?? "");
   if (!match) throw new Error(`Not Markdown with frontmatter: ${text}`);
-  return { data: parse(match[1]!), body: text!.slice(match[0].length) };
+  return { data: parse(match[1] ?? ""), body: text!.slice(match[0].length) };
 }
 
 describe("exporting a Project", () => {
@@ -109,6 +110,8 @@ async function snapshot(admin: Client): Promise<unknown> {
     const { documents } = await get(path);
     return { documents, contents: await Promise.all(documents.map((d: { id: string }) => document(d.id))) };
   };
+  const terms = async (path: string) =>
+    Promise.all((await get(path)).terms.map(async (t: { id: string }) => ({ term: t, versions: await get(`/api/terms/${t.id}/versions`) })));
   const project = async (key: string) => {
     const { tickets } = await get(`/api/projects/${key}/tickets`);
     return {
@@ -116,6 +119,7 @@ async function snapshot(admin: Client): Promise<unknown> {
       members: await get(`/api/projects/${key}/members`),
       guidance: await get(`/api/projects/${key}/guidance`),
       guidanceVersions: await get(`/api/projects/${key}/guidance/versions`),
+      terms: await terms(`/api/projects/${key}/terms`),
       documents: await tree(`/api/projects/${key}/documents`),
       tickets: await Promise.all(
         tickets.map(async (t: { key: string }) => {
@@ -146,6 +150,7 @@ async function snapshot(admin: Client): Promise<unknown> {
     agents: await get("/api/agents?all=true"),
     guidance: await get("/api/workspace/guidance"),
     guidanceVersions: await get("/api/workspace/guidance/versions"),
+    terms: await terms("/api/workspace/terms"),
     documents: await tree("/api/workspace/documents"),
     projects: await Promise.all(projects.map((p: { key: string }) => project(p.key))),
   };
@@ -212,6 +217,15 @@ async function busyWorkspace() {
   // A line of dashes, as frontmatter ends with, in a title, a body and an anchored passage.
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
   await admin.post(`/api/documents/${notes.id}/comments`, { body: "Rule?", anchor: { passage: "intro\n---\nmore" } });
+
+  // Terms in both places, with Versions, one saved by an Agent; a Project Term overriding a Workspace Term.
+  const ticketTerm = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["Issue", "task"], group: "Work" })).body.term;
+  await admin.patch(`/api/terms/${ticketTerm.id}`, { baseVersion: 1, definition: "A unit of work\n---\ntracked within a *Project*." });
+  await admin.post("/api/workspace/terms", { name: "Customer", definition: "A paying organization." });
+  const termWriter = await session();
+  const customer = (await termWriter.post("/api/projects/CRONK/terms", { name: "customer", definition: "A billing account.", avoid: ["Client"], group: "Billing" })).body.term;
+  await termWriter.patch(`/api/terms/${customer.id}`, { baseVersion: 1, avoid: ["Client", "account"] });
+  await termWriter.delete("/api/agent-sessions/current");
 
   // A second, archived Project; a removed Agent.
   await admin.post("/api/projects", { name: "Old", key: "OLD" });
@@ -480,6 +494,60 @@ describe("an export without Versions", () => {
   });
 });
 
+describe("Terms in an export", () => {
+  it("are written as GLOSSARY.md per place, and beside it a terms.md holding them whole", async () => {
+    const { admin } = await busyWorkspace();
+    const files = await untarGz((await admin.download("/api/export")).body);
+
+    expect(files["GLOSSARY.md"]).toBe(
+      "# Acme Labs glossary\n\n" +
+        "**Customer**:\nA paying organization.\n\n" +
+        "## Work\n\n" +
+        "**Ticket**:\nA unit of work\n---\ntracked within a *Project*.\n_Avoid_: Issue, task\n",
+    );
+    expect(files["projects/CRONK/GLOSSARY.md"]).toBe(
+      "# CRONK glossary\n\nWithin CRONK, these Terms replace the Workspace's of the same name.\n\n" +
+        "## Billing\n\n" +
+        "**customer**:\nA billing account.\n_Avoid_: Client, account\n",
+    );
+    const { data } = markdown(files["projects/CRONK/terms.md"]);
+    expect(data.terms).toEqual([
+      expect.objectContaining({
+        name: "customer",
+        definition: "A billing account.",
+        avoid: ["Client", "account"],
+        group: "Billing",
+        version: 2,
+        versions: [expect.objectContaining({ number: 1, avoid: ["Client"] }), expect.objectContaining({ number: 2, avoid: ["Client", "account"] })],
+      }),
+    ]);
+  });
+
+  it("downloads a place's GLOSSARY.md on its own", async () => {
+    const { admin } = await busyWorkspace();
+
+    const res = await admin.download("/api/projects/CRONK/terms/glossary");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/^text\/markdown/);
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="GLOSSARY.md"');
+    expect(res.body.toString()).toBe((await untarGz((await admin.download("/api/export")).body))["projects/CRONK/GLOSSARY.md"]);
+    expect((await admin.download("/api/workspace/terms/glossary")).body.toString()).toMatch(/^# Acme Labs glossary/);
+  });
+
+  it("without Versions import each Term at a single Version holding what it says now", async () => {
+    const before = await busyWorkspace();
+    const exported = await before.admin.download("/api/export?versions=false");
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", exported.body)).status).toBe(201);
+    const [customer] = (await admin.get("/api/projects/CRONK/terms?name=customer")).body.terms;
+    expect(customer).toMatchObject({ avoid: ["Client", "account"], version: 1 });
+    expect((await admin.get(`/api/terms/${customer.id}/versions`)).body.versions).toMatchObject([
+      { number: 1, avoid: ["Client", "account"], actor: { kind: "agent", name: "claude-laptop" } },
+    ]);
+  });
+});
+
 describe("an export taken apart and archived again", () => {
   it("imports with its folder around it, as `tar czf` of the extracted folder makes", async () => {
     const before = await busyWorkspace();
@@ -523,6 +591,19 @@ describe("an export edited by hand", () => {
     const twice = await admin.upload("/api/import", await edited("projects/CRONK/project.md", (d) => d.members.push(d.members[0])));
     expect(twice.status).toBe(400);
     expect(twice.body.error).toMatch(/project\.md lists .* as a member twice/);
+
+    const cronkTerms = "projects/CRONK/terms.md";
+    const sameName = await admin.upload("/api/import", await edited(cronkTerms, (d) => d.terms.push({ ...d.terms[0], name: "CUSTOMER" })));
+    expect(sameName.status).toBe(400);
+    expect(sameName.body.error).toMatch(/CRONK\/terms\.md terms\[1\] has the name CUSTOMER, which another Term there has/);
+
+    const missingVersion = await admin.upload("/api/import", await edited(cronkTerms, (d) => d.terms[0].versions.shift()));
+    expect(missingVersion.status).toBe(400);
+    expect(missingVersion.body.error).toMatch(/CRONK\/terms\.md terms\[0\] versions must be numbered 1, 2, 3/);
+
+    const disagrees = await admin.upload("/api/import", await edited(cronkTerms, (d) => (d.terms[0].definition = "Something else.")));
+    expect(disagrees.status).toBe(400);
+    expect(disagrees.body.error).toMatch(/CRONK\/terms\.md terms\[0\] must say what its Version 2 says/);
 
     expect((await admin.get("/api/projects")).body.projects).toEqual([]);
   });

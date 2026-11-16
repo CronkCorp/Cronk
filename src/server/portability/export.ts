@@ -7,6 +7,8 @@ import { FORMAT, README } from "./format.js";
 import { exportGuidance } from "./guidance.js";
 import { exportPeople } from "./people.js";
 import { exportProject, type ProjectRow } from "./projects.js";
+import { getWorkspace } from "../workspace/workspaces.js";
+import { exportTerms } from "./terms.js";
 import { exportTickets } from "./tickets.js";
 import { exportWorkspaceSettings } from "./workspace.js";
 
@@ -25,6 +27,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
     await exportWorkspaceSettings(ctx);
     await exportGuidance(ctx, "guidance", null);
     await exportTree(ctx, "documents", null);
+    await exportTerms(ctx, "", { projectId: null, workspaceName: (await getWorkspace(db, scope.workspaceId)).name });
   }
   const { rows: projects } = await db.query<ProjectRow>("SELECT * FROM projects WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY key", [
     scope.workspaceId,
@@ -35,6 +38,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
     const statusNow = await exportProject(ctx, dir, p);
     await exportGuidance(ctx, `${dir}/guidance`, p.id);
     await exportTree(ctx, `${dir}/documents`, p.id);
+    await exportTerms(ctx, `${dir}/`, { projectId: p.id, projectKey: p.key });
     await exportTickets(ctx, dir, p, statusNow);
   }
   ctx.writePending();

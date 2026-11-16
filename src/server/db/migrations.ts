@@ -484,7 +484,45 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0021_attachments",
+    id: "0021_terms",
+    sql: `
+      -- Terms (knowledge/terms.ts): the glossary of the Workspace (project_id NULL) or a Project. Names
+      -- are unique per place ignoring case, so a Project Term overrides the Workspace Term of the same name.
+      CREATE TABLE terms (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        definition text NOT NULL,
+        avoid text[] NOT NULL,
+        group_name text,
+        version integer NOT NULL,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE UNIQUE INDEX terms_name ON terms (workspace_id, project_id, lower(name)) NULLS NOT DISTINCT;
+      CREATE INDEX terms_lower_name ON terms (workspace_id, lower(name));
+
+      -- Every saved state of a Term, with the Actor who saved it.
+      CREATE TABLE term_versions (
+        term_id uuid NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        number integer NOT NULL,
+        name text NOT NULL,
+        definition text NOT NULL,
+        avoid text[] NOT NULL,
+        group_name text,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        PRIMARY KEY (term_id, number),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+    `,
+  },
+  {
+    id: "0022_attachments",
     sql: `
       -- A file attached to a Ticket (files/attachments.ts). Its bytes live in the file store under
       -- attachments/<id>; the row is what Cronk knows of it. It is readable by whoever can read its Ticket.

@@ -42,15 +42,17 @@ describe("the OpenAPI description", () => {
       expect(success, label).toHaveLength(1);
       const response = op.responses[success[0]!];
       expect(response.description, label).toBeTruthy();
-      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive; an Attachment's file
-      // answers its bytes; every other success answers JSON with a schema.
+      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive, a glossary Markdown,
+      // an Attachment's file its bytes; every other success answers JSON with a schema.
       const type = label.endsWith("/events")
         ? "text/event-stream"
         : label.endsWith("/export")
           ? "application/gzip"
-          : label.endsWith("/file")
-            ? "application/octet-stream"
-            : "application/json";
+          : label.endsWith("/terms/glossary")
+            ? "text/markdown"
+            : label.endsWith("/file")
+              ? "application/octet-stream"
+              : "application/json";
       if (success[0] !== "204") expect(response.content?.[type]?.schema, label).toBeDefined();
     }
   });
@@ -84,6 +86,7 @@ describe("the OpenAPI description", () => {
     const errorBody = { $ref: "#/components/schemas/Error" };
     const staleBody = { $ref: "#/components/schemas/StaleVersion" };
     const staleGuidanceBody = { $ref: "#/components/schemas/StaleGuidance" };
+    const staleTermBody = { $ref: "#/components/schemas/StaleTermVersion" };
     const sectionBody = { $ref: "#/components/schemas/SectionRefused" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
@@ -95,13 +98,20 @@ describe("the OpenAPI description", () => {
       if (!label.startsWith("GET ")) expect(errors, label).toContain("403");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        // A stale save's refusal is the error shape plus the current Version (of a Document or of Guidance);
+        // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance or a Term);
         // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons;
         // a refused section heading's is the error shape plus the Document's headings.
         const refusesSections = label === "POST /api/documents/{id}/replace-section" && ["400", "404"].includes(code);
         const allowed =
           code === "409"
-            ? [errorBody, staleBody, staleGuidanceBody, expect.objectContaining({ anyOf: [staleBody, errorBody] })]
+            ? [
+                errorBody,
+                staleBody,
+                staleGuidanceBody,
+                staleTermBody,
+                expect.objectContaining({ anyOf: [staleBody, errorBody] }),
+                expect.objectContaining({ anyOf: [staleTermBody, errorBody] }),
+              ]
             : refusesSections
               ? [errorBody, sectionBody]
               : [errorBody];

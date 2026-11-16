@@ -388,6 +388,38 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerGroupedTool(server, ctx, {
+    name: "terms",
+    description:
+      "Terms: the glossary. Each names one concept with its definition and the words to avoid for it; use the name and avoid those words. " +
+      "The Workspace's apply everywhere; within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK, for the Terms that apply in it; leave out for the Workspace's (list, get by name)"),
+      name: z.string().optional().describe("The Term's name, ignoring case (get)"),
+      id: z.string().optional().describe("The Term's id, instead of a name (get)"),
+    },
+    actions: {
+      list: {
+        description: "the Terms that apply in a Project, or the Workspace's, by name, with their definitions",
+        writes: false,
+        run: (api, a) => api("GET", `${treePath(a.project)}/terms`),
+      },
+      get: {
+        description: "one Term by name, as it applies in a Project or the Workspace, or by id",
+        writes: false,
+        run: async (api, a) => {
+          if (a.id !== undefined) return api("GET", `/api/terms/${encodeURIComponent(a.id)}`);
+          if (a.name === undefined) throw new ToolError("The get action needs a name or an id");
+          const found = await api("GET", `${treePath(a.project)}/terms${query({ name: [a.name] })}`);
+          if (found.status >= 400) return found;
+          const [term] = found.body.terms as unknown[];
+          if (!term) throw new ToolError(`No Term named ${a.name.trim()} applies in ${a.project?.toUpperCase() ?? "the Workspace"}`);
+          return { status: 200, body: { term } };
+        },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
     name: "attachments",
     description:
       "Attachments: plain files on a Ticket, such as screenshots, recordings, logs or PDFs, kept as evidence with the work. " +

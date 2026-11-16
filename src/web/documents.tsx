@@ -31,15 +31,15 @@ const treeAddress = (projectKey: string | null | undefined) => (projectKey ? `/p
  * Handles a write refused because someone saved since this page loaded: reloads the page so it
  * shows their Version, and explains why, before anyone writes over it. Other errors pass through.
  */
-const explainStale = (reload: () => void, doing: string) => (err: unknown): never => {
+export const explainStale = (reload: () => void, doing: string) => (err: unknown): never => {
   const current = staleVersionOf(err);
   if (!current) throw err;
   reload();
   throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
 
-/** Whether the signed-in User may change Documents in a Project's tree, or the Workspace's (every User may). */
-function useCanWrite(projectKey: string | null | undefined): boolean {
+/** Whether the signed-in User may change Documents or Terms in a Project, or the Workspace's (every User may). */
+export function useCanWrite(projectKey: string | null | undefined): boolean {
   const [project] = useLoad(() => (projectKey ? api.project(projectKey) : Promise.resolve(undefined)), [projectKey]);
   if (!projectKey) return true;
   return project.kind === "loaded" && project.value?.project.access === "write";
