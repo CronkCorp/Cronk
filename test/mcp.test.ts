@@ -350,6 +350,33 @@ describe("the terms tool", () => {
   });
 });
 
+describe("a tool that saves text", () => {
+  it("follows the API's answer with a hint naming each word a Term says to avoid and the Term to use", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["issue", "work item"] });
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const { isError, texts } = await rawResult(mcp, "documents", {
+      action: "write_report",
+      key: "CRONK-1",
+      title: "Fixed the issue",
+      body: "This work item is done.\n\n`issue` in code\n\n> an issue quoted",
+    });
+    expect(isError).toBe(false);
+    expect(texts).toHaveLength(3);
+    expect(JSON.parse(texts[1]!).avoidedWords).toHaveLength(2);
+    expect(texts[2]).toBe(
+      "Saved, but it uses words a Term says to avoid:\n" +
+        '- "issue" (title, line 1, column 11): use Ticket\n' +
+        '- "work item" (body, line 1, column 6): use Ticket',
+    );
+
+    const clean = await callTool(mcp, "activities", { action: "log", key: "CRONK-1", kind: "progress", body: "All good." });
+    expect(clean.body.avoidedWords).toEqual([]);
+  });
+});
+
 describe("working a delegated Ticket over MCP", () => {
   /** Ada's Project CRONK with `count` Tickets assigned to her and delegated to her Agent claude-laptop, which connects over MCP. */
   async function delegatedOverMcp(count: number) {

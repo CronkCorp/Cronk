@@ -67,7 +67,8 @@ export type SharedSchemaName =
   | "Term"
   | "TermVersion"
   | "StaleTermVersion"
-  | "RenamedId";
+  | "RenamedId"
+  | "AvoidedWord";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -587,6 +588,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A save or delete of a Term refused because the Version it is based on is no longer current, with the current Version.",
     ...object({ error: { type: "string" }, current: ref("TermVersion") }),
   },
+  AvoidedWord: {
+    description:
+      "A word a Term says to avoid, found in the prose a save wrote, with the Term to use instead. The save succeeds regardless; " +
+      "words in code spans, code blocks, block quotes and raw HTML don't count.",
+    ...object({
+      field: { type: "string", description: "The request field it was written in, such as `title`, `body` or `description`." },
+      word: { type: "string", description: "The word or phrase as written." },
+      line: { type: "integer", minimum: 1, description: "The line it starts on in the field as sent, counting from 1." },
+      column: {
+        type: "integer",
+        minimum: 1,
+        description: "The column of that line it starts at, counting from 1 in UTF-16 code units, as JavaScript strings index text.",
+      },
+      term: { ...named, description: "The Term to use instead, as it applies where the text was saved." },
+    }),
+  },
   RenamedId: {
     description: "An Agent or Agent Session an import gave a new id, because the id it had in the export was taken.",
     ...object({
@@ -637,6 +654,13 @@ export function addSharedSchemas(app: FastifyInstance): void {
 
 /** A JSON body with one field holding a shared shape, such as `{ ticket: Ticket }`. */
 export const holding = (field: string, name: SharedSchemaName) => object({ [field]: ref(name) });
+
+/**
+ * The answer to a save of text: one field holding a shared shape, such as `{ report: Document }`, and
+ * `avoidedWords`, the words a Term says to avoid that the save wrote, in the order of the request's fields.
+ */
+export const savedHolding = (field: string, name: SharedSchemaName) =>
+  object({ [field]: ref(name), avoidedWords: { type: "array", items: ref("AvoidedWord") } });
 
 /** A JSON body with one field listing items, such as `{ tickets: Ticket[] }`. */
 export const listing = (field: string, items: object) => object({ [field]: { type: "array", items } });

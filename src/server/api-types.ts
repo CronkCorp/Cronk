@@ -28,6 +28,7 @@ import type { publicWorkspace } from "./workspace/workspaces.js";
 import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
+import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
@@ -150,6 +151,8 @@ export type { Conflict, MergedSection } from "./knowledge/sections.js";
 export type InboxItem = Serialized<ReviewItem> | Serialized<UnverifiedItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
 export type InboxKind = InboxItem["kind"];
 
+/** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
+export type { AvoidedWord };
 /** A recorded choice with its reasoning and status, at its current Version. */
 export type Decision = Serialized<StoredDecision>;
 /** A Decision as its register lists it, without its body. */
