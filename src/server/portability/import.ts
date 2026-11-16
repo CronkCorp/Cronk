@@ -13,6 +13,7 @@ import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
 import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
+import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
 
 /**
@@ -72,6 +73,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await tickets.storeRelations(ctx);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
+  // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
+  if (scope === "workspace") await importTranscripts(ctx);
   return { scope, projects: created, renamedIds: ctx.renamedIds };
 }
 
