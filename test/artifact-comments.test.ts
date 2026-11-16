@@ -37,6 +37,29 @@ describe("Comments on an Artifact", () => {
     expect(listed.status).toBe(200);
     expect(listed.body.comments).toEqual([onFirst.body.comment, reply.body.comment]);
   });
+
+  it("are refused on a Version the Artifact doesn't have, in reply to an Activity, or in reply to a Comment on another Artifact", async () => {
+    const { admin, artifact } = await setup();
+    const other = (await admin.upload("/api/projects/CRONK/artifacts?title=Other", await tarGz(site(1)))).body.artifact;
+    const elsewhere = (await admin.post(`/api/artifacts/${other.id}/comments`, { body: "Over here." })).body.comment;
+
+    const noSuchVersion = await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Hm.", version: 3 });
+    expect(noSuchVersion.status).toBe(400);
+    expect(noSuchVersion.body.error).toBe('"Limits" has no Version 3; its latest is Version 2');
+    expect((await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Hm.", replyToActivityId: elsewhere.id })).status).toBe(400);
+    expect((await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Hm.", replyToCommentId: elsewhere.id })).status).toBe(400);
+    expect((await admin.get(`/api/artifacts/${artifact.id}/comments`)).body.comments).toEqual([]);
+  });
+
+  it("need Write where the Artifact belongs to post, and Read to list", async () => {
+    const { cronk, admin, artifact } = await setup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await admin.get("/api/users")).body.users.find((u: { name: string }) => u.name === "bob").id;
+    await admin.put(`/api/projects/CRONK/members/${bobId}`, { access: "read" });
+
+    expect((await bob.post(`/api/artifacts/${artifact.id}/comments`, { body: "Can I?" })).status).toBe(403);
+    expect((await bob.get(`/api/artifacts/${artifact.id}/comments`)).status).toBe(200);
+  });
 });
 
 /** The work the Agent with token `secret` finds waiting in the welcome of a new Agent Session. */
@@ -45,6 +68,17 @@ async function waitingFor(cronk: Cronk, secret: string) {
 }
 
 describe("A Comment on an Artifact Version", () => {
+  it("waits for an Agent it @mentions as a mention, and for the publishing Agent as before", async () => {
+    const { cronk, admin, claude, artifact } = await setup();
+    const codex = await registerAgent(admin, "codex");
+
+    const posted = (await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "@codex, can you check the colours?", version: 2 })).body.comment;
+
+    const on = { ticket: null, document: null, artifact: { id: artifact.id, title: "Limits", version: 2 } };
+    expect(await waitingFor(cronk, codex.secret)).toEqual([{ reason: "mention", comment: posted, ...on }]);
+    expect(await waitingFor(cronk, claude.secret)).toEqual([{ reason: "published", comment: posted, ...on }]);
+  });
+
   it("waits for the Agent that published the Version being viewed, and only that one", async () => {
     const { cronk, admin, claude, artifact } = await setup();
     const codex = await registerAgent(admin, "codex");
@@ -108,6 +142,17 @@ describe("An Artifact's live updates", () => {
     const posted = (await agent.post(`/api/artifacts/${artifact.id}/comments`, { body: "Published the threshold line." })).body.comment;
 
     expect(await stream.next()).toMatchObject({ event: "comment", data: { comment: posted } });
+  });
+
+  it("end once the watcher can no longer see the Artifact", async () => {
+    const { cronk, admin, artifact } = await setup();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const stream = await bob.events(`/api/artifacts/${artifact.id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Secret." });
+    expect(await stream.next()).toBeNull();
   });
 
   it("are refused to whoever can't read the Artifact", async () => {

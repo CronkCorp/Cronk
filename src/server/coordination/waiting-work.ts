@@ -111,13 +111,6 @@ export function rejectionOf(decision: Pick<Decision, "key" | "sourceTicket">, re
   };
 }
 
-/** Where a Comment is, as its Waiting Work names it. */
-export const placeOf = (on: CommentOn): Pick<CommentWork, "ticket" | "document" | "artifact"> => ({
-  ticket: on.ticket,
-  document: on.document,
-  artifact: on.artifact,
-});
-
 /** The `waiting` event that pushes `work` to the Agent's live Agent Sessions, with its position as the event's id. */
 export function waitingEvent(seq: string, work: WaitingWork): LiveEvent {
   return { event: "waiting", id: seq, data: { waiting: work } };
@@ -130,7 +123,7 @@ export interface CommentPlace {
   /** The Delegate of the Ticket it is on, if any. */
   delegateId: string | null;
   /** On an Artifact: the Agent that published the Version it is on, if an Agent did. */
-  publisherId?: string | null;
+  publisherId: string | null;
 }
 
 /** An @mention of an Agent: its name, and the name of the Owner it picks, if it picks one. Both lower-cased. */
@@ -397,7 +390,7 @@ async function waitingWorkFor(db: Queryable, agent: AgentActor, rows: WaitingRow
       const found = comments.get(row.comment_id);
       if (!found || !(await canRead(db, agent, found.on.projectId))) continue;
       const reason = row.reason as CommentWork["reason"];
-      work.push({ seq: row.seq, work: { reason, comment: publicComment(found.comment), ...placeOf(found.on) } });
+      work.push({ seq: row.seq, work: { reason, comment: publicComment(found.comment), ticket: found.on.ticket, document: found.on.document, artifact: found.on.artifact } });
     } else if (row.suggestion_id !== null) {
       const found = suggestions.get(row.suggestion_id);
       if (!found || !(await canRead(db, agent, found.item.projectId))) continue;

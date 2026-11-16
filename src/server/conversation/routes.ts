@@ -7,7 +7,7 @@ import { updateTicket, type Ticket } from "../work/tickets.js";
 import { checkChoices, dependentNote, dependentsOf, REOPEN_CHOICES, type Dependent, type ReopenChoice } from "../work/reopen.js";
 import { clearClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
-import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
+import { answer, artifactIdParam, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
 import { ticketFor } from "../work/ticket-reads.js";
@@ -25,7 +25,7 @@ import { findComment, insertComment, listComments, publicComment, type Comment, 
 
 const ticketParams = pathParams({ key: ticketKeyParam });
 const documentParams = pathParams({ id: documentIdParam });
-const artifactParams = pathParams({ id: { type: "string", format: "uuid", description: "The Artifact's id." } });
+const artifactParams = pathParams({ id: artifactIdParam });
 
 interface NewComment {
   body: string;
@@ -73,8 +73,8 @@ const newCommentBody = {
   },
 } as const;
 
-/** What a Comment on an Artifact takes: a Comment's fields, but no anchor, and the Version being viewed. */
-const { anchor: _anchor, ...commentFields } = newCommentBody.properties;
+/** What a Comment on an Artifact takes: a Comment's fields, but no anchor nor Activity to reply to, and the Version being viewed. */
+const { anchor: _anchor, replyToActivityId: _activity, ...commentFields } = newCommentBody.properties;
 const newArtifactCommentBody = {
   ...newCommentBody,
   properties: {
@@ -165,7 +165,7 @@ export function conversationRoutes(ctx: AppContext) {
         const { ticket, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write");
-            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null, publisherId: null };
             const posted = await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body);
             return { ticket, posted, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody({ body: request.body.body })) };
           },
@@ -215,7 +215,7 @@ export function conversationRoutes(ctx: AppContext) {
             if (ticket.status.category !== "in_review") throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, not In Review`);
             const status = await statusOf(tx, ticket, "started", request.body.statusId);
             const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
-            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null, publisherId: null };
             return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
           },
           ({ ticket, posted }) => {
@@ -280,7 +280,7 @@ export function conversationRoutes(ctx: AppContext) {
             const reopened = await reopen(ticket, request.body.statusId);
             const posts: { ticket: Ticket; posted: Posted }[] = [];
             const comment = async (t: Ticket, body: string) => {
-              const place = { projectId: t.projectId, delegateId: t.delegate?.id ?? null };
+              const place = { projectId: t.projectId, delegateId: t.delegate?.id ?? null, publisherId: null };
               const posted = await post(tx, positioned, actor, { ticketId: t.id }, place, { body });
               posts.push({ ticket: t, posted });
               return posted;
@@ -363,7 +363,7 @@ export function conversationRoutes(ctx: AppContext) {
         const { document, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const document = await documentFor(tx, actor, request.params.id, "write");
-            const place = { projectId: document.projectId, delegateId: null };
+            const place = { projectId: document.projectId, delegateId: null, publisherId: null };
             const posted = await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document);
             return { document, posted, avoidedWords: await avoidedWordsIn(tx, actor, document.projectId, titleAndBody({ body: request.body.body })) };
           },

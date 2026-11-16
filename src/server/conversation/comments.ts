@@ -16,7 +16,7 @@ export interface Comment {
   documentId: string | null;
   /** Set on a Comment on an Artifact. */
   artifactId: string | null;
-  /** On an Artifact: the Version its writer was viewing. */
+  /** On an Artifact: the Version whoever posted it was viewing. */
   artifactVersion: number | null;
   replyToCommentId: string | null;
   replyToActivityId: string | null;
@@ -65,8 +65,8 @@ interface CommentRow extends RecordedActorRow {
 }
 
 /**
- * Selects Comments, with their Ticket's key, Actor and whether their anchor is still in the
- * Document, from `source` (the table, or a CTE of new rows) as `c`.
+ * Selects Comments, with their Ticket's key, Actor, whether their anchor is still in the Document,
+ * and the Project and title of the Ticket, Document or Artifact they are on, from `source` (the table, or a CTE of new rows) as `c`.
  */
 const selectFrom = (source: string) => `
   SELECT c.id, c.ticket_id, p.key || '-' || t.number AS ticket_key, c.document_id, c.artifact_id, c.artifact_version, c.reply_to_comment_id, c.reply_to_activity_id,

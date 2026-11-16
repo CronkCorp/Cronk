@@ -855,7 +855,7 @@ export const migrations: Migration[] = [
   {
     id: "0032_comments_on_artifacts",
     sql: `
-      -- A Comment may be on an Artifact instead of a Ticket or Document, recording the Version its writer was viewing.
+      -- A Comment may be on an Artifact instead of a Ticket or Document, recording the Version whoever posted it was viewing.
       ALTER TABLE comments ADD COLUMN artifact_id uuid REFERENCES artifacts(id) ON DELETE CASCADE;
       ALTER TABLE comments ADD COLUMN artifact_version integer;
       ALTER TABLE comments ADD CONSTRAINT comments_artifact_version FOREIGN KEY (artifact_id, artifact_version)

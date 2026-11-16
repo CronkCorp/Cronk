@@ -11,7 +11,7 @@ import type { Document } from "../knowledge/documents.js";
 import { requireUnprotected } from "../knowledge/protection.js";
 import { artifactTopic, documentTopic } from "../live/topics.js";
 import { artifactFor } from "./artifact-routes.js";
-import { answer, attachmentIdParam, commentIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { answer, artifactIdParam, attachmentIdParam, commentIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findTicketByKey, type Ticket } from "../work/tickets.js";
@@ -176,7 +176,7 @@ export function attachmentRoutes(ctx: AppContext) {
       "/api/artifacts/:id/attachments",
       {
         schema: {
-          params: pathParams({ id: { type: "string", format: "uuid", description: "The Artifact's id." } }),
+          params: pathParams({ id: artifactIdParam }),
           response: {
             200: answer("Every Attachment in the Artifact's Comments, in the order they were attached", listing("attachments", ref("Attachment"))),
             ...errors(401, 404, 410),

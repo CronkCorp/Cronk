@@ -495,7 +495,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null otherwise." },
       documentId: { ...nullable(id), description: "The Document it is on; null otherwise." },
       artifactId: { ...nullable(id), description: "The Artifact it is on; null otherwise." },
-      artifactVersion: { ...nullable({ type: "integer" }), description: "On an Artifact: the Version its writer was viewing; null otherwise." },
+      artifactVersion: { ...nullable({ type: "integer" }), description: "On an Artifact: the Version whoever posted it was viewing; null otherwise." },
       replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
       replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
       anchor: {
@@ -560,7 +560,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
         artifact: {
           ...nullable(object({ id, title: { type: "string" }, version: { type: "integer", description: "The Version the Comment is on." } })),
-          description: "The Artifact the Comment is on, with the Version its writer was viewing; null otherwise.",
+          description: "The Artifact the Comment is on, with the Version whoever posted it was viewing; null otherwise.",
         },
       },
       ["decision", "suggestion"],
@@ -1002,6 +1002,9 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 /** A Comment's id. */
 export const commentIdParam = { type: "string", format: "uuid", description: "The Comment's id." } as const;
+
+/** An Artifact's id. */
+export const artifactIdParam = { type: "string", format: "uuid", description: "The Artifact's id." } as const;
 
 /** An Attachment's id. */
 export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
