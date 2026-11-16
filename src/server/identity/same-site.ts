@@ -1,41 +1,47 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { bearerToken, HttpError, SIGN_IN_COOKIE } from "../context.js";
 
-/** Methods that only read, which a page of any site may send. */
+/** Methods that only read, which any site may send. */
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** Whether a route with `method` (or methods) changes anything, so another site's pages may not call it. */
+/** Whether a route with `method` (or methods) writes, so other sites may not call it. */
 export const isWrite = (method: string | string[]): boolean => [method].flat().some((m) => !READS.has(m));
 
+const REFUSED = "This write was sent from another site; make it from Cronk itself";
+
 /**
- * Refuses writes a browser sends from a page of another site, so a page elsewhere (an Artifact
- * on a subdomain included, ADR 0007) can't act with a signed-in User's cookie. A write's page is
- * its `Origin`, or its `Referer` when a browser sends no `Origin`; it must be Cronk's own: the
- * origin of `publicUrl` when configured, or else the host the request was sent to. A write naming
- * no page at all is a script's, refused only when it carries the sign-in cookie, as a browser
- * always names the page. Agents calling with a bearer token aren't browsers and are never refused.
+ * Refuses writes a browser sends from another site, so a site elsewhere (an Artifact on a subdomain
+ * included, ADR 0007) can't act with a signed-in User's cookie. The site a write was sent from is its
+ * `Origin`, or its `Referer` when a browser sends no `Origin`; it must be Cronk's own: `publicUrl`'s
+ * origin when configured, or else the host the request was sent to. A write naming no site at all is
+ * a script's, refused only when it carries the sign-in cookie, as a browser always names it. Agents
+ * calling with a bearer token and no cookie aren't browsers and are never refused.
  */
 export function refuseWritesFromOtherSites(app: FastifyInstance, publicUrl: string | undefined): void {
-  const own = publicUrl === undefined ? undefined : new URL(publicUrl).origin;
+  const publicOrigin = publicUrl === undefined ? undefined : new URL(publicUrl).origin;
   app.addHook("onRequest", async (request) => {
-    if (!isWrite(request.method) || bearerToken(request) !== undefined) return;
-    const page = pageOf(request);
-    if (page === undefined ? request.cookies[SIGN_IN_COOKIE] !== undefined : !isOwn(request, page, own)) {
-      throw new HttpError(403, "This change was sent from a page on another site; make it from Cronk itself");
+    if (!isWrite(request.method)) return;
+    const signedIn = request.cookies[SIGN_IN_COOKIE] !== undefined;
+    if (!signedIn && bearerToken(request) !== undefined) return;
+    const from = sentFrom(request);
+    if (from === undefined) {
+      if (signedIn) throw new HttpError(403, REFUSED);
+      return;
     }
+    if (!isCronk(request, from, publicOrigin)) throw new HttpError(403, REFUSED);
   });
 }
 
-/** The page a request was sent from, as the browser names it: its `Origin` (`null` for a page it hides), else its `Referer`. */
-const pageOf = (request: FastifyRequest): string | undefined => request.headers.origin ?? request.headers.referer;
+/** The site a request was sent from, as the browser names it: its `Origin` (`null` for one it hides), else its `Referer`. */
+const sentFrom = (request: FastifyRequest): string | undefined => request.headers.origin ?? request.headers.referer;
 
-/** Whether `page` is one of Cronk's own; a page that isn't a URL, as `null` for one the browser hides, isn't. */
-function isOwn(request: FastifyRequest, page: string, own: string | undefined): boolean {
-  if (!URL.canParse(page)) return false;
-  const url = new URL(page);
-  if (own !== undefined) return url.origin === own;
-  // Read the host the request was sent to with the page's scheme, so a default port written out matches one left off,
+/** Whether `site` is Cronk's own; one that isn't a URL, as `null` for a site the browser hides, isn't. */
+function isCronk(request: FastifyRequest, site: string, publicOrigin: string | undefined): boolean {
+  const url = URL.parse(site);
+  if (url === null) return false;
+  if (publicOrigin !== undefined) return url.origin === publicOrigin;
+  // Read the host the request was sent to with the site's scheme, so a default port written out matches one left off,
   // and a proxy that ends HTTPS in front of Cronk still matches.
   const host = request.headers.host;
-  return host !== undefined && URL.canParse(`${url.protocol}//${host}`) && new URL(`${url.protocol}//${host}`).host === url.host;
+  return host !== undefined && URL.parse(`${url.protocol}//${host}`)?.host === url.host;
 }

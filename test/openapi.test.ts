@@ -74,7 +74,7 @@ describe("the OpenAPI description", () => {
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
       // Every operation refuses query parameters it doesn't take.
       expect(errors, label).toContain("400");
-      // Every write can be refused for coming from a page on another site.
+      // Every write can be refused for coming from another site.
       if (!label.startsWith("GET ")) expect(errors, label).toContain("403");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();

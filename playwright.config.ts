@@ -12,8 +12,8 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: `http://${E2E_HOST}:${E2E_PORT}`,
-    // Calls made with `page.request` share the page's sign-in cookie but name no page, which Cronk refuses for a write;
-    // name Cronk's own, as the page's own calls do.
+    // Calls made with `page.request` share the browser's sign-in cookie but name no site, which Cronk refuses for a write;
+    // name Cronk's own, as the browser's own calls do.
     extraHTTPHeaders: { origin: `http://${E2E_HOST}:${E2E_PORT}` },
     trace: "retain-on-failure",
   },

@@ -33,7 +33,7 @@ export interface AppConfig {
   cookieSecure: boolean;
   /**
    * The address Cronk is reached at, such as `https://cronk.example`. Writes made with the sign-in cookie are accepted
-   * only from pages of this origin; without it, only from pages of the host the request was sent to.
+   * only from this site; without it, only from the host the request was sent to.
    */
   publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
@@ -120,8 +120,8 @@ export async function buildApp(opts: {
           "as `Authorization: Bearer <token>`. An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
           "Agent Access, and its token (read-only tokens are refused every write). An Agent calls within one of its Agent Sessions " +
           "by also sending `Cronk-Agent-Session: <id>` (see /api/agent-sessions); the call refreshes the Session, and history records it. " +
-          "Agents normally connect over MCP at /mcp instead, which does this for them. A signed-in change sent from a page on " +
-          "another site (its `Origin`, or else `Referer`, isn't Cronk's own) is refused with 403, as is one with the cookie that names no page.",
+          "Agents normally connect over MCP at /mcp instead, which does this for them. A signed-in write sent from another site " +
+          "(its `Origin`, or else `Referer`, isn't Cronk's own) is refused with 403, as is one with the cookie that names no site.",
       },
       components: {
         securitySchemes: {

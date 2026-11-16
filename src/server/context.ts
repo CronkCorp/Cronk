@@ -76,8 +76,8 @@ export function requireUserActor(actor: Actor, what: string): asserts actor is E
 
 /**
  * Sets the sign-in cookie. Its lifetime is relative (Max-Age) so it doesn't depend on the browser's clock agreeing with ours.
- * `Strict`, so a browser sends it only with requests from Cronk's own site, not from another site's pages or links;
- * a page that needs no session, as accepting an invitation, works when opened from a link elsewhere too.
+ * `Strict`, so a browser sends it only with requests from Cronk's own site, not from other sites or links on them;
+ * a screen that needs no session, as accepting an invitation, works when opened from a link elsewhere too.
  */
 export function setSignInCookie(ctx: AppContext, reply: FastifyReply, token: string, expiresAt: Date): void {
   reply.setCookie(SIGN_IN_COOKIE, token, {

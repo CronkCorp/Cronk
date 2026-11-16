@@ -57,19 +57,18 @@ export interface Response<T = any> {
   body: T;
 }
 
-/** A cookie as the server last set it, with the attributes that decide when a browser sends it back. */
+/** A cookie's attributes as the server last set it, which decide when a browser sends it back. */
 export interface SetCookie {
-  value: string;
   sameSite?: string | undefined;
   httpOnly?: boolean | undefined;
 }
 
-/** The origin `app.inject` requests are made to, which a page Cronk served sends as its `Origin`. */
+/** The origin `app.inject` requests are made to, which Cronk's own web client sends as its `Origin`. */
 export const OWN_ORIGIN = "http://localhost";
 
 /**
  * One API caller with its own cookie jar, like a browser tab or a script, optionally sending a bearer token.
- * Like a page Cronk served, it sends Cronk's own `Origin` with every call; `headers` add to or replace that,
+ * Like Cronk's web client, it sends Cronk's own `Origin` with every call; `headers` add to or replace that,
  * and a header given as `null` isn't sent at all.
  */
 export class Client {
@@ -86,15 +85,15 @@ export class Client {
   }
 
   /**
-   * The same caller, sharing this cookie jar, calling as a page of another site would: with `headers`
+   * The same caller, sharing this cookie jar, calling as another site in the same browser would: with `headers`
    * such as that site's `origin` or `referer` (`null` leaves one out, as a script or a stricter browser does).
    */
   elsewhere(headers: Record<string, string | null>): Client {
     return new Client(this.cronk, this.token, { ...this.headers, ...headers }, this.cookies, this.cookiesSet);
   }
 
-  /** The cookie `name` as the server last set it for this caller, if it has. */
-  cookieSet(name: string): SetCookie | undefined {
+  /** The attributes the server last set cookie `name` with for this caller, if it has. */
+  lastSetCookie(name: string): SetCookie | undefined {
     return this.cookiesSet.get(name);
   }
 
@@ -160,7 +159,7 @@ export class Client {
       ...(body === undefined ? {} : { payload: body as object }),
     });
     for (const c of res.cookies) {
-      this.cookiesSet.set(c.name, { value: c.value, sameSite: c.sameSite, httpOnly: c.httpOnly });
+      this.cookiesSet.set(c.name, { sameSite: c.sameSite, httpOnly: c.httpOnly });
       if (c.value === "" || (c.maxAge !== undefined && c.maxAge <= 0)) this.cookies.delete(c.name);
       else this.cookies.set(c.name, c.value);
     }
