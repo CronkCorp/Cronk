@@ -56,6 +56,7 @@ export type SharedSchemaName =
   | "GuidanceVersion"
   | "StaleGuidance"
   | "GuidanceMerge"
+  | "DecisionMerge"
   | "SearchResult"
   | "LinkedDocument"
   | "Mention"
@@ -270,6 +271,9 @@ const conflict = {
     both: { type: "string", description: "Mine followed by theirs, for keeping both; a section heading they share appears once." },
   }),
 };
+
+/** Decision keys, in order. */
+const keyList = { type: "array", items: { type: "string" } } as const;
 
 /** The sections of a merge, in order; joined, they make the merged `whole`. */
 const mergedSections = (whole: string) => ({
@@ -652,6 +656,29 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   StaleDecision: {
     description: "An edit of a Decision refused because the Version it is based on is no longer current, with the current Version to merge with.",
     ...object({ error: { type: "string" }, current: ref("DecisionVersion") }),
+  },
+  DecisionMerge: {
+    description:
+      "An edit of a Decision merged with its current Version: the body section by section, the title, group and superseded Decisions each as one field. " +
+      "Only conflicts need a User's choice.",
+    ...object({
+      onto: { ...ref("DecisionVersion"), description: "The current Version merged onto; save the result with its number as `baseVersion`." },
+      title: { ...nullable({ type: "string" }), description: "The merged title; null when it conflicts." },
+      titleConflict: { ...nullable(conflict), description: "Set when both sides changed the title differently." },
+      body: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
+      sections: mergedSections("body"),
+      group: { ...nullable({ type: "string" }), description: "The merged group; null for none, or when it conflicts." },
+      groupConflict: {
+        ...nullable(object({ base: nullable({ type: "string" }), mine: nullable({ type: "string" }), theirs: nullable({ type: "string" }) })),
+        description: "Each side's group, set when both sides changed it differently.",
+      },
+      supersedes: { ...nullable(keyList), description: "The keys of the Decisions the merge supersedes; null when they conflict." },
+      supersedesConflict: {
+        ...nullable(object({ base: keyList, mine: keyList, theirs: keyList })),
+        description: "Each side's superseded Decisions, by key, set when both sides changed them differently; they merge as one field, never key by key.",
+      },
+      conflicts: { type: "integer", description: "How many sections conflict, plus one for each of the title, group and superseded Decisions that does." },
+    }),
   },
   Report: {
     description:

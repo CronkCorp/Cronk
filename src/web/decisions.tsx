@@ -8,7 +8,8 @@ import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip, ProtectedMark } 
 import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
-import { api, decisionsExportUrl, staleVersionOf, type Decision, type DecisionStatus, type DecisionSummary } from "./api.js";
+import { api, decisionsExportUrl, type Decision, type DecisionStatus, type DecisionSummary, type DecisionVersion, type FieldConflict } from "./api.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, type Draft, type MergedField } from "./merge.js";
 import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
 import { MentionedIn } from "./mentions.js";
 import { MarkdownEditor } from "./markdown-editor.js";
@@ -358,44 +359,85 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
   );
 }
 
-/** Edits a Decision's title, group, what it supersedes and its Markdown, based on the Version it started from. */
+/** The labels a Decision's group and superseded Decisions go by in its editor and in a merge. */
+const GROUP = "Group";
+const SUPERSEDES = "Supersedes (keys, such as CRONK-D4)";
+
+/** A Decision Version's group and superseded Decisions as the editor's fields. */
+const fieldsOf = (v: { group: string | null; supersedes: string[] }) => ({ [GROUP]: v.group ?? "", [SUPERSEDES]: v.supersedes.join(", ") });
+
+/** The keys typed into the Supersedes field. */
+const keysIn = (text: string) => text.split(/[\s,]+/).filter(Boolean);
+
+/**
+ * A whole field of a Decision merge as the merge panel settles it: as text, with a conflict's sides
+ * as text too. Only a list of keys can keep both sides; a group is one side's or the other's.
+ */
+function mergedField<T>(label: string, merged: T | null, conflict: FieldConflict<T> | null, text: (value: T) => string, combinable: boolean): MergedField {
+  if (!conflict) return { label, text: text(merged as T), conflict: null, combinable };
+  const [base, mine, theirs] = [conflict.base, conflict.mine, conflict.theirs].map(text) as [string, string, string];
+  return { label, text: null, conflict: { base, mine, theirs, both: mine && theirs ? `${mine}, ${theirs}` : mine || theirs }, combinable };
+}
+
+/**
+ * Edits a Decision's title, group, what it supersedes and its Markdown, based on the Version it
+ * started from. A save refused because someone saved since merges their Version into this edit:
+ * the body section by section, the other fields whole, leaving what both changed differently for
+ * the User to choose or combine.
+ */
 function EditDecision(props: { decision: Decision; onSaved: (d: Decision) => void; onCancel: () => void }) {
   const d = props.decision;
-  const [title, setTitle] = useState(d.title);
-  const [group, setGroup] = useState(d.group ?? "");
-  const [supersedes, setSupersedes] = useState(d.supersedes.map((s) => s.key).join(", "));
-  const [body, setBody] = useState(d.body);
-  const { submit, error, busy } = useSubmit(
-    () =>
-      api
-        .saveDecision(d.key, {
-          baseVersion: d.version,
-          title,
-          body,
-          group,
-          supersedes: supersedes.split(/[\s,]+/).filter(Boolean),
-        })
-        .catch((err) => {
-          const current = staleVersionOf(err);
-          if (!current) throw err;
-          throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; copy your changes, cancel and edit again`);
-        }),
-    props.onSaved,
-  );
+  const edit = (draft: Draft) => ({
+    title: draft.title!,
+    body: draft.text,
+    group: draft.fields![GROUP]!,
+    supersedes: keysIn(draft.fields![SUPERSEDES]!),
+  });
+  const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
+    draft: { title: d.title, text: d.body, fields: fieldsOf({ group: d.group, supersedes: d.supersedes.map((s) => s.key) }) },
+    baseVersion: d.version,
+    save: (draft, baseVersion) => api.saveDecision(d.key, { baseVersion, ...edit(draft) }),
+    merge: async (draft, baseVersion) => {
+      const [merge, started] = await Promise.all([api.mergeDecision(d.key, { baseVersion, ...edit(draft) }), api.decisionVersion(d.key, baseVersion)]);
+      const saved = (v: DecisionVersion) => ({ number: v.number, title: v.title, body: v.body, fields: fieldsOf(v) });
+      const fields = [
+        mergedField(GROUP, merge.group, merge.groupConflict, (g) => g ?? "", false),
+        mergedField(SUPERSEDES, merge.supersedes, merge.supersedesConflict, (keys) => keys.join(", "), true),
+      ];
+      return {
+        base: saved(started),
+        theirs: saved(merge.onto),
+        by: merge.onto.actor,
+        merge: { ...merge, fields },
+        merged: merge.conflicts === 0 ? { title: merge.title!, text: merge.body!, fields: Object.fromEntries(fields.map((f) => [f.label, f.text!])) } : null,
+      };
+    },
+    onSaved: props.onSaved,
+  });
+  const setField = (label: string) => (value: string) => setDraft((dr) => ({ ...dr, fields: { ...dr.fields, [label]: value } }));
   return (
-    <section className="panel wide">
-      <h2>Edit {d.key}</h2>
-      <form onSubmit={submit}>
-        <Field label="Title" value={title} onChange={setTitle} disabled={busy} />
-        <Field label="Group" value={group} onChange={setGroup} required={false} disabled={busy} />
-        <Field label="Supersedes (keys, such as CRONK-D4)" value={supersedes} onChange={setSupersedes} required={false} disabled={busy} />
-        <MarkdownEditor label="Body (Markdown)" value={body} onChange={setBody} disabled={busy} projectKey={d.projectKey} />
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="actions">
-          <Button type="submit" disabled={busy}>Save</Button>
-          <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
-        </div>
-      </form>
-    </section>
+    <>
+      {notice && <StaleSaveNotice {...notice} />}
+      {resolve ? (
+        <ResolveMerge {...resolve} />
+      ) : (
+        <section className="panel wide">
+          <h2>Edit {d.key}</h2>
+          <form onSubmit={save}>
+            {/* Read-only while saving: the merge sends the draft as it was when Save was pressed. */}
+            <Field label="Title" value={draft.title} onChange={(title) => setDraft((dr) => ({ ...dr, title }))} disabled={busy} />
+            <Field label={GROUP} value={draft.fields![GROUP]} onChange={setField(GROUP)} required={false} disabled={busy} />
+            <Field label={SUPERSEDES} value={draft.fields![SUPERSEDES]} onChange={setField(SUPERSEDES)} required={false} disabled={busy} />
+            <MarkdownEditor label="Body (Markdown)" value={draft.text} onChange={(text) => setDraft((dr) => ({ ...dr, text }))} disabled={busy} projectKey={d.projectKey} />
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={busy}>Save</Button>
+              <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>
+              {discardMine && <DiscardMine {...discardMine} />}
+            </div>
+          </form>
+        </section>
+      )}
+    </>
   );
 }
