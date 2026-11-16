@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { dirname, join, relative, sep } from "node:path";
 import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -27,6 +27,8 @@ export interface FileStore {
   get(key: string, range?: ByteRange): Readable;
   /** Removes the file under `key`; removing one that isn't there does nothing. */
   delete(key: string): Promise<void>;
+  /** The keys of every file under the folder `prefix`, however deep, in order. */
+  list(prefix: string): Promise<string[]>;
 }
 
 /** A file refused for growing past the most a store was told to take. */
@@ -37,7 +39,11 @@ export class FileTooLarge extends Error {
 }
 
 /** Keys are `/`-separated paths of letters, digits, `-`, `_` and `.`, never climbing out with `..`. */
-const KEY = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+export const KEY = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+
+/** Ends the name of a file still being written beside its place; never one of a key, which takes no `~`. */
+const PARTIAL_SUFFIX = "~partial";
+const PARTIAL = /~partial$/;
 
 /** A `FileStore` on local disk, under the directory `root`. A file is written beside its place first and moved in, so a reader never sees half of one. */
 export class LocalDiskStore implements FileStore {
@@ -51,7 +57,7 @@ export class LocalDiskStore implements FileStore {
   async put(key: string, bytes: Readable | Buffer, opts: { maxBytes?: number } = {}): Promise<number> {
     const path = this.path(key);
     await mkdir(dirname(path), { recursive: true });
-    const partial = `${path}.${randomBytes(6).toString("hex")}.partial`;
+    const partial = `${path}.${randomBytes(6).toString("hex")}${PARTIAL_SUFFIX}`;
     let size = 0;
     const counting = new Transform({
       transform(chunk: Buffer, _encoding, done) {
@@ -77,6 +83,17 @@ export class LocalDiskStore implements FileStore {
 
   async delete(key: string): Promise<void> {
     await rm(this.path(key), { force: true });
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    const entries = await readdir(this.path(prefix), { recursive: true, withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") return [];
+      throw err;
+    });
+    return entries
+      .filter((entry) => entry.isFile() && !PARTIAL.test(entry.name))
+      .map((entry) => relative(this.root, join(entry.parentPath, entry.name)).split(sep).join("/"))
+      .sort();
   }
 
 }
