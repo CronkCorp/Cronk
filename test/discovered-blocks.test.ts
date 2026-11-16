@@ -107,6 +107,9 @@ describe("Removing a block from a Discovered Ticket", () => {
 
     expect((await agent.delete("/api/tickets/CRONK-2/relations/blocks/CRONK-1")).status).toBe(200);
     expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
+    // A block a User added from it is theirs: the Agent needs the Claim to remove it, as for any Relation.
+    await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+    expect((await agent.delete("/api/tickets/CRONK-2/relations/blocks/CRONK-1")).status).toBe(409);
   });
 });
 

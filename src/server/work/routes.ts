@@ -717,7 +717,7 @@ export function workRoutes(ctx: AppContext) {
             other,
             actor: actor,
             now: ctx.clock.now(),
-            block: discoveredBlock ? { agentId: (actor as AgentActor).agent.id, reason: reason!.trim() } : undefined,
+            block: discoveredBlock ? { agentId: discoveredBlock.agent.id, reason: reason!.trim() } : undefined,
           });
           if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
@@ -1059,29 +1059,36 @@ async function relationEnds(
   kind: RelationKind,
   now: Date,
   opts: { removing?: boolean } = {},
-): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: boolean }> {
+): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: AgentActor | null }> {
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
-  const discoveredBlock = actor.kind === "agent" && kind === "blocks" && (await isOwnDiscoveryAwaitingDelegation(tx, actor, ticket));
+  let discoveredBlock = actor.kind === "agent" && kind === "blocks" && (await isOwnDiscoveryAwaitingDelegation(tx, actor, ticket)) ? actor : null;
   if (actor.kind === "agent" && !discoveredBlock) await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
-  const other = await ticketFor(tx, actor, otherKey, "read").catch((err: unknown) => {
-    throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
-  });
+  const other = await otherTicketFor(tx, actor, otherKey);
   if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
+  // Without its Claim, the Agent removes only the blocks it added from its Discovered Ticket, not those a User added.
+  if (discoveredBlock && opts.removing && !(await isDiscoveredBlock(tx, ticket.id, other.id))) {
+    await requireClaimHolder(tx, discoveredBlock, ticket, now, "changing its Relations");
+    discoveredBlock = null;
+  }
   // A User removes a block from a Discovered Ticket with Write on the blocked Ticket alone, as the Agent added it reading that one only.
   const removingDiscoveredBlock = opts.removing && actor.kind === "user" && kind === "blocked_by" && (await isDiscoveredBlock(tx, other.id, ticket.id));
   if (!discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
   return { ticket, other, discoveredBlock };
 }
 
+/** The other Ticket of a Relation, if `actor` can read it; a missing or hidden one answers 400, as it is named in the request's body or path. */
+const otherTicketFor = (tx: Queryable, actor: Actor, otherKey: string): Promise<Ticket> =>
+  ticketFor(tx, actor, otherKey, "read").catch((err: unknown) => {
+    throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
+  });
+
 /**
  * Has the Agent's new Discovered Ticket `ticket` block the Ticket `otherKey`, which the Agent need only read, recording why.
  * A missing or hidden `otherKey` answers 400. Returns the blocked Ticket.
  */
 async function addDiscoveredBlock(tx: Queryable, agent: AgentActor, ticket: Ticket, otherKey: string, reason: string, now: Date): Promise<Ticket> {
-  const other = await ticketFor(tx, agent, otherKey, "read").catch((err: unknown) => {
-    throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
-  });
+  const other = await otherTicketFor(tx, agent, otherKey);
   // A new Ticket blocks nothing yet, so this can't close a cycle.
   await addRelation(tx, agent.owner.workspaceId, { ticket, kind: "blocks", other, actor: agent, now, block: { agentId: agent.agent.id, reason: reason.trim() } });
   return other;
