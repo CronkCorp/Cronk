@@ -149,7 +149,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
   - **Comment:** the body in a bordered bubble, with replies indented under it. The Comment of a Send back is labelled `SENT BACK`.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
-  - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review".
+  - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review". A Change Cronk made itself, such as an upgrade's, names "Cronk" in plain muted text with no avatar.
 - **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
 
 ![Ticket, dark](ui/ticket-dark.png)
@@ -186,7 +186,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Head:** an avatar, the name, and a summary ("2 live Agent Sessions · Delegate on 3 Tickets"), with Rename and Remove.
   - **One row per live Agent Session:** Live, the Agent Session's name, the Ticket it has Claimed ("Working on CRONK-12 …") or "Connected, no Claim", when it connected, and a meter for the time until it would fall silent.
   - "Not connected" with when its last Agent Session ended, when none is live.
-  - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button, together with Cronk's MCP address and a ready-made command to connect Claude Code.
+  - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button, together with Cronk's MCP address, a ready-made command to connect Claude Code, and the commands a script runs to change things within an Agent Session (reads need none).
   - **"Show what it did"** below the Agent Sessions opens what the Agent did across the Workspace, newest first: its Changes, Activities, Comments and saved Versions, each with when, its Agent Session and a link to the Ticket or Document.
 - **Admins** also see "Everyone else's Agents" below, as rows of Agent, Owner and liveness, read-only.
 

@@ -29,14 +29,59 @@ describe("Ticket Delegate", () => {
     ]);
   });
 
-  it("is refused without an Assignee, or when the Agent isn't the Assignee's", async () => {
+  it("on a Ticket without an Assignee assigns the delegating User, recorded as a change", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const bob = await joinAs(cronk, admin, "bob@example.com");
     await projectWithTickets(admin, "CRONK", 1);
     const bobsAgent = await registerAgent(bob, "bob-bot");
-    const adasAgent = await registerAgent(admin, "claude-laptop");
+    const bobId = await userId(admin, "bob");
 
-    expect((await admin.patch("/api/tickets/CRONK-1", { delegateId: adasAgent.agentId })).status).toBe(400);
+    const delegated = await bob.patch("/api/tickets/CRONK-1", { delegateId: bobsAgent.agentId });
+    expect(delegated.status).toBe(200);
+    expect(delegated.body.ticket.assignee).toEqual({ id: bobId, name: "bob" });
+    expect(delegated.body.ticket.delegate).toEqual({ id: bobsAgent.agentId, name: "bob-bot" });
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
+    expect(changes.slice(1)).toMatchObject([
+      { actor: { kind: "user", name: "bob" }, change: "assignee", from: null, to: { id: bobId, name: "bob" } },
+      { actor: { kind: "user", name: "bob" }, change: "delegate", from: null, to: { id: bobsAgent.agentId, name: "bob-bot" } },
+    ]);
+  });
+
+  it("on a Ticket without an Assignee is refused when the Agent isn't the delegating User's", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 1);
+    const bobsAgent = await registerAgent(bob, "bob-bot");
+
+    const foreign = await admin.patch("/api/tickets/CRONK-1", { delegateId: bobsAgent.agentId });
+    expect(foreign.status).toBe(400);
+    expect(foreign.body.error).toMatch(/Assignee's own Agents/);
+    const ticket = (await admin.get("/api/tickets/CRONK-1")).body.ticket;
+    expect(ticket.assignee).toBeNull();
+    expect(ticket.delegate).toBeNull();
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes).toHaveLength(1);
+  });
+
+  it("is refused together with unassigning the Ticket, which would leave delegated work without a User", async () => {
+    const { admin, claude } = await delegatedSetup(1);
+    const changesBefore = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.length;
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: null });
+
+    const both = await admin.patch("/api/tickets/CRONK-1", { assigneeId: null, delegateId: claude.agentId });
+    expect(both.status).toBe(400);
+    expect(both.body.error).toMatch(/Assign the Ticket to a User before delegating it/);
+    const ticket = (await admin.get("/api/tickets/CRONK-1")).body.ticket;
+    expect(ticket.assignee).not.toBeNull();
+    expect(ticket.delegate).toBeNull();
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes).toHaveLength(changesBefore + 1);
+  });
+
+  it("is refused when the Agent isn't the Assignee's", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 1);
+    const bobsAgent = await registerAgent(bob, "bob-bot");
+
     await admin.patch("/api/tickets/CRONK-1", { assigneeId: await userId(admin, "Ada") });
     const foreign = await admin.patch("/api/tickets/CRONK-1", { delegateId: bobsAgent.agentId });
     expect(foreign.status).toBe(400);
@@ -137,5 +182,39 @@ describe("Ticket Delegate, further", () => {
     await projectWithTickets(admin, "CRONK", 1);
     const claude = await registerAgent(admin, "claude-laptop");
     expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: claude.agentId })).status).toBe(400);
+  });
+});
+
+describe("Upgrading Cronk", () => {
+  it("assigns each delegated Ticket without an Assignee to its Delegate's Owner, recorded as a change by the system", async () => {
+    const { cronk, admin, claude, adaId } = await delegatedSetup(3);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobsAgent = await registerAgent(bob, "bob-bot");
+    const bobId = await userId(admin, "bob");
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: bobId, delegateId: bobsAgent.agentId });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 4" });
+    const historyLength = async (key: string) => (await admin.get(`/api/tickets/${key}/changes`)).body.changes.length;
+    const untouched = { "CRONK-3": await historyLength("CRONK-3"), "CRONK-4": await historyLength("CRONK-4") };
+
+    // As before the rule: CRONK-1 and CRONK-2 delegated with no Assignee; CRONK-3 assigned and delegated; CRONK-4 neither.
+    await cronk.undoMigration(
+      "0018_assign_delegated_tickets",
+      "UPDATE tickets SET assignee_id = NULL WHERE title IN ('Ticket 1', 'Ticket 2', 'Ticket 4')",
+    );
+    await cronk.restart();
+
+    for (const [key, owner, agent] of [
+      ["CRONK-1", { id: adaId, name: "Ada" }, { id: claude.agentId, name: "claude-laptop" }],
+      ["CRONK-2", { id: bobId, name: "bob" }, { id: bobsAgent.agentId, name: "bob-bot" }],
+    ] as const) {
+      const { ticket } = (await admin.get(`/api/tickets/${key}`)).body;
+      expect(ticket.assignee).toEqual(owner);
+      expect(ticket.delegate).toEqual(agent);
+      const { changes } = (await admin.get(`/api/tickets/${key}/changes`)).body;
+      expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: owner });
+    }
+    expect((await admin.get("/api/tickets/CRONK-3")).body.ticket.assignee).toEqual({ id: adaId, name: "Ada" });
+    expect((await admin.get("/api/tickets/CRONK-4")).body.ticket.assignee).toBeNull();
+    for (const [key, length] of Object.entries(untouched)) expect(await historyLength(key)).toBe(length);
   });
 });

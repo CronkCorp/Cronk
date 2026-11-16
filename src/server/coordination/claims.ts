@@ -244,12 +244,13 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
 /**
  * Refuses an Agent unless it calls within the Agent Session holding the Ticket's live Claim (a 409),
  * and returns that Claim's id. `refusedAction` completes the refusal "Claim CRONK-1 in your Agent
- * Session before …", such as "moving it".
+ * Session before …", such as "moving it", which goes on to say who holds the Claim or that no one does.
  */
 export async function requireClaimHolder(db: Queryable, agent: AgentActor, ticket: Ticket, now: Date, refusedAction: string): Promise<string> {
   const held = await findLiveClaimWithId(db, ticket.id, now);
   if (!held || !agent.session || held.claim.session.id !== agent.session.id) {
-    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}`);
+    const holder = !held ? "it isn't Claimed" : `it is Claimed by ${held.claim.agent.name} in another Agent Session`;
+    throw new HttpError(409, `Claim ${ticket.key} in your Agent Session before ${refusedAction}: ${holder}`);
   }
   return held.id;
 }

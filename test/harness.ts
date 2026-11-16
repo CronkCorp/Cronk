@@ -429,10 +429,10 @@ export const memberPassword = "member password";
 
 /**
  * Has `owner` register an Agent called `name` and issue it a token, and returns a
- * client calling the API as that Agent.
+ * client calling the API as that Agent, within a new Agent Session as an Agent changing things must.
  */
-export async function agentOf(cronk: Cronk, owner: Client, name: string, opts: { readOnly?: boolean } = {}): Promise<Client> {
-  return cronk.client((await registerAgent(owner, name, opts)).secret);
+export async function agentOf(cronk: Cronk, owner: Client, name: string, opts: { readOnly?: boolean } = {}): Promise<Client & { sessionId: string }> {
+  return startSession(cronk, (await registerAgent(owner, name, opts)).secret);
 }
 
 /** Has `owner` register an Agent called `name` and issue it a token; returns the Agent's id, the token's id and its secret. */

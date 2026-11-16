@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, joinAs, startInstalledCronk } from "./harness.js";
+import { agentOf, joinAs, startInstalledCronk, startSession } from "./harness.js";
 
 const keysOf = (res: { body: { projects: { key: string }[] } }) => res.body.projects.map((p) => p.key);
 
@@ -119,7 +119,7 @@ describe("an Agent's access", () => {
     expect((await reader.get("/api/projects/CRONK")).body.statuses.map((st: { name: string }) => st.name)).not.toContain("In QA");
 
     const agentId = (await reader.get("/api/me")).body.agent.id;
-    const writer = cronk.client((await admin.post(`/api/agents/${agentId}/tokens`, {})).body.secret);
+    const writer = await startSession(cronk, (await admin.post(`/api/agents/${agentId}/tokens`, {})).body.secret);
     expect((await writer.post("/api/projects/CRONK/tickets", { title: "New" })).status).toBe(201);
   });
 });
