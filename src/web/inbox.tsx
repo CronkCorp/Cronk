@@ -6,8 +6,9 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type StatusCategory } from "./api.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
+import { CONTINUED, ReopenDialog } from "./components/reopen-dialog.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
@@ -315,7 +316,7 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
           )}
         </section>
       </div>
-      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes or Accepts, S sends back or rejects.</p>
+      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes or Accepts, S sends back, reopens or rejects.</p>
     </div>
   );
 }
@@ -486,22 +487,20 @@ function ReviewDetail(props: DetailProps<ReviewItem>) {
   );
 }
 
-/** Started, In Review or finished: work that went on after its blocker was completed. */
-const CONTINUED: readonly StatusCategory[] = ["started", "in_review", "completed"];
-
 /**
  * An Agent's Unverified completion: the Reports like a review, the Tickets that already continued on it,
- * and Accept and a link to the Ticket.
+ * and Accept, Reopen… and a link to the Ticket.
  */
 function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
   const { ticket, reports } = props.item;
   const [detail] = useLoad(() => api.ticket(ticket.key), [ticket.key]);
   const continued = detail.kind === "loaded" ? detail.value.relations.blocks.filter((t) => CONTINUED.includes(t.status.category)) : [];
   const accept = useAction(() => props.acting(() => api.accept(ticket.key)), props.onDone);
+  const [reopening, setReopening] = useState(false);
   const runAccept = () => {
     if (!accept.busy) void accept.run();
   };
-  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept });
+  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept, sendBack: () => setReopening(true) });
 
   return (
     <div className="inbox-detail-body">
@@ -526,8 +525,16 @@ function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
       {accept.error && <p className="error" role="alert">{accept.error}</p>}
       <div className="actions">
         <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+        <Button variant="secondary" onClick={() => setReopening(true)} disabled={props.resolved}>Reopen…</Button>
         <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
       </div>
+      <ReopenDialog
+        ticket={ticket}
+        open={reopening}
+        onOpenChange={setReopening}
+        reopen={(input) => props.acting(() => api.reopen(ticket.key, input))}
+        onDone={props.onDone}
+      />
     </div>
   );
 }

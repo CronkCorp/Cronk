@@ -538,6 +538,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .dialog-overlay { position: fixed; inset: 0; z-index: 30; background: var(--overlay); }
 .dialog { position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%); width: calc(100% - 32px); max-width: 440px; max-height: calc(100% - 32px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 24px; }
 .dialog.wide { max-width: 880px; }
+.dialog.medium { max-width: 640px; }
 .dialog-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .dialog-description { color: var(--muted); margin: 0 0 16px; }
 .dialog-actions { justify-content: flex-end; }
@@ -654,3 +655,14 @@ a.register-row:hover { background: var(--bg); }
 .term-detail .term-definition { font-size: 15px; line-height: 1.65; margin-bottom: 8px; }
 .term-detail p.small { margin: 8px 0 0; }
 .term-version { display: flex; flex-direction: column; gap: 2px; }
+
+/* The Reopen dialog's dependents that already continued, each with its choice (docs/ui.md § Inbox and Triage in Phase 2). */
+.reopen-dependents { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 12px 0; }
+.reopen-dependents-head { background: var(--surface-2); padding: 10px 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.reopen-dependent { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.reopen-dependent + .reopen-dependent { border-top: 1px solid var(--border); }
+.reopen-dependent-text { flex-grow: 1; min-width: 0; }
+.reopen-dependent-title { display: flex; gap: 6px; align-items: baseline; }
+.reopen-dependent-title .key { min-width: 0; }
+.reopen-dependent-state { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 13px; }
+.reopen-note { font-size: 12px; margin: 0 0 16px; }

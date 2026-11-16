@@ -1,7 +1,7 @@
 import type { Actor, RecordedActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { documentReadableSql, readablePlaces } from "../identity/access.js";
-import { ticketKeySql, type RecordedChange } from "../work/tickets.js";
+import { statusFlags, ticketKeySql, type RecordedChange } from "../work/tickets.js";
 import type { ActivityKind } from "../../shared/values.js";
 
 /**
@@ -115,8 +115,8 @@ export async function listAgentRecord(
   });
 }
 
-/** A Change row as a Ticket's timeline shows it: a status change always says whether it was a Send back. */
+/** A Change row as a Ticket's timeline shows it: a status change always says whether it was a Send back or a Reopen. */
 function toChange(row: RecordRow, actor: RecordedActor): RecordedChange {
   const { change, ...data } = row.data as { change: string };
-  return { at: row.at, actor, change, ...data, ...(change === "status" && { sentBack: (data as { sentBack?: boolean }).sentBack === true }) } as RecordedChange;
+  return { at: row.at, actor, change, ...data, ...(change === "status" && statusFlags(data)) } as RecordedChange;
 }
