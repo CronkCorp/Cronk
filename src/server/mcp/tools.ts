@@ -167,20 +167,20 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         },
       },
       relate: {
-        description: "relate a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
+        description: "add a Relation from a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "relate"))}/relations`, {
-            kind: required(a.relation, "a relation", "relate"),
+            kind: required(a.relation, "a Relation", "relate"),
             ticketKey: required(a.other, "an other Ticket", "relate"),
           }),
       },
       unrelate: {
-        description: "remove a relation from a Ticket you hold the Claim on",
+        description: "remove a Relation from a Ticket you hold the Claim on",
         writes: true,
         run: (api, a) => {
           const key = required(a.key, "a key", "unrelate");
-          const kind = required(a.relation, "a relation", "unrelate");
+          const kind = required(a.relation, "a Relation", "unrelate");
           const other = required(a.other, "an other Ticket", "unrelate");
           return api("DELETE", `/api/tickets/${encodeURIComponent(key)}/relations/${kind}/${encodeURIComponent(other)}`);
         },

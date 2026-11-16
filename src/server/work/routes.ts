@@ -856,7 +856,8 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
  * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409).
  */
 async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: string, now: Date): Promise<{ ticket: Ticket; other: Ticket }> {
-  const ticket = await ticketFor(tx, actor, key, "write");
+  // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
+  const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
   if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
   const other = await ticketFor(tx, actor, otherKey, "write").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
