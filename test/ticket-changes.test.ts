@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, registerAgent, startInstalledCronk } from "./harness.js";
+import { registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("Ticket Changes", () => {
   it("records every change with the Actor who made it and when", async () => {
@@ -49,16 +49,18 @@ describe("Ticket Changes", () => {
     const { cronk, admin } = await startInstalledCronk();
     const ada = (await admin.get("/api/me")).body.user;
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
-    const claude = await agentOf(cronk, admin, "claude-laptop");
-    const agent = (await claude.get("/api/me")).body.agent;
+    const claude = await registerAgent(admin, "claude-laptop");
+    const agent = await startSession(cronk, claude.secret);
 
-    await claude.post("/api/projects/CRONK/tickets", { title: "Found a bug" });
-    await claude.patch("/api/tickets/CRONK-1", { title: "Fix the bug" });
-    await admin.delete(`/api/agents/${agent.id}`);
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found a bug" });
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: ada.id, delegateId: claude.agentId });
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.patch("/api/tickets/CRONK-1", { title: "Fix the bug" });
+    await admin.delete(`/api/agents/${claude.agentId}`);
 
     const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
-    const actor = { kind: "agent", id: agent.id, name: "claude-laptop", owner: { id: ada.id, name: "Ada" }, session: { id: claude.sessionId } };
-    expect(changes).toEqual([
+    const actor = { kind: "agent", id: claude.agentId, name: "claude-laptop", owner: { id: ada.id, name: "Ada" }, session: { id: agent.sessionId } };
+    expect(changes.filter((c: { actor: { kind: string } }) => c.actor.kind === "agent")).toEqual([
       expect.objectContaining({ actor, change: "created" }),
       expect.objectContaining({ actor, change: "title", from: "Found a bug", to: "Fix the bug" }),
     ]);
@@ -66,18 +68,21 @@ describe("Ticket Changes", () => {
 
   it("records the Agent Session an Agent's change was made in", async () => {
     const { cronk, admin } = await startInstalledCronk();
+    const ada = (await admin.get("/api/me")).body.user;
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
-    await admin.post("/api/projects/CRONK/tickets", { title: "Add login" });
-    const { secret } = await registerAgent(admin, "claude-laptop");
-    const session = (await cronk.client(secret).post("/api/agent-sessions")).body.session;
+    const claude = await registerAgent(admin, "claude-laptop");
 
-    const inSession = await cronk.client(secret, { "cronk-agent-session": session.id }).patch("/api/tickets/CRONK-1", { title: "Add sign-in" });
-    expect(inSession.status).toBe(200);
+    await admin.post("/api/projects/CRONK/tickets", { title: "Add login" });
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: ada.id, delegateId: claude.agentId });
+    const inSession = await startSession(cronk, claude.secret);
+    await inSession.post("/api/tickets/CRONK-1/claim");
+    expect((await inSession.patch("/api/tickets/CRONK-1", { title: "Add sign-in" })).status).toBe(200);
     // Outside any Agent Session the Agent can't change anything, so every change it makes names its Session.
-    expect((await cronk.client(secret).patch("/api/tickets/CRONK-1", { title: "Add sign-in and sign-out" })).status).toBe(403);
+    expect((await cronk.client(claude.secret).patch("/api/tickets/CRONK-1", { title: "Add sign-in and sign-out" })).status).toBe(403);
 
     const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
-    expect(changes.slice(1).map((c: { actor: { session: unknown } }) => c.actor.session)).toEqual([{ id: session.id }]);
+    const byAgent = changes.filter((c: { actor: { kind: string } }) => c.actor.kind === "agent");
+    expect(byAgent.map((c: { actor: { session: unknown } }) => c.actor.session)).toEqual([{ id: inSession.sessionId }]);
   });
 
   it("refuses a change in an Agent Session that has ended or isn't the Agent's", async () => {

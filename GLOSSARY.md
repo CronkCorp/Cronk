@@ -37,7 +37,7 @@ The User accountable for a Ticket. Always a User, never an Agent.
 _Avoid_: Owner (reserved for Agents), responsible
 
 **Delegate**:
-The Agent a Ticket's Assignee has handed the work to. Must be one of the Assignee's own Agents. Removing the Agent clears it as Delegate of every Ticket, as a change by whoever removed it.
+The Agent a Ticket's Assignee has handed the work to. Must be one of the Assignee's own Agents, so a delegated Ticket always has an Assignee: delegating a Ticket without one assigns the delegating User. Removing the Agent clears it as Delegate of every Ticket, as a change by whoever removed it.
 _Avoid_: Agent assignee, worker
 
 **Autonomous Delegation**:
@@ -85,7 +85,7 @@ An Activity in which an Agent asks something of a User, marked **blocking** when
 _Avoid_: Prompt, request, clarification
 
 **Change**:
-One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or Relations, or its creation, shown in the Ticket's timeline.
+One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or Relations, or its creation, shown in the Ticket's timeline. A Change no Actor made, such as an upgrade assigning a delegated Ticket to its Delegate's Owner, is recorded as by Cronk itself (a system Change).
 _Avoid_: Event, history entry, field change
 
 **Comment**:
@@ -97,7 +97,7 @@ A Comment that concerns an Agent: it answers the Agent's Question, @mentions it,
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
-An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
+An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. An Agent changes a Ticket's fields, Status and Relations only from the Agent Session holding its Claim; Comments need none. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:

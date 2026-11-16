@@ -12,14 +12,26 @@ import type { ImportContext } from "./import-context.js";
 
 /** Writes the history of the Ticket `ticketId` at `${base}.history.md`; `statusNow` names its Project's Statuses by id. */
 export async function exportHistory(ctx: ExportContext, base: string, ticketId: string, statusNow: Map<string, string>): Promise<void> {
-  const { rows: changes } = await ctx.db.query<ActorColumns & { at: Date; change: TicketChange["change"]; data: Record<string, unknown> }>(
+  // A change Cronk itself made has no acting User, and is written as by no one (`by: null`).
+  type ChangeRow = Omit<ActorColumns, "actor_user_id"> & {
+    actor_user_id: string | null;
+    at: Date;
+    change: TicketChange["change"];
+    data: Record<string, unknown>;
+  };
+  const { rows: changes } = await ctx.db.query<ChangeRow>(
     "SELECT * FROM ticket_changes WHERE ticket_id = $1 ORDER BY id",
     [ticketId],
   );
   // Once every Document is written, so a linked Document can be named by its path.
   ctx.afterDocuments(() =>
     ctx.add(`${base}.history.md`, {
-      changes: changes.map((c) => ({ at: iso(c.at), by: ctx.actor(c), change: c.change, ...changeToExport(c.change, c.data, ctx, statusNow) })),
+      changes: changes.map((c) => ({
+        at: iso(c.at),
+        by: c.actor_user_id === null ? null : ctx.actor({ ...c, actor_user_id: c.actor_user_id }),
+        change: c.change,
+        ...changeToExport(c.change, c.data, ctx, statusNow),
+      })),
     }),
   );
 }
@@ -71,7 +83,7 @@ export async function importHistory(ctx: ImportContext, file: File, ticketId: st
     const { at, by, change, ...fields } = entry;
     const kind = oneOf(change, Object.keys(CHANGE_FIELDS) as TicketChange["change"][], `${where}.change`);
     const when = date(at, `${where}.at`);
-    const actor = await ctx.actor(by, `${where}.by`);
+    const actor = by === null ? ({ kind: "system" } as const) : await ctx.actor(by, `${where}.by`);
     const recorded = await importedChange(kind, fields, find, where);
     await recordChange(ctx.db, ticketId, actor, when, { change: kind, ...recorded } as TicketChange);
   }

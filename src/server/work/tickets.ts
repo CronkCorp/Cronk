@@ -1,4 +1,4 @@
-import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
+import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type ChangeActorRow, type RecordedActor, type StoredActor, type SystemActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
@@ -291,32 +291,38 @@ export type TicketChange =
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
   | { change: "document linked" | "document unlinked"; document: DocumentName };
 
-export type { RecordedActor };
+export type { ChangeActor, RecordedActor };
 
-/** A Change to a Ticket with the Actor who made it and when. */
-export type RecordedChange = { at: Date; actor: RecordedActor } & TicketChange;
+/** A Change to a Ticket with the Actor who made it (Cronk itself for a system Change) and when. */
+export type RecordedChange = { at: Date; actor: ChangeActor } & TicketChange;
 
-/** Records a Change to the Ticket: by `actor` as it calls now, or as an import stored it. */
-export async function recordChange(db: Queryable, ticketId: string, actor: Actor | StoredActor, at: Date, change: TicketChange): Promise<void> {
+/** Records a Change to the Ticket: by `actor` as it calls now, as an import stored it, or by Cronk itself. */
+export async function recordChange(
+  db: Queryable,
+  ticketId: string,
+  actor: Actor | StoredActor | SystemActor,
+  at: Date,
+  change: TicketChange,
+): Promise<void> {
   const { change: kind, ...data } = change;
   await db.query(
     `INSERT INTO ticket_changes (ticket_id, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id, change, data)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [ticketId, at, ...actorColumns(actor), kind, data],
+    [ticketId, at, ...changeActorColumns(actor), kind, data],
   );
 }
 
-interface ChangeRow extends RecordedActorRow {
+type ChangeRow = ChangeActorRow & {
   at: Date;
   change: TicketChange["change"];
   data: object;
-}
+};
 
 /** A Ticket's Changes, oldest first. */
 export async function listChanges(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
   const { rows } = await db.query<ChangeRow>(
     `SELECT c.at, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id, c.change, c.data
-     FROM ticket_changes c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
+     FROM ticket_changes c LEFT JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
      WHERE c.ticket_id = $1 ORDER BY c.id`,
     [ticketId],
   );
@@ -324,7 +330,7 @@ export async function listChanges(db: Queryable, ticketId: string): Promise<Reco
     (row) =>
       ({
         at: row.at,
-        actor: toRecordedActor(row),
+        actor: toChangeActor(row),
         change: row.change,
         ...row.data,
         ...(row.change === "status" && { sentBack: (row.data as { sentBack?: boolean }).sentBack === true }),

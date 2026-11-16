@@ -548,3 +548,40 @@ describe("a User an import brought in", () => {
     expect((await cronk.client().post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);
   });
 });
+
+describe("a change Cronk made itself", () => {
+  it("is exported as by no one and imported as Cronk's again", async () => {
+    const { cronk, admin, adaId } = await delegatedSetup(1);
+    await cronk.undoMigration("0018_assign_delegated_tickets", "UPDATE tickets SET assignee_id = NULL");
+    await cronk.restart();
+    const exported = await admin.download("/api/projects/CRONK/export");
+    const history = markdown((await untarGz(exported.body))["projects/CRONK/tickets/CRONK-1.history.md"]).data.changes;
+    expect(history.at(-1)).toMatchObject({ by: null, change: "assignee", from: null, to: { id: adaId, name: "Ada" } });
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", exported.body)).status).toBe(201);
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
+    expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: { name: "Ada" } });
+  });
+});
+
+describe("a delegated Ticket without an Assignee in an export", () => {
+  it("is imported assigned to its Delegate's Owner, recorded as a Change by Cronk itself", async () => {
+    const { admin } = await delegatedSetup(1);
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    // As an export from before delegating always assigned someone could hold.
+    const path = "projects/CRONK/tickets/CRONK-1.md";
+    const { data, body } = markdown(files[path]);
+    data.assignee = null;
+    files[path] = `---\n${stringify(data)}---\n${body}`;
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", await tarGz(files))).status).toBe(201);
+    const ada = { id: (await elsewhere.admin.get("/api/me")).body.user.id, name: "Ada" };
+    const { ticket } = (await elsewhere.admin.get("/api/tickets/CRONK-1")).body;
+    expect(ticket.assignee).toEqual(ada);
+    expect(ticket.delegate).toMatchObject({ name: "claude-laptop" });
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
+    expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: ada });
+  });
+});

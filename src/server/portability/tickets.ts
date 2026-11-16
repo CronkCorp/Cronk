@@ -1,6 +1,7 @@
 import { insertActivity, markAnswered, type Activity } from "../coordination/activities.js";
 import { ACTIVITY_KINDS, PRIORITIES } from "../../shared/values.js";
-import { ticketKeySql } from "../work/tickets.js";
+import { recordChange, ticketKeySql } from "../work/tickets.js";
+import { findUserById } from "../identity/users.js";
 import { storeRelation } from "../work/relations.js";
 import { storeDocumentLink } from "../work/document-links.js";
 import { exportComments, importComments } from "./comments.js";
@@ -151,6 +152,8 @@ export class ImportedTickets {
   readonly relations: PendingRelation[] = [];
   readonly documentLinks: PendingDocumentLink[] = [];
   readonly histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
+  /** Delegated Tickets the export left without an Assignee, which this import assigned to the Delegate's Owner. */
+  readonly assignedToOwner: { ticketId: string; ownerId: string }[] = [];
 
   /** Stores the relations between Tickets this import brought in: a key elsewhere may name another Ticket here. */
   async storeRelations(ctx: ImportContext): Promise<void> {
@@ -170,9 +173,16 @@ export class ImportedTickets {
     }
   }
 
-  /** Imports the Tickets' history, once every Ticket is in so changes can name them. */
+  /**
+   * Imports the Tickets' history, once every Ticket is in so changes can name them, then records each assignment to a
+   * Delegate's Owner this import made, as a Change by Cronk itself, as the upgrade that assigned them here would have.
+   */
   async importHistories(ctx: ImportContext): Promise<void> {
     for (const { ticketId, statusIds, file } of this.histories) await importHistory(ctx, file, ticketId, statusIds);
+    for (const { ticketId, ownerId } of this.assignedToOwner) {
+      const owner = (await findUserById(ctx.db, ownerId))!;
+      await recordChange(ctx.db, ticketId, { kind: "system" }, ctx.now, { change: "assignee", from: null, to: { id: owner.id, name: owner.name } });
+    }
   }
 }
 
@@ -181,7 +191,8 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
   const parents: { ticketId: string; parent: string; path: string }[] = [];
   for (const path of ctx.filesIn(`projects/${dirKey}/tickets`).filter((p) => !p.endsWith(".history.md"))) {
     const t = ctx.need(path);
-    const { key, id } = await importTicket(ctx, t, project);
+    const { key, id, assignedToOwner } = await importTicket(ctx, t, project);
+    if (assignedToOwner) tickets.assignedToOwner.push({ ticketId: id, ownerId: assignedToOwner });
     if (tickets.ids.has(key)) refuse(`Two Tickets have the key ${key}`);
     tickets.ids.set(key, id);
     if (typeof t.data.parent === "string") parents.push({ ticketId: id, parent: t.data.parent.toUpperCase(), path });
@@ -202,13 +213,19 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
   }
 }
 
-/** Writes the Ticket file `t` into `project`; returns its key and id. */
-async function importTicket(ctx: ImportContext, t: File, project: ImportedProject): Promise<{ key: string; id: string }> {
+/**
+ * Writes the Ticket file `t` into `project`; returns its key and id. A delegated Ticket the file leaves without an
+ * Assignee, as an export from before delegating always assigned someone may, is assigned to its Delegate's Owner,
+ * whose id it returns as `assignedToOwner`.
+ */
+async function importTicket(ctx: ImportContext, t: File, project: ImportedProject): Promise<{ key: string; id: string; assignedToOwner?: string }> {
   const key = text(t.data.key, `${t.path} key`).toUpperCase();
   const number = Number(new RegExp(`^${project.key}-([1-9][0-9]{0,8})$`).exec(key)?.[1]);
   if (!number) refuse(`${t.path} key must be a key of ${project.key}, such as ${project.key}-1`);
   const statusId = project.statusIds.get(text(t.data.status, `${t.path} status`).toLowerCase()) ?? refuse(`${t.path} is in a Status ${project.path} doesn't list`);
-  const delegate = t.data.delegate === null || t.data.delegate === undefined ? null : ctx.agent(t.data.delegate, `${t.path} delegate`).id;
+  const delegate = t.data.delegate === null || t.data.delegate === undefined ? null : ctx.agent(t.data.delegate, `${t.path} delegate`);
+  const assignee = t.data.assignee === null || t.data.assignee === undefined ? null : await ctx.userId(t.data.assignee, `${t.path} assignee`);
+  const assignedToOwner = delegate && assignee === null ? delegate.ownerId : undefined;
   const labels = t.data.labels ?? [];
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === "string")) refuse(`${t.path} labels must be a list of text`);
   const { rows } = await ctx.db.query<{ id: string }>(
@@ -222,13 +239,13 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
       statusId,
       oneOf(t.data.priority ?? "none", PRIORITIES, `${t.path} priority`),
       labels,
-      t.data.assignee === null || t.data.assignee === undefined ? null : await ctx.userId(t.data.assignee, `${t.path} assignee`),
-      delegate,
+      assignee ?? assignedToOwner ?? null,
+      delegate?.id ?? null,
       date(t.data.createdAt, `${t.path} createdAt`),
       date(t.data.updatedAt, `${t.path} updatedAt`),
     ],
   );
-  return { key, id: rows[0]!.id };
+  return { key, id: rows[0]!.id, assignedToOwner };
 }
 
 /** The relations the Ticket file `t`, keyed `key`, names. */
