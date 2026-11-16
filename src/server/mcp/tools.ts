@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
-import type { AvoidedWord } from "../api-types.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, EXTRA_ORIGIN_USES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import type { AvoidedWord, Welcome } from "../api-types.js";
+import { formatBytes } from "../files/sizes.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 import { packFolder, type Folder } from "../portability/archive.js";
@@ -11,6 +12,8 @@ import { packFolder, type Folder } from "../portability/archive.js";
 export interface ToolContext {
   readOnly: boolean;
   api: (caller: Caller) => ApiCall;
+  /** What an Artifact may load and hold in the Workspace when the Agent Session started, which the artifacts tool describes. */
+  artifacts: Welcome["artifacts"];
 }
 
 /** One `action` of a grouped tool: whether it writes, and the API call it maps onto. */
@@ -647,10 +650,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "`index.html` at its top. Each belongs to a Project or, without a project, the Workspace, and records the Ticket whose Claim you held. " +
       "Every publish is the whole folder again, as a new Version; publishing a new Version names the Version you based it on (`baseVersion`, " +
       "the Artifact's `version`) and is refused if a later one was published meanwhile, so merge with it first. `url` always shows the latest " +
-      "Version and `versionUrl` the one just published: link that one where your words describe it, such as in a Report. The page runs " +
-      "sandboxed on a hostname of its own: it may load scripts, styles and fonts only from its own files, cdnjs, jsDelivr, unpkg and Google " +
-      "Fonts, and may make no network requests, so put its data in its files. A Version may hold 500 files and 25 MB unless an Admin changed " +
-      "the limits. You can't publish a new Version of an Artifact a User marked `protected`.",
+      "Version and `versionUrl` the one just published: link that one where your words describe it, such as in a Report. " +
+      artifactRules(ctx.artifacts) +
+      " You can't publish a new Version of an Artifact a User marked `protected`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (list, publish a new Artifact)"),
       id: z.string().optional().describe("The Artifact's id (get; publish, for a new Version of it)"),
@@ -670,6 +672,16 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         .string()
         .optional()
         .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (publish)"),
+      extraOrigins: z
+        .array(
+          z.object({
+            origin: z.string().describe("A bare origin, such as https://cdn.plot.ly"),
+            uses: z.array(z.enum(EXTRA_ORIGIN_USES)).describe("What the page loads from it; connect lets it send requests there"),
+            reason: z.string().describe("Why the page needs it, shown to Users on the Artifact"),
+          }),
+        )
+        .optional()
+        .describe("Origins this Version needs beyond the allow-list, each with a reason; for this Version only, so declare them again on the next (publish)"),
     },
     actions: {
       list: {
@@ -694,16 +706,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             }
             folder.set(file.path, file.content ?? Buffer.from(file.contentBase64!, "base64"));
           }
+          const extraOrigins = a.extraOrigins && a.extraOrigins.length > 0 ? JSON.stringify(a.extraOrigins) : undefined;
           const query = (params: Record<string, string | undefined>) =>
             `?${new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined)).toString()}`;
           if (a.id === undefined) {
             const title = required(a.title, "a title", "publish");
-            return api("POST", `${scopePath(a.project)}/artifacts${query({ title, ticket: a.ticket })}`, new FileBody(await packFolder(folder), "application/gzip"));
+            return api("POST", `${scopePath(a.project)}/artifacts${query({ title, ticket: a.ticket, extraOrigins })}`, new FileBody(await packFolder(folder), "application/gzip"));
           }
           const baseVersion = required(a.baseVersion, "a baseVersion with an id", "publish");
           return api(
             "POST",
-            `/api/artifacts/${encodeURIComponent(a.id)}/versions${query({ baseVersion: String(baseVersion), title: a.title, ticket: a.ticket })}`,
+            `/api/artifacts/${encodeURIComponent(a.id)}/versions${query({ baseVersion: String(baseVersion), title: a.title, ticket: a.ticket, extraOrigins })}`,
             new FileBody(await packFolder(folder), "application/gzip"),
           );
         },
@@ -712,6 +725,21 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerSearchTool(server, ctx);
+}
+
+/** What an Artifact's page may load and a Version may hold, as the artifacts tool tells it: the Workspace's settings in force. */
+function artifactRules(rules: Welcome["artifacts"]): string {
+  const allowed =
+    rules.allowedOrigins.length > 0 ? `its own files and ${rules.allowedOrigins.join(", ")}` : "its own files (the Workspace allows no other origins)";
+  const extras = rules.extraOriginsAllowed
+    ? "If it truly needs another origin, such as a library from elsewhere or a data source it sends requests to, declare it in `extraOrigins` " +
+      "with what it loads from there and why; Users see them on the Version, and they are never carried over, so declare them again on the next one. " +
+      "Declare as few as you can."
+    : "This Workspace doesn't allow extra origins, so a publish declaring `extraOrigins` is refused.";
+  return (
+    `The page runs sandboxed on a hostname of its own: it may load scripts, styles and fonts only from ${allowed}, and may make no network ` +
+    `requests, so put its data in its files. ${extras} A Version may hold ${rules.maxFiles} files and ${formatBytes(rules.maxBytes)}.`
+  );
 }
 
 /** Registers the `search` tool: one operation, so it takes no `action`. It only reads, so every token is offered it. */

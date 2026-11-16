@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, type Artifact, type ArtifactVersion } from "./api.js";
+import { api, ApiError, type Artifact, type ArtifactVersion, type Workspace } from "./api.js";
 import { Actor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { formatBytes } from "./components/files.js";
@@ -83,7 +83,7 @@ export function ArtifactsPage(props: { projectKey?: string }) {
  * An Artifact's page: a thin bar over the Artifact in a sandboxed frame, full bleed. `version` shows that Version
  * instead of the latest.
  */
-export function ArtifactPage(props: { id: string; version?: number | undefined }) {
+export function ArtifactPage(props: { id: string; version?: number | undefined; workspace: Workspace | undefined }) {
   const [artifact, reload, setArtifact] = useLoad(() => api.artifact(props.id), [props.id]);
   const [pinned] = useLoad(
     () => (props.version === undefined ? Promise.resolve(undefined) : api.artifactVersion(props.id, props.version)),
@@ -93,18 +93,26 @@ export function ArtifactPage(props: { id: string; version?: number | undefined }
     <Show state={artifact}>
       {(a) => (
         <Show state={pinned}>
-          {(version) => <ArtifactView artifact={a} version={version} onChanged={setArtifact} reload={reload} />}
+          {(version) => <ArtifactView artifact={a} version={version} workspace={props.workspace} onChanged={setArtifact} reload={reload} />}
         </Show>
       )}
     </Show>
   );
 }
 
-function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | undefined; onChanged: (a: Artifact) => void; reload: () => void }) {
+function ArtifactView(props: {
+  artifact: Artifact;
+  version: ArtifactVersion | undefined;
+  workspace: Workspace | undefined;
+  onChanged: (a: Artifact) => void;
+  reload: () => void;
+}) {
   const a = props.artifact;
   const shown = props.version ?? a.versions?.find((v) => v.number === a.version);
   const number = shown?.number ?? a.version;
   const frameUrl = props.version?.frameUrl ?? a.frameUrl ?? "";
+  const extras = shown?.extraOrigins ?? a.extraOrigins;
+  const extrasApply = props.workspace?.artifactExtraOriginsAllowed ?? true;
   const canWrite = useCanWrite(a.projectKey);
   const [publishing, setPublishing] = useState(false);
   const protect = useAction((value: boolean) => api.protectArtifact(a.id, value), (changed) => props.onChanged({ ...a, protected: changed.protected }));
@@ -135,6 +143,7 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
               by <Actor actor={shown.actor} />
             </span>
           )}
+          {extras.length > 0 && <ExtraOrigins extras={extras} apply={extrasApply} />}
           <span className="grow" />
           <CopyLink url={shown?.url ?? a.versionUrl} label={`Copy link to Version ${number}`} />
           <a className={buttonClass("secondary")} href={frameUrl} target="_blank" rel="noopener noreferrer">Open full size</a>
@@ -153,8 +162,8 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
         <iframe key={frameUrl} className="artifact-frame" title={`${a.title}, Version ${number}`} src={frameUrl} sandbox={FRAME_SANDBOX} />
       </div>
       <p className="muted hint artifact-note">
-        {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame. It loads
-        scripts only from itself and a few CDNs, and network requests are blocked.
+        {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame.{" "}
+        {servingNote(props.workspace?.artifactAllowedOrigins, extrasApply ? extras : [])}
       </p>
       <PublishDialog
         open={publishing}
@@ -169,6 +178,50 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
       />
       <ProtectionHistory load={() => api.artifactProtection(a.id)} reloadOn={[a.id, a.protected]} />
     </section>
+  );
+}
+
+/** What a page may load, as the note under the frame says it: the Workspace's allow-list and the Version's extras in force. */
+function servingNote(allowed: string[] | undefined, extras: Artifact["extraOrigins"]): string {
+  const hosts = (origins: string[]) => origins.map((o) => o.replace(/^https:\/\//, "")).join(", ");
+  const from = allowed === undefined ? "the Workspace's allow-list" : allowed.length === 0 ? "nowhere else" : hosts(allowed);
+  const requests = extras.filter((e) => e.uses.includes("connect")).map((e) => e.origin);
+  return (
+    `It loads scripts, styles and fonts only from itself and ${from}` +
+    `${extras.length > 0 ? ", and whatever else only from the extra origins this Version declared, for what each was declared for" : ""}. ` +
+    (requests.length > 0 ? `Network requests go only to ${hosts(requests)}.` : "Network requests are blocked.")
+  );
+}
+
+/** The extra origins the shown Version declared, as a `--warn` pill that opens each with what it loads and why. */
+function ExtraOrigins(props: { extras: Artifact["extraOrigins"]; apply: boolean }) {
+  const count = props.extras.length;
+  return (
+    <Popover
+      label="Extra origins"
+      trigger={
+        <button type="button" className="chip warn extra-origins-chip">
+          {count} extra {count === 1 ? "origin" : "origins"}
+          {props.apply ? "" : " · off"} ▾
+        </button>
+      }
+    >
+      <div className="extra-origins">
+        <div className="menu-label">Extra origins this Version declared</div>
+        {!props.apply && (
+          <p className="muted extra-origins-off">Not applied: this Workspace doesn't allow extra origins, so the Version is served without them.</p>
+        )}
+        <ul className="extra-origin-list" aria-label="Extra origins">
+          {props.extras.map((e) => (
+            <li key={e.origin} className="extra-origin">
+              <span className="extra-origin-name">{e.origin}</span>
+              <span className="muted">for {e.uses.map((u) => (u === "connect" ? "network requests" : u)).join(", ")}</span>
+              <span>{e.reason}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Popover>
   );
 }
 

@@ -1,24 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { ada as admin, startCronk, startInstalledCronk } from "./harness.js";
 
+/** The origins every Artifact may load from until an Admin changes them: cdnjs, jsDelivr, unpkg and Google Fonts. */
+const DEFAULT_ALLOW_LIST = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com"];
+
 describe("the Workspace", () => {
   it("takes the name given at setup, and the Admin can rename it", async () => {
     const cronk = await startCronk();
     const browser = cronk.client();
     await browser.post("/api/setup", { ...admin, workspaceName: "Acme" });
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500 });
+    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500, artifactAllowedOrigins: DEFAULT_ALLOW_LIST, artifactExtraOriginsAllowed: true });
 
     const renamed = await browser.patch("/api/workspace", { name: "  Acme Labs " });
     expect(renamed.status).toBe(200);
-    expect(renamed.body).toEqual({ name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500 });
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500 });
+    expect(renamed.body).toEqual({ name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500, artifactAllowedOrigins: DEFAULT_ALLOW_LIST, artifactExtraOriginsAllowed: true });
+    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500, artifactAllowedOrigins: DEFAULT_ALLOW_LIST, artifactExtraOriginsAllowed: true });
   });
 
   it("gets a default name when setup gives none", async () => {
     const cronk = await startCronk();
     const browser = cronk.client();
     await browser.post("/api/setup", admin);
-    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Cronk", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500 });
+    expect((await browser.get("/api/workspace")).body).toEqual({ name: "Cronk", agentAccess: "write", silenceThresholdSeconds: 300, attachmentMaxBytes: 100 * 1024 * 1024, transcriptMaxBytes: 10485760, artifactMaxBytes: 25 * 1024 * 1024, artifactMaxFiles: 500, artifactAllowedOrigins: DEFAULT_ALLOW_LIST, artifactExtraOriginsAllowed: true });
   });
 
   it("refuses a blank name", async () => {
