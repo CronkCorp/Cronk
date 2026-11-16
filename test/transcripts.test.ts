@@ -36,6 +36,18 @@ describe("Uploading a Transcript", () => {
     });
   });
 
+  it("links the Terms its Sessions saved, which alone are enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const term = await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
+    expect(term.status, JSON.stringify(term.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Define Ticket", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({ tickets: [], documents: [], terms: [{ id: term.body.term.id, name: "Ticket" }] });
+  });
+
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const idle = await session();
@@ -291,6 +303,7 @@ describe("Exporting and importing Transcripts", () => {
       sessions: [sessionId],
       tickets: ["CRONK-1", "SECRET-1"],
       documents: ["documents/1-handbook.md"],
+      terms: [],
     });
     expect(file.body).toBe(rewritten);
     expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId));

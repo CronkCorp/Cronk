@@ -31,6 +31,8 @@ export interface Transcript {
   tickets: { key: string; title: string }[];
   /** The Documents and Reports its Sessions saved or commented on, that the reader can read. */
   documents: { id: string; title: string }[];
+  /** The Terms its Sessions saved, that the reader can read. */
+  terms: { id: string; name: string }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -131,16 +133,17 @@ function hasWord(text: string, word: string): boolean {
 }
 
 /**
- * Everything the Agent Sessions `$1` did, as the Ticket or Document each record is on: the Ticket changes they made, the
- * Activities and Comments they wrote and the Document Versions they saved.
+ * Everything the Agent Sessions `$1` did, as the Ticket, Document or Term each record is on: the Ticket changes they made, the
+ * Activities and Comments they wrote and the Document and Term Versions they saved.
  */
 const SESSION_RECORDS = `
-  SELECT ticket_id, NULL::uuid AS document_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, document_id FROM comments WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT NULL, document_id FROM document_versions WHERE actor_session_id = ANY($1::uuid[])`;
+  SELECT ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, NULL, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, document_id, NULL FROM comments WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT NULL, document_id, NULL FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT NULL, NULL, term_id FROM term_versions WHERE actor_session_id = ANY($1::uuid[])`;
 
-/** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment or a Document Version. */
+/** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, or a Document or Term Version. */
 export async function changedAnything(db: Queryable, sessionIds: string[]): Promise<boolean> {
   if (sessionIds.length === 0) return false;
   const { rows } = await db.query(`SELECT 1 FROM (${SESSION_RECORDS}) r LIMIT 1`, [sessionIds]);
@@ -214,6 +217,11 @@ const CHANGED_DOCUMENTS = `
   SELECT d.id, d.title, coalesce(rt.project_id, d.project_id) AS project_id, d.created_at FROM documents d LEFT JOIN tickets rt ON rt.id = d.ticket_id
   WHERE d.id IN (SELECT document_id FROM (${SESSION_RECORDS}) r)`;
 
+/** The Terms changed by these Sessions (`$1`), with the Project each lies in; null for the Workspace. */
+const CHANGED_TERMS = `
+  SELECT tm.id, tm.name, tm.project_id, p.key AS project_key FROM terms tm LEFT JOIN projects p ON p.id = tm.project_id
+  WHERE tm.id IN (SELECT term_id FROM (${SESSION_RECORDS}) r)`;
+
 /** What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents in the order they were created. */
 export async function changedItems(db: Queryable, sessionIds: string[]) {
   const { rows: tickets } = await db.query<{ id: string; key: string; title: string; project_id: string }>(
@@ -224,16 +232,20 @@ export async function changedItems(db: Queryable, sessionIds: string[]) {
     `${CHANGED_DOCUMENTS} ORDER BY d.created_at, d.id`,
     [sessionIds],
   );
-  return { tickets, documents };
+  const { rows: terms } = await db.query<{ id: string; name: string; project_id: string | null; project_key: string | null }>(
+    `${CHANGED_TERMS} ORDER BY p.key NULLS FIRST, lower(tm.name), tm.id`,
+    [sessionIds],
+  );
+  return { tickets, documents, terms };
 }
 
 /** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
 function placesOf(items: Awaited<ReturnType<typeof changedItems>>): Places {
   const projectIds = new Set<string>(items.tickets.map((t) => t.project_id));
   let workspace = false;
-  for (const d of items.documents) {
-    if (d.project_id === null) workspace = true;
-    else projectIds.add(d.project_id);
+  for (const item of [...items.documents, ...items.terms]) {
+    if (item.project_id === null) workspace = true;
+    else projectIds.add(item.project_id);
   }
   return { projectIds: [...projectIds], workspace };
 }
@@ -273,6 +285,7 @@ export async function readTranscript(
     sessions: stored.sessionIds.map((id) => ({ id })),
     tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title })),
     documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title })),
+    terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name })),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };

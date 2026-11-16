@@ -100,6 +100,11 @@ const transcriptFields = {
     items: object({ id, title: { type: "string" } }),
     description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
   },
+  terms: {
+    type: "array",
+    items: object({ id, name: { type: "string" } }),
+    description: "The Terms its Sessions saved, that the caller can read.",
+  },
   createdAt: timestamp,
   updatedAt: timestamp,
 };
