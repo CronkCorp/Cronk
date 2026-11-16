@@ -42,8 +42,15 @@ describe("the OpenAPI description", () => {
       expect(success, label).toHaveLength(1);
       const response = op.responses[success[0]!];
       expect(response.description, label).toBeTruthy();
-      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive; every other success answers JSON with a schema.
-      const type = label.endsWith("/events") ? "text/event-stream" : label.endsWith("/export") ? "application/gzip" : "application/json";
+      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive, a glossary Markdown;
+      // every other success answers JSON with a schema.
+      const type = label.endsWith("/events")
+        ? "text/event-stream"
+        : label.endsWith("/export")
+          ? "application/gzip"
+          : label.endsWith("/terms/glossary")
+            ? "text/markdown"
+            : "application/json";
       if (success[0] !== "204") expect(response.content?.[type]?.schema, label).toBeDefined();
     }
   });
@@ -78,6 +85,7 @@ describe("the OpenAPI description", () => {
     const staleBody = { $ref: "#/components/schemas/StaleVersion" };
     const staleGuidanceBody = { $ref: "#/components/schemas/StaleGuidance" };
     const staleDecisionBody = { $ref: "#/components/schemas/StaleDecision" };
+    const staleTermBody = { $ref: "#/components/schemas/StaleTermVersion" };
     const sectionBody = { $ref: "#/components/schemas/SectionRefused" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
@@ -85,15 +93,25 @@ describe("the OpenAPI description", () => {
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
       // Every operation refuses query parameters it doesn't take.
       expect(errors, label).toContain("400");
+      // Every write can be refused for coming from another site.
+      if (!label.startsWith("GET ")) expect(errors, label).toContain("403");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
-        // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance or a Decision);
+        // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance, a Term or a Decision);
         // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons;
         // a refused section heading's is the error shape plus the Document's headings.
         const refusesSections = label === "POST /api/documents/{id}/replace-section" && ["400", "404"].includes(code);
         const allowed =
           code === "409"
-            ? [errorBody, staleBody, staleGuidanceBody, staleDecisionBody, expect.objectContaining({ anyOf: [staleBody, errorBody] })]
+            ? [
+                errorBody,
+                staleBody,
+                staleGuidanceBody,
+                staleTermBody,
+                staleDecisionBody,
+                expect.objectContaining({ anyOf: [staleBody, errorBody] }),
+                expect.objectContaining({ anyOf: [staleTermBody, errorBody] }),
+              ]
             : refusesSections
               ? [errorBody, sectionBody]
               : [errorBody];
@@ -105,6 +123,7 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
     expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["400", "404"]);
+    expect(errorsOf("/api/invitations/by-token/{token}/accept", "post")).toEqual(["400", "403", "404", "409"]);
     // A save is refused as stale, or because an Agent changes a Report without its Ticket's Claim.
     expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toMatchObject({
       anyOf: [staleBody, errorBody],

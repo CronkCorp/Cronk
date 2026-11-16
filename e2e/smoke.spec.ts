@@ -1437,3 +1437,35 @@ test("fit the board on a 1280px screen, with Completed and Canceled columns coll
   await open.click();
   await expect(doneColumn).toContainText("Shipped already");
 });
+
+// Runs after the tests above, so Ada and CRONK exist.
+test("open Terms from a Project, override a Workspace Term there and edit it", async ({ page }) => {
+  await signIn(page);
+  const sidebar = page.getByRole("navigation", { name: "Sidebar" });
+  await sidebar.getByRole("link", { name: "Terms" }).click();
+  await page.getByRole("button", { name: "New Term" }).click();
+  await page.getByLabel("Name").fill("Customer");
+  await page.getByLabel("Definition").fill("A paying organization.");
+  await page.getByRole("button", { name: "Create Term" }).click();
+  await expect(page.getByRole("heading", { name: "Customer" })).toBeVisible();
+
+  // From a Project, the Terms page starts on that Project.
+  await sidebar.getByRole("link", { name: /CRONK/ }).click();
+  await sidebar.getByRole("link", { name: "Terms" }).click();
+  await expect(page.getByRole("navigation", { name: "Scope" }).getByRole("link", { name: "CRONK" })).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: "New Term" }).click();
+  await page.getByLabel("Name").fill("customer");
+  await page.getByLabel("Definition").fill("A billing account.");
+  await page.getByLabel("Words to avoid, separated by commas").fill("Client, account");
+  await page.getByRole("button", { name: "Create Term" }).click();
+  await expect(page.getByRole("status")).toContainText("Overrides the Workspace Term Customer");
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Definition").fill("A billing account: who pays.");
+  await page.getByRole("button", { name: "Save as Version 2" }).click();
+  await expect(page.getByRole("list", { name: "Versions" }).getByRole("listitem")).toHaveCount(2);
+
+  await page.getByRole("main").getByRole("link", { name: "Terms" }).click();
+  await page.getByLabel("Filter Terms and words to avoid").fill("client");
+  await expect(page.getByRole("main")).toContainText("A billing account: who pays.");
+});

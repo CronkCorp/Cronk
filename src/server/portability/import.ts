@@ -6,9 +6,11 @@ import { FORMAT } from "./format.js";
 import { importGuidance } from "./guidance.js";
 import { importDecisions } from "./decisions.js";
 import { importTree } from "./documents.js";
+import { importTerms } from "./terms.js";
 import { ImportContext } from "./import-context.js";
 import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
+import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
 import { importWorkspaceSettings } from "./workspace.js";
 
@@ -16,6 +18,8 @@ import { importWorkspaceSettings } from "./workspace.js";
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
  * nothing yet, or a Project export as a new Project. Users are matched by email and Agents by
  * Owner and name; those not found are created, Users deactivated since they have no password here.
+ * Agents and Agent Sessions keep their ids unless one is taken here; then they get a new one, and
+ * `renamed-ids.ts` keeps which became which.
  * Each kind of record has its own module beside this one.
  */
 
@@ -24,6 +28,8 @@ export interface Imported {
   scope: "workspace" | "project";
   /** The keys of the Projects it created. */
   projects: string[];
+  /** The Agents and Agent Sessions it gave new ids, because the ids they had in the export were taken. */
+  renamedIds: RenamedId[];
 }
 
 /** Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. */
@@ -44,6 +50,7 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importGuidance(ctx, "guidance", null);
     await importTree(ctx, "documents", null);
     await importDecisions(ctx, "", null, null);
+    await importTerms(ctx, "", null);
   }
   // Tickets by key across the imported Projects, for parents and relations.
   const tickets = new ImportedTickets();
@@ -54,12 +61,13 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importGuidance(ctx, `projects/${dirKey}/guidance`, project.id);
     await importTree(ctx, `projects/${dirKey}/documents`, project.id);
     await importDecisions(ctx, `projects/${dirKey}`, project.id, project.key);
+    await importTerms(ctx, `projects/${dirKey}/`, project.id);
     await importTickets(ctx, dirKey, project, tickets);
   }
   await tickets.storeRelations(ctx);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
-  return { scope, projects: created };
+  return { scope, projects: created, renamedIds: ctx.renamedIds };
 }
 
 /** What the export's README says it holds; refuses anything but a Cronk export in this format. */
@@ -83,10 +91,11 @@ async function checkRoom(ctx: ImportContext, scope: Imported["scope"], projectKe
       `SELECT 1 FROM projects WHERE workspace_id = $1
        UNION ALL SELECT 1 FROM documents WHERE workspace_id = $1
        UNION ALL SELECT 1 FROM decisions WHERE workspace_id = $1
-       UNION ALL SELECT 1 FROM guidance_versions WHERE workspace_id = $1 LIMIT 1`,
+       UNION ALL SELECT 1 FROM guidance_versions WHERE workspace_id = $1
+       UNION ALL SELECT 1 FROM terms WHERE workspace_id = $1 LIMIT 1`,
       [ctx.workspaceId],
     );
-    if (rows.length > 0) throw new HttpError(409, "A Workspace export goes into a Workspace with no Projects, Documents, Decisions or Guidance yet; import Projects one at a time instead");
+    if (rows.length > 0) throw new HttpError(409, "A Workspace export goes into a Workspace with no Projects, Documents, Decisions, Guidance or Terms yet; import Projects one at a time instead");
   } else if (projectKeys.length !== 1) {
     refuse("A Project export holds exactly one projects/<KEY>/project.md");
   }

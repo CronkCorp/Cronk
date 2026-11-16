@@ -139,7 +139,7 @@ export function AuthCard(props: { title: string; intro?: string; children: React
   );
 }
 
-/** Whether the signed-in User may change Documents and Decisions in a Project, or the Workspace's (every User may). */
+/** Whether the signed-in User may change Documents, Terms and Decisions in a Project, or the Workspace's (every User may). */
 export function useCanWrite(projectKey: string | null | undefined): boolean {
   const [project] = useLoad(() => (projectKey ? api.project(projectKey) : Promise.resolve(undefined)), [projectKey]);
   if (!projectKey) return true;

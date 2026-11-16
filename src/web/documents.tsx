@@ -31,7 +31,7 @@ const treeAddress = (projectKey: string | null | undefined) => (projectKey ? `/p
  * Handles a write refused because someone saved since this page loaded: reloads the page so it
  * shows their Version, and explains why, before anyone writes over it. Other errors pass through.
  */
-const explainStale = (reload: () => void, doing: string) => (err: unknown): never => {
+export const explainStale = (reload: () => void, doing: string) => (err: unknown): never => {
   const current = staleVersionOf(err);
   if (!current) throw err;
   reload();

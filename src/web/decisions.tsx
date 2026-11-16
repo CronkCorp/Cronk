@@ -119,7 +119,7 @@ function Register(props: { projectKey: string | undefined; decisions: DecisionSu
         {groups.length > 0 && (
           <Menu
             label="Filter by group"
-            trigger={<button type="button" className={`filter-chip${filter.group ? " active" : ""}`}>{filter.group ? `Group: ${filter.group}` : "Group"} ▾</button>}
+            trigger={<button type="button" className={`filter-chip${filter.group ? " pressed" : ""}`}>{filter.group ? `Group: ${filter.group}` : "Group"} ▾</button>}
             items={groupItems}
           />
         )}
