@@ -56,10 +56,20 @@ describe("the OpenAPI description", () => {
     const body = (path: string, method: string, code: string) => doc.paths[path][method].responses[code].content["application/json"].schema;
     expect(body("/api/tickets/{key}", "get", "200").properties.ticket).toEqual({ $ref: "#/components/schemas/Ticket" });
     expect(body("/api/projects", "get", "200").properties.projects.items).toEqual({ $ref: "#/components/schemas/Project" });
-    const history = body("/api/tickets/{key}/history", "get", "200");
-    expect(history.properties.changes.items).toEqual({ $ref: "#/components/schemas/RecordedChange" });
+    const changes = body("/api/tickets/{key}/changes", "get", "200");
+    expect(changes.properties.changes.items).toEqual({ $ref: "#/components/schemas/RecordedChange" });
     expect(body("/api/agents", "post", "201").properties.agent).toEqual({ $ref: "#/components/schemas/Agent" });
+    expect(body("/api/agents/{id}/record", "get", "200").properties.record.items).toEqual({ $ref: "#/components/schemas/AgentRecordEntry" });
     expect(body("/api/workspace", "get", "200")).toEqual({ $ref: "#/components/schemas/Workspace" });
+  });
+
+  it("names an Agent's record and a Ticket's Changes as the glossary does", async () => {
+    const doc = await openapi();
+    expect(doc.components.schemas).not.toHaveProperty("AgentWork");
+    expect(doc.paths).not.toHaveProperty("/api/agents/{id}/work");
+    expect(doc.paths).not.toHaveProperty("/api/tickets/{key}/history");
+    expect(doc.components.schemas.RecordedChange.description).toMatch(/^One Change to a Ticket/);
+    expect(doc.components.schemas.RecordedChange.description).not.toMatch(/history/i);
   });
 
   it("describes the errors each operation can answer with the shared error shape", async () => {

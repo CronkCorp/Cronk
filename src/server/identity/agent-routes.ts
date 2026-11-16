@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { HttpError, requireUser, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import { endAgentSessionsOf, lastAgentSessionEnds, liveAgentSessions, publicAgentSession } from "../coordination/agent-sessions.js";
-import { listAgentWork } from "../coordination/agent-work.js";
+import { listAgentRecord } from "../coordination/agent-record.js";
 import { answer, errors, holding, listing, nameSchema, noContent, pathParams, ref } from "../schemas.js";
 import { readablePlaces, requireAdmin } from "./access.js";
 import { userActor } from "../actor.js";
@@ -160,9 +160,9 @@ export function agentRoutes(ctx: AppContext) {
       },
     );
 
-    // What an Agent did across the Workspace, for its Owner or an Admin.
+    // An Agent's record: what it did across the Workspace, for its Owner or an Admin.
     app.get<{ Params: { id: string }; Querystring: { since?: string; limit: number } }>(
-      "/api/agents/:id/work",
+      "/api/agents/:id/record",
       {
         schema: {
           params: agentParams,
@@ -175,9 +175,9 @@ export function agentRoutes(ctx: AppContext) {
           },
           response: {
             200: answer(
-              "What the Agent did, newest first: the changes it made, the Activities and Comments it wrote and the Versions it saved, " +
+              "The Agent's record of what it did, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved, " +
                 "leaving out what the caller can't read",
-              listing("work", ref("AgentWork")),
+              listing("record", ref("AgentRecordEntry")),
             ),
             ...errors(400, 401, 403, 404, 410),
           },
@@ -190,7 +190,7 @@ export function agentRoutes(ctx: AppContext) {
         const owner = (await findUserById(ctx.db, agent.ownerId))!;
         const { since, limit } = request.query;
         const by = { id: agent.id, name: agent.name, owner: { id: owner.id, name: owner.name } };
-        return { work: await listAgentWork(ctx.db, userActor(user), by, { since: since === undefined ? undefined : new Date(since), limit }) };
+        return { record: await listAgentRecord(ctx.db, userActor(user), by, { since: since === undefined ? undefined : new Date(since), limit }) };
       },
     );
 
