@@ -36,6 +36,30 @@ describe("Attachments on a Ticket", () => {
   });
 });
 
+describe("Serving an Attachment", () => {
+  it("shows images, video and audio in the page, but has the browser save anything that could run as a page", async () => {
+    const { admin } = await setup();
+    const fileOf = async (name: string, type: string) => {
+      const id = (await admin.upload(`/api/tickets/CRONK-1/attachments?name=${encodeURIComponent(name)}`, Buffer.from("x"), type)).body.attachment.id;
+      return admin.download(`/api/attachments/${id}/file`);
+    };
+
+    const image = await fileOf("proxy ip.png", "image/png");
+    expect(image.headers["content-disposition"]).toBe(`inline; filename="proxy ip.png"; filename*=UTF-8''proxy%20ip.png`);
+    expect(image.headers["x-content-type-options"]).toBe("nosniff");
+    expect(image.headers["content-security-policy"]).toMatch(/sandbox/);
+
+    for (const [name, type] of [["page.html", "text/html"], ["logo.svg", "image/svg+xml"], ["tool.js", "text/javascript"]]) {
+      const res = await fileOf(name!, type!);
+      expect(res.headers["content-disposition"], name).toMatch(/^attachment;/);
+      expect(res.headers["x-content-type-options"], name).toBe("nosniff");
+      expect(res.headers["content-security-policy"], name).toMatch(/sandbox/);
+    }
+    expect((await fileOf("lockout-repro.mp4", "video/mp4")).headers["content-disposition"]).toMatch(/^inline;/);
+    expect((await fileOf("näive.log", "text/plain")).headers["content-disposition"]).toBe(`inline; filename="n_ive.log"; filename*=UTF-8''n%C3%A4ive.log`);
+  });
+});
+
 describe("Downloading part of an Attachment", () => {
   const video = Buffer.from("0123456789");
 

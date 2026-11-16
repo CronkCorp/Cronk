@@ -112,7 +112,13 @@ export function attachmentRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const attachment = await readableAttachment(ctx.db, actor, request.params.id);
-        reply.header("accept-ranges", "bytes").header("content-type", attachment.contentType);
+        reply
+          .header("accept-ranges", "bytes")
+          .header("content-type", attachment.contentType)
+          .header("content-disposition", contentDisposition(attachment))
+          // The file is someone's upload, served on Cronk's own site: it never runs as a page there.
+          .header("x-content-type-options", "nosniff")
+          .header("content-security-policy", "default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
         const range = byteRange(request.headers.range, attachment.size);
         if (range === "unsatisfiable") {
           reply.header("content-range", `bytes */${attachment.size}`);
@@ -189,6 +195,24 @@ function byteRange(header: string | undefined, size: number): ByteRange | "unsat
   if (to !== "" && Number(to) < start) return undefined;
   if (start >= size) return "unsatisfiable";
   return { start, end };
+}
+
+/**
+ * The media types a browser shows in the page rather than saving: images, video and audio it plays, and plain text.
+ * None of them can run script; anything else, HTML and SVG above all, is saved as a file instead.
+ */
+const SHOWN_IN_PAGE = new Set([
+  ...["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"],
+  ...["video/mp4", "video/webm", "video/ogg"],
+  ...["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/wav", "audio/x-wav", "audio/webm", "audio/flac"],
+  "text/plain",
+]);
+
+/** The `Content-Disposition` an Attachment is served with: shown in the page or saved, under its own name (RFC 6266). */
+function contentDisposition(attachment: Attachment): string {
+  const ascii = attachment.name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  const encoded = encodeURIComponent(attachment.name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${SHOWN_IN_PAGE.has(attachment.contentType) ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 /** A size as Users read it: whole MB or GB where it is one, otherwise bytes. */
