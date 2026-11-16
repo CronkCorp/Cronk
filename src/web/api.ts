@@ -31,6 +31,7 @@ import type {
   LinkedDocument,
   Member,
   Mention,
+  EmbeddedIn,
   Merge,
   MergedSection,
   Conflict,
@@ -98,6 +99,7 @@ export type {
   LinkedDocument,
   Member,
   Mention,
+  EmbeddedIn,
   Merge,
   MergedSection,
   Conflict,
@@ -263,6 +265,8 @@ export const api = {
     attachmentMaxBytes?: number;
     artifactMaxBytes?: number;
     artifactMaxFiles?: number;
+    artifactAllowedOrigins?: string[];
+    artifactExtraOriginsAllowed?: boolean;
   }) =>
     request<Workspace>("PATCH", "/api/workspace", changes),
   /** How much storage the Workspace's files take; Admins only. */
@@ -306,6 +310,8 @@ export const api = {
   /** One Version of an Artifact, with its files and where to frame it. */
   artifactVersion: (id: string, number: number) =>
     request<{ version: ArtifactVersion }>("GET", `${artifactPath(id)}/versions/${number}`).then((r) => r.version),
+  /** Where an Artifact is embedded that the caller can read, most recently changed first. */
+  artifactEmbeddedIn: (id: string) => request<{ embeddedIn: EmbeddedIn[] }>("GET", `${artifactPath(id)}/embedded-in`).then((r) => r.embeddedIn),
   /** Publishes a folder, packed as an archive, as a new Artifact. */
   publishArtifact: (projectKey: string | undefined, title: string, archive: Blob) =>
     upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${new URLSearchParams({ title })}`, archive, "application/gzip").then((r) => r.artifact),

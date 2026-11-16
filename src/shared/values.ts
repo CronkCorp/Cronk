@@ -84,3 +84,6 @@ export type SuggestionState = (typeof SUGGESTION_STATES)[number];
 /** A Decision's lifecycle status. Only Users change it; a Decision becomes superseded when one superseding it is accepted. */
 export const DECISION_STATUSES = ["proposed", "accepted", "rejected", "deprecated", "superseded"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
+
+/** What a declared extra origin of an Artifact Version may be loaded from for, each opening one directive of its content policy. */
+export const EXTRA_ORIGIN_USES = ["scripts", "styles", "fonts", "images", "media", "connect"] as const;

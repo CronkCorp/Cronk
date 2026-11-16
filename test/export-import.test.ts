@@ -233,7 +233,7 @@ async function busyWorkspace() {
   const { cronk, admin, session, claude } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
-  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024, artifactMaxBytes: 30 * 1024 * 1024, artifactMaxFiles: 800 });
+  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024, artifactMaxBytes: 30 * 1024 * 1024, artifactMaxFiles: 800, artifactAllowedOrigins: ["https://esm.sh"] });
   await admin.put("/api/workspace/guidance", { baseVersion: 0, markdown: "Be kind." });
   await admin.put("/api/workspace/guidance", { baseVersion: 1, markdown: "Be kind. Be brief." });
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
@@ -264,12 +264,15 @@ async function busyWorkspace() {
   const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
   // An Artifact the Agent published from CRONK-1, then Ada's second Version of it, with a binary file; she marks it Protected.
   const prototype = (await agent.upload("/api/projects/CRONK/artifacts?title=Cache%20prototype", await tarGz({ "index.html": "<p>v1</p>", "img/chart.png": "\u0089PNG" }))).body.artifact;
-  await admin.upload(`/api/artifacts/${prototype.id}/versions?baseVersion=1&title=Cache%20dashboard`, await tarGz({ "index.html": "<p>v2</p>", "data.json": "[1,2]" }));
+  // Ada's declares an extra origin; then she turns extra origins off for the Workspace.
+  const extraOrigins = encodeURIComponent(JSON.stringify([{ origin: "https://cdn.plot.ly", uses: ["scripts", "connect"], reason: "Plotly draws it" }]));
+  await admin.upload(`/api/artifacts/${prototype.id}/versions?baseVersion=1&title=Cache%20dashboard&extraOrigins=${extraOrigins}`, await tarGz({ "index.html": "<p>v2</p>", "data.json": "[1,2]" }));
   await admin.post(`/api/artifacts/${prototype.id}/protection`, { protected: true });
   // Ada comments on its first Version, with a file, and the Agent replies on the second.
   const onPrototype = (await admin.post(`/api/artifacts/${prototype.id}/comments`, { body: "The chart needs a legend.", version: 1 })).body.comment;
   await admin.upload(`/api/comments/${onPrototype.id}/attachments?name=legend.txt`, Buffer.from("legend"), "text/plain");
   await agent.post(`/api/artifacts/${prototype.id}/comments`, { body: "Version 2 has one.", replyToCommentId: onPrototype.id, version: 2 });
+  await admin.patch("/api/workspace", { artifactExtraOriginsAllowed: false });
   // Attachments: the Agent's binary screenshot, and two of Ada's, one named as a hidden file would be.
   await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
   await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");

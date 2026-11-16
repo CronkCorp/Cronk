@@ -15,6 +15,10 @@ export interface Workspace {
   /** The most bytes, and files, one Version of an Artifact may hold. */
   artifactMaxBytes: number;
   artifactMaxFiles: number;
+  /** The origins every Artifact may load scripts, styles and fonts from, besides its own files. */
+  artifactAllowedOrigins: string[];
+  /** Whether a publish may declare extra origins for its Version, and Versions are served with those they declared. */
+  artifactExtraOriginsAllowed: boolean;
 }
 
 /** The shape of the Workspace the API returns. */
@@ -26,6 +30,8 @@ export const publicWorkspace = (w: Workspace) => ({
   transcriptMaxBytes: w.transcriptMaxBytes,
   artifactMaxBytes: w.artifactMaxBytes,
   artifactMaxFiles: w.artifactMaxFiles,
+  artifactAllowedOrigins: w.artifactAllowedOrigins,
+  artifactExtraOriginsAllowed: w.artifactExtraOriginsAllowed,
 });
 
 interface WorkspaceRow {
@@ -37,6 +43,8 @@ interface WorkspaceRow {
   transcript_max_bytes: number;
   artifact_max_bytes: string;
   artifact_max_files: number;
+  artifact_allowed_origins: string[];
+  artifact_extra_origins_allowed: boolean;
 }
 
 const toWorkspace = (row: WorkspaceRow): Workspace => ({
@@ -48,6 +56,8 @@ const toWorkspace = (row: WorkspaceRow): Workspace => ({
   transcriptMaxBytes: row.transcript_max_bytes,
   artifactMaxBytes: Number(row.artifact_max_bytes),
   artifactMaxFiles: row.artifact_max_files,
+  artifactAllowedOrigins: row.artifact_allowed_origins,
+  artifactExtraOriginsAllowed: row.artifact_extra_origins_allowed,
 });
 
 export async function insertWorkspace(db: Queryable, input: { name: string; now: Date }): Promise<Workspace> {
@@ -63,7 +73,10 @@ export async function getWorkspace(db: Queryable, id: string): Promise<Workspace
   return toWorkspace(rows[0]!);
 }
 
-/** Renames the Workspace and/or changes its Agent Access, silence threshold, or its limits on Attachments, Transcripts and Artifacts. */
+/**
+ * Renames the Workspace and/or changes its Agent Access, silence threshold, its limits on Attachments, Transcripts and
+ * Artifacts, or the origins Artifacts may load from.
+ */
 export async function updateWorkspace(
   db: Queryable,
   id: string,
@@ -75,13 +88,16 @@ export async function updateWorkspace(
     transcriptMaxBytes?: number;
     artifactMaxBytes?: number;
     artifactMaxFiles?: number;
+    artifactAllowedOrigins?: string[];
+    artifactExtraOriginsAllowed?: boolean;
   },
 ): Promise<Workspace> {
   const { rows } = await db.query<WorkspaceRow>(
     `UPDATE workspaces SET name = coalesce($2, name), agent_access = coalesce($3, agent_access),
        silence_threshold_seconds = coalesce($4, silence_threshold_seconds), attachment_max_bytes = coalesce($5, attachment_max_bytes),
        transcript_max_bytes = coalesce($6, transcript_max_bytes), artifact_max_bytes = coalesce($7, artifact_max_bytes),
-       artifact_max_files = coalesce($8, artifact_max_files)
+       artifact_max_files = coalesce($8, artifact_max_files), artifact_allowed_origins = coalesce($9, artifact_allowed_origins),
+       artifact_extra_origins_allowed = coalesce($10, artifact_extra_origins_allowed)
      WHERE id = $1 RETURNING *`,
     [
       id,
@@ -92,6 +108,8 @@ export async function updateWorkspace(
       changes.transcriptMaxBytes ?? null,
       changes.artifactMaxBytes ?? null,
       changes.artifactMaxFiles ?? null,
+      changes.artifactAllowedOrigins ?? null,
+      changes.artifactExtraOriginsAllowed ?? null,
     ],
   );
   return toWorkspace(rows[0]!);

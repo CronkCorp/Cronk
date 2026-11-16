@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -75,7 +75,9 @@ export type SharedSchemaName =
   | "Attachment"
   | "Artifact"
   | "ArtifactVersion"
+  | "ExtraOrigin"
   | "StaleArtifact"
+  | "EmbeddedIn"
   | "AvoidedWord"
   | "Suggestion";
 
@@ -136,6 +138,18 @@ const writtenBy = {
 const ticketName = object({ key: { type: "string" }, title: { type: "string" } });
 const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
+
+/** The Artifacts a Markdown body embeds: their addresses standing alone on a line. */
+const embeds = (whose: string) => ({
+  type: "array",
+  items: object({
+    artifactId: id,
+    version: { ...nullable({ type: "integer" }), description: "The Version the address names, which the embed keeps showing; null for the latest." },
+  }),
+  description:
+    `The Artifacts ${whose} embeds, in order, each once: an Artifact's address (\`url\` or \`versionUrl\`) standing alone on a line, bare, shows the ` +
+    "Artifact in place. An address inside a sentence, or naming no Artifact of the Workspace, stays a link.",
+});
 
 /** Who did something, as history records it. */
 const recordedActor = {
@@ -296,6 +310,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
     artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
     artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
+    artifactAllowedOrigins: {
+      type: "array",
+      items: { type: "string" },
+      description: "The origins every Artifact may load scripts, styles and fonts from, besides its own files.",
+    },
+    artifactExtraOriginsAllowed: {
+      type: "boolean",
+      description: "Whether a publish may declare extra origins for its Version; turned off, Versions are served without those they declared.",
+    },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
@@ -509,6 +532,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The passage of its Document it is anchored to; null when it isn't anchored.",
       },
       body: { type: "string", description: "Markdown." },
+      embeds: embeds("its body"),
       sendBack: { type: "boolean", description: "True for the Comment a User sent its Ticket back from review with." },
       at: timestamp,
       actor: { ...recordedActor, description: "Who posted it." },
@@ -583,6 +607,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "The Document whose Protected mark covers it: itself if marked, else the nearest marked Document above it; null if none.",
       },
       covers: { type: "integer", description: "When it is itself marked Protected, how many Documents under it the mark covers; 0 otherwise." },
+      embeds: embeds("its body"),
       createdAt: timestamp,
       updatedAt: timestamp,
     }),
@@ -651,6 +676,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
     }),
   },
+  EmbeddedIn: {
+    description: "A Document, Report or Comment whose current text embeds an Artifact: its address standing alone on a line.",
+    ...object({
+      kind: { type: "string", enum: ["document", "report", "comment"], description: "What embeds it." },
+      id: { ...id, description: "The Document's, Report's or Comment's id; read a Report as a Document." },
+      title: { type: "string", description: "Its title; for a Comment, the title of the Ticket, Document or Artifact it is on." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "For a Report, or a Comment on a Ticket: the Ticket's key." },
+      documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      artifactId: { ...nullable(id), description: "For a Comment on an Artifact: that Artifact's id." },
+      version: { ...nullable({ type: "integer" }), description: "The Version it embeds; null for the latest." },
+      at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
+    }),
+  },
   Mention: {
     description:
       "Something whose current text mentions a Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term or Decision.",
@@ -678,7 +717,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Version: {
     description: "One saved state of a Document, recording which Actor produced it. Never changes.",
-    ...object({ ...versionFields, body: { type: "string", description: "Markdown." } }),
+    ...object({ ...versionFields, body: { type: "string", description: "Markdown." }, embeds: embeds("its body") }),
   },
   VersionSummary: { description: "A Version without its body, as a Document's Version list shows it.", ...object(versionFields) },
   StaleVersion: {
@@ -817,6 +856,18 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       actor: { ...recordedActor, description: "Who attached it." },
     }),
   },
+  ExtraOrigin: {
+    description: "An origin a publish declared for its Version beyond the Workspace's allow-list: what the page loads from there, and why.",
+    ...object({
+      origin: { type: "string", description: "A bare origin, such as `https://cdn.plot.ly`." },
+      uses: {
+        type: "array",
+        items: { type: "string", enum: EXTRA_ORIGIN_USES },
+        description: "What the page may load from it; `connect` lets it send requests there.",
+      },
+      reason: { type: "string", description: "Why the page needs it, as the publisher wrote it." },
+    }),
+  },
   Artifact: {
     description:
       "A folder of files with `index.html`, such as a prototype or dashboard, published by a User or an Agent and served in isolation " +
@@ -838,6 +889,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: {
           ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
           description: "The Ticket the latest Version came from: the one whose Claim the publishing Agent Session held.",
+        },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins the latest Version's publish declared; served with it only while the Workspace allows extra origins.",
         },
         createdAt: timestamp,
         updatedAt: { ...timestamp, description: "When its latest Version was published." },
@@ -861,6 +917,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         sourceTicket: { ...nullable(object({ key: { type: "string" }, title: { type: "string" } })), description: "The Ticket it came from, if any." },
         fileCount: { type: "integer", description: "How many files it holds." },
         size: { type: "integer", description: "How many bytes its files take." },
+        extraOrigins: {
+          type: "array",
+          items: { $ref: "ExtraOrigin#" },
+          description: "The extra origins its publish declared, never carried over from an earlier Version; served with it only while the Workspace allows extra origins.",
+        },
         url: { type: "string", description: "Its address in Cronk." },
         frameUrl: { type: "string", description: "Where it is served on the Artifact hostname, signed for the caller and valid for 12 hours; only when one Version is asked for." },
         files: {

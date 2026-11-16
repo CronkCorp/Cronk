@@ -185,9 +185,9 @@ const NO_COMMENTS: Comment[] = [];
  * A Document's body, rendered again only when it or its highlighted passages change, so hovering a
  * Comment doesn't rebuild it.
  */
-const DocumentBody = memo(function DocumentBody(props: { body: string; highlights: Highlight[] }) {
+const DocumentBody = memo(function DocumentBody(props: { body: string; highlights: Highlight[]; embeds: Document["embeds"] }) {
   return props.body.trim() ? (
-    <CronkMarkdown sourceOffsets highlights={props.highlights}>{props.body}</CronkMarkdown>
+    <CronkMarkdown sourceOffsets highlights={props.highlights} embeds={props.embeds}>{props.body}</CronkMarkdown>
   ) : (
     <p className="muted">This Document is empty.</p>
   );
@@ -389,7 +389,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               onBlur={() => setFocused([])}
             >
               <div className="markdown" data-testid="document-body" ref={bodyAt}>
-                <DocumentBody body={d.body} highlights={highlights} />
+                <DocumentBody body={d.body} highlights={highlights} embeds={d.embeds} />
               </div>
               <AttachmentThumbnails {...files} />
               {canWrite && offer && (
@@ -654,7 +654,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
         <div className="version-view" aria-label={`Version ${viewing.number}`}>
           <h3>Version {viewing.number}: {viewing.title}</h3>
           <div className="markdown">
-            {viewing.body.trim() ? <CronkMarkdown>{viewing.body}</CronkMarkdown> : <p className="muted">Empty.</p>}
+            {viewing.body.trim() ? <CronkMarkdown embeds={viewing.embeds}>{viewing.body}</CronkMarkdown> : <p className="muted">Empty.</p>}
           </div>
         </div>
       )}

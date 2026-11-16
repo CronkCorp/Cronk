@@ -217,3 +217,17 @@ describe("Files attached to a Comment on an Artifact", () => {
     expect((await bob.download(`/api/attachments/${attached.body.attachment.id}/file`)).status).toBe(404);
   });
 });
+
+describe("A Comment on an Artifact that embeds another Artifact", () => {
+  it("records the embed, and is listed where the other Artifact is embedded, with its Artifact's title and id", async () => {
+    const { admin, artifact } = await setup();
+    const other = (await admin.upload("/api/projects/CRONK/artifacts?title=Other", await tarGz(site(1)))).body.artifact;
+
+    const posted = (await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: `Compare with:\n${other.versionUrl}` })).body.comment;
+    expect(posted.embeds).toEqual([{ artifactId: other.id, version: 1 }]);
+
+    expect((await admin.get(`/api/artifacts/${other.id}/embedded-in`)).body.embeddedIn).toEqual([
+      expect.objectContaining({ kind: "comment", id: posted.id, title: "Limits", projectKey: "CRONK", ticketKey: null, documentId: null, artifactId: artifact.id, version: 1 }),
+    ]);
+  });
+});

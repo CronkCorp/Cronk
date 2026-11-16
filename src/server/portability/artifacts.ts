@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { artifactFileKey, insertArtifactRow, insertArtifactVersion, type ArtifactFile } from "../files/artifacts.js";
 import { mediaTypeOf } from "../files/artifact-routes.js";
+import { extraOrigins, type ExtraOrigin } from "../files/origins.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { bytesOf } from "./archive.js";
 import { date, integer, isUuid, list, refuse, text } from "./fields.js";
@@ -30,6 +31,7 @@ interface VersionRow extends ActorColumns {
   title: string;
   at: Date;
   source_ticket: string | null;
+  extra_origins: ExtraOrigin[];
 }
 
 /** Writes the Artifacts of the Workspace (projectId null) or a Project into `${dir}artifacts/`. */
@@ -59,6 +61,7 @@ export async function exportArtifacts(ctx: ExportContext, dir: string, projectId
         at: iso(v.at),
         by: ctx.actor(v),
         sourceTicket: v.source_ticket ?? undefined,
+        ...(v.extra_origins.length > 0 && { extraOrigins: v.extra_origins }),
         files: files.map((f) => ({ path: f.path, contentType: f.content_type })),
       });
     }
@@ -114,7 +117,15 @@ export async function importArtifacts(ctx: ImportContext, dir: string, projectId
       const published = await insertArtifactVersion(
         ctx.db,
         artifact,
-        { title, actor: await ctx.actor(v.by, at("by")), sourceTicketId: sourceTicket, files, now: date(v.at, at("at")) },
+        {
+          title,
+          actor: await ctx.actor(v.by, at("by")),
+          sourceTicketId: sourceTicket,
+          files,
+          // Exports from before declared extras have none.
+          extraOrigins: v.extraOrigins === undefined ? [] : extraOrigins(v.extraOrigins, at("extraOrigins")),
+          now: date(v.at, at("at")),
+        },
         number,
       );
       artifact = { id: published.id, workspaceId: published.workspaceId, version: published.version };

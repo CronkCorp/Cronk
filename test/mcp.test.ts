@@ -990,6 +990,7 @@ describe("the artifacts tool", () => {
     const origin = new URL(await cronk.url()).origin;
     expect(artifact.url).toBe(`${origin}/artifacts/${artifact.id}`);
     expect(artifact.versionUrl).toBe(`${origin}/artifacts/${artifact.id}?version=1`);
+    expect(created.body.embedding).toContain(`embed this Version's address, ${artifact.versionUrl}`);
 
     const next = await callTool(mcp, "artifacts", { action: "publish", id: artifact.id, baseVersion: 1, files: [{ path: "index.html", content: "<p>v2</p>" }] });
     expect(next.body.artifact).toMatchObject({ version: 2, versionUrl: `${origin}/artifacts/${artifact.id}?version=2` });
@@ -1010,6 +1011,38 @@ describe("the artifacts tool", () => {
     const listed = await callTool(mcp, "artifacts", { action: "list", project: "CRONK" });
     expect(listed.body.artifacts.map((a: { id: string }) => a.id)).toEqual([artifact.id]);
     expect(await callTool(mcp, "artifacts", { action: "publish", project: "CRONK", files: [] })).toEqual({ isError: true, body: "The publish action needs a title" });
+  });
+
+  it("describes the allow-list and limits the Workspace has in force, and declares extra origins on a publish", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const description = async () => {
+      const mcp = await connectMcp(cronk, claude.secret);
+      return { mcp, text: (await mcp.client.listTools()).tools.find((t) => t.name === "artifacts")!.description! };
+    };
+    const before = (await description()).text;
+    expect(before).toContain("https://cdnjs.cloudflare.com, https://cdn.jsdelivr.net, https://unpkg.com, https://fonts.googleapis.com, https://fonts.gstatic.com");
+    expect(before).toMatch(/500 files and 25 MB/);
+    expect(before).toMatch(/extraOrigins/);
+
+    await admin.patch("/api/workspace", { artifactAllowedOrigins: ["https://esm.sh"], artifactMaxFiles: 40, artifactMaxBytes: 2 * 1024 * 1024, artifactExtraOriginsAllowed: false });
+    const { mcp, text } = await description();
+    expect(text).toContain("https://esm.sh");
+    expect(text).not.toContain("cdnjs");
+    expect(text).toMatch(/40 files and 2 MB/);
+    expect(text).toMatch(/doesn't allow extra origins/);
+
+    await admin.patch("/api/workspace", { artifactExtraOriginsAllowed: true });
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const extra = { origin: "https://cdn.plot.ly", uses: ["scripts"], reason: "Plotly draws the chart" };
+    const published = await callTool(mcp, "artifacts", {
+      action: "publish",
+      project: "CRONK",
+      title: "Chart",
+      files: [{ path: "index.html", content: "<p>chart</p>" }],
+      extraOrigins: [extra],
+    });
+    expect(published.isError).toBe(false);
+    expect(published.body.artifact.extraOrigins).toEqual([extra]);
   });
 
   it("offers a read-only token only get and list", async () => {
