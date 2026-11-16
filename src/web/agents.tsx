@@ -254,6 +254,11 @@ function TokensDialog(props: { agent: Agent; open: boolean; onOpenChange: (open:
             aria-label="Command to connect Claude Code"
             onFocus={(e) => e.target.select()}
           />
+          <p>
+            A script can read with the token alone, but an Agent changes things only within an Agent Session: start one, send its id
+            as <code>Cronk-Agent-Session</code> on every change, and end it when done.
+          </p>
+          <textarea className="copy script" readOnly rows={4} value={scriptSession(secret)} aria-label="Script using an Agent Session" onFocus={(e) => e.target.select()} />
         </div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
@@ -312,6 +317,15 @@ function LiveSessions(props: { agent: Agent }) {
 
 /** Cronk's MCP address, where an Agent connects: this installation's own origin. */
 const mcpUrl = () => `${window.location.origin}/mcp`;
+
+/** Shell commands a script runs to change things as the Agent: start an Agent Session, change something in it, end it. */
+const scriptSession = (secret: string) =>
+  [
+    `TOKEN=${secret}`,
+    `SESSION=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" ${window.location.origin}/api/agent-sessions | jq -r .session.id)`,
+    `curl -X POST -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" -H "Content-Type: application/json" -d '{"title": "From a script"}' ${window.location.origin}/api/projects/KEY/tickets`,
+    `curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" ${window.location.origin}/api/agent-sessions/current`,
+  ].join("\n");
 
 /** What an Agent did across the Workspace, newest first, shown on request. */
 function WorkLog(props: { agent: Agent }) {
