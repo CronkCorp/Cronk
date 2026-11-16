@@ -3,11 +3,14 @@ import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
-import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip } from "./components/tags.js";
+import { RejectDecisionForm } from "./components/reject-decision.js";
+import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip, ProtectedMark } from "./components/tags.js";
+import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
 import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionSummary } from "./api.js";
-import { CronkMarkdown } from "./markdown.js";
+import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
+import { MentionedIn } from "./mentions.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
@@ -144,6 +147,7 @@ function Register(props: { projectKey: string | undefined; decisions: DecisionSu
                 <span className="register-title">
                   {d.title}
                   {d.supersededBy && <span className="superseded-by"> → {d.supersededBy.key}</span>}
+                  {d.protected && <> <ProtectedMark compact /></>}
                 </span>
                 <span className="register-status"><DecisionStatusPill status={d.status} /></span>
                 <span className="register-group">{d.group ?? ""}</span>
@@ -163,7 +167,10 @@ function NewDecision(props: { projectKey: string | undefined; onCancel: () => vo
   const [group, setGroup] = useState("");
   const { submit, error, busy } = useSubmit(
     () => api.createDecision(props.projectKey, { title, group }),
-    (decision) => navigate(`/decisions/${decision.key}?edit=1`),
+    (decision) => {
+      forgetLinkedKnowledge();
+      navigate(`/decisions/${decision.key}?edit=1`);
+    },
   );
   return (
     <section className="panel">
@@ -189,14 +196,16 @@ function DecisionPage(props: { decisionKey: string; onChanged: () => void }) {
   return (
     <Show state={decision}>
       {(d) => (
-        <DecisionView
-          decision={d}
-          startEditing={editing}
-          onChanged={(changed) => {
-            setDecision(changed);
-            props.onChanged();
-          }}
-        />
+        <MarkdownPlace.Provider value={d.projectKey}>
+          <DecisionView
+            decision={d}
+            startEditing={editing}
+            onChanged={(changed) => {
+              setDecision(changed);
+              props.onChanged();
+            }}
+          />
+        </MarkdownPlace.Provider>
       )}
     </Show>
   );
@@ -207,6 +216,18 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
   const canWrite = useCanWrite(d.projectKey);
   const [editing, setEditing] = useState(props.startEditing);
   const status = useAction((to: DecisionStatus) => api.setDecisionStatus(d.key, to), props.onChanged);
+  // Rejecting needs a reason, typed into a box the Reject action opens.
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const reject = useAction(
+    () => api.setDecisionStatus(d.key, "rejected", reason),
+    (changed: Decision) => {
+      setRejecting(false);
+      setReason("");
+      props.onChanged(changed);
+    },
+  );
+  const protect = useAction((value: boolean) => api.protectDecision(d.key, value), props.onChanged);
   const moves: [DecisionStatus, string][] = [
     ["accepted", "Accept"],
     ["rejected", "Reject"],
@@ -232,21 +253,39 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
         <div className="decision-head">
           <span className="key">{d.key}</span>
           <DecisionStatusPill status={d.status} />
+          {d.protected && <ProtectedMark />}
           {canWrite && (
             <div className="actions">
               <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
-              {otherMoves.length > 0 && (
-                <Menu
-                  label="Change status"
-                  trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
-                  items={otherMoves.map(([to, label]) => ({ label, onSelect: () => void status.run(to), disabled: status.busy }))}
-                />
-              )}
+              <Menu
+                label="More actions"
+                trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
+                items={[
+                  ...otherMoves.map(([to, label]) => ({
+                    label: to === "rejected" ? `${label}…` : label,
+                    onSelect: () => (to === "rejected" ? setRejecting(true) : void status.run(to)),
+                    disabled: status.busy,
+                  })),
+                  { label: d.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!d.protected), disabled: protect.busy },
+                ]}
+              />
               {d.status === "proposed" && <Button onClick={() => void status.run("accepted")} disabled={status.busy}>Accept</Button>}
             </div>
           )}
         </div>
         {status.error && <p className="error" role="alert">{status.error}</p>}
+        {protect.error && <p className="error" role="alert">{protect.error}</p>}
+        {reject.error && <p className="error" role="alert">{reject.error}</p>}
+        {rejecting && (
+          <RejectDecisionForm
+            proposedBy={d.proposedBy}
+            reason={reason}
+            onReasonChange={setReason}
+            onReject={() => void reject.run()}
+            onCancel={() => setRejecting(false)}
+            busy={reject.busy}
+          />
+        )}
         <h1 className="decision-title">{d.title}</h1>
         {d.supersedes.length > 0 && (
           <Banner tone="info" role="status">
@@ -282,6 +321,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
             <h4>Status</h4>
             <div><DecisionStatusPill status={d.status} /></div>
             <span className="muted small">by {d.statusChangedBy.name}, <RelativeTime at={d.statusChangedAt} /></span>
+            {d.statusReason && (
+              <div className="markdown decision-status-reason">
+                <CronkMarkdown>{d.statusReason}</CronkMarkdown>
+              </div>
+            )}
           </div>
           <div className="side-group">
             <h4>Group</h4>
@@ -290,10 +334,21 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           <div className="side-group">
             <h4>Proposed by</h4>
             <Actor actor={d.proposedBy} />
+            {d.sourceTicket && (
+              <span className="muted small">
+                from <Link to={`/tickets/${d.sourceTicket.key}`} className="link"><span className="mono">{d.sourceTicket.key}</span> {d.sourceTicket.title}</Link>
+              </span>
+            )}
           </div>
           <div className="side-group">
             <h4>Version</h4>
             <span>Version {d.version}, <RelativeTime at={d.updatedAt} /></span>
+          </div>
+          <MentionedIn load={() => api.decisionMentions(d.key)} deps={[d.key, d.version]} what="its key" compact />
+          <div className="side-group">
+            <h4>Protected</h4>
+            <span>{d.protected ? "Yes: Agents may read it but not edit it" : <span className="muted">No</span>}</span>
+            <ProtectionHistory load={() => api.decisionProtection(d.key)} reloadOn={[d.key, d.protected]} />
           </div>
         </div>
       </aside>

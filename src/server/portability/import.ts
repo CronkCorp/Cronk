@@ -15,6 +15,7 @@ import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
 import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
+import { recordAllMentions } from "../knowledge/mentions.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -51,28 +52,31 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await checkRoom(ctx, scope, projectKeys);
 
   await importPeople(ctx);
+  // Tickets by key across the imported Projects, for parents, relations and the Decisions Agents proposed from them.
+  const tickets = new ImportedTickets();
   if (scope === "workspace") {
     await importWorkspaceSettings(ctx);
     await importGuidance(ctx, "guidance", null);
     await importTree(ctx, "documents", null);
-    await importDecisions(ctx, "", null, null);
+    await importDecisions(ctx, "", null, null, tickets);
     await importTerms(ctx, "", null);
   }
-  // Tickets by key across the imported Projects, for parents and relations.
-  const tickets = new ImportedTickets();
   const created: string[] = [];
   for (const dirKey of projectKeys) {
     const project = await importProject(ctx, dirKey);
     created.push(project.key);
     await importGuidance(ctx, `projects/${dirKey}/guidance`, project.id);
     await importTree(ctx, `projects/${dirKey}/documents`, project.id);
-    await importDecisions(ctx, `projects/${dirKey}`, project.id, project.key);
+    await importDecisions(ctx, `projects/${dirKey}`, project.id, project.key, tickets);
     await importTerms(ctx, `projects/${dirKey}/`, project.id);
     await importTickets(ctx, dirKey, project, tickets);
   }
   await tickets.storeRelations(ctx);
+  await tickets.storeDecisionSources(ctx);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
+  // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.
+  await recordAllMentions(db, workspaceId);
   // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
   if (scope === "workspace") await importTranscripts(ctx);
   return { scope, projects: created, renamedIds: ctx.renamedIds };

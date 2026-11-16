@@ -1,5 +1,6 @@
 import type { Queryable } from "./database.js";
 import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
+import { recordAllMentions } from "../knowledge/mentions.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -634,6 +635,89 @@ export const migrations: Migration[] = [
         PRIMARY KEY (transcript_id, session_id)
       );
       CREATE INDEX transcript_sessions_session ON transcript_sessions (session_id);
+    `,
+  },
+  {
+    id: "0026_mentions",
+    sql: `
+      -- What mentions each Decision and Term (knowledge/mentions.ts): the Ticket, Document, Comment, Term or
+      -- Decision whose current text names a Decision's key (kept as written, so a mention counts once a Decision
+      -- with that key exists) or a Term's name (the Term it names where the text lies). Rewritten on every change
+      -- to the text, and for every text naming a Term's name when a Term takes or gives up that name.
+      CREATE TABLE mentions (
+        ticket_id uuid REFERENCES tickets(id) ON DELETE CASCADE,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        decision_key text,
+        mentioned_term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        CHECK (num_nonnulls(ticket_id, document_id, comment_id, term_id, decision_id) = 1),
+        CHECK (num_nonnulls(decision_key, mentioned_term_id) = 1)
+      );
+      CREATE INDEX mentions_decision_key ON mentions (decision_key);
+      CREATE INDEX mentions_mentioned_term ON mentions (mentioned_term_id);
+      CREATE INDEX mentions_ticket ON mentions (ticket_id);
+      CREATE INDEX mentions_document ON mentions (document_id);
+      CREATE INDEX mentions_comment ON mentions (comment_id);
+      CREATE INDEX mentions_term ON mentions (term_id);
+      CREATE INDEX mentions_decision ON mentions (decision_id);
+    `,
+    backfill: (db) => recordAllMentions(db),
+  },
+  {
+    id: "0027_proposed_decisions",
+    sql: `
+      -- Why a Decision took its status, as the User gave it; required when rejecting one. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN status_reason text;
+      ALTER TABLE decision_versions ADD COLUMN status_reason text;
+      -- An Agent's proposed Decision: the Ticket whose Claim its Agent Session held when proposing it, and that
+      -- Claim's id (see tickets.claim_id), which a Report written in the same Claim lists it by. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      ALTER TABLE decisions ADD COLUMN source_claim_id uuid;
+      CREATE INDEX decisions_source_claim ON decisions (source_claim_id) WHERE source_claim_id IS NOT NULL;
+      -- Waiting Work is also a rejection of a Decision the Agent proposed: the Version that rejected it, with its reason.
+      ALTER TABLE waiting_work ALTER COLUMN comment_id DROP NOT NULL;
+      ALTER TABLE waiting_work ADD COLUMN decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE;
+      ALTER TABLE waiting_work ADD COLUMN decision_version integer;
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check CHECK (reason IN ('answer', 'mention', 'comment', 'rejected'));
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_on_one CHECK (
+        (comment_id IS NULL) = (reason = 'rejected') AND (decision_id IS NULL) = (reason <> 'rejected') AND (decision_version IS NULL) = (decision_id IS NULL));
+      ALTER TABLE waiting_work ADD UNIQUE (agent_id, decision_id, decision_version);
+    `,
+  },
+  {
+    id: "0028_protected",
+    sql: `
+      -- Protected (ADR 0004): Agents may read the item but never change it. Only Users set or unset the mark.
+      -- A Document's mark also covers every Document under it in the page tree, worked out when read.
+      ALTER TABLE documents ADD COLUMN protected boolean NOT NULL DEFAULT false;
+      ALTER TABLE terms ADD COLUMN protected boolean NOT NULL DEFAULT false;
+      ALTER TABLE decisions ADD COLUMN protected boolean NOT NULL DEFAULT false;
+
+      -- Every time a User marked or unmarked an item, its protection history. Exactly one item column is set.
+      CREATE TABLE protection_markings (
+        id bigserial PRIMARY KEY,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        protected boolean NOT NULL,
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        CHECK (num_nonnulls(document_id, term_id, decision_id) = 1)
+      );
+      CREATE INDEX protection_markings_document ON protection_markings (document_id) WHERE document_id IS NOT NULL;
+      CREATE INDEX protection_markings_term ON protection_markings (term_id) WHERE term_id IS NOT NULL;
+      CREATE INDEX protection_markings_decision ON protection_markings (decision_id) WHERE decision_id IS NOT NULL;
+
+      -- Accepted Decisions are Protected by default: mark those already accepted, as by the User who accepted them, then.
+      INSERT INTO protection_markings (decision_id, protected, at, actor_user_id)
+      SELECT d.id, true, v.at, v.actor_user_id
+      FROM decisions d JOIN decision_versions v ON v.decision_id = d.id
+      WHERE d.status = 'accepted'
+        AND v.number = (SELECT coalesce(max(number), 0) + 1 FROM decision_versions WHERE decision_id = d.id AND status <> 'accepted');
+      UPDATE decisions SET protected = true WHERE status = 'accepted';
     `,
   },
 ];

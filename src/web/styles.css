@@ -323,6 +323,11 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .tl-report-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--agent-soft); font-size: 13px; }
 .tl-report-title { margin: 0; font-size: 14px; }
 .tl-report-body { padding: 8px 12px; }
+.tl-report-decisions { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.tl-report-decisions h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.tl-report-decisions ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.inbox-decision-body { border-left: 3px solid var(--agent); padding: 4px 12px; background: var(--surface); }
+.decision-status-reason { margin-top: 4px; font-size: 13px; }
 .tl-report-body > :first-child { margin-top: 0; }
 .tl-report-body > :last-child { margin-bottom: 0; }
 .tl-report-body h1, .tl-report-body h2, .tl-report-body h3, .tl-report-body h4, .tl-report-body h5, .tl-report-body h6 { font-size: 14px; font-weight: 600; margin: 12px 0 4px; }
@@ -507,7 +512,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label.finding { color: var(--ok); }
 .kind-label.question { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
-.kind-label.report { color: var(--agent); }
+.kind-label.report, .kind-label.decision { color: var(--agent); }
 .kind-label.comment { color: var(--accent); }
 .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; color: var(--muted); }
 .priority.urgent { color: var(--on-accent); background: var(--danger); }
@@ -515,6 +520,11 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .priority.medium { color: var(--warn); background: var(--warn-soft); }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; padding: 1px 8px; border-radius: 4px; background: var(--surface-2); color: var(--text); vertical-align: middle; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
+/* The Protected mark (docs/ui.md § Component conventions): a muted, bordered pill with a lock, or the lock alone in dense rows. */
+.protected-mark { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--surface); vertical-align: middle; white-space: nowrap; }
+.protected-lock { display: inline-flex; align-items: center; color: var(--muted); vertical-align: middle; }
+.lock { flex: none; }
+.history.protection { margin-top: 12px; font-size: 13px; }
 .chip-remove { background: none; border: none; color: var(--muted); padding: 0 2px; line-height: 1; cursor: pointer; font: inherit; }
 
 /* Radix overlays (popover, menu, dialog) and tabs: styled here, behaviour from Radix. Shadows are for these only. */

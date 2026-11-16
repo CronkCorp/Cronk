@@ -34,15 +34,19 @@ export const ACTIVITY_KINDS = ["plan", "progress", "finding", "question", "error
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
 /**
- * Why a Comment waits for an Agent, in order of precedence: it answers the Agent's question,
- * @mentions it, or is on a Ticket delegated to it.
+ * Why work waits for an Agent. A Comment, in order of precedence: it answers the Agent's question,
+ * @mentions it, or is on a Ticket delegated to it. Or `rejected`: a User rejected a Decision the Agent proposed.
  */
-export const WAITING_REASONS = ["answer", "mention", "comment"] as const;
+export const WAITING_REASONS = ["answer", "mention", "comment", "rejected"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
 
 /** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
 export const LINK_REASONS = ["report", "linked", "mention"] as const;
 export type LinkReason = (typeof LINK_REASONS)[number];
+
+/** What can mention a Decision or a Term: its text names the Decision's key or the Term's name. */
+export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision"] as const;
+export type MentionKind = (typeof MENTION_KINDS)[number];
 
 /** How a Comment @mentions an Agent, for the API's and the MCP tools' descriptions. */
 export const MENTION_SYNTAX =

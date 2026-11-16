@@ -3,9 +3,15 @@ import { actingUser, type Actor } from "../actor.js";
 import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
+import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, savedHolding } from "../schemas.js";
+import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
+import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
+import { markRejected, rejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
+import { agentTopic } from "../live/topics.js";
+import { ticketFor } from "../work/ticket-reads.js";
+import { listSessionClaims, requireClaimHolder, type SessionClaim } from "../coordination/claims.js";
 import {
   contentOf,
   DECISION_TEMPLATE,
@@ -20,8 +26,11 @@ import {
   type Decision,
   type DecisionContent,
   type DecisionScope,
+  type DecisionSource,
   type DecisionVersion,
 } from "./decisions.js";
+import { listMentions } from "./mentions.js";
+import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 
 /** A Decision title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -66,6 +75,7 @@ interface NewDecision {
   body?: string;
   group?: string | null;
   supersedes?: string[];
+  ticket?: string;
 }
 
 const newDecisionBody = {
@@ -77,6 +87,14 @@ const newDecisionBody = {
     body: { ...body, description: "Markdown; if left out, the sections of a decision record to fill in: the decision and its reasons, Consequences, and Considered Options." },
     group,
     supersedes,
+    ticket: {
+      type: "string",
+      maxLength: 30,
+      description:
+        "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds; its Assignee reviews the Decision, " +
+        "and the Reports of that Claim list it. It must be of the Decision's Project, or, for a Workspace Decision, of an open Project. " +
+        "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
+    },
   },
 } as const;
 
@@ -97,25 +115,72 @@ export async function decisionFor(db: Queryable, actor: Actor, key: string, need
 
 export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    /** Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step. */
-    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent) => {
+    /** Tells the Inbox of whoever reviews each of `decisions`, if an Agent proposed it, that it may have changed. Call once committed. */
+    const reviewersHear = async (decisions: Decision[]) =>
+      inboxesChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
+
+    /**
+     * Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step, adding
+     * those it changed to `changed`, whose reviewers' Inboxes may then have changed too.
+     */
+    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent, changed: Decision[]) => {
       const now = ctx.clock.now();
       const saved = await saveDecision(tx, current, content, actor, now);
-      await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now);
+      changed.push(...(await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now)));
+      // A Decision becoming accepted is marked Protected by default (ADR 0004), as by whoever accepted it.
+      if (current.status !== "accepted" && saved.status === "accepted" && !saved.protected) {
+        await setProtected(tx, { kind: "decision", id: saved.id }, true, actingUser(actor).id, now);
+        return { ...saved, protected: true };
+      }
       return saved;
     };
 
-    /** Creates a proposed Decision in `scope`, which the caller has Write in. Only a User records one. */
+    /** Creates a proposed Decision in `scope`, which the caller has Write in. A User or an Agent may; it starts proposed either way. */
     const create = async (tx: Queryable, actor: Actor, scope: DecisionScope, input: NewDecision) => {
-      requireUserActor(actor, "record a Decision");
       const content: DecisionContent = {
         title: input.title.trim(),
         body: input.body ?? DECISION_TEMPLATE,
         status: "proposed",
+        statusReason: null,
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      return insertDecision(tx, scope, content, actor, ctx.clock.now());
+      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, scope, input.ticket));
+      return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
+    };
+
+    /**
+     * The Claim an Agent proposes a Decision in `scope` from: that of the Ticket `key` names, which its Agent
+     * Session must hold, or else the one Claim it holds whose Ticket fits. A Ticket fits when everyone who can
+     * read the Decision can read it: it is of the Decision's Project, or, for a Workspace Decision, of an open
+     * Project. None for a User.
+     */
+    const sourceOf = async (tx: Queryable, actor: Actor, scope: DecisionScope, key: string | undefined): Promise<DecisionSource | null> => {
+      if (actor.kind === "user") {
+        if (key !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Decision came from, as the one it holds the Claim on");
+        return null;
+      }
+      const held = actor.session ? await listSessionClaims(tx, actor.session.id) : [];
+      const fits = (claim: SessionClaim) => (scope.projectId === null ? !claim.private : claim.projectId === scope.projectId);
+      if (key === undefined) {
+        const fitting = held.filter(fits);
+        if (fitting.length > 1) {
+          throw new HttpError(400, `Your Agent Session holds the Claims on ${fitting.map((c) => c.ticketKey).join(", ")}; name the Ticket the Decision came from as \`ticket\``);
+        }
+        return fitting[0] ?? null;
+      }
+      const ticket = await ticketFor(tx, actor, key, "read");
+      const claimId = await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "proposing a Decision from it");
+      const claim = held.find((c) => c.claimId === claimId)!;
+      if (!fits(claim)) {
+        throw new HttpError(
+          400,
+          scope.projectId === null
+            ? `${ticket.key} is in a private Project, so a Workspace Decision can't name it: not everyone who reads the Decision may read it`
+            : `${ticket.key} isn't a Ticket of the Decision's Project; a Decision names a source Ticket of its own Project`,
+        );
+      }
+      return claim;
     };
 
     interface RegisterQuery {
@@ -159,16 +224,17 @@ export function decisionRoutes(ctx: AppContext) {
         schema: {
           params: projectParams,
           body: newDecisionBody,
-          response: { 201: answer("The new Decision, proposed, at Version 1", holding("decision", "Decision")), ...errors(400, 401, 403, 404, 410) },
+          response: { 201: answer("The new Decision, proposed, at Version 1", savedHolding("decision", "Decision")), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const decision = await transaction(ctx.db, async (tx) => {
+        const saved = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           return create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
         });
-        return reply.code(201).send({ decision });
+        await reviewersHear([saved.decision]);
+        return reply.code(201).send(saved);
       },
     );
 
@@ -177,14 +243,15 @@ export function decisionRoutes(ctx: AppContext) {
       {
         schema: {
           body: newDecisionBody,
-          response: { 201: answer("The new Workspace Decision, proposed, at Version 1", holding("decision", "Decision")), ...errors(400, 401, 403, 410) },
+          response: { 201: answer("The new Workspace Decision, proposed, at Version 1", savedHolding("decision", "Decision")), ...errors(400, 401, 403, 404, 409, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
-        const decision = await transaction(ctx.db, (tx) => create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body));
-        return reply.code(201).send({ decision });
+        const saved = await transaction(ctx.db, (tx) => create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body));
+        await reviewersHear([saved.decision]);
+        return reply.code(201).send(saved);
       },
     );
 
@@ -214,7 +281,7 @@ export function decisionRoutes(ctx: AppContext) {
             properties: { baseVersion, title, body, group, supersedes },
           },
           response: {
-            200: answer("The Decision at its new Version; unchanged if the edit changed nothing", holding("decision", "Decision")),
+            200: answer("The Decision at its new Version; unchanged if the edit changed nothing", savedHolding("decision", "Decision")),
             ...errors(400, 401, 403, 404, 410),
             409: { description: "The edit is based on a Version that is no longer current; the answer carries the current Version", ...ref("StaleDecision") },
           },
@@ -222,9 +289,15 @@ export function decisionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const decision = await transaction(ctx.db, async (tx) => {
+        const changed: Decision[] = [];
+        const saved = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          requireUserActor(actor, "edit a Decision");
+          if (actor.kind === "agent" && current.status !== "proposed") {
+            const instead = current.protected ? ". It is Protected: make a Suggestion of the change instead, for a User to accept or reject" : "";
+            throw new HttpError(403, `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}; only Users change it now${instead}`);
+          }
+          // A proposal a User marked Protected is closed to Agents too.
+          requireUnprotected(actor, current, current.key);
           await requireCurrent(tx, current, request.body.baseVersion);
           const { title: newTitle, body: newBody, group: newGroup, supersedes: newSupersedes } = request.body;
           const content = {
@@ -234,13 +307,17 @@ export function decisionRoutes(ctx: AppContext) {
             ...(newGroup !== undefined && { group: groupOf(newGroup) }),
             ...(newSupersedes !== undefined && { supersedes: await requireSuperseded(tx, scopeOf(actor, current), current.number, newSupersedes) }),
           };
-          return save(tx, actor, current, content);
+          return {
+            decision: await save(tx, actor, current, content, changed),
+            avoidedWords: await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body)),
+          };
         });
-        return { decision };
+        await reviewersHear([saved.decision, ...changed]);
+        return saved;
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { status: DecisionStatus } }>(
+    app.post<{ Params: { key: string }; Body: { status: DecisionStatus; reason?: string } }>(
       "/api/decisions/:key/status",
       {
         schema: {
@@ -255,6 +332,11 @@ export function decisionRoutes(ctx: AppContext) {
                 enum: DECISION_STATUSES,
                 description: "The new status. A Decision becomes superseded only when one superseding it is accepted, so superseded is refused here.",
               },
+              reason: {
+                type: "string",
+                maxLength: 10_000,
+                description: "Why, in Markdown; required when rejecting. It reaches the Agent that proposed the Decision as Waiting Work.",
+              },
             },
           },
           response: {
@@ -266,15 +348,85 @@ export function decisionRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { status } = request.body;
+        const reason = request.body.reason?.trim() || null;
+        // A rejection waits for the Agent that proposed the Decision, pushed to it once committed.
+        const changed: Decision[] = [];
+        const { decision } = await withWaitingWork(
+          ctx,
+          async (tx, positioned) => {
+            const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
+            requireUserActor(actor, "change a Decision's status");
+            if (status === "superseded") {
+              throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
+            }
+            if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
+            const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason }, changed);
+            const proposer = saved.proposedBy;
+            if (status !== "rejected" || saved.version === current.version || proposer.kind !== "agent") return { decision: saved };
+            const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
+            const work = rejectionOf(saved, (await findDecisionVersion(tx, saved, saved.version))!);
+            return { decision: saved, told: seq === undefined ? undefined : { agentId: proposer.id, seq, work } };
+          },
+          ({ told }) => {
+            if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
+          },
+        );
+        await reviewersHear([decision, ...changed]);
+        return { decision };
+      },
+    );
+
+    app.post<{ Params: { key: string }; Body: { protected: boolean } }>(
+      "/api/decisions/:key/protection",
+      {
+        schema: {
+          params: decisionParams,
+          body: protectionBody,
+          response: {
+            200: answer("The Decision marked Protected or unmarked, at the same Version", holding("decision", "Decision")),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
         const decision = await transaction(ctx.db, async (tx) => {
-          const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          requireUserActor(actor, "change a Decision's status");
-          if (status === "superseded") {
-            throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
-          }
-          return save(tx, actor, current, { ...contentOf(current), status });
+          const decision = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          requireUserActor(actor, "mark a Decision Protected or unmark it");
+          await setProtected(tx, { kind: "decision", id: decision.id }, request.body.protected, actor.user.id, ctx.clock.now());
+          return { ...decision, protected: request.body.protected };
         });
         return { decision };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/decisions/:key/protection",
+      { schema: { params: decisionParams, response: { 200: protectionHistoryAnswer, ...errors(400, 401, 403, 404, 410) } } },
+      async (request) => {
+        const decision = await decisionFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        return { markings: await listProtectionMarkings(ctx.db, { kind: "decision", id: decision.id }) };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/decisions/:key/mentions",
+      {
+        schema: {
+          params: decisionParams,
+          response: {
+            200: answer(
+              "What mentions the Decision's key, most recently changed first (at most 50): Tickets, Documents, Comments, Terms and Decisions the caller can read",
+              listing("mentions", ref("Mention")),
+            ),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const decision = await decisionFor(ctx.db, actor, request.params.key, "read");
+        return { mentions: await listMentions(ctx.db, { decisionKey: decision.key }, await readablePlaces(ctx.db, actor)) };
       },
     );
 

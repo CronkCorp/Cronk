@@ -154,7 +154,7 @@ describe("the page tree", () => {
     const res = await admin.get("/api/projects/CRONK/documents");
     expect(res.status).toBe(200);
     expect(outline(res.body.documents)).toEqual(["Guides", "  Setup", "    Docker", "  Style", "Roadmap"]);
-    expect(res.body.documents[1]).toEqual({ id: setup, parentId: guides, title: "Setup", depth: 1 });
+    expect(res.body.documents[1]).toEqual({ id: setup, parentId: guides, title: "Setup", depth: 1, protected: false });
   });
 
   it("keeps Workspace Documents in a tree of their own", async () => {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -58,6 +58,7 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
+  | "Mention"
   | "Transcript"
   | "TranscriptSummary"
   | "AgentRecordEntry"
@@ -70,6 +71,7 @@ export type SharedSchemaName =
   | "TermVersion"
   | "StaleTermVersion"
   | "RenamedId"
+  | "ProtectionMarking"
   | "Attachment"
   | "AvoidedWord";
 
@@ -112,6 +114,11 @@ const transcriptFields = {
     items: object({ id, name: { type: "string" } }),
     description: "The Terms its Sessions saved, that the caller can read.",
   },
+  decisions: {
+    type: "array",
+    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    description: "The Decisions its Sessions proposed or refined, that the caller can read.",
+  },
   createdAt: timestamp,
   updatedAt: timestamp,
 };
@@ -141,6 +148,10 @@ const recordedActor = {
   ),
 };
 
+/** Describes an item's `protected` flag: true when `when`. */
+const protectedDescription = (when: string) =>
+  `Whether Agents may read but not change it, whatever their Agent Access: true when ${when}. An Agent proposes a change to it as a Suggestion.`;
+
 /** A Version's fields, all but its body. */
 const versionFields = {
   number: { type: "integer", description: "Counts from 1 per Document." },
@@ -165,6 +176,7 @@ const decisionSummaryFields = {
   status: decisionStatus,
   group: { ...nullable({ type: "string" }), description: "The group it is filed under; null for none." },
   version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when editing." },
+  protected: { type: "boolean", description: protectedDescription("a User marked it Protected, as accepting it does") },
   supersededBy: { ...nullable(decisionRef), description: "The accepted Decision that replaced it, if it is superseded." },
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -174,7 +186,12 @@ const decisionFields = {
   ...decisionSummaryFields,
   body: { type: "string", description: "Markdown." },
   supersedes: { type: "array", items: decisionRef, description: "The Decisions it replaces once accepted, of the same Project or Workspace." },
+  sourceTicket: {
+    ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
+    description: "The Ticket an Agent was working on when it proposed it, holding its Claim; null otherwise.",
+  },
   proposedBy: { ...recordedActor, description: "Who recorded it." },
+  statusReason: { ...nullable({ type: "string" }), description: "Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given." },
   statusChangedAt: { ...timestamp, description: "When it took its current status." },
   statusChangedBy: { ...recordedActor, description: "Who gave it its current status." },
 };
@@ -184,6 +201,7 @@ const decisionVersionFields = {
   number: { type: "integer", description: "Counts from 1 per Decision." },
   title: { type: "string" },
   status: decisionStatus,
+  statusReason: { ...nullable({ type: "string" }), description: "Why it had that status, as given when it took it." },
   group: nullable({ type: "string" }),
   supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
   at: timestamp,
@@ -461,17 +479,33 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   WaitingWork: {
-    description: "A Comment waiting for an Agent (ADR 0005), with why and what it is on.",
-    ...object({
-      reason: {
-        type: "string",
-        enum: WAITING_REASONS,
-        description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
+    description:
+      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed, with their reason.",
+    ...object(
+      {
+        reason: {
+          type: "string",
+          enum: WAITING_REASONS,
+          description:
+            "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why.",
+        },
+        comment: { ...nullable(ref("Comment")), description: "The Comment; null for a rejection." },
+        decision: {
+          ...object({
+            key: { type: "string" },
+            title: { type: "string" },
+            reason: { type: "string", description: "Why the User rejected it, in Markdown." },
+            rejectedBy: recordedActor,
+            at: timestamp,
+          }),
+          description: "For a rejection only: the Decision, as the Version that rejected it holds it.",
+        },
+        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision came from; null otherwise." },
+        document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
       },
-      comment: ref("Comment"),
-      ticket: { ...nullable(ticketName), description: "The Ticket it is on; null on a Document." },
-      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document it is on; null on a Ticket." },
-    }),
+      ["decision"],
+    ),
   },
   Document: {
     description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",
@@ -484,8 +518,22 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       title: { type: "string" },
       body: { type: "string", description: "Markdown." },
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      protected: { type: "boolean", description: protectedDescription("it is marked Protected, or sits under a Document that is") },
+      protectedBy: {
+        ...nullable(object({ id, title: { type: "string" } })),
+        description: "The Document whose Protected mark covers it: itself if marked, else the nearest marked Document above it; null if none.",
+      },
+      covers: { type: "integer", description: "When it is itself marked Protected, how many Documents under it the mark covers; 0 otherwise." },
       createdAt: timestamp,
       updatedAt: timestamp,
+    }),
+  },
+  ProtectionMarking: {
+    description: "One marking or unmarking of an item as Protected, with the User who did it.",
+    ...object({
+      protected: { type: "boolean", description: "True when it was marked, false when unmarked." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "The User who did it; only Users mark and unmark." },
     }),
   },
   Decision: {
@@ -520,6 +568,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       createdAt: timestamp,
       updatedAt: timestamp,
       ...writtenBy,
+      decisions: {
+        type: "array",
+        items: decisionRef,
+        description: "The Decisions Agents proposed during the Claim it was written in, of its Ticket's Project or the Workspace, oldest first.",
+      },
     }),
   },
   LinkedDocument: {
@@ -539,6 +592,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
     }),
   },
+  Mention: {
+    description:
+      "Something whose current text mentions a Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term or Decision.",
+    ...object({
+      kind: { type: "string", enum: MENTION_KINDS, description: "What mentions it." },
+      id: { ...id, description: "Its id; read a Ticket or Decision by its key instead." },
+      key: { ...nullable({ type: "string" }), description: "A Ticket's or Decision's key; null for the others." },
+      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket or Document it is on." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, or a Report: the Ticket's key." },
+      documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
+    }),
+  },
   DocumentTreeEntry: {
     description: "A Document as its page tree lists it.",
     ...object({
@@ -546,6 +613,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       parentId: { ...nullable(id), description: "The Document it sits under; null at the top." },
       title: { type: "string" },
       depth: { type: "integer", description: "How deep it sits: 0 at the top." },
+      protected: { type: "boolean", description: protectedDescription("it, or a Document above it, is marked Protected") },
     }),
   },
   Version: {
@@ -595,6 +663,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Term." },
       ...termFields,
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      protected: { type: "boolean", description: protectedDescription("a User marked it Protected") },
       createdAt: timestamp,
       updatedAt: timestamp,
       overrides: {
@@ -776,3 +845,19 @@ export const termIdParam = { type: "string", format: "uuid", description: "The T
 
 /** A Ticket's key, such as `CRONK-12`, in any case. */
 export const ticketKeyParam = { type: "string", description: "The Ticket's key, such as `CRONK-12`; any case." } as const;
+
+/** The body of a request marking an item Protected or unmarking it. */
+export const protectionBody = {
+  type: "object",
+  required: ["protected"],
+  additionalProperties: false,
+  properties: {
+    protected: { type: "boolean", description: "True to mark it Protected, so Agents may read but not change it; false to unmark it." },
+  },
+} as const;
+
+/** An item's protection history, newest first. */
+export const protectionHistoryAnswer = answer(
+  "Each time a User marked it Protected or unmarked it, newest first",
+  listing("markings", ref("ProtectionMarking")),
+);

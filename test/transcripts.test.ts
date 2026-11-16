@@ -48,6 +48,23 @@ describe("Uploading a Transcript", () => {
     expect(read).toMatchObject({ tickets: [], documents: [], terms: [{ id: term.body.term.id, name: "Ticket" }] });
   });
 
+  it("links the Decisions its Sessions proposed or refined, which alone are enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    expect((await agent.post("/api/workspace/decisions", { title: "Compose for installs" })).status).toBe(201);
+    await agent.post("/api/projects/CRONK/decisions", { title: "Markdown for Decisions" });
+    const refiner = await session();
+    await refiner.patch("/api/decisions/CRONK-D1", { baseVersion: 1, body: "Refined." });
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Record what we chose", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({ tickets: [], documents: [], terms: [], decisions: [{ key: "D1", title: "Compose for installs" }, { key: "CRONK-D1", title: "Markdown for Decisions" }] });
+    const refined = await upload(cronk.client(claude.secret), "chat-2", chat("Refine it", refiner.sessionId));
+    expect(refined.status, JSON.stringify(refined.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${refined.body.transcript.id}`)).body.transcript.decisions).toEqual([{ key: "CRONK-D1", title: "Markdown for Decisions" }]);
+  });
+
   it("links the Ticket its Sessions attached a file to, which alone is enough to keep it", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
@@ -316,6 +333,7 @@ describe("Exporting and importing Transcripts", () => {
       tickets: ["CRONK-1", "SECRET-1"],
       documents: ["documents/1-handbook.md"],
       terms: [],
+      decisions: [],
     });
     expect(file.body).toBe(rewritten);
     expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId));

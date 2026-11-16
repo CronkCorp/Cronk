@@ -3,12 +3,15 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, ref, termIdParam } from "../schemas.js";
+import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
+import { listMentions } from "./mentions.js";
+import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 import {
   deleteTerm,
+  findProtectedWorkspaceTerm,
   findTerm,
   insertTerm,
   listApplicableTerms,
@@ -95,7 +98,18 @@ export function termRoutes(ctx: AppContext) {
       withOverrides(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
     const answerTerm = async (actor: Actor, term: StoredTerm): Promise<Term> => (await answerTerms(actor, [term]))[0]!;
 
+    /**
+     * Refuses an Agent's naming a Project Term after a Protected Workspace Term, which would replace
+     * that Term within the Project and so change what it says there.
+     */
+    const requireNotReplacingProtected = async (db: Queryable, actor: Actor, projectId: string | null, termName: string) => {
+      if (actor.kind !== "agent" || projectId === null) return;
+      const replaced = await findProtectedWorkspaceTerm(db, actingUser(actor).workspaceId, termName);
+      if (replaced) requireUnprotected(actor, replaced, replaced.name, "replace it with a Project Term of the same name");
+    };
+
     const create = async (actor: Actor, place: TermPlace, input: NewTerm) => {
+      await requireNotReplacingProtected(ctx.db, actor, place.projectId, input.name);
       const fields: TermFields = { name: input.name, definition: input.definition, avoid: input.avoid ?? [], group: input.group ?? null };
       const created = await transaction(ctx.db, (tx) => insertTerm(tx, { place, fields, actor, now: ctx.clock.now() }));
       if (created === "name taken") throw nameTaken(input.name);
@@ -255,6 +269,8 @@ export function termRoutes(ctx: AppContext) {
         const { baseVersion: base, ...edit } = request.body;
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, current, current.name);
+          if (edit.name !== undefined) await requireNotReplacingProtected(tx, actor, current.projectId, edit.name);
           await requireCurrent(tx, current, base, "save");
           const fields: TermFields = {
             name: edit.name ?? current.name,
@@ -287,11 +303,64 @@ export function termRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         await transaction(ctx.db, async (tx) => {
           const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, term, term.name, "delete it");
           requireUserActor(actor, "delete a Term");
           await requireCurrent(tx, term, request.query.baseVersion, "delete");
-          await deleteTerm(tx, term.id);
+          await deleteTerm(tx, actingUser(actor).workspaceId, term);
         });
         return reply.code(204).send();
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: { protected: boolean } }>(
+      "/api/terms/:id/protection",
+      {
+        schema: {
+          params: termParams,
+          body: protectionBody,
+          response: { 200: answer("The Term marked Protected or unmarked, at the same Version", holding("term", "Term")), ...errors(400, 401, 403, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const term = await transaction(ctx.db, async (tx) => {
+          const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUserActor(actor, "mark a Term Protected or unmark it");
+          await setProtected(tx, { kind: "term", id: term.id }, request.body.protected, actor.user.id, ctx.clock.now());
+          return { ...term, protected: request.body.protected };
+        });
+        return { term: await answerTerm(actor, term) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/terms/:id/protection",
+      { schema: { params: termParams, response: { 200: protectionHistoryAnswer, ...errors(401, 403, 404, 410) } } },
+      async (request) => {
+        const term = await termFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        return { markings: await listProtectionMarkings(ctx.db, { kind: "term", id: term.id }) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/terms/:id/mentions",
+      {
+        schema: {
+          params: termParams,
+          response: {
+            200: answer(
+              "What names the Term with its capitalisation, as a whole word, where it applies, most recently changed first (at most 50): " +
+                "Tickets, Documents, Comments, other Terms and Decisions the caller can read",
+              listing("mentions", ref("Mention")),
+            ),
+            ...errors(401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const term = await termFor(ctx.db, actor, request.params.id, "read");
+        return { mentions: await listMentions(ctx.db, { termId: term.id }, await readablePlaces(ctx.db, actor)) };
       },
     );
 

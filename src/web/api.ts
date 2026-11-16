@@ -26,11 +26,13 @@ import type {
   Invitation,
   LinkedDocument,
   Member,
+  Mention,
   Merge,
   MergedSection,
   Conflict,
   Priority,
   Project,
+  ProtectionMarking,
   RecordedActor,
   RecordedChange,
   RelationKind,
@@ -84,11 +86,13 @@ export type {
   Invitation,
   LinkedDocument,
   Member,
+  Mention,
   Merge,
   MergedSection,
   Conflict,
   Priority,
   Project,
+  ProtectionMarking,
   RecordedActor,
   RecordedChange,
   RelationKind,
@@ -205,10 +209,14 @@ export const api = {
   terms: (projectKey?: string) => request<{ terms: Term[] }>("GET", `${scopePath(projectKey)}/terms`).then((r) => r.terms),
   term: (id: string) => request<{ term: Term }>("GET", termPath(id)).then((r) => r.term),
   termVersions: (id: string) => request<{ versions: TermVersion[] }>("GET", `${termPath(id)}/versions`).then((r) => r.versions),
+  /** What names the Term where it applies, most recently changed first. */
+  termMentions: (id: string) => request<{ mentions: Mention[] }>("GET", `${termPath(id)}/mentions`).then((r) => r.mentions),
   createTerm: (projectKey: string | undefined, input: TermInput) =>
     request<{ term: Term }>("POST", `${scopePath(projectKey)}/terms`, input).then((r) => r.term),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveTerm: (id: string, baseVersion: number, input: TermInput) => request<{ term: Term }>("PATCH", termPath(id), { baseVersion, ...input }).then((r) => r.term),
+  protectTerm: (id: string, value: boolean) => request<{ term: Term }>("POST", `${termPath(id)}/protection`, { protected: value }).then((r) => r.term),
+  termProtection: (id: string) => request<{ markings: ProtectionMarking[] }>("GET", `${termPath(id)}/protection`).then((r) => r.markings),
   deleteTerm: (id: string, baseVersion: number) => request<void>("DELETE", `${termPath(id)}?baseVersion=${baseVersion}`),
   /** Imports an export of the Workspace or a Project; Admins only. */
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
@@ -251,8 +259,14 @@ export const api = {
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveDecision: (key: string, input: { baseVersion: number; title?: string; body?: string; group?: string | null; supersedes?: string[] }) =>
     request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
-  setDecisionStatus: (key: string, status: DecisionStatus) =>
-    request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status }).then((r) => r.decision),
+  /** Changes a Decision's status; rejecting needs a `reason`, which reaches the Agent that proposed it. */
+  setDecisionStatus: (key: string, status: DecisionStatus, reason?: string) =>
+    request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status, ...(reason === undefined ? {} : { reason }) }).then((r) => r.decision),
+  /** What names the Decision's key, most recently changed first. */
+  decisionMentions: (key: string) => request<{ mentions: Mention[] }>("GET", `${decisionPath(key)}/mentions`).then((r) => r.mentions),
+  protectDecision: (key: string, value: boolean) =>
+    request<{ decision: Decision }>("POST", `${decisionPath(key)}/protection`, { protected: value }).then((r) => r.decision),
+  decisionProtection: (key: string) => request<{ markings: ProtectionMarking[] }>("GET", `${decisionPath(key)}/protection`).then((r) => r.markings),
   decisionVersions: (key: string) =>
     request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
 
@@ -378,6 +392,9 @@ export const api = {
     request<{ document: Document }>("POST", `${documentPath(id)}/move`, { parentId }).then((r) => r.document),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   deleteDocument: (id: string, baseVersion: number) => request<void>("DELETE", `${documentPath(id)}?baseVersion=${baseVersion}`),
+  protectDocument: (id: string, value: boolean) =>
+    request<{ document: Document }>("POST", `${documentPath(id)}/protection`, { protected: value }).then((r) => r.document),
+  documentProtection: (id: string) => request<{ markings: ProtectionMarking[] }>("GET", `${documentPath(id)}/protection`).then((r) => r.markings),
   versions: (id: string) => request<{ versions: VersionSummary[] }>("GET", `${documentPath(id)}/versions`).then((r) => r.versions),
   version: (id: string, number: number) =>
     request<{ version: Version }>("GET", `${documentPath(id)}/versions/${number}`).then((r) => r.version),

@@ -33,7 +33,7 @@ export async function importMarkdownFolder(db: Queryable, tree: Tree, folder: Fo
   const create = async (planned: DocumentToCreate, parentId: string | null, depth: number) => {
     const document = await insertDocument(db, { tree, parentId, title: planned.title, body: planned.body, actor, now });
     if (document === "no such parent") throw new Error("A Document just created vanished");
-    created.push({ id: document.id, parentId, title: document.title, depth });
+    created.push({ id: document.id, parentId, title: document.title, depth, protected: false });
     for (const child of planned.children) await create(child, document.id, depth + 1);
   };
   for (const planned of toCreate) await create(planned, null, 0);

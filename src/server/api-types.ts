@@ -31,9 +31,11 @@ import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.j
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
+import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
+import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { QuestionItem, DecisionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
 import type {
   Decision as StoredDecision,
   DecisionSummary as StoredDecisionSummary,
@@ -110,6 +112,8 @@ export type Claim = Serialized<StoredClaim>;
 
 /** A Document linked to a Ticket: one of its Reports, or a Document mentioning its key. */
 export type LinkedDocument = Serialized<StoredLinkedDocument>;
+/** Something whose text mentions a Decision or Term. */
+export type Mention = Serialized<StoredMention>;
 
 /** A Ticket with the Tickets and Documents around it and its live Claim, as its page shows it. */
 export interface TicketDetail {
@@ -142,6 +146,8 @@ export type Version = Serialized<StoredVersion>;
 export type Term = Serialized<StoredTerm>;
 /** One saved state of a Term, with the Actor who saved it. */
 export type TermVersion = Serialized<StoredTermVersion>;
+/** One marking of a Document, Term or Decision as Protected, or unmarking, with the User who did it. */
+export type ProtectionMarking = Serialized<StoredProtectionMarking>;
 /** A Version without its body, as a Document's Version list shows it. */
 export type VersionSummary = Omit<Version, "body">;
 /** A Document as its page tree lists it. */
@@ -154,8 +160,12 @@ export type Merge = StoredMerge & { onto: Version };
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
-/** One item in a User's Inbox: a Ticket to review, an Unverified completion, or an open question of one of their Agents. */
-export type InboxItem = Serialized<ReviewItem> | Serialized<UnverifiedItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
+/** One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, or a Decision an Agent proposed. */
+export type InboxItem =
+  | Serialized<ReviewItem>
+  | Serialized<UnverifiedItem>
+  | (Serialized<Omit<QuestionItem, "question">> & { question: Activity })
+  | Serialized<DecisionItem>;
 export type InboxKind = InboxItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
