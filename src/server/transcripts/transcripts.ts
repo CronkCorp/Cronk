@@ -94,12 +94,38 @@ export async function findForUpdate(db: Queryable, agentId: string, chatId: stri
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUIDS = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
-/** The ids of the Agent's own Agent Sessions that `markdown` names, in any case. */
-export async function sessionsNamedIn(db: Queryable, agentId: string, markdown: string): Promise<string[]> {
-  const named = [...new Set([...markdown.matchAll(UUIDS)].map((m) => m[0].toLowerCase()))];
-  if (named.length === 0) return [];
-  const { rows } = await db.query<{ id: string }>("SELECT id FROM agent_sessions WHERE agent_id = $1 AND id = ANY($2::uuid[])", [agentId, named]);
+/**
+ * The ids of the Agent's own Agent Sessions that `markdown` names, in any case. An id an import gave a Session a new id for
+ * (see `portability/renamed-ids.ts`) names every Session it became; one that isn't a UUID, as in an export edited by hand,
+ * counts only as a whole word.
+ */
+export async function sessionsNamedIn(db: Queryable, agent: { id: string; workspaceId: string }, markdown: string): Promise<string[]> {
+  const uuids = new Set([...markdown.matchAll(UUIDS)].map((m) => m[0].toLowerCase()));
+  const named = new Set(uuids);
+  const { rows: renamed } = await db.query<{ from_id: string; to_id: string }>(
+    "SELECT from_id, to_id FROM renamed_ids WHERE workspace_id = $1 AND kind = 'agent_session'",
+    [agent.workspaceId],
+  );
+  for (const r of renamed) {
+    if (UUID.test(r.from_id) ? uuids.has(r.from_id.toLowerCase()) : hasWord(markdown, r.from_id)) named.add(r.to_id);
+  }
+  if (named.size === 0) return [];
+  const { rows } = await db.query<{ id: string }>("SELECT id FROM agent_sessions WHERE agent_id = $1 AND id = ANY($2::uuid[])", [agent.id, [...named]]);
   return rows.map((r) => r.id);
+}
+
+/** Characters an id may run on with, so a match next to one is part of a longer word. */
+const WORD_CHAR = /[A-Za-z0-9_-]/;
+
+/** Whether `text` holds `word` with no word character right before or after it. */
+function hasWord(text: string, word: string): boolean {
+  if (word === "") return false;
+  for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
+    const before = text[at - 1];
+    const after = text[at + word.length];
+    if ((before === undefined || !WORD_CHAR.test(before)) && (after === undefined || !WORD_CHAR.test(after))) return true;
+  }
+  return false;
 }
 
 /** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment or a Document Version. */

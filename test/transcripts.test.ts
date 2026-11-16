@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, untarGz, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A chat in the turn convention, as a client's hook converts it, in which the Agent saw `sessionIds` in its tool results. */
 const chat = (ask: string, ...sessionIds: string[]) =>
@@ -295,9 +295,8 @@ describe("Exporting and importing Transcripts", () => {
     expect(restored).toEqual({
       ...original,
       id: listed[0].id,
-      // Until import keeps Agent and Agent Session ids (#155), the links follow the ids the import gave them.
-      agent: { id: expect.any(String), name: "claude-laptop", owner: { id: expect.any(String), name: "bob" } },
-      sessions: [{ id: expect.any(String) }],
+      // The import keeps the Agent's and its Session's ids; only the Owner, a User, is new here.
+      agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
       documents: [{ id: handbook.id, title: "Handbook" }],
     });
   });
@@ -316,5 +315,48 @@ describe("Listing Transcripts", () => {
     expect(mine[0]).not.toHaveProperty("markdown");
     expect(mine[0]).toMatchObject({ chatId: "chat-2", tickets: [{ key: "CRONK-1" }] });
     expect((await carol.get("/api/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([second]);
+  });
+});
+
+describe("Linking a chat written before an import", () => {
+  it("also finds the Agent's Sessions an import gave new ids, by the ids they had in the export", async () => {
+    // claude-laptop's Session changed CRONK-1 in one installation; old-bot's changed it too.
+    const before = await delegatedSetup();
+    const session = await before.session();
+    await session.post("/api/tickets/CRONK-1/claim");
+    await session.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Mine" });
+    await session.delete("/api/agent-sessions/current");
+    const bot = await registerAgent(before.admin, "old-bot");
+    await before.admin.patch("/api/tickets/CRONK-1", { delegateId: bot.agentId });
+    const botSession = await startSession(before.cronk, bot.secret);
+    await botSession.post("/api/tickets/CRONK-1/claim");
+    await botSession.post("/api/tickets/CRONK-1/comments", { body: "Not yours" });
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    const renamed = (key: string, from: string, to = from) =>
+      tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", key), text.replaceAll("CRONK", key).replaceAll(from, to)])));
+
+    // Elsewhere, Ada's claude-laptop already exists, so the import matches it. The export goes in three times: the
+    // Sessions keep their ids the first time, get new ones the second, and the third time one was edited by hand.
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    const claude = await registerAgent(admin, "claude-laptop");
+    for (const archive of [await tarGz(files), await renamed("COPY", "CRONK"), await renamed("HAND", session.sessionId, "my-session")]) {
+      expect((await admin.upload("/api/import", archive)).status).toBe(201);
+    }
+    const sessionOf = async (key: string) =>
+      (await admin.get(`/api/tickets/${key}/activities`)).body.activities[0].session.id as string;
+    const hook = cronk.client(claude.secret);
+
+    const uploaded = await upload(hook, "chat-1", chat("Fix CRONK-1", session.sessionId, botSession.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const copy = await sessionOf("COPY-1");
+    expect(copy).not.toBe(session.sessionId);
+    expect(uploaded.body.transcript.sessions.map((s: { id: string }) => s.id).sort()).toEqual([session.sessionId, copy].sort());
+    expect(uploaded.body.transcript.tickets.map((t: { key: string }) => t.key)).toEqual(["COPY-1", "CRONK-1"]);
+
+    // An id edited by hand is matched as written, as a whole word.
+    const byHand = await upload(hook, "chat-2", "## Assistant\n\nAgent Session my-session\n");
+    expect(byHand.status, JSON.stringify(byHand.body)).toBe(200);
+    expect(byHand.body.transcript.tickets.map((t: { key: string }) => t.key)).toEqual(["HAND-1"]);
+    expect((await upload(hook, "chat-3", "## Assistant\n\nnot-my-session-at-all\n")).status).toBe(422);
   });
 });

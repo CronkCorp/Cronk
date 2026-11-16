@@ -65,7 +65,7 @@ export function transcriptRoutes(ctx: AppContext) {
           // One upload of a chat at a time, so neither loses the other's text or Sessions.
           await lockUntilCommit(tx, `transcript:${actor.agent.id}:${chatId}`);
           const existing = await findForUpdate(tx, actor.agent.id, chatId);
-          const upload = afterUpload(existing, markdown, await sessionsNamedIn(tx, actor.agent.id, markdown));
+          const upload = afterUpload(existing, markdown, await sessionsNamedIn(tx, { id: actor.agent.id, workspaceId }, markdown));
           const limit = (await getWorkspace(tx, workspaceId)).transcriptMaxBytes;
           const size = sizeOf(upload);
           if (size > limit) {
