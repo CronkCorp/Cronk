@@ -1,9 +1,16 @@
 import type { StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import type { Folder } from "./archive.js";
+import { textOf, type Folder } from "./archive.js";
+import type { FileStore } from "../files/store.js";
 import { natural, refuse, type File } from "./fields.js";
 import { readFrontmatter } from "./frontmatter.js";
 import { recordRenamedId, type RenamedId } from "./renamed-ids.js";
+
+/** Where an import stores the files of Attachments, and the keys it stored so far. */
+export interface ImportedFiles {
+  store: FileStore;
+  stored: string[];
+}
 
 /**
  * What every part of an import shares: the export's files, and the ids the Users, Agents and
@@ -27,6 +34,8 @@ export class ImportContext {
     /** The export, unwrapped. */
     readonly folder: Folder,
     readonly now: Date,
+    /** Where the files of Attachments go. */
+    readonly files: ImportedFiles,
   ) {}
 
   /** Records that the Agent or Agent Session with id `from` in the export has the id `to` here, if they differ. */
@@ -37,12 +46,18 @@ export class ImportContext {
     await recordRenamedId(this.db, this.workspaceId, renamed);
   }
 
+  /** Stores `bytes` under `key` in the file store, noting the key so a failed import can remove it again. */
+  async storeFile(key: string, bytes: Buffer): Promise<void> {
+    this.files.stored.push(key);
+    await this.files.store.put(key, bytes);
+  }
+
   /** The file at `path`, read, if the export has it. */
   read(path: string): File | undefined {
-    const text = this.folder.get(path);
-    if (text === undefined) return undefined;
+    const contents = this.folder.get(path);
+    if (contents === undefined) return undefined;
     try {
-      return { path, ...readFrontmatter(text) };
+      return { path, ...readFrontmatter(textOf(contents)) };
     } catch (err) {
       refuse(`${path} can't be read: ${(err as Error).message}`);
     }

@@ -9,6 +9,7 @@ import type {
   AgentSession,
   AgentToken,
   AgentRecordEntry,
+  Attachment,
   Comment,
   Decision,
   DecisionStatus,
@@ -38,6 +39,7 @@ import type {
   Report,
   Role,
   SearchKind,
+  Storage,
   SearchResult,
   Status,
   StatusCategory,
@@ -66,6 +68,7 @@ export type {
   AgentSession,
   AgentToken,
   AgentRecordEntry,
+  Attachment,
   Comment,
   Decision,
   DecisionStatus,
@@ -95,6 +98,7 @@ export type {
   Report,
   Role,
   SearchKind,
+  Storage,
   SearchResult,
   Status,
   StatusCategory,
@@ -159,12 +163,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
-/** Uploads `file`, such as a .tar.gz archive, as the raw request body. */
-async function upload<T>(path: string, file: Blob): Promise<T> {
+/**
+ * Sends `file` as the raw request body: typed `contentType`, or as plain bytes, as an archive is (the server tells a zip
+ * from a tar, gzipped or not, by its bytes).
+ */
+async function upload<T>(path: string, file: Blob, contentType = "application/octet-stream"): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
-    // The server tells a zip from a tar, gzipped or not, by its bytes, so the upload is sent as plain bytes.
-    headers: { "content-type": "application/octet-stream" },
+    headers: { "content-type": contentType },
     body: file,
     credentials: "same-origin",
   });
@@ -173,6 +179,9 @@ async function upload<T>(path: string, file: Blob): Promise<T> {
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   return data as T;
 }
+
+/** Where an Attachment's file is served: shown in the page when it is an image, video, audio or plain text, saved otherwise. */
+export const attachmentFileUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}/file`;
 
 /** Where the whole Workspace's export downloads from; it holds every Version. */
 export const workspaceExportUrl = "/api/export";
@@ -224,7 +233,19 @@ export const api = {
   signOut: () => request<void>("DELETE", "/api/sign-in"),
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
-  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number }) => request<Workspace>("PATCH", "/api/workspace", changes),
+  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; attachmentMaxBytes?: number }) =>
+    request<Workspace>("PATCH", "/api/workspace", changes),
+  /** How much storage the Workspace's files take; Admins only. */
+  storage: () => request<Storage>("GET", "/api/workspace/storage"),
+  /** A Ticket's Attachments, in the order they were attached. */
+  attachments: (key: string) =>
+    request<{ attachments: Attachment[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/attachments`).then((r) => r.attachments),
+  /** Attaches `file` to the Ticket `key`, sent as itself with its own media type. */
+  attach: (key: string, file: File) =>
+    upload<{ attachment: Attachment }>(`/api/tickets/${encodeURIComponent(key)}/attachments?${new URLSearchParams({ name: file.name || "pasted" })}`, file, file.type || undefined).then(
+      (r) => r.attachment,
+    ),
+  deleteAttachment: (id: string) => request<void>("DELETE", `/api/attachments/${encodeURIComponent(id)}`),
 
   /** A Project's Decisions, or the Workspace's without a Project key, newest first. */
   decisions: (projectKey?: string) => request<{ decisions: DecisionSummary[] }>("GET", `${scopePath(projectKey)}/decisions`).then((r) => r.decisions),

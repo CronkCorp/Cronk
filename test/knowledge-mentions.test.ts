@@ -153,7 +153,7 @@ describe("Mentions of Decisions and Terms", () => {
     const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold; see D1." })).body.term;
     await admin.post("/api/projects/CRONK/documents", { title: "Runbook", body: "A Claim follows CRONK-D1." });
 
-    await cronk.undoMigration("0024_mentions", "DROP TABLE mentions");
+    await cronk.undoMigration("0025_mentions", "DROP TABLE mentions");
     await cronk.restart();
 
     expect(await mentionsOfTerm(admin, claim.id)).toEqual(["document: Runbook"]);

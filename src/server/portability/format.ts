@@ -82,6 +82,9 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   still in the Project, an Agent its id from \`people.md\`, and a Document the \`path\` of its file if the export holds it.
   A Ticket under Autonomous Delegation has \`autonomous: true\`, and an Agent's completion its \`verification\` (\`unverified\`
   or \`verified\`); a Project's \`autonomousByDefault\` is written when on.
+  \`<KEY>.attachments/\` holds its Attachments as the files themselves, each named \`<n>-<name>\` in the order they were
+  attached, and \`index.md\`, whose frontmatter lists each file's id, name, media type, size, when and by whom it was attached;
+  an import keeps the id unless it is taken.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
 already in the installation an export is imported into come in deactivated, since they have no password there; an Admin

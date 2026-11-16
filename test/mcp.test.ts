@@ -776,3 +776,46 @@ describe("a Ticket becoming Ready over MCP", () => {
     });
   });
 });
+
+describe("the attachments tool", () => {
+  it("attaches text or base64 files to a Ticket the Agent holds the Claim on, and lists them", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect((await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "log.txt", content: "boom" })).isError).toBe(true);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const log = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "sign-in-flood.log", content: "429 x 50\n" });
+    expect(log.isError).toBe(false);
+    expect(log.body.attachment).toMatchObject({ name: "sign-in-flood.log", contentType: "text/plain", size: 9, actor: { kind: "agent", session: { id: mcp.transport.sessionId } } });
+
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const image = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "proxy-ip.png", contentBase64: png.toString("base64"), contentType: "image/png" });
+    expect(image.body.attachment).toMatchObject({ contentType: "image/png", size: 8 });
+    expect((await admin.download(`/api/attachments/${image.body.attachment.id}/file`)).body.equals(png)).toBe(true);
+
+    expect(await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "x", content: "a", contentBase64: "YQ==" })).toEqual({
+      isError: true,
+      body: "The attach action needs either content or contentBase64, not both",
+    });
+    const listed = await callTool(mcp, "attachments", { action: "list", key: "CRONK-1" });
+    expect(listed.body).toEqual((await admin.get("/api/tickets/CRONK-1/attachments")).body);
+  });
+
+  it("takes files of several MB, not only what fits a small JSON request", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const recording = Buffer.alloc(3 * 1024 * 1024, 7);
+    const attached = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "repro.mp4", contentBase64: recording.toString("base64"), contentType: "video/mp4" });
+    expect(attached.body.attachment).toMatchObject({ name: "repro.mp4", size: recording.length });
+  });
+
+  it("offers a read-only token only list", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+    const { tools } = await mcp.client.listTools();
+    expect(tools.find((t) => t.name === "attachments")?.inputSchema.properties?.action).toMatchObject({ enum: ["list"] });
+  });
+});

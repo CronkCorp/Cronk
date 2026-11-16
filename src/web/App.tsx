@@ -11,7 +11,8 @@ import { SearchPage, searchFilterFrom } from "./search.js";
 import { Sidebar } from "./frame.js";
 import { routeOf } from "./routes.js";
 import { Link, navigate, useLocation } from "./router.js";
-import { AuthCard, Field, messageOf, useSubmit } from "./ui.js";
+import { AuthCard, Field, messageOf, Show, useLoad, useSubmit } from "./ui.js";
+import { formatBytes } from "./components/files.js";
 import { filterFrom, ProjectPage, ProjectsPage, projectViewOf } from "./work.js";
 import { TicketPage } from "./ticket.js";
 import { TermPage, TermsPage } from "./terms.js";
@@ -204,10 +205,17 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
   const [name, setName] = useState(props.current.name);
   const [agentAccess, setAgentAccess] = useState<AgentAccess>(props.current.agentAccess);
   const [silenceMinutes, setSilenceMinutes] = useState(String(props.current.silenceThresholdSeconds / 60));
+  const [attachmentMegabytes, setAttachmentMegabytes] = useState(String(props.current.attachmentMaxBytes / MB));
+  const [storage] = useLoad(api.storage, []);
   const { submit, error, busy } = useSubmit(
     () => {
       setSaved(false);
-      return api.updateWorkspace({ name, agentAccess, silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60) });
+      return api.updateWorkspace({
+        name,
+        agentAccess,
+        silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60),
+        attachmentMaxBytes: Math.round(Number(attachmentMegabytes) * MB),
+      });
     },
     (workspace) => {
       setSaved(true);
@@ -223,6 +231,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <p className="muted hint">The most Agents may do in the Workspace outside any Project, such as creating Projects.</p>
         <Field label="Silence threshold (minutes)" type="number" value={silenceMinutes} onChange={setSilenceMinutes} />
         <p className="muted hint">How long an Agent Session may stay silent before it ends and its Claims lapse, from 1 minute to 1 day.</p>
+        <Field label="Attachment size limit (MB)" type="number" value={attachmentMegabytes} onChange={setAttachmentMegabytes} />
+        <p className="muted hint">The largest file anyone may attach, from 1 MB to 10 GB.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
           <Button type="submit" disabled={busy}>Save</Button>
@@ -230,6 +240,14 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
           {saved && <span className="muted" role="status">Saved.</span>}
         </div>
       </form>
+      <h2>Storage used</h2>
+      <Show state={storage}>
+        {(s) => (
+          <p className="muted hint" data-testid="storage-used">
+            Attachments: {formatBytes(s.attachments.bytes)} in {s.attachments.files} {s.attachments.files === 1 ? "file" : "files"}. There is no quota.
+          </p>
+        )}
+      </Show>
       <h2>Export and import</h2>
       <p className="muted hint">
         Everything in the Workspace as Markdown files with frontmatter, in a .tar.gz archive. Import one into a fresh installation to move Cronk.
@@ -241,6 +259,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
     </section>
   );
 }
+
+const MB = 1024 * 1024;
 
 /** Picks an export archive and imports it. */
 function ImportExport() {

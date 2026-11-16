@@ -13,8 +13,16 @@ export interface ApiResponse {
   body: any;
 }
 
-/** Calls one API operation as a fixed caller. */
-export type ApiCall = (method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: object) => Promise<ApiResponse>;
+/** A request body that is a file's bytes rather than JSON, as an upload sends. */
+export class FileBody {
+  constructor(
+    readonly bytes: Buffer,
+    readonly contentType: string,
+  ) {}
+}
+
+/** Calls one API operation as a fixed caller, with a JSON body or a file's bytes. */
+export type ApiCall = (method: "GET" | "POST" | "PATCH" | "DELETE", url: string, body?: object | FileBody) => Promise<ApiResponse>;
 
 /** The headers that make a request the caller's: its token, and its Agent Session once there is one. */
 export function callerHeaders(caller: Caller): Record<string, string> {
@@ -23,11 +31,12 @@ export function callerHeaders(caller: Caller): Record<string, string> {
 
 /** Calls Cronk's own HTTP API in-process, exactly as the Agent could over the network. */
 export async function callApi(app: FastifyInstance, caller: Caller, ...[method, url, body]: Parameters<ApiCall>): Promise<ApiResponse> {
+  const file = body instanceof FileBody ? body : undefined;
   const res = await app.inject({
     method,
     url,
-    headers: callerHeaders(caller),
-    ...(body && { payload: body }),
+    headers: { ...callerHeaders(caller), ...(file && { "content-type": file.contentType }) },
+    ...(body && { payload: file ? file.bytes : body }),
   });
   return { status: res.statusCode, body: parseBody(res.body) };
 }
