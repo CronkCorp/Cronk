@@ -60,7 +60,8 @@ export type SharedSchemaName =
   | "LinkedDocument"
   | "AgentRecordEntry"
   | "Term"
-  | "TermVersion";
+  | "TermVersion"
+  | "StaleTermVersion";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -496,6 +497,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       at: timestamp,
       actor: { ...recordedActor, description: "Who saved it." },
     }),
+  },
+  StaleTermVersion: {
+    description: "A save or delete of a Term refused because the Version it is based on is no longer current, with the current Version.",
+    ...object({ error: { type: "string" }, current: ref("TermVersion") }),
   },
   AgentRecordEntry: {
     description: "One entry in an Agent's record: one thing it did. `kind` says which; the field named after it holds what, and the other three are null.",

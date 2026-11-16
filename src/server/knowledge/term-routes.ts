@@ -1,11 +1,23 @@
 import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, errors, holding, listing, pathParams, projectKeyParam, ref, termIdParam } from "../schemas.js";
+import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
-import { findTerm, insertTerm, listApplicableTerms, listTerms, withOverrides, type StoredTerm, type TermFields, type TermPlace } from "./terms.js";
+import {
+  deleteTerm,
+  findTerm,
+  insertTerm,
+  listApplicableTerms,
+  listTerms,
+  listTermVersions,
+  saveTermVersion,
+  withOverrides,
+  type StoredTerm,
+  type TermFields,
+  type TermPlace,
+} from "./terms.js";
 
 /** A Term's name: non-blank, at most 200 characters. */
 const name = { type: "string", minLength: 1, maxLength: 200, pattern: "\\S", description: "Its canonical name; unique where it belongs, ignoring case." } as const;
@@ -40,6 +52,28 @@ const nameFilter = {
   type: "object",
   properties: { name: { type: "string", description: "Only the Term with this name, ignoring case." } },
 } as const;
+
+/** The Version a save or delete is based on; it must be the Term's current one (ADR 0009). */
+const baseVersion = {
+  type: "integer",
+  minimum: 1,
+  description: "The number of the Version this write is based on. The write is refused if it is no longer the current Version.",
+} as const;
+
+interface TermEdit {
+  baseVersion: number;
+  name?: string;
+  definition?: string;
+  avoid?: string[];
+  group?: string | null;
+}
+
+/** A write refused as stale, with the current Version, or one taking another Term's name. */
+const writeConflict = {
+  description:
+    "The write is based on a Version that is no longer current, and the answer carries the current Version; or the new name is another Term's where it belongs",
+  anyOf: [ref("StaleTermVersion"), ref("Error")],
+};
 
 const projectParams = pathParams({ key: projectKeyParam });
 const termParams = pathParams({ id: termIdParam });
@@ -158,7 +192,95 @@ export function termRoutes(ctx: AppContext) {
         return { term: (await answerTerms(actor, [term]))[0]! };
       },
     );
+
+    app.patch<{ Params: { id: string }; Body: TermEdit }>(
+      "/api/terms/:id",
+      {
+        schema: {
+          params: termParams,
+          body: {
+            type: "object",
+            required: ["baseVersion"],
+            additionalProperties: false,
+            properties: { baseVersion, name, definition, avoid, group },
+          },
+          response: {
+            200: answer("The Term at its new Version; unchanged if the save changed nothing", holding("term", "Term")),
+            ...errors(400, 401, 403, 404, 410),
+            409: writeConflict,
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { baseVersion: base, ...edit } = request.body;
+        const saved = await transaction(ctx.db, async (tx) => {
+          const current = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          await requireCurrent(tx, current, base, "save");
+          const fields: TermFields = {
+            name: edit.name ?? current.name,
+            definition: edit.definition ?? current.definition,
+            avoid: edit.avoid ?? current.avoid,
+            group: edit.group === undefined ? current.group : edit.group,
+          };
+          const saved = await saveTermVersion(tx, actingUser(actor).workspaceId, current, { fields, actor, now: ctx.clock.now() });
+          if (saved === "name taken") throw nameTaken(fields.name);
+          return saved;
+        });
+        return { term: (await answerTerms(actor, [saved]))[0]! };
+      },
+    );
+
+    app.delete<{ Params: { id: string }; Querystring: { baseVersion: number } }>(
+      "/api/terms/:id",
+      {
+        schema: {
+          params: termParams,
+          querystring: { type: "object", required: ["baseVersion"], properties: { baseVersion } },
+          response: {
+            204: noContent("The Term and its Versions are deleted"),
+            ...errors(400, 401, 403, 404, 410),
+            409: { description: "The delete is based on a Version that is no longer current, and the answer carries the current Version", ...ref("StaleTermVersion") },
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        await transaction(ctx.db, async (tx) => {
+          const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUserActor(actor, "delete a Term");
+          await requireCurrent(tx, term, request.query.baseVersion, "delete");
+          await deleteTerm(tx, term.id);
+        });
+        return reply.code(204).send();
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/terms/:id/versions",
+      {
+        schema: {
+          params: termParams,
+          response: { 200: answer("The Term's Versions, newest first", listing("versions", ref("TermVersion"))), ...errors(401, 403, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const term = await termFor(ctx.db, actor, request.params.id, "read");
+        return { versions: await listTermVersions(ctx.db, term.id) };
+      },
+    );
   };
+}
+
+/** What to do after a write is refused as stale, by the kind of write. */
+const AFTER_STALE = { save: "read it and save again", delete: "read it and delete again if you still mean to" } as const;
+
+/** Refuses a save or delete based on a Version that is no longer current, answering with the current Version. */
+async function requireCurrent(db: Queryable, term: StoredTerm, base: number, write: keyof typeof AFTER_STALE): Promise<void> {
+  if (base === term.version) return;
+  const current = (await listTermVersions(db, term.id))[0]!;
+  throw new HttpError(409, `This ${write} is based on Version ${base}, but the Term is at Version ${term.version}; ${AFTER_STALE[write]}`, { current });
 }
 
 /**
