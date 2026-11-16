@@ -33,12 +33,15 @@ const PRIVATE_KEY = /-----BEGIN ((?:[A-Z0-9]+ )*)PRIVATE KEY( BLOCK)?-----[\s\S]
 
 /**
  * The credentials of an `Authorization` header, as written in a request, a curl command or JSON, after its scheme if it has one.
- * Shell variables (`$TOKEN`) are left, as they aren't secrets, and so is what scrubbing already replaced.
+ * Shell variables (`$TOKEN`) are left, as they aren't secrets, and so is what scrubbing already replaced and a scheme with no
+ * credentials after it on its line. The scheme is matched atomically (`(?=(…))\2`), so a credential left alone can't make the
+ * scheme word itself count as one.
  */
-const AUTHORIZATION = /\b((?:proxy-)?authorization["']?\s*[:=]\s*["']?\s*)((?:bearer|basic|token|digest)\s+)?(?![[$])[^\s"'\\,;]+/gi;
+const AUTHORIZATION =
+  /\b((?:proxy-)?authorization["']?[ \t]*[:=][ \t]*["']?[ \t]*)(?=((?:bearer|basic|token|digest)[ \t]+|))\2(?![[$])(?!(?:bearer|basic|token|digest)\b)[^\s"'\\,;]+/gi;
 
 /** A bearer credential outside an `Authorization` header. */
-const BEARER = /\b(bearer\s+)(?![[$])[A-Za-z0-9._~+/-]{16,}=*/gi;
+const BEARER = /\b(bearer[ \t]+)(?![[$])[A-Za-z0-9._~+/-]{16,}=*/gi;
 
 /**
  * An Agent token, sign-in or link token of Cronk's own: 32 random bytes as base64url, 43 characters with no prefix. Matched as a

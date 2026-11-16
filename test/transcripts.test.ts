@@ -181,6 +181,20 @@ describe("Scrubbing secrets on upload", () => {
     expect(read.markdown).toBe(`${first}\n## Assistant\n\nRotate [scrubbed: GitHub token] now.\n`);
   });
 
+  it("leaves shell variables, bare schemes and what it already scrubbed as they are", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    const untouched =
+      chat("Fix CRONK-1", agent.sessionId) +
+      '\ncurl -H "Authorization: Bearer $TOKEN" -H "Authorization: Basic ${CREDS}"\n' +
+      "Authorization: Bearer [scrubbed]\n{ \"authorization\": \"Bearer [scrubbed]\" }\nSend Authorization: Bearer\nthen the token.\n";
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", untouched);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown).toBe(untouched);
+  });
+
   it("counts the scrubbed text against the Workspace's limit", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
