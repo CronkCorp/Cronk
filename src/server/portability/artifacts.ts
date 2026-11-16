@@ -7,13 +7,14 @@ import { bytesOf } from "./archive.js";
 import { date, integer, isUuid, list, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
+import { exportComments, importComments } from "./comments.js";
 import type { ImportContext } from "./import-context.js";
 import type { ImportedTickets } from "./tickets.js";
 
 /**
  * Artifacts: `artifacts/<n>-<title>.md` for the Workspace's, and `projects/<KEY>/artifacts/` for a Project's, numbered in
  * the order they were created. Its frontmatter holds the Artifact and its Versions; each Version's files are in
- * `<n>-<title>/<version>/` as they were published. Every Version is exported when the export includes Versions, otherwise
+ * `<n>-<title>/<version>/` as they were published, and its Comments in `<n>-<title>.comments/`. Every Version is exported when the export includes Versions, otherwise
  * only the latest, keeping its number so links to it keep working.
  */
 
@@ -72,6 +73,7 @@ export async function exportArtifacts(ctx: ExportContext, dir: string, projectId
       createdAt: iso(a.created_at),
       versions: written,
     });
+    await exportComments(ctx, `${base}.comments`, "artifact_id", a.id);
   }
 }
 
@@ -129,6 +131,8 @@ export async function importArtifacts(ctx: ImportContext, dir: string, projectId
       artifact = { id: published.id, workspaceId: published.workspaceId, version: published.version };
     }
     await importProtection(ctx, { kind: "artifact", id }, file.data, path);
+    const imported = versions.map((v, i) => integer(v.number, where(`versions[${i}] number`)));
+    await importComments(ctx, `${base}.comments`, { artifactId: id }, undefined, undefined, imported);
   }
 }
 

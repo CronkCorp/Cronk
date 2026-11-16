@@ -37,12 +37,18 @@ export async function embedsIn(db: Queryable, workspaceId: string, body: string)
 const SOURCE_COLUMN = { document: "document_id", comment: "comment_id" } as const;
 
 /** Every source's Workspace and Markdown body, as `s`, by its kind and id. */
-const SOURCES = `(
+const sources = (artifacts = true) => `(
   SELECT 'document' AS kind, d.id, d.workspace_id, d.body FROM documents d
   UNION ALL
-  SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id), c.body
+  ${
+    artifacts
+      ? `SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id, x.workspace_id), c.body
   FROM comments c LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
-    LEFT JOIN documents d ON d.id = c.document_id
+    LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN artifacts x ON x.id = c.artifact_id`
+      : `SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id), c.body
+  FROM comments c LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
+    LEFT JOIN documents d ON d.id = c.document_id`
+  }
 ) s`;
 
 interface SourceRow {
@@ -67,7 +73,7 @@ async function record(db: Queryable, source: SourceRow): Promise<ArtifactAt[]> {
 
 /** Records what `source` embeds now, from its current text, and answers it. Run in the transaction that creates or changes it. */
 export async function recordEmbeds(db: Queryable, source: EmbedSource): Promise<ArtifactAt[]> {
-  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${SOURCES} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
+  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${sources()} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
   return rows[0] ? record(db, rows[0]) : [];
 }
 
@@ -76,7 +82,7 @@ export async function recordEmbeds(db: Queryable, source: EmbedSource): Promise<
  * Version an address may have named before it existed. Run in the transaction that publishes it.
  */
 export async function recordEmbedsNaming(db: Queryable, workspaceId: string, artifactId: string): Promise<void> {
-  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${SOURCES} WHERE s.workspace_id = $1 AND strpos(lower(s.body), $2) > 0 ORDER BY s.kind, s.id`, [
+  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${sources()} WHERE s.workspace_id = $1 AND strpos(lower(s.body), $2) > 0 ORDER BY s.kind, s.id`, [
     workspaceId,
     artifactId.toLowerCase(),
   ]);
@@ -90,10 +96,10 @@ const BATCH = 200;
  * Records what every source embeds, in the Workspace `workspaceId` (all Workspaces when null), as for a database or
  * an import that didn't record them yet. If what counts as an embed changes, add a migration that runs it again.
  */
-export async function recordAllEmbeds(db: Queryable, workspaceId: string | null = null): Promise<void> {
+export async function recordAllEmbeds(db: Queryable, workspaceId: string | null = null, opts: { artifacts?: boolean } = {}): Promise<void> {
   for (let after = { kind: "", id: "00000000-0000-0000-0000-000000000000" }; ; ) {
     const { rows } = await db.query<SourceRow>(
-      `SELECT * FROM ${SOURCES} WHERE ($1::uuid IS NULL OR s.workspace_id = $1) AND (s.kind, s.id) > ($2, $3::uuid)
+      `SELECT * FROM ${sources(opts.artifacts)} WHERE ($1::uuid IS NULL OR s.workspace_id = $1) AND (s.kind, s.id) > ($2, $3::uuid)
        ORDER BY s.kind, s.id LIMIT $4`,
       [workspaceId, after.kind, after.id, BATCH],
     );
@@ -113,7 +119,7 @@ export interface EmbeddedIn {
   kind: "document" | "report" | "comment";
   /** The Document's, Report's or Comment's id. */
   id: string;
-  /** Its title; for a Comment, the title of the Ticket or Document it is on. */
+  /** Its title; for a Comment, the title of the Ticket, Document or Artifact it is on. */
   title: string;
   /** Null when it lies in the Workspace outside any Project. */
   projectKey: string | null;
@@ -121,6 +127,8 @@ export interface EmbeddedIn {
   ticketKey: string | null;
   /** For a Comment on a Document: the Document's id. */
   documentId: string | null;
+  /** For a Comment on an Artifact: that Artifact's id. */
+  artifactId: string | null;
   /** The Version it embeds; null for the latest. */
   version: number | null;
   /** When it last changed; for a Comment, when it was posted. */
@@ -136,16 +144,17 @@ export async function listEmbeddedIn(db: Queryable, artifactId: string, readable
     `WITH e AS (SELECT * FROM artifact_embeds e WHERE e.artifact_id = $1),
      found AS (
        SELECT CASE WHEN d.ticket_id IS NULL THEN 'document' ELSE 'report' END AS kind, d.id, d.title, p.key AS project_key,
-              ${ticketKeySql("tp", "tt")} AS ticket_key, NULL::uuid AS document_id, e.version, d.updated_at AS at, d.project_id, d.workspace_id
+              ${ticketKeySql("tp", "tt")} AS ticket_key, NULL::uuid AS document_id, NULL::uuid AS artifact_id, e.version, d.updated_at AS at, d.project_id, d.workspace_id
        FROM e JOIN documents d ON d.id = e.document_id LEFT JOIN projects p ON p.id = d.project_id
          LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
        UNION ALL
-       SELECT 'comment', c.id, coalesce(t.title, d.title), coalesce(tp.key, dp.key), ${ticketKeySql("tp", "t")}, c.document_id, e.version, c.at,
-              coalesce(t.project_id, d.project_id), coalesce(tp.workspace_id, d.workspace_id)
+       SELECT 'comment', c.id, coalesce(t.title, d.title, x.title), coalesce(tp.key, dp.key, xp.key), ${ticketKeySql("tp", "t")}, c.document_id,
+              c.artifact_id, e.version, c.at, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
        FROM e JOIN comments c ON c.id = e.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
          LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
+         LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
      )
-     SELECT kind, id, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", version, at
+     SELECT kind, id, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", version, at
      FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
      ORDER BY at DESC, id, version NULLS FIRST LIMIT ${EMBEDDED_IN_LIMIT}`,
     [artifactId, readable.projectIds, readable.workspaceId],

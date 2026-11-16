@@ -664,7 +664,8 @@ export const migrations: Migration[] = [
       CREATE INDEX mentions_term ON mentions (term_id);
       CREATE INDEX mentions_decision ON mentions (decision_id);
     `,
-    backfill: (db) => recordAllMentions(db),
+    // Artifacts came later (0035_comments_on_artifacts), so this reads Comments as they were then.
+    backfill: (db) => recordAllMentions(db, null, { artifacts: false }),
   },
   {
     id: "0027_proposed_decisions",
@@ -901,7 +902,43 @@ export const migrations: Migration[] = [
       CREATE INDEX artifact_embeds_document ON artifact_embeds (document_id);
       CREATE INDEX artifact_embeds_comment ON artifact_embeds (comment_id);
     `,
-    backfill: (db) => recordAllEmbeds(db),
+    // Comments on Artifacts came later (0035_comments_on_artifacts), so this reads Comments as they were then.
+    backfill: (db) => recordAllEmbeds(db, null, { artifacts: false }),
+  },
+  {
+    id: "0035_comments_on_artifacts",
+    sql: `
+      -- A Comment may be on an Artifact instead of a Ticket or Document, recording the Version whoever posted it was viewing.
+      ALTER TABLE comments ADD COLUMN artifact_id uuid REFERENCES artifacts(id) ON DELETE CASCADE;
+      ALTER TABLE comments ADD COLUMN artifact_version integer;
+      ALTER TABLE comments ADD CONSTRAINT comments_artifact_version FOREIGN KEY (artifact_id, artifact_version)
+        REFERENCES artifact_versions(artifact_id, number) ON DELETE CASCADE;
+      ALTER TABLE comments DROP CONSTRAINT comments_check;
+      ALTER TABLE comments ADD CONSTRAINT comments_on_one CHECK (num_nonnulls(ticket_id, document_id, artifact_id) = 1);
+      ALTER TABLE comments ADD CONSTRAINT comments_artifact_version_given CHECK ((artifact_id IS NULL) = (artifact_version IS NULL));
+      CREATE INDEX comments_artifact ON comments (artifact_id, seq) WHERE artifact_id IS NOT NULL;
+
+      -- A Comment on an Artifact Version an Agent published waits for that Agent.
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check
+        CHECK (reason IN ('answer', 'mention', 'comment', 'published', 'rejected', 'suggestion_rejected'));
+    `,
+  },
+  {
+    id: "0036_transcript_redactions",
+    sql: `
+      -- Passages a Transcript's Owner redacted by hand (transcripts/redact.ts), in the order they were made. The passage is
+      -- never kept, only what finds it again in a later upload: its length, rolling fingerprint and SHA-256 digest.
+      CREATE TABLE transcript_redactions (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        seq integer NOT NULL,
+        length integer NOT NULL CHECK (length > 0),
+        fingerprint bigint NOT NULL,
+        digest text NOT NULL,
+        created_at timestamptz NOT NULL,
+        PRIMARY KEY (transcript_id, seq)
+      );
+    `,
   },
   {
     id: "0035_term_search",

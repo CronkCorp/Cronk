@@ -715,7 +715,19 @@ a.register-row:hover { background: var(--bg); }
 .artifact-title { font-size: 14px; font-weight: 600; margin: 0; }
 .artifact-source { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .artifact-source .key { min-width: 0; }
-.artifact-frame { display: block; width: 100%; height: calc(100vh - 180px); min-height: 480px; border: none; }
+.artifact-body { display: flex; flex-direction: row; align-items: stretch; }
+.artifact-frame { display: block; flex: 1; min-width: 0; width: 100%; height: calc(100vh - 180px); min-height: 480px; border: none; }
+/* The Comments drawer: 300px beside the Artifact, scrolling on its own; under it on narrow screens. */
+.artifact-drawer-slot { display: flex; flex: 0 0 300px; width: 300px; max-height: calc(100vh - 180px); min-height: 480px; border-left: 1px solid var(--border); }
+.artifact-drawer { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; padding: 12px; overflow-y: auto; }
+.artifact-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.artifact-drawer-title { font-size: 14px; font-weight: 600; margin: 0; }
+.artifact-drawer .comment-form { margin-top: 4px; }
+.comment-version { font-size: 12px; }
+@media (max-width: 900px) {
+  .artifact-body { flex-direction: column; }
+  .artifact-drawer-slot { flex: 0 0 auto; width: auto; max-height: none; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
+}
 .artifact-note { margin: 0; font-size: 12px; }
 .version-chip { font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
 .version-chip:hover { color: var(--text); }

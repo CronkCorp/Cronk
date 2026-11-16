@@ -512,11 +512,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   Comment: {
-    description: "A message an Actor posted on a Ticket or a Document: conversation, as opposed to an Agent's own Activities.",
+    description: "A message an Actor posted on a Ticket, a Document or an Artifact: conversation, as opposed to an Agent's own Activities.",
     ...object({
       id,
-      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null on a Document." },
-      documentId: { ...nullable(id), description: "The Document it is on; null on a Ticket." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null otherwise." },
+      documentId: { ...nullable(id), description: "The Document it is on; null otherwise." },
+      artifactId: { ...nullable(id), description: "The Artifact it is on; null otherwise." },
+      artifactVersion: { ...nullable({ type: "integer" }), description: "On an Artifact: the Version whoever posted it was viewing; null otherwise." },
       replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
       replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
       anchor: {
@@ -547,6 +549,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           enum: WAITING_REASONS,
           description:
             "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`published`: it is on an Artifact Version the Agent published. " +
             "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why. " +
             "`suggestion_rejected`: a User rejected a Suggestion the Agent made; `suggestion` says which and why.",
         },
@@ -579,6 +582,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         },
         ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision or Suggestion came from; null otherwise." },
         document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
+        artifact: {
+          ...nullable(object({ id, title: { type: "string" }, version: { type: "integer", description: "The Version the Comment is on." } })),
+          description: "The Artifact the Comment is on, with the Version whoever posted it was viewing; null otherwise.",
+        },
       },
       ["decision", "suggestion"],
     ),
@@ -674,10 +681,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     ...object({
       kind: { type: "string", enum: ["document", "report", "comment"], description: "What embeds it." },
       id: { ...id, description: "The Document's, Report's or Comment's id; read a Report as a Document." },
-      title: { type: "string", description: "Its title; for a Comment, the title of the Ticket or Document it is on." },
+      title: { type: "string", description: "Its title; for a Comment, the title of the Ticket, Document or Artifact it is on." },
       projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "For a Report, or a Comment on a Ticket: the Ticket's key." },
       documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      artifactId: { ...nullable(id), description: "For a Comment on an Artifact: that Artifact's id." },
       version: { ...nullable({ type: "integer" }), description: "The Version it embeds; null for the latest." },
       at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
     }),
@@ -689,10 +697,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       kind: { type: "string", enum: MENTION_KINDS, description: "What mentions it." },
       id: { ...id, description: "Its id; read a Ticket or Decision by its key instead." },
       key: { ...nullable({ type: "string" }), description: "A Ticket's or Decision's key; null for the others." },
-      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket or Document it is on." },
+      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on." },
       projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, or a Report: the Ticket's key." },
       documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      artifactId: { ...nullable(id), description: "For a Comment on an Artifact: the Artifact's id." },
       at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
     }),
   },
@@ -930,7 +939,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       "and so to everything those Sessions changed.",
     ...object({
       ...transcriptFields,
-      markdown: { type: "string", description: "The text of the latest upload, in the turn convention (Markdown)." },
+      markdown: {
+        type: "string",
+        description:
+          "The text of the latest upload, in the turn convention (Markdown), with known secrets scrubbed (best-effort) and its Owner's hand redactions applied.",
+      },
       earlier: {
         type: "array",
         items: { type: "string" },
@@ -1062,6 +1075,9 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
 /** A Comment's id. */
 export const commentIdParam = { type: "string", format: "uuid", description: "The Comment's id." } as const;
+
+/** An Artifact's id. */
+export const artifactIdParam = { type: "string", format: "uuid", description: "The Artifact's id." } as const;
 
 /** An Attachment's id. */
 export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
