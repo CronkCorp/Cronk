@@ -19,7 +19,7 @@ import {
 } from "../schemas.js";
 import { avoidedWordsIn, titleAndDescription } from "../knowledge/avoided-words.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
-import { addRelation, listRelations, removeRelation } from "./relations.js";
+import { addRelation, isDiscoveredBlock, listRelations, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
@@ -738,7 +738,12 @@ export function workRoutes(ctx: AppContext) {
             otherKey: { type: "string", description: "The other Ticket's key, such as `CRONK-7`; any case." },
           }),
           response: {
-            200: answer("The Ticket's remaining relations. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            200: answer(
+              "The Ticket's remaining relations. Needs Write in both Tickets' Projects, except that a User removes a block an Agent added from its Discovered Ticket " +
+                "from the blocked Ticket's side with Write there and Read in the other. An Agent must hold the Ticket's Claim, except to remove a block from its own " +
+                "Discovered Ticket no User has delegated or finished yet.",
+              holding("relations", "Relations"),
+            ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -746,7 +751,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, request.params.kind, ctx.clock.now());
+          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, request.params.kind, ctx.clock.now(), { removing: true });
           // Removing a blocking relation may unblock either end.
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
@@ -1046,15 +1051,19 @@ async function relationEnds(
   otherKey: string,
   kind: RelationKind,
   now: Date,
+  opts: { removing?: boolean } = {},
 ): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: boolean }> {
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
   const discoveredBlock = actor.kind === "agent" && kind === "blocks" && (await isOwnDiscoveryAwaitingDelegation(tx, actor, ticket));
   if (actor.kind === "agent" && !discoveredBlock) await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
-  const other = await ticketFor(tx, actor, otherKey, discoveredBlock ? "read" : "write").catch((err: unknown) => {
+  const other = await ticketFor(tx, actor, otherKey, "read").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
   });
   if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
+  // A User removes a block from a Discovered Ticket with Write on the blocked Ticket alone, as the Agent added it reading that one only.
+  const removingDiscoveredBlock = opts.removing && actor.kind === "user" && kind === "blocked_by" && (await isDiscoveredBlock(tx, other.id, ticket.id));
+  if (!discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
   return { ticket, other, discoveredBlock };
 }
 

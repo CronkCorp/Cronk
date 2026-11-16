@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, registerAgent, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
 
 const reason = "It builds on the migration that leaves orphans.";
 
@@ -74,5 +74,38 @@ describe("Blocks from a Discovered Ticket", () => {
     expect((await admin.get("/api/projects/CRONK/tickets")).body.tickets).toHaveLength(3);
     // Only an Agent's Discovered Ticket is filed with blocks.
     expect((await admin.post("/api/projects/CRONK/tickets", { title: "Mine", blocks: [{ ticketKey: "CRONK-1", reason }] })).status).toBe(400);
+  });
+});
+
+describe("Removing a block from a Discovered Ticket", () => {
+  it("is open to a User who may change the blocked Ticket, even reading the Discovered Ticket only, and makes that Ticket Ready again", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await admin.put(`/api/projects/OPS/members/${bobId}`, { access: "read" });
+    const agent = await session();
+    await agent.post("/api/projects/OPS/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+
+    const removed = await bob.delete("/api/tickets/CRONK-1/relations/blocked_by/OPS-1");
+
+    expect(removed.status).toBe(200);
+    expect(removed.body.relations.blockedBy).toEqual([]);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blocks).toEqual([]);
+    const changes = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.map((c: any) => `${c.change} by ${c.actor.kind}`);
+    expect(changes.slice(-2)).toEqual(["relation added by agent", "relation removed by user"]);
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    // From the Discovered Ticket's side, Bob would change OPS-1, where he only reads.
+    await agent.post("/api/tickets/OPS-1/relations", { kind: "blocks", ticketKey: "CRONK-1", reason });
+    expect((await bob.delete("/api/tickets/OPS-1/relations/blocks/CRONK-1")).status).toBe(403);
+  });
+
+  it("is open to the Agent that added it while its Discovered Ticket waits for a User", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+
+    expect((await agent.delete("/api/tickets/CRONK-2/relations/blocks/CRONK-1")).status).toBe(200);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
   });
 });

@@ -102,6 +102,15 @@ export async function storeRelation(db: Queryable, row: StoredRelation): Promise
   return rowCount !== 0;
 }
 
+/** Whether `blocker` blocks `blocked` by a block an Agent added from its Discovered Ticket. */
+export async function isDiscoveredBlock(db: Queryable, blocker: string, blocked: string): Promise<boolean> {
+  const { rowCount } = await db.query(
+    "SELECT 1 FROM ticket_relations WHERE kind = 'blocks' AND from_ticket_id = $1 AND to_ticket_id = $2 AND added_by_agent_id IS NOT NULL",
+    [blocker, blocked],
+  );
+  return rowCount !== 0;
+}
+
 /** Removes a relation, recording it in both Tickets' history. Returns false if there was no such relation. Run inside a transaction. */
 export async function removeRelation(db: Queryable, input: RelationChange): Promise<boolean> {
   const row = storedRow(input.ticket, input.kind, input.other);
