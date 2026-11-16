@@ -38,6 +38,7 @@ import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./kno
 import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
 import type { QuestionItem, DecisionItem, ReviewItem, SuggestionInboxItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { UnattendedItem } from "./inbox/triage.js";
 import type { Suggestion as StoredSuggestion, SuggestedContent } from "./knowledge/suggestions.js";
 import type {
   Decision as StoredDecision,
@@ -190,8 +191,11 @@ export type Suggestion = Serialized<StoredSuggestion>;
 export type { SuggestedContent };
 export type InboxKind = InboxItem["kind"];
 
-/** One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, or a Suggestion nobody reviews. */
-export type TriageItem = Serialized<UnverifiedItem> | Serialized<SuggestionInboxItem>;
+/**
+ * One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, a delegated or In Review Ticket
+ * whose Assignee is deactivated or can't see its Project, or a Suggestion nobody reviews.
+ */
+export type TriageItem = Serialized<UnverifiedItem> | Serialized<UnattendedItem> | Serialized<SuggestionInboxItem>;
 export type TriageKind = TriageItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */
