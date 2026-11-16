@@ -28,8 +28,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   created: { title: { holds: "title" }, description: { holds: "text" }, status: { holds: "status" } },
   title: fromTo("title"),
   description: fromTo("text"),
-  // `sentBack` is written only for a Send back's move.
-  status: { ...fromTo("status"), sentBack: { holds: "flag" } },
+  // `sentBack` is written only for a Send back's move, `reopened` only for a Reopen's.
+  status: { ...fromTo("status"), sentBack: { holds: "flag" }, reopened: { holds: "flag" } },
   priority: fromTo("priority"),
   labels: fromTo("labels"),
   assignee: fromTo("user", true),

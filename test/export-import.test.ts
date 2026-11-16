@@ -269,10 +269,15 @@ async function busyWorkspace() {
   await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done", body: "Shipped the API." });
   const done = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed");
   expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
+  // A minute later, Ada Reopens it once and claude-laptop completes it again; the minute keeps its two Reports in order.
+  cronk.clock.advance(60_000);
+  await admin.post("/api/tickets/CRONK-2/reopen", { comment: "Version it.", dependents: {} });
+  await autonomous.post("/api/tickets/CRONK-2/claim");
+  await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done again", body: "Versioned." });
+  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
   await autonomous.delete("/api/agent-sessions/current");
 
-  // Documents with Versions and Comments, in both page trees.
-  cronk.clock.advance(60_000);
+  // Documents with Versions and Comments, in both page trees, in the same minute.
   const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "# Guide\n\nStart here." })).body.document;
   await admin.post("/api/projects/CRONK/documents", { title: "Setup / Docker", body: "docker compose up", parentId: guide.id });
   await admin.post("/api/projects/CRONK/documents", { title: "Roadmap" });
@@ -353,6 +358,8 @@ describe("importing an export", () => {
     expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
     const moves = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
     expect(moves.map((c: { to: { name: string } }) => c.to.name)).toEqual(["In Progress"]);
+    const reopenings = (await admin.get("/api/tickets/CRONK-2/changes")).body.changes.filter((c: { reopened?: boolean }) => c.reopened);
+    expect(reopenings.map((c: { from: { name: string }; to: { name: string } }) => [c.from.name, c.to.name])).toEqual([["Done", "In Progress"]]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
     const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
