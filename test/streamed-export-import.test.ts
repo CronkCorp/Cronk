@@ -250,3 +250,45 @@ describe("an import that fails partway", () => {
     expect(await elsewhere.stored()).toHaveLength(4 + 4);
   });
 });
+
+describe("a file larger than the import allows", () => {
+  it("refuses a Workspace export with a 413 naming it when it is over the Attachment limit the export's own workspace.md sets", async () => {
+    const { admin } = await workspaceWithFiles();
+    const files = await untarFiles((await admin.download("/api/export")).body);
+    const edited = new Map<string, Buffer | string>(files);
+    edited.set("workspace.md", editFrontmatter(files.get("workspace.md")!, (data) => (data.attachmentMaxBytes = 2000)));
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    const res = await elsewhere.admin.upload("/api/import", await tarFiles(edited));
+    expect(res.status).toBe(413);
+    expect(res.body.error).toContain("projects/CRONK/tickets/CRONK-1.attachments/1-trace.bin");
+    expect(await elsewhere.stored()).toEqual([]);
+  });
+
+  it("refuses a Project export with a 413 naming it when it is over this Workspace's limits, before storing it whole", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    expect((await admin.upload("/api/tickets/CRONK-1/attachments?name=dump.bin", binary(1.5 * MB), "application/octet-stream")).status).toBe(201);
+    const exported = (await admin.download("/api/projects/CRONK/export")).body;
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    expect((await elsewhere.admin.patch("/api/workspace", { attachmentMaxBytes: MB, artifactMaxBytes: MB })).status).toBe(200);
+    const res = await elsewhere.admin.upload("/api/import", exported);
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe("projects/CRONK/tickets/CRONK-1.attachments/1-dump.bin is larger than 1 MB, the most a file of this import may be in this Workspace");
+    expect(await elsewhere.stored()).toEqual([]);
+  });
+
+  it("refuses an Artifact Version holding more files than this Workspace allows one, as publishing it would be", async () => {
+    const { admin } = await workspaceWithFiles();
+    const exported = (await admin.download("/api/projects/CRONK/export")).body;
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    expect((await elsewhere.admin.patch("/api/workspace", { artifactMaxFiles: 2 })).status).toBe(200);
+    const res = await elsewhere.admin.upload("/api/import", exported);
+    expect(res.status).toBe(413);
+    expect(res.body.error).toContain("projects/CRONK/artifacts/1-limits/2/ holds 3 files, more than the 2");
+    expect(await elsewhere.stored()).toEqual([]);
+  });
+});
