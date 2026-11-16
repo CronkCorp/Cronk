@@ -489,11 +489,13 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   Comment: {
-    description: "A message an Actor posted on a Ticket or a Document: conversation, as opposed to an Agent's own Activities.",
+    description: "A message an Actor posted on a Ticket, a Document or an Artifact: conversation, as opposed to an Agent's own Activities.",
     ...object({
       id,
-      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null on a Document." },
-      documentId: { ...nullable(id), description: "The Document it is on; null on a Ticket." },
+      ticketKey: { ...nullable({ type: "string" }), description: "The Ticket it is on; null otherwise." },
+      documentId: { ...nullable(id), description: "The Document it is on; null otherwise." },
+      artifactId: { ...nullable(id), description: "The Artifact it is on; null otherwise." },
+      artifactVersion: { ...nullable({ type: "integer" }), description: "On an Artifact: the Version its writer was viewing; null otherwise." },
       replyToCommentId: { ...nullable(id), description: "The Comment it replies to, if any." },
       replyToActivityId: { ...nullable(id), description: "The Activity it replies to, if any; a reply to a question answers it." },
       anchor: {
@@ -523,6 +525,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           enum: WAITING_REASONS,
           description:
             "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`published`: it is on an Artifact Version the Agent published. " +
             "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why. " +
             "`suggestion_rejected`: a User rejected a Suggestion the Agent made; `suggestion` says which and why.",
         },
@@ -555,6 +558,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         },
         ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision or Suggestion came from; null otherwise." },
         document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
+        artifact: {
+          ...nullable(object({ id, title: { type: "string" }, version: { type: "integer", description: "The Version the Comment is on." } })),
+          description: "The Artifact the Comment is on, with the Version its writer was viewing; null otherwise.",
+        },
       },
       ["decision", "suggestion"],
     ),

@@ -152,6 +152,7 @@ describe("rejecting a Suggestion", () => {
         },
         ticket: null,
         document: null,
+        artifact: null,
       },
     ]);
     expect((await cronk.client(secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);

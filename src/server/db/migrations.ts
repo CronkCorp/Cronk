@@ -851,4 +851,23 @@ export const migrations: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
     `,
   },
+  {
+    id: "0032_comments_on_artifacts",
+    sql: `
+      -- A Comment may be on an Artifact instead of a Ticket or Document, recording the Version its writer was viewing.
+      ALTER TABLE comments ADD COLUMN artifact_id uuid REFERENCES artifacts(id) ON DELETE CASCADE;
+      ALTER TABLE comments ADD COLUMN artifact_version integer;
+      ALTER TABLE comments ADD CONSTRAINT comments_artifact_version FOREIGN KEY (artifact_id, artifact_version)
+        REFERENCES artifact_versions(artifact_id, number) ON DELETE CASCADE;
+      ALTER TABLE comments DROP CONSTRAINT comments_check;
+      ALTER TABLE comments ADD CONSTRAINT comments_on_one CHECK (num_nonnulls(ticket_id, document_id, artifact_id) = 1);
+      ALTER TABLE comments ADD CONSTRAINT comments_artifact_version_given CHECK ((artifact_id IS NULL) = (artifact_version IS NULL));
+      CREATE INDEX comments_artifact ON comments (artifact_id, seq) WHERE artifact_id IS NOT NULL;
+
+      -- A Comment on an Artifact Version an Agent published waits for that Agent.
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check
+        CHECK (reason IN ('answer', 'mention', 'comment', 'published', 'rejected', 'suggestion_rejected'));
+    `,
+  },
 ];
