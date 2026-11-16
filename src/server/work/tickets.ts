@@ -565,8 +565,13 @@ export async function listDiscoveredIn(db: Queryable, claimIds: string[]): Promi
 
 /** The Tickets matching an SQL condition on `t`, in key order across Projects. */
 export async function listTicketRefs(db: Queryable, where: string, params: unknown[]): Promise<TicketRef[]> {
+  return (await listIdentifiedTicketRefs(db, where, params)).map(({ id: _id, ...ref }) => ref);
+}
+
+/** As `listTicketRefs`, with each Ticket's id. */
+export async function listIdentifiedTicketRefs(db: Queryable, where: string, params: unknown[]): Promise<(TicketRef & { id: string })[]> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${where} ORDER BY p.key, t.number`, params);
-  return rows.map(toTicket).map((ticket) => ({ key: ticket.key, title: ticket.title, status: ticket.status }));
+  return rows.map(toTicket).map((ticket) => ({ id: ticket.id, key: ticket.key, title: ticket.title, status: ticket.status }));
 }
 
 /**

@@ -65,7 +65,7 @@ const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastInd
 /** Relations, leaving out Tickets of Projects `actor` can't see. */
 export async function visibleRelations(db: Queryable, actor: Actor, relations: Relations): Promise<Relations> {
   const keys = await visibleProjectKeys(db, actor);
-  const visible = (refs: TicketRef[]) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
+  const visible = <R extends TicketRef>(refs: R[]) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
   return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
 }
 

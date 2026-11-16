@@ -3,13 +3,13 @@ import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
-import { transaction } from "../db/database.js";
+import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
-import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream } from "./archive.js";
-import { exportFolder } from "./export.js";
+import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
+import { exportDecisionsFolder, exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 import { listRenamedIds } from "./renamed-ids.js";
@@ -34,6 +34,7 @@ const importedAnswer = answer(
 export function portabilityRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     exportRoutes(app, ctx);
+    decisionExportRoutes(app, ctx);
     // An export's archive is read as it streams in, its large files going straight into the file store; these parsers apply only to the routes registered with them.
     await app.register(async (streamed) => {
       streamed.addContentTypeParser(ARCHIVE_TYPES, (_request, payload, done) => done(null, payload));
@@ -49,22 +50,9 @@ export function portabilityRoutes(ctx: AppContext) {
 
 /** Exporting the Workspace or one Project. */
 function exportRoutes(app: FastifyInstance, ctx: AppContext) {
-  /**
-   * Answers with the export of the Workspace, or of one Project, as a gzipped tar archive to save, streamed: the files
-   * of Attachments and Artifacts are read from the file store only as the archive reaches them.
-   */
-  const sendExport = async (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null, versions: boolean) => {
-    const now = ctx.clock.now();
-    const folder = await transaction(ctx.db, async (tx) => {
-      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
-      return exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now });
-    });
-    const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
-    return reply
-      .header("content-type", "application/gzip")
-      .header("content-disposition", `attachment; filename="cronk-${project ? project.key : "workspace"}-${stamp}.tar.gz"`)
-      .send(packFolderStream(folder, ctx.files));
-  };
+  /** Answers with the export of the Workspace, or of one Project, as a gzipped tar archive to save. */
+  const sendExport = (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null, versions: boolean) =>
+    sendArchive(ctx, reply, project?.key ?? "workspace", (tx, now) => exportFolder(tx, { workspaceId, projectId: project?.id ?? null, versions, now }));
 
   app.get<{ Querystring: { versions?: boolean } }>(
     "/api/export",
@@ -99,6 +87,62 @@ function exportRoutes(app: FastifyInstance, ctx: AppContext) {
       return sendExport(reply, user.workspaceId, project, request.query.versions ?? true);
     },
   );
+}
+
+/** Downloading one scope's Decisions as a `docs/adr/` folder, for anyone who can read them. */
+function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
+  /** Answers with the Decisions of the Workspace (project null) or a Project, as a gzipped tar archive to save. */
+  const sendDecisions = (reply: FastifyReply, workspaceId: string, project: { id: string; key: string } | null) =>
+    sendArchive(ctx, reply, `${project?.key ?? "workspace"}-adr`, (tx, now) => exportDecisionsFolder(tx, workspaceId, project, now));
+
+  app.get(
+    "/api/workspace/decisions/export",
+    {
+      schema: {
+        description: `Exports the Workspace's own Decisions, those in no Project, as a \`docs/adr/\` folder. ${DECISIONS_EXPORT_FORMAT}`,
+        response: { 200: decisionsExportAnswer, ...errors(401, 403, 410) },
+      },
+    },
+    async (request, reply) => {
+      const actor = await requireActor(ctx, request);
+      await requireWorkspaceAccess(ctx.db, actor, "read");
+      return sendDecisions(reply, actingUser(actor).workspaceId, null);
+    },
+  );
+
+  app.get<{ Params: { key: string } }>(
+    "/api/projects/:key/decisions/export",
+    {
+      schema: {
+        description: `Exports one Project's Decisions as a \`docs/adr/\` folder. ${DECISIONS_EXPORT_FORMAT}`,
+        params: pathParams({ key: projectKeyParam }),
+        response: { 200: decisionsExportAnswer, ...errors(401, 403, 404, 410) },
+      },
+    },
+    async (request, reply) => {
+      const actor = await requireActor(ctx, request);
+      const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+      return sendDecisions(reply, actingUser(actor).workspaceId, project);
+    },
+  );
+}
+
+/**
+ * Answers with the folder `build` makes as a gzipped tar archive to save, named `cronk-<name>-<stamp>.tar.gz`.
+ * It is built in a read-only, repeatable-read transaction so its files agree with each other, and streamed: the files
+ * of Attachments and Artifacts are read from the file store only as the archive reaches them.
+ */
+async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<StoredFolder>) {
+  const now = ctx.clock.now();
+  const folder = await transaction(ctx.db, async (tx) => {
+    await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    return build(tx, now);
+  });
+  const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
+  return reply
+    .header("content-type", "application/gzip")
+    .header("content-disposition", `attachment; filename="cronk-${name}-${stamp}.tar.gz"`)
+    .send(packFolderStream(folder, ctx.files));
 }
 
 /** Importing an export. */
@@ -250,6 +294,15 @@ function archiveStream(body: unknown): Readable {
 
 const EXPORT_FORMAT =
   "The answer is a gzipped tar archive of Markdown files with YAML frontmatter, laid out as its README.md describes; POST /api/import reads it back.";
+
+const DECISIONS_EXPORT_FORMAT =
+  "Any User or Agent who can read the Decisions can download it. The answer is a gzipped tar archive holding only `docs/adr/NNNN-<title>.md`, " +
+  "one per Decision, each the same file GET /api/export or GET /api/projects/{key}/export writes for it, without its Versions; empty when there are none.";
+
+const decisionsExportAnswer = {
+  description: "The Decisions, as a gzipped tar archive of `docs/adr/` to save",
+  content: { "application/gzip": { schema: { type: "string", format: "binary" } } },
+};
 
 const versionsQuery = {
   type: "object",

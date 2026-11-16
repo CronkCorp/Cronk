@@ -3,7 +3,7 @@ import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { lockUntilCommit, transaction } from "../db/database.js";
 import { answer, errors, holding, listing, noContent, pathParams, ref } from "../schemas.js";
-import { getWorkspace } from "../workspace/workspaces.js";
+import { getWorkspace, MAX_TRANSCRIPT_BYTES } from "../workspace/workspaces.js";
 import {
   afterUpload,
   changedAnything,
@@ -11,7 +11,6 @@ import {
   findTranscript,
   listTranscripts,
   transcriptSummary,
-  MAX_TRANSCRIPT_BYTES,
   readTranscript,
   deleteTranscript,
   sessionsNamedIn,

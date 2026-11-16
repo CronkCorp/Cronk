@@ -125,6 +125,85 @@ describe("exporting a Project", () => {
   });
 });
 
+describe("exporting a scope's Decisions as docs/adr", () => {
+  it("downloads a Project's Decisions as the same docs/adr files the Project export writes, and nothing else", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Other", key: "OTHER" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits!", body: "Per email.", supersedes: ["CRONK-D1"] });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+    await admin.post("/api/projects/OTHER/decisions", { title: "Elsewhere" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+
+    const res = await admin.download("/api/projects/CRONK/decisions/export");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/gzip");
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="cronk-CRONK-adr-2026-01-01T09-00-00.tar.gz"');
+    const files = await untarGz(res.body);
+
+    expect(Object.keys(files).sort()).toEqual(["docs/adr/0001-limits-in-the-api.md", "docs/adr/0002-per-email-limits.md"]);
+    expect(markdown(files["docs/adr/0001-limits-in-the-api.md"])).toMatchObject({
+      data: { key: "CRONK-D1", title: "Limits in the API", status: "superseded", group: "Security", supersededBy: "CRONK-D2" },
+      body: "Limit sign-ins.",
+    });
+    const full = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    for (const path of Object.keys(files)) expect(files[path]).toBe(full[`projects/CRONK/${path}`]);
+  });
+
+  it("downloads the Workspace's own Decisions, none from any Project", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "v1" });
+    await admin.patch("/api/decisions/D1", { baseVersion: 1, body: "Use Compose." });
+
+    const res = await admin.download("/api/workspace/decisions/export");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="cronk-workspace-adr-2026-01-01T09-00-00.tar.gz"');
+    const files = await untarGz(res.body);
+
+    // Two Versions, but only the current file.
+    expect(Object.keys(files)).toEqual(["docs/adr/0001-compose-for-installs.md"]);
+    expect(markdown(files["docs/adr/0001-compose-for-installs.md"])).toMatchObject({ data: { key: "D1", version: 2 }, body: "Use Compose." });
+    const full = await untarGz((await admin.download("/api/export")).body);
+    expect(files["docs/adr/0001-compose-for-installs.md"]).toBe(full["docs/adr/0001-compose-for-installs.md"]);
+  });
+
+  it("answers an empty archive for a scope with no Decisions", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+
+    for (const path of ["/api/workspace/decisions/export", "/api/projects/CRONK/decisions/export"]) {
+      const res = await admin.download(path);
+      expect(res.status).toBe(200);
+      expect(await untarGz(res.body)).toEqual({});
+    }
+  });
+
+  it("is for anyone who can read the Decisions, hiding a Project they can't see", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API" });
+    await admin.post("/api/projects/SECRET/decisions", { title: "Hush" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+    const grace = await joinAs(cronk, admin, "grace@example.com");
+    const claude = cronk.client((await registerAgent(grace, "claude-laptop")).secret);
+
+    expect(Object.keys(await untarGz((await grace.download("/api/projects/CRONK/decisions/export")).body))).toEqual(["docs/adr/0001-limits-in-the-api.md"]);
+    expect(Object.keys(await untarGz((await grace.download("/api/workspace/decisions/export")).body))).toEqual(["docs/adr/0001-compose-for-installs.md"]);
+    expect((await claude.download("/api/workspace/decisions/export")).status).toBe(200);
+    expect((await claude.download("/api/projects/CRONK/decisions/export")).status).toBe(200);
+    expect((await grace.download("/api/projects/SECRET/decisions/export")).status).toBe(404);
+    const stranger = cronk.client();
+    expect((await stranger.download("/api/workspace/decisions/export")).status).toBe(401);
+    expect((await stranger.download("/api/projects/CRONK/decisions/export")).status).toBe(401);
+  });
+});
+
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 /**
@@ -375,8 +454,8 @@ async function busyWorkspace() {
   await admin.post(`/api/suggestions/${suggestions[0]}/accept`);
   await admin.post(`/api/suggestions/${suggestions[1]}/accept`, { content: { avoid: ["Issue", "job"] } });
   await grace.post(`/api/suggestions/${suggestions[2]}/reject`, { reason: "Keep the title." });
-  // Discovered Tickets it files from CRONK-4, which its Report lists: CRONK-5 waits in Ada's Inbox, CRONK-6 she keeps in Backlog.
-  await suggester.post("/api/projects/CRONK/tickets", { title: "Dead links in the docs" });
+  // Discovered Tickets it files from CRONK-4, which its Report lists: CRONK-5 waits in Ada's Inbox, blocking CRONK-3; CRONK-6 she keeps in Backlog.
+  await suggester.post("/api/projects/CRONK/tickets", { title: "Dead links in the docs", blocks: [{ ticketKey: "CRONK-3", reason: "Its docs link to the dead pages." }] });
   await suggester.post("/api/projects/CRONK/tickets", { title: "Docs build is slow" });
   await suggester.post("/api/tickets/CRONK-4/reports", { title: "Tidied", body: "Found two more." });
   await admin.post("/api/tickets/CRONK-6/keep");
@@ -665,14 +744,14 @@ describe("an export without Versions", () => {
 });
 
 describe("Discovered Tickets in an export", () => {
-  it("carry their Discovered marker in their frontmatter: the Agent and Agent Session that filed them, their source and whether kept", async () => {
+  it("carry their Discovered marker in their frontmatter: the Agent and Agent Session that filed them, their source, whether kept and why they block", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
     await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
     await admin.post("/api/tickets/CRONK-2/keep");
     const elsewhere = await startSession(cronk, claude.secret);
-    await elsewhere.post("/api/projects/CRONK/tickets", { title: "Found later" });
+    await elsewhere.post("/api/projects/CRONK/tickets", { title: "Found later", blocks: [{ ticketKey: "CRONK-1", reason: "Same cache." }] });
 
     const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
 
@@ -683,7 +762,10 @@ describe("Discovered Tickets in an export", () => {
       sourceClaim: expect.any(String),
       kept: true,
     });
-    expect(markdown(files["projects/CRONK/tickets/CRONK-3.md"]).data.discovered).toEqual({ agent: claude.agentId, session: elsewhere.sessionId });
+    expect(markdown(files["projects/CRONK/tickets/CRONK-3.md"]).data).toMatchObject({
+      discovered: { agent: claude.agentId, session: elsewhere.sessionId, blockReasons: { "CRONK-1": "Same cache." } },
+      blocks: ["CRONK-1"],
+    });
     expect(markdown(files["projects/CRONK/tickets/CRONK-1.md"]).data.discovered).toBeUndefined();
   });
 });
@@ -902,18 +984,21 @@ describe("an export taken apart and archived again", () => {
   });
 });
 
+/** An export's files archived again with one Markdown file's frontmatter edited, and the file renamed if asked. */
+function editedExport(files: Record<string, string>, path: string, edit: (data: any) => void, rename?: string) {
+  const { data, body } = markdown(files[path]);
+  edit(data);
+  const copy = { ...files };
+  delete copy[path];
+  copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
+  return tarGz(copy);
+}
+
 describe("an export edited by hand", () => {
   it("is refused when it says what Cronk can't hold, naming the file", async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/export")).body);
-    const edited = async (path: string, edit: (data: any) => void, rename?: string) => {
-      const { data, body } = markdown(files[path]);
-      edit(data);
-      const copy = { ...files };
-      delete copy[path];
-      copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
-      return tarGz(copy);
-    };
+    const edited = (path: string, edit: (data: any) => void, rename?: string) => editedExport(files, path, edit, rename);
     const { admin } = await startInstalledCronk("Elsewhere");
 
     const answeredPlan = await admin.upload("/api/import", await edited("projects/CRONK/tickets/CRONK-1.activities/1.md", (d) => (d.answer = 1)));
@@ -1123,5 +1208,42 @@ describe("Importing Artifacts", () => {
     const res = await elsewhere.upload("/api/import", await tarGz(edited));
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/index\.html/);
+  });
+});
+
+describe("the Workspace's settings in an export", () => {
+  /** A Workspace export from a fresh installation, with `workspace.md` edited. */
+  async function exportWith(edit: (data: any) => void) {
+    const { admin } = await startInstalledCronk("Acme");
+    return editedExport(await untarGz((await admin.download("/api/export")).body), "workspace.md", edit);
+  }
+
+  it("are refused on import outside the bounds the API allows, naming the setting and its range", async () => {
+    const { admin } = await startInstalledCronk("Elsewhere");
+
+    const tooQuiet = await admin.upload("/api/import", await exportWith((d) => (d.silenceThresholdSeconds = 59)));
+    expect(tooQuiet.status).toBe(400);
+    expect(tooQuiet.body.error).toMatch(/workspace\.md silenceThresholdSeconds must be from 60 to 86400/);
+
+    const tooSmall = await admin.upload("/api/import", await exportWith((d) => (d.attachmentMaxBytes = 1024 * 1024 - 1)));
+    expect(tooSmall.status).toBe(400);
+    expect(tooSmall.body.error).toMatch(/workspace\.md attachmentMaxBytes must be from 1048576 to 10737418240/);
+
+    expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);
+  });
+
+  it("left out of workspace.md, as in an export from before them, keep the Workspace's own values", async () => {
+    const { admin } = await startInstalledCronk("Elsewhere");
+    await admin.patch("/api/workspace", { silenceThresholdSeconds: 120, artifactMaxFiles: 50 });
+
+    const imported = await admin.upload("/api/import", await exportWith((d) => {
+      delete d.silenceThresholdSeconds;
+      delete d.artifactMaxFiles;
+      d.attachmentMaxBytes = 2 * 1024 * 1024;
+    }));
+    expect(imported.status).toBe(201);
+
+    const workspace = (await admin.get("/api/workspace")).body;
+    expect(workspace).toMatchObject({ name: "Acme", silenceThresholdSeconds: 120, artifactMaxFiles: 50, attachmentMaxBytes: 2 * 1024 * 1024 });
   });
 });

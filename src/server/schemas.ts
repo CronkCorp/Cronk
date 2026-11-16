@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
 import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
@@ -39,6 +40,7 @@ export type SharedSchemaName =
   | "Status"
   | "Ticket"
   | "TicketRef"
+  | "BlockingRef"
   | "Relations"
   | "RecordedChange"
   | "Activity"
@@ -56,6 +58,7 @@ export type SharedSchemaName =
   | "GuidanceVersion"
   | "StaleGuidance"
   | "GuidanceMerge"
+  | "DecisionMerge"
   | "SearchResult"
   | "LinkedDocument"
   | "Mention"
@@ -271,6 +274,9 @@ const conflict = {
   }),
 };
 
+/** Decision keys, in order. */
+const keyList = { type: "array", items: { type: "string" } } as const;
+
 /** The sections of a merge, in order; joined, they make the merged `whole`. */
 const mergedSections = (whole: string) => ({
   type: "array",
@@ -305,11 +311,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   Workspace: object({
     name: { type: "string" },
     agentAccess: agentAccessSchema,
-    silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
-    attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
-    transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
-    artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
-    artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
+    ...Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, { type: "integer", description: s.responseDescription }])),
     artifactAllowedOrigins: {
       type: "array",
       items: { type: "string" },
@@ -450,11 +452,23 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "Another Ticket, as a Ticket lists it among its Sub-Tickets or relations.",
     ...object({ key: { type: "string" }, title: { type: "string" }, status: ref("Status") }),
   },
+  BlockingRef: {
+    description: "Another Ticket at the other end of a block, as a Ticket lists it among its relations.",
+    ...object({
+      key: { type: "string" },
+      title: { type: "string" },
+      status: ref("Status"),
+      block: {
+        ...nullable(object({ agent: { ...named, description: "The Agent that added it." }, reason: { type: "string" } })),
+        description: "Set on a block an Agent added from its own Discovered Ticket: the Agent that added it, and why. Null on any other block.",
+      },
+    }),
+  },
   Relations: {
     description: "A Ticket's relations to other Tickets, each list in key order.",
     ...object({
-      blocks: { type: "array", items: ref("TicketRef") },
-      blockedBy: { type: "array", items: ref("TicketRef") },
+      blocks: { type: "array", items: ref("BlockingRef") },
+      blockedBy: { type: "array", items: ref("BlockingRef") },
       relatesTo: { type: "array", items: ref("TicketRef") },
     }),
   },
@@ -652,6 +666,29 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   StaleDecision: {
     description: "An edit of a Decision refused because the Version it is based on is no longer current, with the current Version to merge with.",
     ...object({ error: { type: "string" }, current: ref("DecisionVersion") }),
+  },
+  DecisionMerge: {
+    description:
+      "An edit of a Decision merged with its current Version: the body section by section, the title, group and superseded Decisions each as one field. " +
+      "Only conflicts need a User's choice.",
+    ...object({
+      onto: { ...ref("DecisionVersion"), description: "The current Version merged onto; save the result with its number as `baseVersion`." },
+      title: { ...nullable({ type: "string" }), description: "The merged title; null when it conflicts." },
+      titleConflict: { ...nullable(conflict), description: "Set when both sides changed the title differently." },
+      body: { ...nullable({ type: "string" }), description: "The merged Markdown; null while any section conflicts." },
+      sections: mergedSections("body"),
+      group: { ...nullable({ type: "string" }), description: "The merged group; null for none, or when it conflicts." },
+      groupConflict: {
+        ...nullable(object({ base: nullable({ type: "string" }), mine: nullable({ type: "string" }), theirs: nullable({ type: "string" }) })),
+        description: "Each side's group, set when both sides changed it differently.",
+      },
+      supersedes: { ...nullable(keyList), description: "The keys of the Decisions the merge supersedes; null when they conflict." },
+      supersedesConflict: {
+        ...nullable(object({ base: keyList, mine: keyList, theirs: keyList })),
+        description: "Each side's superseded Decisions, by key, set when both sides changed them differently; they merge as one field, never key by key.",
+      },
+      conflicts: { type: "integer", description: "How many sections conflict, plus one for each of the title, group and superseded Decisions that does." },
+    }),
   },
   Report: {
     description:

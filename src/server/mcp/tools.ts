@@ -117,7 +117,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description:
       "Tickets: the units of work tracked in a Project, keyed like CRONK-12. When you notice work outside the Ticket you are on, or while on none, " +
       "file it as a Discovered Ticket: it waits in Backlog for a User, who delegates, keeps or cancels it. You may edit your own Discovered Tickets " +
-      "until a User delegates them, but not work on them.",
+      "until a User delegates them, but not work on them. If other work shouldn't build on what you found, have your Discovered Ticket block it, saying why.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK (list, file)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12 (get, claim, release, move, create_sub_ticket, edit, relate, unrelate)"),
@@ -132,6 +132,11 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       parent: z.string().optional().describe("The key of the Ticket's new parent in the same Project, or `none` to make it a top-level Ticket (edit)"),
       relation: z.enum(RELATION_KINDS).optional().describe("How the Ticket relates to the other, read from the Ticket's side (relate, unrelate)"),
       other: z.string().optional().describe("The other Ticket's key, such as CRONK-7 (relate, unrelate)"),
+      blocks: z.array(z.string()).optional().describe("Keys of Tickets of any Project you can read that your Discovered Ticket blocks from the start (file)"),
+      reason: z
+        .string()
+        .optional()
+        .describe("Why your Discovered Ticket blocks those Tickets, which each blocked Ticket shows; needed with `blocks` (file) and to block from it without a Claim (relate)"),
       status: z.array(z.string()).optional().describe("Only Tickets in one of these Status ids (list)"),
       category: z.array(z.enum(STATUS_CATEGORIES)).optional().describe("Only Tickets whose Status is in one of these Status Categories (list)"),
       priority: z
@@ -202,15 +207,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       file: {
         description:
           "file a Discovered Ticket in a Project, needing no Claim: it goes to Backlog, undelegated, for the Assignee of the Ticket you hold the Claim on, " +
-          "or else your Owner, and that Ticket's Reports from this Claim list it",
+          "or else your Owner, and that Ticket's Reports from this Claim list it; with `blocks` and a `reason`, it blocks those Tickets until finished or a User removes the block",
         writes: true,
         run: (api, a) => {
           const project = required(a.project, "a project", "file");
           const title = required(a.title, "a title", "file");
+          const reason = a.blocks?.length ? required(a.reason, "a reason for its blocks", "file") : undefined;
           return api("POST", `/api/projects/${encodeURIComponent(project)}/tickets`, {
             title,
             ...(a.description !== undefined && { description: a.description }),
             ...(a.source !== undefined && { ticket: a.source }),
+            ...(reason !== undefined && { blocks: a.blocks!.map((ticketKey) => ({ ticketKey, reason })) }),
           });
         },
       },
@@ -232,16 +239,18 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
       relate: {
         description:
-          "add a Relation from a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other",
+          "add a Relation from a Ticket you hold the Claim on to another: it blocks, is blocked_by or relates_to the other; " +
+          "or, with a `reason`, have your own Discovered Ticket no User has delegated or finished yet block any Ticket you can read",
         writes: true,
         run: (api, a) =>
           api("POST", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "relate"))}/relations`, {
             kind: required(a.relation, "a Relation", "relate"),
             ticketKey: required(a.other, "an other Ticket", "relate"),
+            ...(a.reason !== undefined && { reason: a.reason }),
           }),
       },
       unrelate: {
-        description: "remove a Relation from a Ticket you hold the Claim on",
+        description: "remove a Relation from a Ticket you hold the Claim on, or a block from your own Discovered Ticket no User has delegated or finished yet",
         writes: true,
         run: (api, a) => {
           const key = required(a.key, "a key", "unrelate");

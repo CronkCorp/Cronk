@@ -1,15 +1,32 @@
 import type { Actor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "../../shared/values.js";
-import { listTicketRefs, recordChange, type Ticket, type TicketRef } from "./tickets.js";
+import { listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
 
 
 const inverse: Record<RelationKind, RelationKind> = { blocks: "blocked_by", blocked_by: "blocks", relates_to: "relates_to" };
 
+/** Who added a block from their Discovered Ticket, and why. */
+export interface DiscoveredBlock {
+  agent: AgentRef;
+  reason: string;
+}
+
+/** A block an Agent adds from its Discovered Ticket, as stored: the Agent's id and why. */
+export interface NewDiscoveredBlock {
+  agentId: string;
+  reason: string;
+}
+
+/** A Ticket on the other end of a block, with the Agent and reason if the block came from a Discovered Ticket (else null). */
+export interface BlockingRef extends TicketRef {
+  block: DiscoveredBlock | null;
+}
+
 /** A Ticket's relations to other Tickets, each list in key order. */
 export interface Relations {
-  blocks: TicketRef[];
-  blockedBy: TicketRef[];
+  blocks: BlockingRef[];
+  blockedBy: BlockingRef[];
   relatesTo: TicketRef[];
 }
 
@@ -20,6 +37,14 @@ export interface RelationChange {
   other: Ticket;
   actor: Actor;
   now: Date;
+}
+
+/** A row of `ticket_relations`, with the Agent and reason of a block from a Discovered Ticket. */
+export interface StoredRelation {
+  kind: "blocks" | "relates_to";
+  from: string;
+  to: string;
+  block?: NewDiscoveredBlock | null;
 }
 
 /** The stored row for a relation: blocking runs from blocker to blocked; relating is stored once, lower id first. */
@@ -53,10 +78,14 @@ async function wouldCycle(db: Queryable, blocker: string, blocked: string): Prom
  * Relates `ticket` to `other`, recording it in both Tickets' history unless they
  * were already related that way. Returns false, changing nothing, for a blocking
  * relation that would close a cycle. The Tickets must differ and share
- * `workspaceId`. Run inside a transaction.
+ * `workspaceId`. `block` records the Agent and reason of a block from its Discovered Ticket. Run inside a transaction.
  */
-export async function addRelation(db: Queryable, workspaceId: string, input: RelationChange): Promise<boolean> {
-  const row = storedRow(input.ticket, input.kind, input.other);
+export async function addRelation(
+  db: Queryable,
+  workspaceId: string,
+  input: RelationChange & { block?: NewDiscoveredBlock },
+): Promise<boolean> {
+  const row: StoredRelation = { ...storedRow(input.ticket, input.kind, input.other), block: input.block ?? null };
   if (row.kind === "blocks") {
     // One blocking change per Workspace at a time, so two added at once can't close a cycle between them.
     await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
@@ -70,11 +99,20 @@ export async function addRelation(db: Queryable, workspaceId: string, input: Rel
  * Stores a relation between two Tickets by id, without checks or history, as an import does;
  * relating is stored once, lower id first. Returns whether it wasn't stored already.
  */
-export async function storeRelation(db: Queryable, row: { kind: "blocks" | "relates_to"; from: string; to: string }): Promise<boolean> {
+export async function storeRelation(db: Queryable, row: StoredRelation): Promise<boolean> {
   const [from, to] = row.kind === "relates_to" && row.to < row.from ? [row.to, row.from] : [row.from, row.to];
   const { rowCount } = await db.query(
-    `INSERT INTO ticket_relations (kind, from_ticket_id, to_ticket_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-    [row.kind, from, to],
+    `INSERT INTO ticket_relations (kind, from_ticket_id, to_ticket_id, added_by_agent_id, reason) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+    [row.kind, from, to, row.block?.agentId ?? null, row.block?.reason ?? null],
+  );
+  return rowCount !== 0;
+}
+
+/** Whether `blocker` blocks `blocked` by a block an Agent added from its Discovered Ticket. */
+export async function isDiscoveredBlock(db: Queryable, blocker: string, blocked: string): Promise<boolean> {
+  const { rowCount } = await db.query(
+    "SELECT 1 FROM ticket_relations WHERE kind = 'blocks' AND from_ticket_id = $1 AND to_ticket_id = $2 AND added_by_agent_id IS NOT NULL",
+    [blocker, blocked],
   );
   return rowCount !== 0;
 }
@@ -98,11 +136,29 @@ async function recordBothSides(db: Queryable, change: "relation added" | "relati
   await recordChange(db, other.id, actor, now, { change, kind: inverse[kind], ticket: { key: ticket.key, title: ticket.title } });
 }
 
+/**
+ * The Tickets `ticketId` blocks (`side` "from") or is blocked by ("to"), in key order, each with the Agent and reason of a
+ * block from a Discovered Ticket.
+ */
+async function blockingRefs(db: Queryable, ticketId: string, side: "from" | "to"): Promise<BlockingRef[]> {
+  const [end, other] = side === "from" ? ["from_ticket_id", "to_ticket_id"] : ["to_ticket_id", "from_ticket_id"];
+  const { rows } = await db.query<{ id: string; agent_id: string | null; agent_name: string | null; reason: string | null }>(
+    `SELECT r.${other} AS id, r.added_by_agent_id AS agent_id, a.name AS agent_name, r.reason
+     FROM ticket_relations r LEFT JOIN agents a ON a.id = r.added_by_agent_id
+     WHERE r.kind = 'blocks' AND r.${end} = $1`,
+    [ticketId],
+  );
+  const blocks = new Map(rows.map((r) => [r.id, r.agent_id === null ? null : { agent: { id: r.agent_id, name: r.agent_name! }, reason: r.reason! }]));
+  const refs = await listIdentifiedTicketRefs(db, "t.id = ANY($1::uuid[])", [[...blocks.keys()]]);
+  return refs.map(({ id, ...ref }) => ({ ...ref, block: blocks.get(id)! }));
+}
+
+/** A Ticket's relations, each with the Tickets at its other end in key order; blocks carry who added one from a Discovered Ticket, and why. */
 export async function listRelations(db: Queryable, ticketId: string): Promise<Relations> {
   const related = (sql: string) => listTicketRefs(db, `t.id IN (${sql})`, [ticketId]);
   return {
-    blocks: await related("SELECT to_ticket_id FROM ticket_relations WHERE kind = 'blocks' AND from_ticket_id = $1"),
-    blockedBy: await related("SELECT from_ticket_id FROM ticket_relations WHERE kind = 'blocks' AND to_ticket_id = $1"),
+    blocks: await blockingRefs(db, ticketId, "from"),
+    blockedBy: await blockingRefs(db, ticketId, "to"),
     relatesTo: await related(
       `SELECT to_ticket_id FROM ticket_relations WHERE kind = 'relates_to' AND from_ticket_id = $1
        UNION SELECT from_ticket_id FROM ticket_relations WHERE kind = 'relates_to' AND to_ticket_id = $1`,

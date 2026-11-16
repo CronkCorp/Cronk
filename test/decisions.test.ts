@@ -289,3 +289,104 @@ describe("the Decision register", () => {
     expect((await grace.get("/api/decisions/SECRET-D1")).status).toBe(404);
   });
 });
+
+describe("merging an edit of a Decision with the current Version", () => {
+  const record = "Intro.\n\n## Consequences\n\nSlower.\n\n## Considered Options\n\nSQLite.\n";
+
+  /** A Workspace Decision D3 at Version 1, superseding nothing, with D1 and D2 to supersede. */
+  async function decisionWith(body: string, fields: { group?: string } = {}) {
+    const started = await startInstalledCronk();
+    await started.admin.post("/api/workspace/decisions", { title: "One" });
+    await started.admin.post("/api/workspace/decisions", { title: "Two" });
+    await started.admin.post("/api/workspace/decisions", { title: "Postgres", body, ...fields });
+    return started;
+  }
+
+  it("combines edits to different sections and fields without a conflict, saving nothing", async () => {
+    const { admin } = await decisionWith(record, { group: "Storage" });
+    await admin.patch("/api/decisions/D3", { baseVersion: 1, body: record.replace("Slower.", "Slower writes."), group: "Data" });
+
+    const res = await admin.post("/api/decisions/d3/merge", {
+      baseVersion: 1,
+      title: "Postgres for storage",
+      body: record.replace("SQLite.", "SQLite, MySQL."),
+      group: "Storage",
+      supersedes: ["d1"],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.merge).toMatchObject({
+      onto: { number: 2, group: "Data", body: record.replace("Slower.", "Slower writes.") },
+      conflicts: 0,
+      title: "Postgres for storage",
+      titleConflict: null,
+      body: record.replace("Slower.", "Slower writes.").replace("SQLite.", "SQLite, MySQL."),
+      group: "Data",
+      groupConflict: null,
+      supersedes: ["D1"],
+      supersedesConflict: null,
+    });
+    expect((await admin.get("/api/decisions/D3")).body.decision).toMatchObject({ version: 2, title: "Postgres", supersedes: [] });
+  });
+
+  it("reports a section, title, group or superseded Decisions both sides changed differently as conflicts", async () => {
+    const { admin } = await decisionWith(record, { group: "Storage" });
+    await admin.patch("/api/decisions/D3", { baseVersion: 1, title: "Their Postgres", body: record.replace("Slower.", "Slower writes."), group: "Data", supersedes: ["D2"] });
+
+    const res = await admin.post("/api/decisions/D3/merge", {
+      baseVersion: 1,
+      title: "My Postgres",
+      body: record.replace("Slower.", "Slower reads."),
+      group: "Databases",
+      supersedes: ["D1", "D2"],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.merge).toMatchObject({
+      conflicts: 4,
+      title: null,
+      titleConflict: { base: "Postgres", mine: "My Postgres", theirs: "Their Postgres" },
+      body: null,
+      group: null,
+      groupConflict: { base: "Storage", mine: "Databases", theirs: "Data" },
+      supersedes: null,
+      supersedesConflict: { base: [], mine: ["D1", "D2"], theirs: ["D2"] },
+    });
+    expect(res.body.merge.sections[1]).toMatchObject({
+      heading: "## Consequences",
+      text: null,
+      conflict: { base: "## Consequences\n\nSlower.\n\n", mine: "## Consequences\n\nSlower reads.\n\n", theirs: "## Consequences\n\nSlower writes.\n\n" },
+    });
+  });
+
+  it("takes the other side's group and superseded Decisions where both sides made the same change, in any order", async () => {
+    const { admin } = await decisionWith(record);
+    await admin.patch("/api/decisions/D3", { baseVersion: 1, group: "Data", supersedes: ["D2", "D1"] });
+
+    const res = await admin.post("/api/decisions/D3/merge", { baseVersion: 1, group: " Data ", supersedes: ["d1", "D2"] });
+
+    expect(res.body.merge).toMatchObject({ conflicts: 0, group: "Data", groupConflict: null, supersedes: ["D1", "D2"], supersedesConflict: null, title: "Postgres", body: record });
+  });
+
+  it("needs only Read access, hides the Decisions of a private Project, and refuses an unknown Decision or Version", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres", body: record });
+    await admin.patch("/api/decisions/CRONK-D1", { baseVersion: 1, body: record.replace("Slower.", "Slower writes.") });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await admin.put(`/api/projects/CRONK/members/${(await bob.get("/api/me")).body.user.id}`, { access: "read" });
+
+    const read = await bob.post("/api/decisions/CRONK-D1/merge", { baseVersion: 1, body: record.replace("SQLite.", "SQLite, MySQL.") });
+    expect(read.status).toBe(200);
+    expect(read.body.merge).toMatchObject({ conflicts: 0, body: record.replace("Slower.", "Slower writes.").replace("SQLite.", "SQLite, MySQL.") });
+    expect((await admin.post("/api/decisions/CRONK-D9/merge", { baseVersion: 1 })).body).toMatchObject({ error: "No such Decision" });
+    const missing = await admin.post("/api/decisions/CRONK-D1/merge", { baseVersion: 3 });
+    expect([missing.status, missing.body.error]).toEqual([404, "No such Version"]);
+    expect((await admin.post("/api/decisions/CRONK-D1/merge", { baseVersion: 1, supersedes: ["D1"] })).status).toBe(400);
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const hidden = await carol.post("/api/decisions/CRONK-D1/merge", { baseVersion: 1 });
+    expect([hidden.status, hidden.body.error]).toEqual([404, "No such Decision"]);
+  });
+});

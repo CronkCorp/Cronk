@@ -1,20 +1,101 @@
 import type { Queryable } from "../db/database.js";
 import type { AgentAccess } from "../identity/access.js";
 
-export interface Workspace {
+const MB = 1024 * 1024;
+
+/** The largest Transcript limit a Workspace may set, and so the largest upload read at all: 100 MB. */
+export const MAX_TRANSCRIPT_BYTES = 100 * MB;
+
+/** The smallest Transcript limit a Workspace may set: 1 KB. */
+const MIN_TRANSCRIPT_BYTES = 1024;
+
+/** One numeric Workspace setting: all the API, the `Workspace` schema and `workspace.md` need to know of it. */
+interface WorkspaceSetting {
+  /** Its name in the API and in `workspace.md`. */
+  name: string;
+  /** Its column in `workspaces`, where its default and `CHECK` live. */
+  column: string;
+  /** Whether the column is a `bigint`, which comes back from the database as a string. */
+  bigint: boolean;
+  /** What the API accepts, which an import checks too. */
+  schema: { type: "integer"; minimum: number; maximum: number; description: string };
+  /** What the setting is, as the `Workspace` schema of API responses describes it, without the bounds. */
+  responseDescription: string;
+}
+
+/**
+ * The Workspace's numeric settings. Adding one takes an entry here and its migration: the API, the `Workspace`
+ * schema and `workspace.md` export and import all follow from this table.
+ */
+export const WORKSPACE_SETTINGS = [
+  {
+    name: "silenceThresholdSeconds",
+    column: "silence_threshold_seconds",
+    bigint: false,
+    schema: {
+      type: "integer",
+      minimum: 60,
+      maximum: 86_400,
+      description: "How long an Agent Session may stay silent before it ends and its Claims lapse: one minute to one day.",
+    },
+    responseDescription: "How long an Agent Session may stay silent before it ends and its Claims lapse.",
+  },
+  {
+    name: "attachmentMaxBytes",
+    column: "attachment_max_bytes",
+    bigint: true,
+    schema: { type: "integer", minimum: MB, maximum: 10 * 1024 * MB, description: "The largest file an Attachment may be, in bytes: 1 MB to 10 GB." },
+    responseDescription: "The largest file an Attachment may be, in bytes.",
+  },
+  {
+    name: "transcriptMaxBytes",
+    column: "transcript_max_bytes",
+    bigint: false,
+    schema: {
+      type: "integer",
+      minimum: MIN_TRANSCRIPT_BYTES,
+      maximum: MAX_TRANSCRIPT_BYTES,
+      description: "The most a Transcript may hold, all its texts together, in bytes: 1 KB to 100 MB; 10 MB unless changed.",
+    },
+    responseDescription: "The most a Transcript may hold, all its texts together, in bytes of UTF-8.",
+  },
+  {
+    name: "artifactMaxBytes",
+    column: "artifact_max_bytes",
+    bigint: true,
+    schema: {
+      type: "integer",
+      minimum: MB,
+      maximum: 500 * MB,
+      description: "The most bytes one Version of an Artifact may hold, all its files together: 1 MB to 500 MB; 25 MB unless changed.",
+    },
+    responseDescription: "The most bytes one Version of an Artifact may hold, all its files together.",
+  },
+  {
+    name: "artifactMaxFiles",
+    column: "artifact_max_files",
+    bigint: false,
+    schema: { type: "integer", minimum: 1, maximum: 10_000, description: "The most files one Version of an Artifact may hold: 1 to 10,000; 500 unless changed." },
+    responseDescription: "The most files one Version of an Artifact may hold.",
+  },
+] as const satisfies readonly WorkspaceSetting[];
+
+type WorkspaceSettingName = (typeof WORKSPACE_SETTINGS)[number]["name"];
+type WorkspaceSettingColumn = (typeof WORKSPACE_SETTINGS)[number]["column"];
+
+/** The Workspace's numeric settings, by name. */
+export type WorkspaceSettings = { [K in WorkspaceSettingName]: number };
+
+/** The settings `values` holds, in the table's order, leaving out those it doesn't. */
+export function pickSettings<T>(values: Partial<Record<WorkspaceSettingName, T>>): Partial<Record<WorkspaceSettingName, T>> {
+  return Object.fromEntries(WORKSPACE_SETTINGS.filter((s) => values[s.name] !== undefined).map((s) => [s.name, values[s.name]]));
+}
+
+export interface Workspace extends WorkspaceSettings {
   id: string;
   name: string;
   /** The most Agents may do in the Workspace outside any Project. */
   agentAccess: AgentAccess;
-  /** How long an Agent Session may stay silent before it ends and its Claims lapse. */
-  silenceThresholdSeconds: number;
-  /** The largest file an Attachment may be, in bytes. */
-  attachmentMaxBytes: number;
-  /** The most a Transcript may hold, all its texts together, in bytes. */
-  transcriptMaxBytes: number;
-  /** The most bytes, and files, one Version of an Artifact may hold. */
-  artifactMaxBytes: number;
-  artifactMaxFiles: number;
   /** The origins every Artifact may load scripts, styles and fonts from, besides its own files. */
   artifactAllowedOrigins: string[];
   /** Whether a publish may declare extra origins for its Version, and Versions are served with those they declared. */
@@ -25,37 +106,24 @@ export interface Workspace {
 export const publicWorkspace = (w: Workspace) => ({
   name: w.name,
   agentAccess: w.agentAccess,
-  silenceThresholdSeconds: w.silenceThresholdSeconds,
-  attachmentMaxBytes: w.attachmentMaxBytes,
-  transcriptMaxBytes: w.transcriptMaxBytes,
-  artifactMaxBytes: w.artifactMaxBytes,
-  artifactMaxFiles: w.artifactMaxFiles,
+  ...(pickSettings(w) as WorkspaceSettings),
   artifactAllowedOrigins: w.artifactAllowedOrigins,
   artifactExtraOriginsAllowed: w.artifactExtraOriginsAllowed,
 });
 
-interface WorkspaceRow {
+type WorkspaceRow = {
   id: string;
   name: string;
   agent_access: AgentAccess;
-  silence_threshold_seconds: number;
-  attachment_max_bytes: string;
-  transcript_max_bytes: number;
-  artifact_max_bytes: string;
-  artifact_max_files: number;
   artifact_allowed_origins: string[];
   artifact_extra_origins_allowed: boolean;
-}
+} & { [C in WorkspaceSettingColumn]: number | string };
 
 const toWorkspace = (row: WorkspaceRow): Workspace => ({
   id: row.id,
   name: row.name,
   agentAccess: row.agent_access,
-  silenceThresholdSeconds: row.silence_threshold_seconds,
-  attachmentMaxBytes: Number(row.attachment_max_bytes),
-  transcriptMaxBytes: row.transcript_max_bytes,
-  artifactMaxBytes: Number(row.artifact_max_bytes),
-  artifactMaxFiles: row.artifact_max_files,
+  ...(Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, s.bigint ? Number(row[s.column]) : row[s.column]])) as WorkspaceSettings),
   artifactAllowedOrigins: row.artifact_allowed_origins,
   artifactExtraOriginsAllowed: row.artifact_extra_origins_allowed,
 });
@@ -73,44 +141,35 @@ export async function getWorkspace(db: Queryable, id: string): Promise<Workspace
   return toWorkspace(rows[0]!);
 }
 
+/** What an Admin, or an import, may change about the Workspace. */
+export interface WorkspaceChanges extends Partial<WorkspaceSettings> {
+  name?: string;
+  agentAccess?: AgentAccess;
+  artifactAllowedOrigins?: string[];
+  artifactExtraOriginsAllowed?: boolean;
+}
+
 /**
- * Renames the Workspace and/or changes its Agent Access, silence threshold, its limits on Attachments, Transcripts and
- * Artifacts, or the origins Artifacts may load from.
+ * Renames the Workspace and/or changes its Agent Access, any of its numeric settings, or the origins Artifacts may
+ * load from. Whatever `changes` leaves out keeps the Workspace's value.
  */
 export async function updateWorkspace(
   db: Queryable,
   id: string,
-  changes: {
-    name?: string;
-    agentAccess?: AgentAccess;
-    silenceThresholdSeconds?: number;
-    attachmentMaxBytes?: number;
-    transcriptMaxBytes?: number;
-    artifactMaxBytes?: number;
-    artifactMaxFiles?: number;
-    artifactAllowedOrigins?: string[];
-    artifactExtraOriginsAllowed?: boolean;
-  },
+  changes: WorkspaceChanges,
 ): Promise<Workspace> {
-  const { rows } = await db.query<WorkspaceRow>(
-    `UPDATE workspaces SET name = coalesce($2, name), agent_access = coalesce($3, agent_access),
-       silence_threshold_seconds = coalesce($4, silence_threshold_seconds), attachment_max_bytes = coalesce($5, attachment_max_bytes),
-       transcript_max_bytes = coalesce($6, transcript_max_bytes), artifact_max_bytes = coalesce($7, artifact_max_bytes),
-       artifact_max_files = coalesce($8, artifact_max_files), artifact_allowed_origins = coalesce($9, artifact_allowed_origins),
-       artifact_extra_origins_allowed = coalesce($10, artifact_extra_origins_allowed)
-     WHERE id = $1 RETURNING *`,
-    [
-      id,
-      changes.name ?? null,
-      changes.agentAccess ?? null,
-      changes.silenceThresholdSeconds ?? null,
-      changes.attachmentMaxBytes ?? null,
-      changes.transcriptMaxBytes ?? null,
-      changes.artifactMaxBytes ?? null,
-      changes.artifactMaxFiles ?? null,
-      changes.artifactAllowedOrigins ?? null,
-      changes.artifactExtraOriginsAllowed ?? null,
-    ],
-  );
+  const columns: [string, unknown][] = [
+    ["name", changes.name],
+    ["agent_access", changes.agentAccess],
+    ...WORKSPACE_SETTINGS.map((s): [string, unknown] => [s.column, changes[s.name]]),
+    ["artifact_allowed_origins", changes.artifactAllowedOrigins],
+    ["artifact_extra_origins_allowed", changes.artifactExtraOriginsAllowed],
+  ];
+  // Column names come from this module, never from the caller; every value is a parameter.
+  const sets = columns.map(([column], i) => `${column} = coalesce($${i + 2}, ${column})`).join(", ");
+  const { rows } = await db.query<WorkspaceRow>(`UPDATE workspaces SET ${sets} WHERE id = $1 RETURNING *`, [
+    id,
+    ...columns.map(([, value]) => value ?? null),
+  ]);
   return toWorkspace(rows[0]!);
 }

@@ -19,7 +19,7 @@ import {
 } from "../schemas.js";
 import { avoidedWordsIn, titleAndDescription } from "../knowledge/avoided-words.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
-import { addRelation, listRelations, removeRelation } from "./relations.js";
+import { addRelation, isDiscoveredBlock, listRelations, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
@@ -65,7 +65,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
+import { clearClaim, isOwnDiscoveryAwaitingDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import { ticketDetail, ticketDetailSchema, ticketFor, visibleChanges, visibleRelations } from "./ticket-reads.js";
@@ -80,6 +80,9 @@ const projectKey = { type: "string", pattern: `^${PROJECT_KEY_PATTERN}$` } as co
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
 /** A Ticket's Markdown description. */
 const description = { type: "string", maxLength: 100_000 } as const;
+
+/** Why an Agent's Discovered Ticket blocks another: non-blank, at most 1000 characters. */
+const blockReason = { type: "string", minLength: 1, maxLength: 1000, pattern: "\\S" } as const;
 
 /** A Label: non-blank, at most 50 characters. */
 const label = { type: "string", minLength: 1, maxLength: 50, pattern: "\\S" } as const;
@@ -104,6 +107,11 @@ interface TicketQuery {
 }
 
 export function workRoutes(ctx: AppContext) {
+  /** Tells the Inbox and Triage of any waiting Discovered Ticket among these that what it blocks changed. */
+  const discoveriesChanged = (tickets: Ticket[]) => {
+    const waiting = tickets.filter(isWaitingDiscovery);
+    if (waiting.length > 0) waitingItemsChanged(ctx.live, waiting.map((t) => t.assignee?.id));
+  };
   return async (app: FastifyInstance) => {
     app.get<{ Querystring: { archived?: boolean } }>(
       "/api/projects",
@@ -514,7 +522,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { title: string; description?: string; ticket?: string } }>(
+    app.post<{ Params: { key: string }; Body: { title: string; description?: string; ticket?: string; blocks?: { ticketKey: string; reason: string }[] } }>(
       "/api/projects/:key/tickets",
       {
         schema: {
@@ -534,6 +542,19 @@ export function workRoutes(ctx: AppContext) {
                   "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It must be of the same Project. " +
                   "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
               },
+              blocks: {
+                type: "array",
+                maxItems: 50,
+                description:
+                  "For an Agent: Tickets of any Project it can read that its Discovered Ticket blocks from the start, each with why, which the blocked Ticket shows. " +
+                  "Nothing is filed if any can't be blocked.",
+                items: {
+                  type: "object",
+                  required: ["ticketKey", "reason"],
+                  additionalProperties: false,
+                  properties: { ticketKey: { type: "string", maxLength: 30 }, reason: blockReason },
+                },
+              },
             },
           },
           response: {
@@ -549,13 +570,14 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const now = ctx.clock.now();
-        const { ticket, avoidedWords } = await transaction(ctx.db, async (tx) => {
+        const { ticket, blocked, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
           const input = { project, title: request.body.title.trim(), description: request.body.description ?? "", actor, now };
           let ticket: Ticket;
+          const blocked: Ticket[] = [];
           if (actor.kind === "agent") {
             const source = await sourceClaimOf(tx, actor, project.id, request.body.ticket, now, "a Discovered Ticket");
             const sourceTicket = source && (await findTicketsByIds(tx, [source.ticketId]))[0]!;
@@ -567,13 +589,15 @@ export function workRoutes(ctx: AppContext) {
             // Cronk routes it, not the Agent, which may not assign Tickets.
             const assignee = await discoveryAssignee(tx, actor, sourceTicket?.assignee ?? actingUser(actor), project.id);
             ticket = assignee ? await updateTicket(tx, created, { assignee }, { kind: "system" }, now) : created;
+            for (const { ticketKey, reason } of request.body.blocks ?? []) blocked.push(await addDiscoveredBlock(tx, actor, ticket, ticketKey, reason, now));
           } else {
             if (request.body.ticket !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Discovered Ticket came from, as the one it holds the Claim on");
+            if (request.body.blocks !== undefined) throw new HttpError(400, "Only an Agent files a Ticket with blocks, as its Discovered Ticket");
             ticket = await insertTicket(tx, { ...input, status: statuses[0]! });
           }
-          return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
+          return { ticket, blocked, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
-        ticketsChanged(ctx.live, [ticket]);
+        ticketsChanged(ctx.live, [ticket, ...blocked]);
         if (ticket.discovered) waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         return reply.code(201).send({ ticket, avoidedWords });
       },
@@ -649,7 +673,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string } }>(
+    app.post<{ Params: { key: string }; Body: { kind: RelationKind; ticketKey: string; reason?: string } }>(
       "/api/tickets/:key/relations",
       {
         schema: {
@@ -658,24 +682,42 @@ export function workRoutes(ctx: AppContext) {
             type: "object",
             required: ["kind", "ticketKey"],
             additionalProperties: false,
-            properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
+            properties: {
+              kind: { type: "string", enum: RELATION_KINDS },
+              ticketKey: { type: "string", maxLength: 30 },
+              reason: {
+                ...blockReason,
+                description:
+                  "Why the Ticket blocks the other: needed, and only allowed, when an Agent adds a block from its own Discovered Ticket, which the blocked Ticket shows.",
+              },
+            },
           },
           response: {
-            201: answer("The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            201: answer(
+              "The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim, except to add a block, with a reason, from its own Discovered Ticket " +
+                "no User has delegated or finished yet: that may block any Ticket the Agent can read.",
+              holding("relations", "Relations"),
+            ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
+        const { kind, reason } = request.body;
         const { ends, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, ctx.clock.now());
+          const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now());
+          if (discoveredBlock && reason === undefined) throw new HttpError(400, `Say why ${ticket.key} blocks ${other.key} with a reason`);
+          if (!discoveredBlock && reason !== undefined) {
+            throw new HttpError(400, "Only an Agent gives a reason, for a block from its own Discovered Ticket no User has delegated or finished yet");
+          }
           const added = await addRelation(tx, actingUser(actor).workspaceId, {
             ticket,
-            kind: request.body.kind,
+            kind,
             other,
             actor: actor,
             now: ctx.clock.now(),
+            block: discoveredBlock ? { agentId: discoveredBlock.agent.id, reason: reason!.trim() } : undefined,
           });
           if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
@@ -683,6 +725,7 @@ export function workRoutes(ctx: AppContext) {
           return { ends: [ticket, other], relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
         });
         ticketsChanged(ctx.live, ends);
+        discoveriesChanged(ends);
         return reply.code(201).send({ relations });
       },
     );
@@ -701,7 +744,12 @@ export function workRoutes(ctx: AppContext) {
             otherKey: { type: "string", description: "The other Ticket's key, such as `CRONK-7`; any case." },
           }),
           response: {
-            200: answer("The Ticket's remaining relations. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            200: answer(
+              "The Ticket's remaining relations. Needs Write in both Tickets' Projects, except that a User removes a block an Agent added from its Discovered Ticket " +
+                "from the blocked Ticket's side with Write there and Read in the other. An Agent must hold the Ticket's Claim, except to remove a block from its own " +
+                "Discovered Ticket no User has delegated or finished yet.",
+              holding("relations", "Relations"),
+            ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -709,7 +757,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, ctx.clock.now());
+          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, request.params.kind, ctx.clock.now(), { removing: true });
           // Removing a blocking relation may unblock either end.
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
@@ -717,6 +765,7 @@ export function workRoutes(ctx: AppContext) {
           return { ends: [ticket, other], readyBefore, relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
         });
         ticketsChanged(ctx.live, ends);
+        discoveriesChanged(ends);
         await tellNewlyReady(ctx, ends.map((t) => t.id), readyBefore);
         return { relations };
       },
@@ -998,17 +1047,51 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
 /**
  * The two Tickets of a Relation being changed, if `actor` has Write in both Projects,
  * since the change shows on both. A missing or hidden `key` answers 404; a missing or
- * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409).
+ * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409), except for a
+ * block from its own Discovered Ticket no User has delegated or finished yet (`discoveredBlock`), which
+ * may block any Ticket the Agent can read.
  */
-async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: string, now: Date): Promise<{ ticket: Ticket; other: Ticket }> {
+async function relationEnds(
+  tx: Queryable,
+  actor: Actor,
+  key: string,
+  otherKey: string,
+  kind: RelationKind,
+  now: Date,
+  opts: { removing?: boolean } = {},
+): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: AgentActor | null }> {
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
   const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
-  if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
-  const other = await ticketFor(tx, actor, otherKey, "write").catch((err: unknown) => {
+  let discoveredBlock = actor.kind === "agent" && kind === "blocks" && (await isOwnDiscoveryAwaitingDelegation(tx, actor, ticket)) ? actor : null;
+  if (actor.kind === "agent" && !discoveredBlock) await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
+  const other = await otherTicketFor(tx, actor, otherKey);
+  if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
+  // Without its Claim, the Agent removes only the blocks it added from its Discovered Ticket, not those a User added.
+  if (discoveredBlock && opts.removing && !(await isDiscoveredBlock(tx, ticket.id, other.id))) {
+    await requireClaimHolder(tx, discoveredBlock, ticket, now, "changing its Relations");
+    discoveredBlock = null;
+  }
+  // A User removes a block from a Discovered Ticket with Write on the blocked Ticket alone, as the Agent added it reading that one only.
+  const removingDiscoveredBlock = opts.removing && actor.kind === "user" && kind === "blocked_by" && (await isDiscoveredBlock(tx, other.id, ticket.id));
+  if (!discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
+  return { ticket, other, discoveredBlock };
+}
+
+/** The other Ticket of a Relation, if `actor` can read it; a missing or hidden one answers 400, as it is named in the request's body or path. */
+const otherTicketFor = (tx: Queryable, actor: Actor, otherKey: string): Promise<Ticket> =>
+  ticketFor(tx, actor, otherKey, "read").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
   });
-  if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
-  return { ticket, other };
+
+/**
+ * Has the Agent's new Discovered Ticket `ticket` block the Ticket `otherKey`, which the Agent need only read, recording why.
+ * A missing or hidden `otherKey` answers 400. Returns the blocked Ticket.
+ */
+async function addDiscoveredBlock(tx: Queryable, agent: AgentActor, ticket: Ticket, otherKey: string, reason: string, now: Date): Promise<Ticket> {
+  const other = await otherTicketFor(tx, agent, otherKey);
+  // A new Ticket blocks nothing yet, so this can't close a cycle.
+  await addRelation(tx, agent.owner.workspaceId, { ticket, kind: "blocks", other, actor: agent, now, block: { agentId: agent.agent.id, reason: reason.trim() } });
+  return other;
 }
 
 /** The Status with this id among a Project's Statuses. */

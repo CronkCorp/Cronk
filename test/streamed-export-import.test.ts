@@ -253,15 +253,18 @@ describe("an import that fails partway", () => {
 
 describe("a file larger than the import allows", () => {
   it("refuses a Workspace export with a 413 naming it when it is over the Attachment limit the export's own workspace.md sets", async () => {
-    const { admin } = await workspaceWithFiles();
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    expect((await admin.upload("/api/tickets/CRONK-1/attachments?name=dump.bin", binary(1.5 * MB), "application/octet-stream")).status).toBe(201);
     const files = await untarFiles((await admin.download("/api/export")).body);
     const edited = new Map<string, Buffer | string>(files);
-    edited.set("workspace.md", editFrontmatter(files.get("workspace.md")!, (data) => (data.attachmentMaxBytes = 2000)));
+    edited.set("workspace.md", editFrontmatter(files.get("workspace.md")!, (data) => (data.attachmentMaxBytes = MB)));
 
     const elsewhere = await installationWithFilesIn("Elsewhere");
     const res = await elsewhere.admin.upload("/api/import", await tarFiles(edited));
     expect(res.status).toBe(413);
-    expect(res.body.error).toContain("projects/CRONK/tickets/CRONK-1.attachments/1-trace.bin");
+    expect(res.body.error).toBe("projects/CRONK/tickets/CRONK-1.attachments/1-dump.bin is larger than 1 MB, the most an Attachment may take in this Workspace");
     expect(await elsewhere.stored()).toEqual([]);
   });
 

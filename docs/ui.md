@@ -204,6 +204,8 @@ The Project page is shown in `docs/ui/frame.png`.
 - **A Discovered Ticket** shows where it was found and a `--warn` banner listing the Tickets it pauses, with a link to remove a block. Actions: **Delegate to <Agent>** (primary, the Agent that found it), **Delegate to…**, **Keep in Backlog**, and Cancel in the ghost style.
   - **Delegate to <Agent>** shows only when the Agent that found it is one of the User's own; **Delegate to…** lists their other Agents.
   - On its Ticket page, a **Discovered** field names the Agent and the Ticket it came from, with a **Kept** chip once kept in Backlog. A Report lists the Tickets discovered during its Claim below its body, under the Decisions proposed.
+  - The list item adds how many Tickets it pauses ("By claude-laptop · from CRONK-12 · pauses 2 Tickets"). In the banner, each paused Ticket shows the Agent's reason under it, and **Remove block** removes that block from the paused Ticket's side.
+  - Under Relations on a blocked Ticket's page, a block from a Discovered Ticket shows the Agent that added it and its reason under the blocking Ticket.
 - **A proposed Decision** shows who proposed it and from which Ticket, its body, and **Accept** (primary), **Reject…**, which opens a required reason box (the reason reaches the Agent as Waiting Work), and Open Decision.
 - **Triage** is the same split view, with the same keyboard shortcuts. A Discovered Ticket's primary action is **Take it**, which assigns it to the User.
 - **An Unattended Ticket** (in Triage only) is a delegated or In Review Ticket whose Assignee is deactivated or can't see its Project. The list names why ("Carol is deactivated", "Carol can't see CRONK"); the detail pane repeats it in a `--warn` banner, then shows the Status, the Delegate and any Reports. Actions: **Reassign to…** (primary), a menu of the active Users with the signed-in User first, and Open Ticket. A note says the Delegate stays only if it goes to the Delegate's Owner.
@@ -226,7 +228,7 @@ The Project page is shown in `docs/ui/frame.png`.
 
 ![Decisions](ui/phase-2-decisions.png)
 
-- **Register** (`/decisions`): the same scope switch, status and group filter chips with counts, and a table of key, title, status, group and date. A superseded Decision carries "→ CRONK-D7" after its title.
+- **Register** (`/decisions`): the page head holds the same scope switch, then **Export docs/adr**, for everyone who can read the register, and **New Decision**, for those with Write. Export downloads the scope's own Decisions as a `docs/adr/` archive. Below it, status and group filter chips with counts, and a table of key, title, status, group and date. A superseded Decision carries "→ CRONK-D7" after its title.
 - **A Decision's page**: key, status and Protected mark, the title at 24px, a banner for what it supersedes (`--info`) or what superseded it (`--warn`), the body at Document size, and a side panel with status, group, who proposed it, Mentioned in and Terms.
 
 ### Artifact
