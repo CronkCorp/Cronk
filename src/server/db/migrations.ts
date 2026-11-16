@@ -903,4 +903,16 @@ export const migrations: Migration[] = [
     `,
     backfill: (db) => recordAllEmbeds(db),
   },
+  {
+    id: "0035_term_search",
+    sql: `
+      -- The searchable text of a Term: its name, definition and words to avoid. array_to_string is only STABLE, so an index can't
+      -- use it directly; joining text with a space is immutable, which this function declares so the index below can be built on it.
+      CREATE FUNCTION term_search_text(name text, definition text, avoid text[]) RETURNS text
+        LANGUAGE sql IMMUTABLE PARALLEL SAFE
+        RETURN name || ' ' || definition || ' ' || array_to_string(avoid, ' ');
+      -- Full-text search (search/search.ts) matches this exact expression, as 0014_search's indexes do.
+      CREATE INDEX terms_search ON terms USING gin (to_tsvector('english', term_search_text(name, definition, avoid)));
+    `,
+  },
 ];
