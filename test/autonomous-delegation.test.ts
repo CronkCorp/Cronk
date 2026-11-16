@@ -313,3 +313,50 @@ describe("A Ticket moved under another", () => {
     expect((await admin.patch("/api/tickets/CRONK-2", { parentKey: null })).body.ticket.autonomous).toBe(true);
   });
 });
+
+describe("Reopen", () => {
+  it("needs a reason, then sends the Unverified completion back to the same Delegate in a Started Status, Ready again", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await completeAutonomously(admin, agent);
+
+    expect((await admin.post("/api/tickets/CRONK-1/reopen", { comment: " ", dependents: {} })).status).toBe(400);
+    const events = await agent.events("/api/agent-sessions/current/events");
+    expect((await events.next())?.event).toBe("ready");
+
+    const reopened = await admin.post("/api/tickets/CRONK-1/reopen", { comment: "The cache isn't cleared on moves.", dependents: {} });
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.ticket).toMatchObject({ status: { category: "started" }, verification: null, delegate: { id: claude.agentId } });
+    expect(reopened.body.comment).toMatchObject({ body: "The cache isn't cleared on moves." });
+    expect((await admin.get("/api/tickets/CRONK-1/changes")).body.changes.slice(-2)).toMatchObject([
+      { actor: { kind: "user", name: "Ada" }, change: "status", to: { category: "started" }, reopened: true },
+      { actor: { kind: "user", name: "Ada" }, change: "verification", from: "unverified", to: null },
+    ]);
+    expect((await admin.get("/api/inbox")).body.items).toEqual([]);
+    // The Delegate is told: the Ticket is Ready for it again, and the reason waits for it.
+    const told = [await events.next(), await events.next()].map((e) => e?.event).sort();
+    expect(told).toEqual(["ticketReady", "waiting"]);
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toMatchObject([
+      { reason: "comment", comment: { body: "The cache isn't cleared on moves." }, ticket: { key: "CRONK-1" } },
+    ]);
+  });
+
+  it("is only for an Unverified completion, and only for Users with Write", async () => {
+    const { cronk, admin, session } = await delegatedSetup(2);
+    const reason = { comment: "Not right.", dependents: {} };
+    expect((await admin.post("/api/tickets/CRONK-2/reopen", reason)).status).toBe(409);
+    const agent = await session();
+    await completeAutonomously(admin, agent);
+
+    expect((await agent.post("/api/tickets/CRONK-1/reopen", reason)).status).toBe(403);
+    const reader = await joinAs(cronk, admin, "rita@example.com");
+    const ritaId = (await reader.get("/api/me")).body.user.id;
+    await admin.put(`/api/projects/CRONK/members/${ritaId}`, { access: "read" });
+    expect((await reader.post("/api/tickets/CRONK-1/reopen", reason)).status).toBe(403);
+
+    await admin.post("/api/tickets/CRONK-1/accept");
+    const verified = await admin.post("/api/tickets/CRONK-1/reopen", reason);
+    expect(verified.status).toBe(409);
+    expect(verified.body.error).toMatch(/isn't an Unverified completion/);
+  });
+});

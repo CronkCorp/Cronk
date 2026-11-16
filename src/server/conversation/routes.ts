@@ -2,8 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { Actor } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { userActor } from "../actor.js";
-import { findStatusToMoveInto, listStatuses } from "../work/projects.js";
-import { updateTicket } from "../work/tickets.js";
+import { findStatusToMoveInto, listStatuses, type Status } from "../work/projects.js";
+import { updateTicket, type Ticket } from "../work/tickets.js";
 import type { Queryable } from "../db/database.js";
 import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
@@ -32,6 +32,16 @@ interface NewComment {
 }
 
 const id = { type: "string", format: "uuid" } as const;
+
+/** What a Reopen does to a Ticket it blocks that already continued on the work. */
+const REOPEN_CHOICES = ["keep", "pause", "reopen"] as const;
+type ReopenChoice = (typeof REOPEN_CHOICES)[number];
+
+interface ReopenBody {
+  comment: string;
+  statusId?: string;
+  dependents: Record<string, ReopenChoice>;
+}
 
 const newCommentBody = {
   type: "object",
@@ -185,11 +195,7 @@ export function conversationRoutes(ctx: AppContext) {
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
             if (ticket.status.category !== "in_review") throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, not In Review`);
-            const started = (await listStatuses(tx, ticket.projectId)).filter((s) => s.category === "started");
-            const chosen = request.body.statusId === undefined ? started[0] : started.find((s) => s.id === request.body.statusId);
-            // Locked so it can't be removed before the move commits.
-            const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
-            if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
+            const status = await startedStatus(tx, ticket, request.body.statusId);
             const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
             return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
@@ -202,6 +208,64 @@ export function conversationRoutes(ctx: AppContext) {
           },
         );
         // Sending it back makes it Ready again; In Review, it wasn't Ready before.
+        await tellNewlyReady(ctx, [ticket.id], new Map());
+        return { ticket, comment: publicComment(posted.comment) };
+      },
+    );
+
+    // An Inbox action: hands an Agent's Unverified completion back to its Delegate, with a Comment saying why.
+    app.post<{ Params: { key: string }; Body: ReopenBody }>(
+      "/api/tickets/:key/reopen",
+      {
+        schema: {
+          params: ticketParams,
+          body: {
+            type: "object",
+            required: ["comment", "dependents"],
+            additionalProperties: false,
+            properties: {
+              comment: { ...newCommentBody.properties.body, description: `Why the completion is Reopened, as Markdown. ${MENTION_SYNTAX}` },
+              statusId: { ...id, description: "A Started Status of the Ticket's Project. The Project's first Started Status if left out." },
+              dependents: {
+                type: "object",
+                maxProperties: 200,
+                description:
+                  "What happens to each Ticket it blocks that already continued on the work, by key: `keep` or `pause` for a Started one " +
+                  "(`pause` releases its Claim and moves it to its Project's first Unstarted Status), `keep` or `reopen` for an Unverified one. " +
+                  "Every such Ticket the caller can see needs a choice; others take none.",
+                additionalProperties: { type: "string", enum: REOPEN_CHOICES },
+              },
+            },
+          },
+          response: {
+            200: answer(
+              "The Ticket, moved from its Completed Status back to a Started one with the same Delegate, and the Comment posted on it, which waits for its Delegate",
+              { type: "object", required: ["ticket", "comment"], properties: { ticket: ref("Ticket"), comment: ref("Comment") } },
+            ),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        const actor = userActor(user);
+        const { ticket, posted } = await posting(
+          async (tx, positioned) => {
+            const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+            if (ticket.verification !== "unverified") throw new HttpError(409, `${ticket.key} isn't an Unverified completion, so there is nothing to Reopen`);
+            const status = await startedStatus(tx, ticket, request.body.statusId);
+            const moved = await updateTicket(tx, ticket, { status, reopen: true, verification: null }, actor, ctx.clock.now());
+            const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
+            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment }) };
+          },
+          ({ ticket, posted }) => {
+            ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
+            pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
+            inboxesChanged(ctx.live, [ticket.assignee?.id]);
+            ticketsChanged(ctx.live, [ticket]);
+          },
+        );
+        // Reopening it makes it Ready again; Completed, it wasn't Ready before.
         await tellNewlyReady(ctx, [ticket.id], new Map());
         return { ticket, comment: publicComment(posted.comment) };
       },
@@ -262,4 +326,13 @@ export function conversationRoutes(ctx: AppContext) {
       },
     );
   };
+}
+
+/** The Started Status of `ticket`'s Project with `statusId`, or its first one; locked so it can't be removed before the move commits. */
+async function startedStatus(tx: Queryable, ticket: Ticket, statusId: string | undefined): Promise<Status> {
+  const started = (await listStatuses(tx, ticket.projectId)).filter((s) => s.category === "started");
+  const chosen = statusId === undefined ? started[0] : started.find((s) => s.id === statusId);
+  const status = chosen && (await findStatusToMoveInto(tx, ticket.projectId, chosen.id));
+  if (!status) throw new HttpError(400, "That isn't a Started Status of this Ticket's Project");
+  return status;
 }
