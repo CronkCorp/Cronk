@@ -17,12 +17,15 @@ export interface ServerConfig extends AppConfig {
  * - `PUBLIC_URL` (optional): the address Users reach Cronk at, such as `https://cronk.example`. Signed-in
  *   writes are taken only from this site; without it, from the host each request was sent to.
  * - `WEB_ROOT` (default: the built client next to the server, if present), absolute or relative to the working directory.
- * - `FILES_STORAGE` (default `disk`): where the files of Attachments are stored, `disk` or `s3` (any S3-compatible store).
+ * - `FILES_STORAGE` (default `disk`): where the files of Attachments and Artifacts are stored, `disk` or `s3` (any S3-compatible store).
  * - `FILES_DIR` (default `data/files`): with `disk`, the directory files are stored in, absolute or relative to the working directory.
  *   Keep it on a volume that outlives the server, like the database's.
  * - With `s3`: `S3_BUCKET` (required), `S3_ENDPOINT` (default: AWS S3 itself), `S3_REGION` (default `us-east-1`),
  *   `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` (default: the AWS SDK's usual sources), and `S3_FORCE_PATH_STYLE`
  *   (default `true` with an `S3_ENDPOINT`, else `false`).
+ * - `ARTIFACTS_URL` (optional, recommended): the address of the hostname Artifacts are served from, such as
+ *   `https://artifacts.cronk.example`, pointed at this same server; it needs `PUBLIC_URL` too. Without it, Artifacts are
+ *   served from Cronk's own hostname in a stricter sandbox (ADR 0007).
  */
 export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): ServerConfig {
   const databaseUrl = env.DATABASE_URL;
@@ -35,6 +38,18 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
   if (publicUrl !== undefined && !/^https?:$/.test(URL.parse(publicUrl)?.protocol ?? "")) {
     throw new Error(`PUBLIC_URL must be an http or https address, such as https://cronk.example, got "${publicUrl}"`);
   }
+  const artifactsUrl = env.ARTIFACTS_URL || undefined;
+  if (artifactsUrl !== undefined) {
+    const url = URL.parse(artifactsUrl);
+    if (!url || !/^https?:$/.test(url.protocol) || url.pathname !== "/") {
+      throw new Error(`ARTIFACTS_URL must be the http or https address of a hostname of its own, such as https://artifacts.cronk.example, got "${artifactsUrl}"`);
+    }
+    // Cronk's own address is what the Artifact hostname lets frame its pages, and what it must never share.
+    if (publicUrl === undefined) throw new Error("Set PUBLIC_URL too when setting ARTIFACTS_URL, so Artifacts can be framed only by Cronk itself");
+    if (new URL(publicUrl).hostname === url.hostname) {
+      throw new Error("ARTIFACTS_URL must be a different hostname from PUBLIC_URL, not only another port, so Artifacts can't act as the signed-in User");
+    }
+  }
   return {
     databaseUrl,
     host: env.HOST ?? "0.0.0.0",
@@ -43,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
     publicUrl,
     webRoot: env.WEB_ROOT ? resolve(env.WEB_ROOT) : defaultWebRoot,
     storage: loadStorage(env),
+    artifactsUrl,
   };
 }
 

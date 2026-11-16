@@ -29,8 +29,12 @@ export interface AppContext {
   clock: Clock;
   cookieSecure: boolean;
   live: LiveUpdates;
-  /** Where the files of Attachments are stored. */
+  /** Where the files of Attachments and Artifacts are stored. */
   files: FileStore;
+  /** The address Cronk is reached at, if configured (see `AppConfig`). */
+  publicUrl?: string | undefined;
+  /** The address of the Artifact hostname, if configured (see `AppConfig`). */
+  artifactsUrl?: string | undefined;
 }
 
 export class HttpError extends Error {

@@ -30,12 +30,16 @@ function currentItem(route: Route): string | undefined {
       return "decisions";
     case "project":
     case "projectDocuments":
+    case "projectArtifacts":
       return projectItem(route.key);
+    case "artifacts":
+      return "artifacts";
     case "ticket":
       return projectItem(projectKeyOfTicket(route.key));
     case "projects":
     case "search":
     case "password":
+    case "artifact":
       return undefined;
   }
 }
@@ -67,6 +71,7 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
   const projectList: Project[] = projects.kind === "loaded" ? projects.value : [];
   const workspaceLinks = [
     { id: "guidance", to: "/guidance", label: "Guidance" },
+    { id: "artifacts", to: "/artifacts", label: "Artifacts" },
     ...(admin
       ? [
           { id: "users", to: "/users", label: "Users" },

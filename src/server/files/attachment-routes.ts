@@ -17,6 +17,7 @@ import { findTicketByKey, type Ticket } from "../work/tickets.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { SHOWN_MEDIA_TYPES } from "../../shared/values.js";
 import { FileTooLarge, type ByteRange } from "./store.js";
+import { formatBytes } from "./sizes.js";
 import {
   attachmentKey,
   deleteAttachment,
@@ -336,13 +337,6 @@ function contentDisposition(attachment: Attachment): string {
   return `${SHOWN_IN_PAGE.has(attachment.contentType) ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
-/** A size as Users read it: whole MB or GB where it is one, otherwise bytes. */
-function formatBytes(bytes: number): string {
-  const MB = 1024 * 1024;
-  if (bytes % (1024 * MB) === 0) return `${bytes / (1024 * MB)} GB`;
-  if (bytes % MB === 0) return `${bytes / MB} MB`;
-  return `${bytes} bytes`;
-}
 
 /** The uploaded file as it streams in. */
 function uploadedBytes(request: FastifyRequest): Readable {

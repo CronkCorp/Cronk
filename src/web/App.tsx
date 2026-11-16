@@ -2,6 +2,7 @@ import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
 import { DocumentPage, DocumentsPage } from "./documents.js";
+import { ArtifactPage, ArtifactsPage, versionOf } from "./artifacts.js";
 import { decisionFilterFrom, DecisionsPage } from "./decisions.js";
 import { api, ApiError, workspaceExportUrl, type AgentAccess, type User, type Workspace } from "./api.js";
 import { GuidanceSection } from "./guidance.js";
@@ -176,6 +177,12 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
       return <DocumentsPage />;
     case "projectDocuments":
       return <DocumentsPage projectKey={route.key} />;
+    case "artifacts":
+      return <ArtifactsPage />;
+    case "projectArtifacts":
+      return <ArtifactsPage projectKey={route.key} />;
+    case "artifact":
+      return <ArtifactPage id={route.id} version={versionOf(search.get("version"))} />;
     case "document":
       return <DocumentPage id={route.id} edit={search.get("edit") === "1"} />;
     case "decisions":
@@ -206,6 +213,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
   const [agentAccess, setAgentAccess] = useState<AgentAccess>(props.current.agentAccess);
   const [silenceMinutes, setSilenceMinutes] = useState(String(props.current.silenceThresholdSeconds / 60));
   const [attachmentMegabytes, setAttachmentMegabytes] = useState(String(props.current.attachmentMaxBytes / MB));
+  const [artifactMegabytes, setArtifactMegabytes] = useState(String(props.current.artifactMaxBytes / MB));
+  const [artifactFiles, setArtifactFiles] = useState(String(props.current.artifactMaxFiles));
   const [storage] = useLoad(api.storage, []);
   const { submit, error, busy } = useSubmit(
     () => {
@@ -215,6 +224,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         agentAccess,
         silenceThresholdSeconds: Math.round(Number(silenceMinutes) * 60),
         attachmentMaxBytes: Math.round(Number(attachmentMegabytes) * MB),
+        artifactMaxBytes: Math.round(Number(artifactMegabytes) * MB),
+        artifactMaxFiles: Math.round(Number(artifactFiles)),
       });
     },
     (workspace) => {
@@ -233,6 +244,10 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
         <p className="muted hint">How long an Agent Session may stay silent before it ends and its Claims lapse, from 1 minute to 1 day.</p>
         <Field label="Attachment size limit (MB)" type="number" value={attachmentMegabytes} onChange={setAttachmentMegabytes} />
         <p className="muted hint">The largest file anyone may attach, from 1 MB to 10 GB.</p>
+        <Field label="Artifact size limit (MB)" type="number" value={artifactMegabytes} onChange={setArtifactMegabytes} />
+        <p className="muted hint">The most one Version of an Artifact may hold, all its files together, from 1 MB to 500 MB.</p>
+        <Field label="Artifact file limit" type="number" value={artifactFiles} onChange={setArtifactFiles} />
+        <p className="muted hint">The most files one Version of an Artifact may hold, from 1 to 10,000.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
           <Button type="submit" disabled={busy}>Save</Button>
@@ -244,7 +259,8 @@ function WorkspaceSettings(props: { current: Workspace; onDone: (workspace: Work
       <Show state={storage}>
         {(s) => (
           <p className="muted hint" data-testid="storage-used">
-            Attachments: {formatBytes(s.attachments.bytes)} in {s.attachments.files} {s.attachments.files === 1 ? "file" : "files"}. There is no quota.
+            Attachments: {formatBytes(s.attachments.bytes)} in {s.attachments.files} {s.attachments.files === 1 ? "file" : "files"}. Artifacts:{" "}
+            {formatBytes(s.artifacts.bytes)} in {s.artifacts.files} {s.artifacts.files === 1 ? "file" : "files"}, every Version counted. There is no quota.
           </p>
         )}
       </Show>

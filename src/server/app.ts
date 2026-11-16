@@ -27,6 +27,8 @@ import { transcriptRoutes } from "./transcripts/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
 import { refuseWritesFromOtherSites } from "./identity/same-site.js";
 import { attachmentRoutes } from "./files/attachment-routes.js";
+import { artifactRoutes } from "./files/artifact-routes.js";
+import { artifactHostRoutes, keepArtifactHostApart } from "./files/artifact-host.js";
 import { createFileStore, type StorageConfig } from "./files/storage.js";
 import { cachedSerializers } from "./serializers.js";
 
@@ -45,8 +47,13 @@ export interface AppConfig {
   publicUrl?: string | undefined;
   /** Directory holding the built web client, served at `/`. The API works without it. */
   webRoot?: string | undefined;
-  /** Where the files of Attachments are stored: a directory on local disk, or a bucket of an S3-compatible store. */
+  /** Where the files of Attachments and Artifacts are stored: a directory on local disk, or a bucket of an S3-compatible store. */
   storage: StorageConfig;
+  /**
+   * The address Artifacts are served from, a hostname of their own such as `https://artifacts.cronk.example` (ADR 0007).
+   * Without it, they are served from Cronk's own hostname in a stricter sandbox.
+   */
+  artifactsUrl?: string | undefined;
 }
 
 /**
@@ -83,6 +90,8 @@ export async function buildApp(opts: {
     cookieSecure: opts.config.cookieSecure,
     live: opts.live ?? new LiveUpdates(),
     files: createFileStore(opts.config.storage),
+    publicUrl: opts.config.publicUrl,
+    artifactsUrl: opts.config.artifactsUrl,
   };
 
   // Open live-update streams would otherwise keep the server from closing.
@@ -123,6 +132,8 @@ export async function buildApp(opts: {
     return reply.code(500).send({ error: "Something went wrong" });
   });
   await app.register(cookie);
+  // The Artifact hostname serves Artifacts' files and nothing else, so nothing of Cronk's runs or answers there (ADR 0007).
+  keepArtifactHostApart(app, opts.config.artifactsUrl);
   refuseWritesFromOtherSites(app, opts.config.publicUrl);
   addSharedSchemas(app);
   // Describes every route from its schema; served at /api/openapi.json.
@@ -177,6 +188,8 @@ export async function buildApp(opts: {
   await app.register(workRoutes(ctx));
   await app.register(documentLinkRoutes(ctx));
   await app.register(attachmentRoutes(ctx));
+  await app.register(artifactRoutes(ctx));
+  await app.register(artifactHostRoutes(ctx));
   await app.register(knowledgeRoutes(ctx));
   await app.register(guidanceRoutes(ctx));
   await app.register(decisionRoutes(ctx));

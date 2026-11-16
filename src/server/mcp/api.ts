@@ -1,10 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { AGENT_SESSION_HEADER } from "../context.js";
 
-/** Who the MCP server calls the API as: an Agent's token, within one of its Agent Sessions once there is one. */
+/**
+ * Who the MCP server calls the API as: an Agent's token, within one of its Agent Sessions once there is one, sent
+ * to the host the Agent reached Cronk at, so addresses the API answers with (such as an Artifact's) are ones it can open.
+ */
 export interface Caller {
   token: string;
   sessionId?: string | undefined;
+  host?: string | undefined;
 }
 
 /** The API's answer: its status and parsed JSON body (`{ error }` for an error). */
@@ -35,7 +39,7 @@ export async function callApi(app: FastifyInstance, caller: Caller, ...[method, 
   const res = await app.inject({
     method,
     url,
-    headers: { ...callerHeaders(caller), ...(file && { "content-type": file.contentType }) },
+    headers: { ...callerHeaders(caller), ...(caller.host && { host: caller.host }), ...(file && { "content-type": file.contentType }) },
     ...(body && { payload: file ? file.bytes : body }),
   });
   return { status: res.statusCode, body: parseBody(res.body) };
