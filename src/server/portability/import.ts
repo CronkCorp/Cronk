@@ -4,9 +4,11 @@ import { unwrapFolder, type Folder } from "./archive.js";
 import { natural, refuse } from "./fields.js";
 import { FORMAT } from "./format.js";
 import { importGuidance } from "./guidance.js";
+import { importArtifacts } from "./artifacts.js";
 import { importDecisions } from "./decisions.js";
 import { importTree } from "./documents.js";
 import { importTerms } from "./terms.js";
+import { storeSuggestionSources } from "./suggestions.js";
 import { ImportContext } from "./import-context.js";
 import type { ImportedFiles } from "./import-context.js";
 import { importPeople } from "./people.js";
@@ -62,17 +64,23 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
     await importTerms(ctx, "", null);
   }
   const created: string[] = [];
+  const projectIds: { dirKey: string; id: string }[] = [];
   for (const dirKey of projectKeys) {
     const project = await importProject(ctx, dirKey);
     created.push(project.key);
+    projectIds.push({ dirKey, id: project.id });
     await importGuidance(ctx, `projects/${dirKey}/guidance`, project.id);
     await importTree(ctx, `projects/${dirKey}/documents`, project.id);
     await importDecisions(ctx, `projects/${dirKey}`, project.id, project.key, tickets);
     await importTerms(ctx, `projects/${dirKey}/`, project.id);
     await importTickets(ctx, dirKey, project, tickets);
   }
+  // Artifacts after every Ticket, which their Versions name as where they came from.
+  if (scope === "workspace") await importArtifacts(ctx, "", null, tickets);
+  for (const { dirKey, id } of projectIds) await importArtifacts(ctx, `projects/${dirKey}/`, id, tickets);
   await tickets.storeRelations(ctx);
   await tickets.storeDecisionSources(ctx);
+  await storeSuggestionSources(ctx, tickets);
   await tickets.storeDocumentLinks(ctx);
   await tickets.importHistories(ctx);
   // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.
@@ -104,10 +112,11 @@ async function checkRoom(ctx: ImportContext, scope: Imported["scope"], projectKe
        UNION ALL SELECT 1 FROM documents WHERE workspace_id = $1
        UNION ALL SELECT 1 FROM decisions WHERE workspace_id = $1
        UNION ALL SELECT 1 FROM guidance_versions WHERE workspace_id = $1
-       UNION ALL SELECT 1 FROM terms WHERE workspace_id = $1 LIMIT 1`,
+       UNION ALL SELECT 1 FROM terms WHERE workspace_id = $1
+       UNION ALL SELECT 1 FROM artifacts WHERE workspace_id = $1 LIMIT 1`,
       [ctx.workspaceId],
     );
-    if (rows.length > 0) throw new HttpError(409, "A Workspace export goes into a Workspace with no Projects, Documents, Decisions, Guidance or Terms yet; import Projects one at a time instead");
+    if (rows.length > 0) throw new HttpError(409, "A Workspace export goes into a Workspace with no Projects, Documents, Decisions, Guidance, Terms or Artifacts yet; import Projects one at a time instead");
   } else if (projectKeys.length !== 1) {
     refuse("A Project export holds exactly one projects/<KEY>/project.md");
   }

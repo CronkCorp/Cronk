@@ -5,6 +5,7 @@ import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, RELATION
 import type { AvoidedWord } from "../api-types.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
+import { packFolder, type Folder } from "../portability/archive.js";
 
 /** What the tools need: whether the token is read-only, and a way to call the API as the Agent, within its Session. */
 export interface ToolContext {
@@ -311,7 +312,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
-      "move, or create Documents under; propose a change to it as a Suggestion instead.",
+      "move, or create Documents under; propose a change to it with the `suggestions` tool instead.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
@@ -413,7 +414,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status. When you make a choice " +
       "worth keeping, propose a Decision: a User reviews it (the Assignee of the Ticket you hold the Claim on, or else your Owner) and " +
       "accepts or rejects it; a rejection reaches you as waiting work, with the reason. You may update your proposal while it is " +
-      "proposed, unless a User marked it `protected`; an accepted Decision is Protected, so propose a change to it as a Suggestion. Saving text that uses a word a Term says to " +
+      "proposed, unless a User marked it `protected`; an accepted Decision is Protected, so propose a change to it with the `suggestions` tool. Saving text that uses a word a Term says to " +
       "avoid still goes through: the result lists each such word with the Term to use, as `avoidedWords`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list, propose)"),
@@ -479,6 +480,71 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   });
 
   registerGroupedTool(server, ctx, {
+    name: "suggestions",
+    description:
+      "Suggestions: how you propose a change to an item you may not change yourself: a Protected Document, Term or Decision (an accepted Decision is " +
+      "Protected), or Guidance, which only Users write. Send the item's new content based on the Version you read (`baseVersion`, the item's `version`; " +
+      "Guidance at 0 when nobody has written it) with your reasoning; fields you leave out keep what that Version holds. A User reviews it (the Assignee " +
+      "of the Ticket you hold the Claim on, or else your Owner; a Workspace item goes to Triage) and accepts it as is, credited to you, edits and accepts " +
+      "it, credited to them, or rejects it with a reason, which reaches you as waiting work. Check where yours stand with `list`.",
+    parameters: {
+      kind: z.enum(["document", "term", "decision", "guidance"]).optional().describe("What kind of item to change (create)"),
+      itemId: z.string().optional().describe("The Document's or Term's id (create)"),
+      key: z.string().optional().describe("The Decision's key, such as CRONK-D7 (create)"),
+      project: z.string().optional().describe("For Guidance, the Project key whose Guidance to change; leave out for the Workspace's (create)"),
+      baseVersion: z.number().int().optional().describe("The item's `version` you read and are changing (create)"),
+      title: z.string().optional().describe("A Document's or Decision's new title (create)"),
+      body: z.string().optional().describe("A Document's or Decision's new Markdown body (create)"),
+      name: z.string().optional().describe("A Term's new name (create)"),
+      definition: z.string().optional().describe("A Term's new definition, in Markdown (create)"),
+      avoid: z.array(z.string()).optional().describe("A Term's new words to avoid (create)"),
+      group: z.string().nullable().optional().describe("A Term's or Decision's new group; null for none (create)"),
+      markdown: z.string().optional().describe("Guidance's new Markdown (create)"),
+      reasoning: z.string().optional().describe("Why the change, in Markdown, for the User who reviews it (create)"),
+      ticket: z
+        .string()
+        .optional()
+        .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (create)"),
+      state: z.array(z.enum(["open", "accepted", "rejected"])).optional().describe("Only your Suggestions in these states (list)"),
+      id: z.string().optional().describe("The Suggestion's id (get)"),
+    },
+    actions: {
+      create: {
+        description: "suggest a new Version of a Protected Document, Term or Decision, or of Guidance",
+        writes: true,
+        run: (api, a) => {
+          const kind = required(a.kind, "a kind", "create");
+          const item =
+            kind === "decision"
+              ? { kind, key: required(a.key, "a key for a Decision", "create") }
+              : kind === "guidance"
+                ? { kind, project: a.project ?? null }
+                : { kind, id: required(a.itemId, `an itemId for a ${kind === "document" ? "Document" : "Term"}`, "create") };
+          const fields = { title: a.title, body: a.body, name: a.name, definition: a.definition, avoid: a.avoid, group: a.group, markdown: a.markdown };
+          const content = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+          return api("POST", "/api/suggestions", {
+            item,
+            baseVersion: required(a.baseVersion, "a baseVersion", "create"),
+            content,
+            reasoning: required(a.reasoning, "reasoning", "create"),
+            ticket: a.ticket,
+          });
+        },
+      },
+      list: {
+        description: "your own Suggestions, newest first, with where each stands: open, accepted (and the Version it made) or rejected (and why)",
+        writes: false,
+        run: (api, a) => api("GET", `/api/suggestions${query({ state: a.state })}`),
+      },
+      get: {
+        description: "one Suggestion, with its item as it stands now",
+        writes: false,
+        run: (api, a) => api("GET", `/api/suggestions/${encodeURIComponent(required(a.id, "an id", "get"))}`),
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
     name: "terms",
     description:
       "Terms: the glossary. Each names one concept with its definition and the words to avoid for it; use the name and avoid those words. " +
@@ -519,12 +585,17 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerGroupedTool(server, ctx, {
     name: "attachments",
     description:
-      "Attachments: plain files on a Ticket, such as screenshots, recordings, logs or PDFs, kept as evidence with the work. " +
-      "Whoever can read the Ticket can read them. Attach one to a Ticket you hold the Claim on, as text (`content`) or as base64 " +
-      "(`contentBase64`) for anything else; each may be as large as the Workspace allows (100 MB unless an Admin changed it), " +
-      "and at most 100 MB through this tool. For a larger file, POST it to /api/tickets/{key}/attachments?name=<name> with the HTTP API.",
+      "Attachments: plain files on a Ticket, a Document or Report, or a Comment, such as screenshots, recordings, logs or PDFs, kept as " +
+      "evidence with the work. Whoever can read the item can read them, and listing a Ticket's includes those in its Comments and Reports. " +
+      "Attach one to a Ticket you hold the Claim on, a Document that isn't Protected (a Report only while holding its Ticket's Claim), or " +
+      "a Comment you posted, as text (`content`) or as base64 (`contentBase64`) for anything else; each may be as large as the Workspace " +
+      "allows (100 MB unless an Admin changed it), and at most 100 MB through this tool. For a larger file, POST it to " +
+      "/api/tickets/{key}/attachments, /api/documents/{id}/attachments or /api/comments/{id}/attachments with ?name=<name> over the HTTP API. " +
+      "To show an image in a Document, put ![name](/api/attachments/{id}/file) in its Markdown; every Version keeps showing it.",
     parameters: {
       key: z.string().optional().describe("Ticket key, such as CRONK-12 (attach, list)"),
+      documentId: z.string().optional().describe("Document or Report id, instead of a key (attach, list)"),
+      commentId: z.string().optional().describe("The id of a Comment you posted, instead of a key (attach)"),
       name: z.string().optional().describe("The file's name, such as sign-in-flood.log or proxy-ip.png (attach)"),
       content: z.string().optional().describe("The file's text, stored as UTF-8 (attach)"),
       contentBase64: z.string().optional().describe("The file's bytes as base64, instead of content (attach)"),
@@ -535,22 +606,98 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     actions: {
       list: {
-        description: "a Ticket's Attachments, in the order they were attached; download one at GET /api/attachments/{id}/file",
+        description:
+          "a Ticket's or Document's Attachments, those in its Comments (and a Ticket's Reports) included, in the order they were attached; " +
+          "download one at GET /api/attachments/{id}/file",
         writes: false,
-        run: (api, a) => api("GET", `/api/tickets/${encodeURIComponent(required(a.key, "a key", "list"))}/attachments`),
+        run: (api, a) => {
+          if (a.commentId !== undefined || (a.key === undefined) === (a.documentId === undefined)) throw new ToolError("The list action needs a key or a documentId");
+          return api("GET", attachmentsPath(a, "list"));
+        },
       },
       attach: {
-        description: "attach a file to a Ticket you hold the Claim on",
+        description: "attach a file to a Ticket you hold the Claim on, a Document or Report, or a Comment you posted",
         writes: true,
         run: (api, a) => {
-          const key = required(a.key, "a key", "attach");
+          const path = attachmentsPath(a, "attach");
           const name = required(a.name, "a name", "attach");
           if ((a.content === undefined) === (a.contentBase64 === undefined)) throw new ToolError("The attach action needs either content or contentBase64, not both");
           const file =
             a.content !== undefined
               ? new FileBody(Buffer.from(a.content, "utf8"), a.contentType ?? "text/plain")
               : new FileBody(Buffer.from(a.contentBase64!, "base64"), a.contentType ?? "application/octet-stream");
-          return api("POST", `/api/tickets/${encodeURIComponent(key)}/attachments?name=${encodeURIComponent(name)}`, file);
+          return api("POST", `${path}?name=${encodeURIComponent(name)}`, file);
+        },
+      },
+    },
+  });
+
+  registerGroupedTool(server, ctx, {
+    name: "artifacts",
+    description:
+      "Artifacts: things you build to be seen, such as an HTML prototype, a dashboard or a report page, published as a folder of files with " +
+      "`index.html` at its top. Each belongs to a Project or, without a project, the Workspace, and records the Ticket whose Claim you held. " +
+      "Every publish is the whole folder again, as a new Version; publishing a new Version names the Version you based it on (`baseVersion`, " +
+      "the Artifact's `version`) and is refused if a later one was published meanwhile, so merge with it first. `url` always shows the latest " +
+      "Version and `versionUrl` the one just published: link that one where your words describe it, such as in a Report. The page runs " +
+      "sandboxed on a hostname of its own: it may load scripts, styles and fonts only from its own files, cdnjs, jsDelivr, unpkg and Google " +
+      "Fonts, and may make no network requests, so put its data in its files. A Version may hold 500 files and 25 MB unless an Admin changed " +
+      "the limits. You can't publish a new Version of an Artifact a User marked `protected`.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (list, publish a new Artifact)"),
+      id: z.string().optional().describe("The Artifact's id (get; publish, for a new Version of it)"),
+      title: z.string().optional().describe("The Artifact's title (publish a new Artifact), or its new one (publish a new Version)"),
+      files: z
+        .array(
+          z.object({
+            path: z.string().describe("The file's path in the folder, such as index.html or js/app.js"),
+            content: z.string().optional().describe("The file's text, stored as UTF-8"),
+            contentBase64: z.string().optional().describe("The file's bytes as base64, instead of content, for an image or font"),
+          }),
+        )
+        .optional()
+        .describe("Every file of the folder, index.html among them (publish)"),
+      baseVersion: z.number().int().optional().describe("The Version a new Version is based on: the Artifact's `version` when you read it (publish with an id)"),
+      ticket: z
+        .string()
+        .optional()
+        .describe("The key of the Ticket you hold the Claim on that it came from; needed only when you hold more than one Claim (publish)"),
+    },
+    actions: {
+      list: {
+        description: "a Project's (or the Workspace's) Artifacts, most recently published first",
+        writes: false,
+        run: (api, a) => api("GET", `${scopePath(a.project)}/artifacts`),
+      },
+      get: {
+        description: "one Artifact with its Versions, newest first",
+        writes: false,
+        run: (api, a) => api("GET", `/api/artifacts/${encodeURIComponent(required(a.id, "an id", "get"))}`),
+      },
+      publish: {
+        description: "publish a folder as a new Artifact in a Project (or the Workspace), or, given an id and baseVersion, as that Artifact's next Version",
+        writes: true,
+        run: async (api, a) => {
+          const files = required(a.files, "files", "publish");
+          const folder: Folder = new Map();
+          for (const file of files) {
+            if ((file.content === undefined) === (file.contentBase64 === undefined)) {
+              throw new ToolError(`The publish action needs either content or contentBase64 for ${file.path}, not both`);
+            }
+            folder.set(file.path, file.content ?? Buffer.from(file.contentBase64!, "base64"));
+          }
+          const query = (params: Record<string, string | undefined>) =>
+            `?${new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => e[1] !== undefined)).toString()}`;
+          if (a.id === undefined) {
+            const title = required(a.title, "a title", "publish");
+            return api("POST", `${scopePath(a.project)}/artifacts${query({ title, ticket: a.ticket })}`, new FileBody(await packFolder(folder), "application/gzip"));
+          }
+          const baseVersion = required(a.baseVersion, "a baseVersion with an id", "publish");
+          return api(
+            "POST",
+            `/api/artifacts/${encodeURIComponent(a.id)}/versions${query({ baseVersion: String(baseVersion), title: a.title, ticket: a.ticket })}`,
+            new FileBody(await packFolder(folder), "application/gzip"),
+          );
         },
       },
     },
@@ -583,6 +730,14 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
 function commentsPath(a: { key?: string | undefined; documentId?: string | undefined }, action: string): string {
   if ((a.key === undefined) === (a.documentId === undefined)) throw new ToolError(`The ${action} action needs a key or a documentId`);
   return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
+}
+
+/** Where the Attachments of the one Ticket (`key`), Document or Comment the arguments name are. */
+function attachmentsPath(a: { key?: string | undefined; documentId?: string | undefined; commentId?: string | undefined }, action: string): string {
+  if ([a.key, a.documentId, a.commentId].filter((v) => v !== undefined).length !== 1) throw new ToolError(`The ${action} action needs one of key, documentId or commentId`);
+  if (a.key !== undefined) return `/api/tickets/${encodeURIComponent(a.key)}/attachments`;
+  if (a.documentId !== undefined) return `/api/documents/${encodeURIComponent(a.documentId)}/attachments`;
+  return `/api/comments/${encodeURIComponent(a.commentId!)}/attachments`;
 }
 
 /** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */

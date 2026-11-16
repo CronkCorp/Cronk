@@ -1338,6 +1338,46 @@ test("see the selected item marked Resolved elsewhere once it is answered in ano
   await expect(detail.getByRole("button", { name: "Post answer" })).toBeVisible();
 });
 
+// Runs after the tests above, so Ada exists. It works in a Project of its own, filtered to it.
+test("open a Suggestion from the Inbox, switch to side by side, and accept it", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Inbox suggestions", key: "INS" } });
+  const { document } = await (await page.request.post("/api/projects/INS/documents", { data: { title: "Sign-in limits", body: "Five per email.\n\nNo per-IP limits.\n" } })).json();
+  await page.request.post(`/api/documents/${document.id}/protection`, { data: { protected: true } });
+  const { ticket, agentCall } = await delegatedTicket(page, request, "suggest-bot", "Limit per IP too", "INS");
+  expect((await request.post(`/api/tickets/${ticket.key}/claim`, { headers: agentCall })).status()).toBe(200);
+  const suggested = await request.post("/api/suggestions", {
+    headers: agentCall,
+    data: { item: { kind: "document", id: document.id }, baseVersion: 1, content: { body: "Five per email.\n\nFifty per IP.\n" }, reasoning: "The proxy passes client IPs now." },
+  });
+  expect(suggested.status()).toBe(201);
+
+  await page.goto("/inbox?project=INS");
+  const list = page.getByRole("region", { name: "Inbox items" });
+  const detail = page.getByRole("region", { name: "Selected item" });
+  await expect(list.getByRole("heading", { name: "Suggestions · 1" })).toBeVisible();
+  await list.getByRole("list", { name: "Suggestions" }).getByRole("link", { name: /Sign-in limits/ }).click();
+  // The Agent's reasoning, then the Diff against the Version it started from, unified at first.
+  await expect(detail).toContainText("The proxy passes client IPs now.");
+  await expect(detail).toContainText(`while working on ${ticket.key}`);
+  const changes = detail.getByRole("list", { name: "Changes" });
+  await expect(changes.locator(".diff-removed")).toHaveText(/No per-IP limits\./);
+  await expect(changes.locator(".diff-added")).toHaveText(/Fifty per IP\./);
+
+  // Side by side shows the current Version beside the suggestion, and stays chosen for this User.
+  await detail.getByRole("button", { name: "Side by side" }).click();
+  await expect(detail.getByRole("list", { name: "Version 1, current" })).toContainText("No per-IP limits.");
+  await expect(detail.getByRole("list", { name: "Suggested by suggest-bot" })).toContainText("Fifty per IP.");
+  await page.reload();
+  await expect(detail.getByRole("button", { name: "Side by side" })).toHaveAttribute("aria-pressed", "true");
+  await expect(detail).toContainText("Version 2 will be credited to suggest-bot, accepted by you.");
+
+  await detail.getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();
+  const { document: saved } = await (await page.request.get(`/api/documents/${document.id}`)).json();
+  expect(saved).toMatchObject({ version: 2, body: "Five per email.\n\nFifty per IP.\n" });
+});
+
 /** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */
 async function reviewWithReport(
   page: import("@playwright/test").Page,

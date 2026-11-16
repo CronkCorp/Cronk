@@ -22,7 +22,7 @@ describe("Ticket Changes", () => {
       { at: "2026-01-01T09:00:00.000Z", actor, change: "created", title: "Add login", description: "v1", status: backlog },
       { at: "2026-01-01T09:01:00.000Z", actor, change: "title", from: "Add login", to: "Add sign-in" },
       { at: "2026-01-01T09:01:00.000Z", actor, change: "description", from: "v1", to: "v2" },
-      { at: "2026-01-01T09:02:00.000Z", actor, change: "status", from: backlog, to: todo, sentBack: false },
+      { at: "2026-01-01T09:02:00.000Z", actor, change: "status", from: backlog, to: todo, sentBack: false, reopened: false },
     ]);
   });
 

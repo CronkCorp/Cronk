@@ -1,5 +1,6 @@
 import type { Queryable } from "../db/database.js";
 import type { Folder } from "./archive.js";
+import { exportArtifacts } from "./artifacts.js";
 import { exportDecisions } from "./decisions.js";
 import type { FileStore } from "../files/store.js";
 import { exportTree } from "./documents.js";
@@ -31,6 +32,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
     await exportTree(ctx, "documents", null);
     await exportDecisions(ctx, "", null, null);
     await exportTerms(ctx, "", { projectId: null, workspaceName: (await getWorkspace(db, scope.workspaceId)).name });
+    await exportArtifacts(ctx, "", null);
   }
   const { rows: projects } = await db.query<ProjectRow>("SELECT * FROM projects WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY key", [
     scope.workspaceId,
@@ -44,6 +46,7 @@ export async function exportFolder(db: Queryable, scope: ExportScope, files: Fil
     await exportDecisions(ctx, dir, p.id, p.key);
     await exportTerms(ctx, `${dir}/`, { projectId: p.id, projectKey: p.key });
     await exportTickets(ctx, dir, p, statusNow);
+    await exportArtifacts(ctx, `${dir}/`, p.id);
   }
   ctx.writePending();
   // Transcripts are kept only in the full export.

@@ -54,6 +54,7 @@ describe("saving a Document", () => {
       at: cronk.clock.now().toISOString(),
       actor: { kind: "user", id: ada.id, name: "Ada" },
       restoredFrom: null,
+      suggestion: null,
     });
     expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "theirs", version: 2 });
   });
@@ -99,9 +100,9 @@ describe("Versions", () => {
     expect(res.status).toBe(200);
     const agent = { kind: "agent", id: claude.agentId, name: "claude-laptop", owner: { id: ada.id, name: "Ada" } };
     expect(res.body.versions).toEqual([
-      { number: 3, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null },
-      { number: 2, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { ...agent, session: { id: session.id } }, restoredFrom: null },
-      { number: 1, title: "Plan", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null },
+      { number: 3, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null, suggestion: null },
+      { number: 2, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { ...agent, session: { id: session.id } }, restoredFrom: null, suggestion: null },
+      { number: 1, title: "Plan", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null, suggestion: null },
     ]);
     expect((await admin.get(`/api/documents/${id}/versions/2`)).body.version).toMatchObject({ number: 2, body: "v2" });
     expect((await admin.get(`/api/documents/${id}/versions/9`)).status).toBe(404);

@@ -150,6 +150,13 @@ export async function findTicketsByIds(db: Queryable, ids: string[]): Promise<Ti
   return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
+/** The Tickets with these ids, locked for update in id order, so concurrent lockers queue rather than deadlock. Run inside a transaction. */
+export async function lockTicketsByIds(db: Queryable, ids: string[]): Promise<Ticket[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ANY($1::uuid[]) ORDER BY t.id FOR UPDATE OF t`, [ids]);
+  return rows.map(toTicket);
+}
+
 export async function findTicketById(db: Queryable, id: string): Promise<Ticket | undefined> {
   const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = $1`, [id]);
   return rows[0] && toTicket(rows[0]);
@@ -199,6 +206,8 @@ export interface TicketEdit {
   status?: Status;
   /** Marks the move to `status` as a Send back's (the send-back route); history records it as `sentBack`. */
   sendBack?: boolean;
+  /** Marks the move to `status` as a Reopen's (the reopen route); history records it as `reopened`. */
+  reopen?: boolean;
   priority?: Priority;
   labels?: string[];
   /** A User of the Ticket's Workspace, or null to leave it unassigned. */
@@ -230,7 +239,7 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     columns.push(["description", changes.description]);
   }
   if (changes.status !== undefined && changes.status.id !== ticket.status.id) {
-    recorded.push({ change: "status", from: ticket.status, to: changes.status, ...(changes.sendBack && { sentBack: true }) });
+    recorded.push({ change: "status", from: ticket.status, to: changes.status, ...(changes.sendBack && { sentBack: true }), ...(changes.reopen && { reopened: true }) });
     columns.push(["status_id", changes.status.id]);
   }
   if (changes.priority !== undefined && changes.priority !== ticket.priority) {
@@ -325,7 +334,7 @@ export type TicketChange =
   | { change: "created"; title: string; description: string; status: Status }
   | { change: "title"; from: string; to: string }
   | { change: "description"; from: string; to: string }
-  | { change: "status"; from: Status; to: Status; /** Stored only when true; reads of Changes give it always. */ sentBack?: boolean }
+  | { change: "status"; from: Status; to: Status; /** Stored only when true; reads of Changes give them always. */ sentBack?: boolean; reopened?: boolean }
   | { change: "priority"; from: Priority; to: Priority }
   | { change: "labels"; from: string[]; to: string[] }
   | { change: "assignee"; from: UserRef | null; to: UserRef | null }
@@ -363,6 +372,12 @@ type ChangeRow = ChangeActorRow & {
   data: object;
 };
 
+/** A status Change's flags as reads give them: each always, false unless stored as true. */
+export const statusFlags = (data: object) => {
+  const { sentBack, reopened } = data as { sentBack?: boolean; reopened?: boolean };
+  return { sentBack: sentBack === true, reopened: reopened === true };
+};
+
 /** A Ticket's Changes, oldest first. */
 export async function listChanges(db: Queryable, ticketId: string): Promise<RecordedChange[]> {
   const { rows } = await db.query<ChangeRow>(
@@ -378,7 +393,7 @@ export async function listChanges(db: Queryable, ticketId: string): Promise<Reco
         actor: toChangeActor(row),
         change: row.change,
         ...row.data,
-        ...(row.change === "status" && { sentBack: (row.data as { sentBack?: boolean }).sentBack === true }),
+        ...(row.change === "status" && statusFlags(row.data)),
       }) as RecordedChange,
   );
 }

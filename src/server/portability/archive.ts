@@ -20,6 +20,23 @@ export const bytesOf = (contents: string | Buffer): Buffer => (typeof contents =
 /** A file's contents read as UTF-8 text. */
 export const textOf = (contents: string | Buffer): string => (typeof contents === "string" ? contents : contents.toString("utf8"));
 
+/** The media types an uploaded archive may come as. */
+export const ARCHIVE_TYPES = [
+  "application/gzip",
+  "application/x-gzip",
+  "application/x-tar",
+  "application/x-compressed-tar",
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/octet-stream",
+];
+
+/** The uploaded archive; a body sent as another type, such as JSON, is refused. */
+export function archiveBody(body: unknown): Buffer {
+  if (Buffer.isBuffer(body)) return body;
+  throw new HttpError(400, `Send the archive itself as the request body, typed ${ARCHIVE_TYPES.join(", ")}`);
+}
+
 /** The most an archive may unpack to, so a small upload can't fill the memory. */
 const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
 

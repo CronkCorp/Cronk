@@ -720,4 +720,135 @@ export const migrations: Migration[] = [
       UPDATE decisions SET protected = true WHERE status = 'accepted';
     `,
   },
+  {
+    id: "0029_suggestions",
+    sql: `
+      -- Suggestions (ADR 0014): a new Version of a Document, Term, Decision or Guidance an Agent proposes, parked until a User
+      -- accepts or rejects it. Exactly one item column is set, except for Guidance, which project_id names (null for the
+      -- Workspace's). project_id is the item's Project for every kind. content is the full proposed content, as the kind holds
+      -- it; actor_user_id is the proposing Agent's Owner, as history records it. A Suggestion on a Project item waits for the
+      -- source Ticket's Assignee, else the Owner (see inbox.ts); on a Workspace item, for Triage.
+      CREATE TABLE suggestions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        kind text NOT NULL CHECK (kind IN ('document', 'term', 'decision', 'guidance')),
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        base_version integer NOT NULL CHECK (base_version >= 0),
+        content jsonb NOT NULL,
+        reasoning text NOT NULL,
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid NOT NULL REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL,
+        -- open until a User accepts it (with_edits when they changed it first, result_version the Version it made) or rejects it (reason).
+        state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'accepted', 'rejected')),
+        with_edits boolean,
+        result_version integer,
+        reason text,
+        decided_at timestamptz,
+        decided_by_user_id uuid REFERENCES users(id),
+        CHECK (num_nonnulls(document_id, term_id, decision_id) = CASE WHEN kind = 'guidance' THEN 0 ELSE 1 END),
+        CHECK ((kind = 'document') = (document_id IS NOT NULL) AND (kind = 'term') = (term_id IS NOT NULL) AND (kind = 'decision') = (decision_id IS NOT NULL)),
+        CHECK ((state = 'open') = (decided_at IS NULL) AND (decided_at IS NULL) = (decided_by_user_id IS NULL)),
+        CHECK ((state = 'accepted') = (result_version IS NOT NULL) AND (result_version IS NULL) = (with_edits IS NULL)),
+        CHECK ((state = 'rejected') = (reason IS NOT NULL))
+      );
+      CREATE INDEX suggestions_agent ON suggestions (actor_agent_id, at);
+      CREATE INDEX suggestions_open ON suggestions (workspace_id, at) WHERE state = 'open';
+      CREATE INDEX suggestions_document ON suggestions (document_id) WHERE document_id IS NOT NULL;
+      CREATE INDEX suggestions_term ON suggestions (term_id) WHERE term_id IS NOT NULL;
+      CREATE INDEX suggestions_decision ON suggestions (decision_id) WHERE decision_id IS NOT NULL;
+
+      -- Accepting a Suggestion on Guidance unchanged credits the Agent, so Guidance Versions record Actors as other Versions do.
+      ALTER TABLE guidance_versions ADD COLUMN actor_kind text NOT NULL DEFAULT 'user' CHECK (actor_kind IN ('user', 'agent'));
+      ALTER TABLE guidance_versions ALTER COLUMN actor_kind DROP DEFAULT;
+      ALTER TABLE guidance_versions ADD COLUMN actor_agent_id uuid REFERENCES agents(id);
+      ALTER TABLE guidance_versions ADD COLUMN actor_session_id uuid REFERENCES agent_sessions(id);
+      ALTER TABLE guidance_versions ADD CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL));
+
+      -- Waiting Work is also a rejection of a Suggestion the Agent made.
+      ALTER TABLE waiting_work ADD COLUMN suggestion_id uuid REFERENCES suggestions(id) ON DELETE CASCADE;
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_reason_check;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_reason_check CHECK (reason IN ('answer', 'mention', 'comment', 'rejected', 'suggestion_rejected'));
+      ALTER TABLE waiting_work DROP CONSTRAINT waiting_work_on_one;
+      ALTER TABLE waiting_work ADD CONSTRAINT waiting_work_on_one CHECK (
+        num_nonnulls(comment_id, decision_id, suggestion_id) = 1
+        AND (decision_id IS NULL) = (reason <> 'rejected') AND (suggestion_id IS NULL) = (reason <> 'suggestion_rejected')
+        AND (decision_version IS NULL) = (decision_id IS NULL));
+      ALTER TABLE waiting_work ADD UNIQUE (agent_id, suggestion_id);
+    `,
+  },
+  {
+    id: "0030_attachments_on_documents_and_comments",
+    sql: `
+      -- An Attachment is on exactly one Ticket, Document (a Report too) or Comment, which decides who can read it.
+      -- One on a Document belongs to the Document, not to a Version, so every Version still shows it.
+      ALTER TABLE attachments ALTER COLUMN ticket_id DROP NOT NULL;
+      ALTER TABLE attachments ADD COLUMN document_id uuid REFERENCES documents(id) ON DELETE CASCADE;
+      ALTER TABLE attachments ADD COLUMN comment_id uuid REFERENCES comments(id) ON DELETE CASCADE;
+      ALTER TABLE attachments ADD CONSTRAINT attachments_on_one CHECK (num_nonnulls(ticket_id, document_id, comment_id) = 1);
+      CREATE INDEX attachments_document ON attachments (document_id, seq) WHERE document_id IS NOT NULL;
+      CREATE INDEX attachments_comment ON attachments (comment_id, seq) WHERE comment_id IS NOT NULL;
+    `,
+  },
+  {
+    id: "0031_artifacts",
+    sql: `
+      -- An Artifact (files/artifacts.ts): a folder of files with index.html, belonging to a Project or, with no
+      -- Project, the Workspace. Each publish adds a Version holding the whole folder; the latest is the highest number.
+      CREATE TABLE artifacts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        title text NOT NULL CHECK (title <> ''),
+        version integer NOT NULL DEFAULT 0,
+        protected boolean NOT NULL DEFAULT false,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE INDEX artifacts_place ON artifacts (workspace_id, project_id, updated_at DESC);
+
+      -- One publish of an Artifact: who published it, from which Ticket's Claim if an Agent named one, and the
+      -- files it holds, whose bytes are in the file store under artifact-files/<file id>.
+      CREATE TABLE artifact_versions (
+        artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        number integer NOT NULL CHECK (number > 0),
+        title text NOT NULL,
+        source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL)),
+        PRIMARY KEY (artifact_id, number)
+      );
+      CREATE TABLE artifact_files (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        artifact_id uuid NOT NULL,
+        version integer NOT NULL,
+        path text NOT NULL CHECK (path <> ''),
+        content_type text NOT NULL,
+        size bigint NOT NULL CHECK (size >= 0),
+        FOREIGN KEY (artifact_id, version) REFERENCES artifact_versions(artifact_id, number) ON DELETE CASCADE,
+        UNIQUE (artifact_id, version, path)
+      );
+
+      -- Artifacts can be Protected, recorded in the same history as Documents, Terms and Decisions.
+      ALTER TABLE protection_markings ADD COLUMN artifact_id uuid REFERENCES artifacts(id) ON DELETE CASCADE;
+      ALTER TABLE protection_markings DROP CONSTRAINT protection_markings_check;
+      ALTER TABLE protection_markings ADD CONSTRAINT protection_markings_one_item CHECK (num_nonnulls(document_id, term_id, decision_id, artifact_id) = 1);
+      CREATE INDEX protection_markings_artifact ON protection_markings (artifact_id) WHERE artifact_id IS NOT NULL;
+
+      -- Limits per Version: 25 MB and 500 files unless an Admin changes them.
+      ALTER TABLE workspaces ADD COLUMN artifact_max_bytes bigint NOT NULL DEFAULT 26214400 CHECK (artifact_max_bytes > 0);
+      ALTER TABLE workspaces ADD COLUMN artifact_max_files integer NOT NULL DEFAULT 500 CHECK (artifact_max_files > 0);
+      -- The secret the Artifact hostname's addresses are signed with, so a frame shows only what Cronk handed out.
+      ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+    `,
+  },
 ];

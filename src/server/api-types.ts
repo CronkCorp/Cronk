@@ -26,6 +26,7 @@ import type {
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
 import type { publicAttachment } from "./files/attachments.js";
+import type { publicArtifact, publicVersion } from "./files/artifact-routes.js";
 import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
@@ -35,7 +36,8 @@ import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, DecisionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { QuestionItem, DecisionItem, ReviewItem, SuggestionInboxItem, UnverifiedItem } from "./inbox/inbox.js";
+import type { Suggestion as StoredSuggestion, SuggestedContent } from "./knowledge/suggestions.js";
 import type {
   Decision as StoredDecision,
   DecisionSummary as StoredDecisionSummary,
@@ -46,6 +48,7 @@ export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
+export type { ReopenChoice } from "./work/reopen.js";
 export type { ActivityKind, DecisionStatus, Priority, RelationKind, SearchKind, StatusCategory, Verification } from "../shared/values.js";
 export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
@@ -84,9 +87,17 @@ export type Invitation = Serialized<ReturnType<typeof publicInvitation>>;
 export type Workspace = Serialized<ReturnType<typeof publicWorkspace>>;
 /** A file attached to a Ticket. */
 export type Attachment = Serialized<ReturnType<typeof publicAttachment>>;
+/** One publish of an Artifact; asked for alone, with its files and where to frame it. */
+export type ArtifactVersion = Serialized<ReturnType<typeof publicVersion>> & {
+  frameUrl?: string;
+  files?: { path: string; contentType: string; size: number }[];
+};
+/** A folder of files with index.html, published as Versions; asked for alone, with its Versions and where to frame the latest. */
+export type Artifact = Serialized<ReturnType<typeof publicArtifact>> & { frameUrl?: string; versions?: ArtifactVersion[] };
 /** How much storage the Workspace's files take, by kind; Admins only. */
 export interface Storage {
   attachments: { files: number; bytes: number };
+  artifacts: { files: number; bytes: number };
 }
 /** Standing instructions Users write for Agents: its Markdown and current Version (0 before anyone writes it). */
 export type Guidance = Serialized<StoredGuidance>;
@@ -146,7 +157,7 @@ export type Version = Serialized<StoredVersion>;
 export type Term = Serialized<StoredTerm>;
 /** One saved state of a Term, with the Actor who saved it. */
 export type TermVersion = Serialized<StoredTermVersion>;
-/** One marking of a Document, Term or Decision as Protected, or unmarking, with the User who did it. */
+/** One marking of a Document, Term, Decision or Artifact as Protected, or unmarking, with the User who did it. */
 export type ProtectionMarking = Serialized<StoredProtectionMarking>;
 /** A Version without its body, as a Document's Version list shows it. */
 export type VersionSummary = Omit<Version, "body">;
@@ -160,12 +171,20 @@ export type Merge = StoredMerge & { onto: Version };
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
-/** One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, or a Decision an Agent proposed. */
+/**
+ * One item in a User's Inbox: a Ticket to review, an Unverified completion, an open question of one of their Agents, a Decision an
+ * Agent proposed, or a Suggestion an Agent made.
+ */
 export type InboxItem =
   | Serialized<ReviewItem>
   | Serialized<UnverifiedItem>
   | (Serialized<Omit<QuestionItem, "question">> & { question: Activity })
-  | Serialized<DecisionItem>;
+  | Serialized<DecisionItem>
+  | Serialized<SuggestionInboxItem>;
+
+/** A new Version of a Protected item, or of Guidance, an Agent proposes for a User to accept or reject (ADR 0014). */
+export type Suggestion = Serialized<StoredSuggestion>;
+export type { SuggestedContent };
 export type InboxKind = InboxItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */

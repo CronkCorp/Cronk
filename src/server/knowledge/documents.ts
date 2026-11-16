@@ -5,6 +5,7 @@ import { documentReadableSql, type Readable } from "../identity/access.js";
 import { recordTicketMentions } from "./ticket-mentions.js";
 import { recordMentions } from "./mentions.js";
 import type { LinkReason } from "../../shared/values.js";
+import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
 /**
  * Documents: Markdown (ADR 0003) belonging to a Project or the Workspace, arranged
@@ -234,6 +235,8 @@ export interface Version {
   actor: RecordedActor;
   /** The Version it restored, if it was a restore. */
   restoredFrom: number | null;
+  /** The Suggestion a User accepted to make it, unchanged or edited; null for a Version saved otherwise. */
+  suggestion: VersionSuggestion | null;
 }
 
 interface VersionRow extends RecordedActorRow {
@@ -244,7 +247,7 @@ interface VersionRow extends RecordedActorRow {
   restored_from: number | null;
 }
 
-const toVersion = (row: VersionRow): Version => ({
+const toVersion = (row: VersionRow): Omit<Version, "suggestion"> => ({
   number: row.number,
   title: row.title,
   body: row.body,
@@ -261,13 +264,13 @@ const SELECT_VERSIONS = `
 /** One of a Document's Versions, by number. */
 export async function findVersion(db: Queryable, documentId: string, number: number): Promise<Version | undefined> {
   const { rows } = await db.query<VersionRow>(`${SELECT_VERSIONS} WHERE v.document_id = $1 AND v.number = $2`, [documentId, number]);
-  return rows[0] && toVersion(rows[0]);
+  return rows[0] && (await withSuggestions(db, { kind: "document", id: documentId }, [toVersion(rows[0])]))[0];
 }
 
 /** A Document's Versions, newest first, without their bodies. */
 export async function listVersions(db: Queryable, documentId: string): Promise<Omit<Version, "body">[]> {
   const { rows } = await db.query<VersionRow>(`${SELECT_VERSIONS} WHERE v.document_id = $1 ORDER BY v.number DESC`, [documentId]);
-  return rows.map(toVersion).map(({ body: _, ...summary }) => summary);
+  return withSuggestions(db, { kind: "document", id: documentId }, rows.map(toVersion).map(({ body: _, ...summary }) => summary));
 }
 
 /**
@@ -277,7 +280,7 @@ export async function listVersions(db: Queryable, documentId: string): Promise<O
 export async function saveVersion(
   db: Queryable,
   document: Document,
-  save: { title: string; body: string; actor: Actor; now: Date; restoredFrom?: number },
+  save: { title: string; body: string; actor: Actor | StoredActor; now: Date; restoredFrom?: number },
 ): Promise<Document> {
   if (save.restoredFrom === undefined && save.title === document.title && save.body === document.body) return document;
   const number = document.version + 1;

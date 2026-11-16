@@ -28,8 +28,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   created: { title: { holds: "title" }, description: { holds: "text" }, status: { holds: "status" } },
   title: fromTo("title"),
   description: fromTo("text"),
-  // `sentBack` is written only for a Send back's move.
-  status: { ...fromTo("status"), sentBack: { holds: "flag" } },
+  // `sentBack` is written only for a Send back's move, `reopened` only for a Reopen's.
+  status: { ...fromTo("status"), sentBack: { holds: "flag" }, reopened: { holds: "flag" } },
   priority: fromTo("priority"),
   labels: fromTo("labels"),
   assignee: fromTo("user", true),
@@ -71,7 +71,8 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   same name within it. \`terms.md\` beside it holds the same Terms whole in its frontmatter, with their Versions when the export
   includes them; an import reads that, not the glossary.
 - \`documents/\`: the page tree. Each Document is \`<n>-<title>.md\`, numbered in tree order, with the Documents under it in a
-  folder of the same name. \`<name>.versions/\` holds its Versions when the export includes them, \`<name>.comments/\` its Comments.
+  folder of the same name. \`<name>.versions/\` holds its Versions when the export includes them, \`<name>.comments/\` its Comments,
+  and \`<name>.attachments/\` its Attachments, laid out as a Ticket's are (below).
 - \`docs/adr/\`: the Decisions, each \`<NNNN>-<title>.md\` named by its number, its status, group and the Decisions it supersedes
   or was superseded by (named by key) in its frontmatter. \`<name>.versions/\` holds its Versions when the export includes them.
 - \`tickets/<KEY>.md\`: a Ticket, its description as the body; relations name other Tickets by key, and \`documents\` lists the
@@ -84,7 +85,13 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   or \`verified\`); a Project's \`autonomousByDefault\` is written when on.
   \`<KEY>.attachments/\` holds its Attachments as the files themselves, each named \`<n>-<name>\` in the order they were
   attached, and \`index.md\`, whose frontmatter lists each file's id, name, media type, size, when and by whom it was attached;
-  an import keeps the id unless it is taken.
+  an import keeps the id unless it is taken. A Report's Attachments are beside it the same way, and a Comment's, of a Ticket or
+  a Document, in \`<n>.attachments/\` beside its \`<n>.md\`.
+- \`artifacts/<n>-<title>.md\`: an Artifact, numbered in the order they were created (the Workspace's at the top, a Project's in
+  \`projects/<KEY>/artifacts/\`). Its frontmatter holds its id, title, latest Version and Protected mark, and each Version
+  exported with who published it, when, the Ticket it came from (by key) and its files; \`<n>-<title>/<version>/\` holds those
+  files as they were published. Every Version is exported when the export includes Versions, else only the latest.
+  An import keeps the id unless it is taken.
 - \`transcripts/<n>.md\`: the chats that led Agents to change things (Workspace exports only), numbered in the order they were
   first uploaded. The frontmatter names the Agent and its Agent Sessions by their ids in \`people.md\`, the client's \`chatId\`,
   the Tickets (by key), Documents (by path) and Terms (by name, after their Project's key) those Sessions changed; the body is the latest text. \`<n>.earlier/\` holds, as

@@ -44,8 +44,8 @@ describe("Workspace Guidance", () => {
     expect(versions.status).toBe(200);
     expect(versions.body).toEqual({
       versions: [
-        { version: 1, markdown: "First.", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
-        { version: 2, markdown: "Second.", at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: graceId, name: "grace" } },
+        { version: 1, markdown: "First.", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, suggestion: null },
+        { version: 2, markdown: "Second.", at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: graceId, name: "grace" }, suggestion: null },
       ],
     });
   });
@@ -145,7 +145,7 @@ describe("Project Guidance", () => {
     expect(saved.body).toEqual({ guidance: { markdown: "Use pnpm.", version: 1 } });
     expect((await admin.get("/api/projects/CRONK/guidance")).body.guidance).toEqual({ markdown: "Use pnpm.", version: 1 });
     expect((await admin.get("/api/projects/CRONK/guidance/versions")).body.versions).toEqual([
-      { version: 1, markdown: "Use pnpm.", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: writerId, name: "bob" } },
+      { version: 1, markdown: "Use pnpm.", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: writerId, name: "bob" }, suggestion: null },
     ]);
     expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Workspace rules.", version: 1 });
 

@@ -4,6 +4,7 @@ import { iso, type ActorColumns, type ExportContext } from "./export-context.js"
 import { date, integer, list, refuse, text, type File } from "./fields.js";
 import { isRecord } from "./format.js";
 import { importProtection, protectionToExport } from "./protection.js";
+import { importSuggestions, suggestionsToExport } from "./suggestions.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -49,6 +50,7 @@ export async function exportTerms(ctx: ExportContext, dir: string, place: { proj
       ...fieldsOf(t),
       version: t.version,
       ...(await protectionToExport(ctx, { kind: "term", id: t.id }, t.protected)),
+      ...(await suggestionsToExport(ctx, { kind: "term", id: t.id })),
       createdAt: iso(t.created_at),
       createdBy: ctx.actor(versions[0]!),
       updatedAt: iso(t.updated_at),
@@ -95,6 +97,7 @@ export async function importTerms(ctx: ImportContext, dir: string, projectId: st
     if (versions.length === 0) {
       const actor = await ctx.actor(entry.createdBy, `${where} createdBy`);
       await insertTermVersion(ctx.db, id, { number: 1, ...fields, at: date(entry.updatedAt, `${where} updatedAt`), actor });
+      await importSuggestions(ctx, { kind: "term", id }, projectId, entry, where);
       continue;
     }
     const numbers = versions.map((v, n) => integer(v.number, `${where} versions[${n}] number`));
@@ -107,5 +110,6 @@ export async function importTerms(ctx: ImportContext, dir: string, projectId: st
       if (n + 1 === version && JSON.stringify(saved) !== JSON.stringify(fields)) refuse(`${where} must say what its Version ${version} says`);
       await insertTermVersion(ctx.db, id, { number: n + 1, ...saved, at: date(v.at, `${at} at`), actor: await ctx.actor(v.by, `${at} by`) });
     }
+    await importSuggestions(ctx, { kind: "term", id }, projectId, entry, where);
   }
 }

@@ -3,22 +3,22 @@ import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 
 /**
- * Protected (ADR 0004): a Document, Term or Decision Agents may read but never change, whatever
+ * Protected (ADR 0004): a Document, Term, Decision or Artifact Agents may read but never change, whatever
  * their Agent Access. Only Users with Write where the item lives mark and unmark it, and each time
  * is recorded in the item's protection history. A Document's mark covers every Document under it.
  */
 
 /** An item that can be marked Protected. */
-export type ProtectableKind = "document" | "term" | "decision";
+export type ProtectableKind = "document" | "term" | "decision" | "artifact";
 /** One item that can be marked Protected, by its kind and id. */
 export interface ProtectableItem {
   kind: ProtectableKind;
   id: string;
 }
 
-const TABLE: Record<ProtectableKind, string> = { document: "documents", term: "terms", decision: "decisions" };
+const TABLE: Record<ProtectableKind, string> = { document: "documents", term: "terms", decision: "decisions", artifact: "artifacts" };
 /** The column of `protection_markings` naming each kind of item. */
-export const PROTECTION_COLUMN: Record<ProtectableKind, string> = { document: "document_id", term: "term_id", decision: "decision_id" };
+export const PROTECTION_COLUMN: Record<ProtectableKind, string> = { document: "document_id", term: "term_id", decision: "decision_id", artifact: "artifact_id" };
 
 /** One marking of an item as Protected, or unmarking, with the User who did it. */
 export interface ProtectionMarking {
@@ -64,6 +64,10 @@ export async function listProtectionMarkings(db: Queryable, item: ProtectableIte
   return rows.map((r) => ({ protected: r.protected, at: r.at, actor: { kind: "user", id: r.user_id, name: r.user_name } }));
 }
 
+/** What an Agent refused a change to an item it may not change does instead, ending a refusal's sentence. */
+export const SUGGEST_INSTEAD =
+  "make a Suggestion of the change instead (POST /api/suggestions, or the `suggestions` tool), for a User to accept or reject";
+
 /**
  * Refuses an Agent's change to a Protected item (a 403) with a pointer to Suggestions, the way an
  * Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3", and
@@ -73,6 +77,6 @@ export function requireUnprotected(actor: Actor, item: { protected: boolean }, w
   if (actor.kind !== "agent" || !item.protected) return;
   throw new HttpError(
     403,
-    `${what} is Protected: Agents may read it but not ${change}. Make a Suggestion of the change instead, for a User to accept or reject`,
+    `${what} is Protected: Agents may read it but not ${change}. ${SUGGEST_INSTEAD.charAt(0).toUpperCase()}${SUGGEST_INSTEAD.slice(1)}`,
   );
 }

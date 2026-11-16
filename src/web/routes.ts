@@ -4,6 +4,9 @@ export type Route =
   | { page: "projects"; archived: boolean }
   | { page: "project"; key: string }
   | { page: "projectDocuments"; key: string }
+  | { page: "artifacts" }
+  | { page: "projectArtifacts"; key: string }
+  | { page: "artifact"; id: string }
   | { page: "ticket"; key: string }
   | { page: "documents" }
   | { page: "document"; id: string }
@@ -22,6 +25,7 @@ export type Route =
 const FIXED: Record<string, Route> = {
   "/archived": { page: "projects", archived: true },
   "/documents": { page: "documents" },
+  "/artifacts": { page: "artifacts" },
   "/decisions": { page: "decisions" },
   "/inbox": { page: "inbox" },
   "/terms": { page: "terms" },
@@ -36,6 +40,8 @@ const FIXED: Record<string, Route> = {
 const PATTERNS: [RegExp, (param: string) => Route][] = [
   [/^\/projects\/([^/]+)$/, (key) => ({ page: "project", key })],
   [/^\/projects\/([^/]+)\/documents$/, (key) => ({ page: "projectDocuments", key })],
+  [/^\/projects\/([^/]+)\/artifacts$/, (key) => ({ page: "projectArtifacts", key })],
+  [/^\/artifacts\/([^/]+)$/, (id) => ({ page: "artifact", id })],
   [/^\/tickets\/([^/]+)$/, (key) => ({ page: "ticket", key })],
   [/^\/documents\/([^/]+)$/, (id) => ({ page: "document", id })],
   [/^\/decisions\/([^/]+)$/, (key) => ({ page: "decision", key })],
@@ -66,7 +72,7 @@ export const termsAddress = (projectKey: string | null | undefined) => (projectK
 
 /** The Project a page belongs to, if any, so the Terms and Decisions pages can start on it: a Project's own pages, or a Ticket's. */
 export function projectKeyOf(route: Route): string | undefined {
-  if (route.page === "project" || route.page === "projectDocuments") return route.key.toUpperCase();
+  if (route.page === "project" || route.page === "projectDocuments" || route.page === "projectArtifacts") return route.key.toUpperCase();
   if (route.page === "ticket") return projectKeyOfTicket(route.key).toUpperCase();
   return undefined;
 }

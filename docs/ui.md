@@ -23,13 +23,13 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
   - Search, which `/` focuses.
   - Inbox, Triage, Documents, Terms, Decisions and Agents. Triage shows the number of items the User could act on, in `--muted`. Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
   - **Projects**, each listed by key and name. Archived Projects are left out.
-  - **Workspace**: Guidance, plus Users and Settings for Admins.
+  - **Workspace**: Guidance and Artifacts, plus Users and Settings for Admins.
   - The signed-in User and their role, which opens a menu: Change password (the `/password` page) and Sign out.
 - **Active item:** `--accent-soft` background with `--accent` text. There is exactly one active item, and a Ticket or Document marks its Project or Documents.
 - **Below 760px** the sidebar becomes a wrapping strip with the main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
 - **Page head:** breadcrumbs (13px, muted), then a row holding the `h1`, the view switcher and the actions. The primary action comes last. Destructive actions such as Archive and Delete go in a "…" menu, never next to the primary action.
 - **Project views:** List, Board and Reports are a segmented control in the page head. Statuses, Guidance and Access move into the Project's settings.
-- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. The signed-out link pages, `/invite/:token` and `/reset-password/:token`, show their card whoever is signed in. Terms live at `/terms` (`?project=KEY` for a Project's scope) and `/terms/:id`.
+- **Routes stay as they are:** `/inbox`, `/projects/:key`, `/tickets/:key`, `/documents/:id`, `/agents`. Workspace settings gets its own route, `/settings`, instead of replacing the page. The signed-out link pages, `/invite/:token` and `/reset-password/:token`, show their card whoever is signed in. Terms live at `/terms` (`?project=KEY` for a Project's scope) and `/terms/:id`. Artifacts are listed at `/artifacts` (the Workspace's) and `/projects/:key/artifacts`, and each lives at `/artifacts/:id`, which shows its latest Version, or `?version=n` for that Version.
 
 ## Design tokens
 
@@ -99,7 +99,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
   - A timeline shows clock times (`<RelativeTime clock>`) with a separator for each day ("Today", "Yesterday", "14 Nov").
 - **Empty states:** a short heading saying what will appear and one line saying how it gets there ("Agents write a Report when they hand work over").
 - **Silence meter** (`<SilenceMeter>`): a thin `--agent` bar that empties from when an Agent Session was last heard to when it would fall silent, with "heard 40 s ago" under it. It counts down every second on the client between live updates.
-- **Protected** (`<ProtectedMark>`): a pill with a lock and "Protected", in `--muted` with a border, after the item's title. On a Document that covers a branch it adds "covers 4 under it". Its tooltip says Agents may read but not edit. Dense rows, such as the page tree and the Decision register, show the lock alone (`<ProtectedMark compact>`), with the same tooltip and "Protected" as its accessible name. Users with Write mark and unmark an item with **Protect** and **Unprotect** (a button on a Document, in the "…" menu of a Term or Decision), and its history lists each time.
+- **Protected** (`<ProtectedMark>`): a pill with a lock and "Protected", in `--muted` with a border, after the item's title. On a Document that covers a branch it adds "covers 4 under it". Its tooltip says Agents may read but not edit. Dense rows, such as the page tree and the Decision register, show the lock alone (`<ProtectedMark compact>`), with the same tooltip and "Protected" as its accessible name. Users with Write mark and unmark an item with **Protect** and **Unprotect** (a button on a Document, in the "…" menu of a Term, Decision or Artifact), and its history lists each time.
 - **Decision status** (`<DecisionStatusPill>`): 11px uppercase pill. Proposed is outlined `--warn`, Accepted filled `--ok-soft` with `--ok` text, Superseded outlined `--info`, Rejected outlined `--muted`, and Deprecated dashed `--muted`.
 - **Reasoning** (`<Reasoning>`): an Agent's "why" on a Suggestion or proposed Decision, in an `--agent-soft` box with a 3px `--agent` left border and a `WHY` kind label.
 - **Diff** (`<Diff>`): mono lines on `--surface`, removed lines on `--danger-soft` and struck through, added on `--ok-soft`, with a header naming the two Versions. A Unified / Side by side segmented control switches it, remembered per User; below 700px it is always unified.
@@ -111,7 +111,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 
 The Project page is shown in `docs/ui/frame.png`.
 
-- **Page head:** the title, a List / Board / Reports segmented control, a "…" menu, and New Ticket as the only primary action, last. The "…" menu holds Documents (the Project's page tree), Project settings (read-only without Write access), and for those with Write access Archive Project (Restore Project once archived), which asks for confirmation.
+- **Page head:** the title, a List / Board / Reports segmented control, a "…" menu, and New Ticket as the only primary action, last. The "…" menu holds Documents (the Project's page tree), Artifacts, Project settings (read-only without Write access), and for those with Write access Archive Project (Restore Project once archived), which asks for confirmation.
 - **Project settings** (`?view=settings`): one section each for Access (Admins), Agent Access, Autonomous Delegation (the default delegating pre-fills: Autonomous, or Stops at In Review), Statuses and Guidance. The old addresses `?view=statuses` and `?view=guidance` open it at that section.
 - **List rows:** Status dot, key, title, Labels, Priority tag, and the Delegate's and Assignee's avatars, each named in its tooltip ("Delegate: claude-laptop").
 - **Board:** open columns share the main column's width. Columns in the Completed and Canceled Status Categories start collapsed to their dot and count, and clicking one opens it until the User leaves the page; nothing is stored. So a 1280px screen shows every Status without sideways scrolling. Cards show the key, Priority, title, Labels and the avatars.
@@ -126,7 +126,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion or a proposed Decision) and S sends back (or opens Reject… on a proposed Decision). None of them fire while focus is in a text field. A line under the split names them.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion or a proposed Decision) and S sends back (or opens Reopen… on an Unverified completion, or Reject… on a proposed Decision). None of them fire while focus is in a text field. A line under the split names them.
 - **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
 - **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
 - **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
@@ -141,13 +141,14 @@ The Project page is shown in `docs/ui/frame.png`.
 
 - **Main column:** the title, the description, then one **timeline** and the Comment box at the end.
 - **Side panel (280px, sticky):**
-  - Status, Priority, Assignee, Delegate, Autonomy (Autonomous, or Stops at In Review; always shown, and pre-filled from the Project's default on delegating) and Labels, each edited in place. An Agent's completion adds a Verification row: an Unverified chip with Accept, or Verified.
+  - Status, Priority, Assignee, Delegate, Autonomy (Autonomous, or Stops at In Review; always shown, and pre-filled from the Project's default on delegating) and Labels, each edited in place. An Agent's completion adds a Verification row: an Unverified chip with Accept and Reopen…, or Verified.
   - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter spans the silence threshold, from when the Agent Session was last heard from to the lapse time. It is hidden when the Ticket is not Claimed.
   - Parent, Sub-Tickets, Relations and Mentioned in.
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
   - **Comment:** the body in a bordered bubble, with replies indented under it. The Comment of a Send back is labelled `SENT BACK`.
+  - A Reopen shows as its Change, "reopened it: Done → In Progress", followed by its reason as a Comment.
   - **Report:** a card with an `--agent` border, its title and an "Open Report" link. The body is shown at body size, and its headings are scaled down to 14px.
   - **Change** (today's History): a single muted line with a small ring in the gutter, such as "claude-laptop moved it from In Progress to In Review". A Change Cronk made itself, such as an upgrade's, names "Cronk" in plain muted text with no avatar.
 - **Replying:** only Comments and questions offer a Reply button. Plan, Progress, Finding and Error don't, but a Comment can still quote them.
@@ -228,7 +229,8 @@ The Project page is shown in `docs/ui/frame.png`.
 
 ![Artifact](ui/phase-2-artifact.png)
 
-- **Full bleed** under a thin bar: title, the Version menu (which also lists Versions and where the Artifact is embedded), its source Ticket and Agent, any declared extra origins as a `--warn` pill, **Copy link to Version n**, Open full size, and **Comments n**.
+- **Full bleed** under a thin bar: title, Protected mark, the Version menu (which also lists Versions, **Copy link to latest**, and where the Artifact is embedded), its source Ticket and who published the Version, any declared extra origins as a `--warn` pill, **Copy link to Version n**, Open full size, **Comments n**, and a "…" menu with Publish new Version and Protect or Unprotect for those with Write. Its protection history is under the frame.
+- **The list** (`/projects/:key/artifacts`, `/artifacts`): one row per Artifact, most recently published first, with its title, lock, Version chip, source Ticket, publisher and time; **Publish Artifact** is the primary action. Publishing, there or from the "…" menu, opens a dialog to pick a folder holding `index.html`, which is packed and sent whole.
 - **Comments** open in a 300px drawer on the right, each saying which Version it was on. Below 900px the drawer moves under the Artifact.
 - **Embedded** in a Report or Document: a bordered block with a bar (kind label, title, Version chip, Open full size) above the sandboxed frame.
 
@@ -240,7 +242,13 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Files** in the side panel: every Attachment on the Ticket, in Comments and Reports too, and the Artifacts from its work, each with type, size and Actor.
 - **Dropping a file anywhere** on the Ticket page attaches it to the Ticket, as does pasting one. Video and images posted in a Comment or Report show inline where they were posted.
 - **Opening one** (a thumbnail or a Files entry) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
-- **Workspace settings** hold the Attachment size limit, and show Admins the storage Attachments use.
+- **Workspace settings** hold the Attachment size limit and the Artifact limits (size and files per Version), and show Admins the storage Attachments and Artifacts use.
+
+### Attachments on Documents, Reports and Comments
+
+- **A Document or Report** shows its own Attachments as the same thumbnails under its body, with a drop zone for those with Write; dropping or pasting a file anywhere on the page outside the editor attaches it to the Document. They belong to the Document, not a Version, so an old Version whose Markdown shows one (`![name](/api/attachments/<id>/file)`) still shows it.
+- **A Comment box** has "Attach files…": the picked files are attached to the Comment once it is posted. Only whoever posted a Comment may attach to it; any User with Write may delete its files.
+- **Where they were posted:** a Comment's files sit under its text, and a Report's under its body in the Ticket's timeline: images and MP4/WebM video at most 360px tall, video and audio playing in place, anything else by type and name. Opening one shows the same dialog as a thumbnail.
 
 ## Live updates
 

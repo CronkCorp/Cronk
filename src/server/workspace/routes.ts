@@ -6,8 +6,20 @@ import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.j
 import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
 import { attachmentStorage } from "../files/attachments.js";
+import { artifactStorage } from "../files/artifacts.js";
 
 const MB = 1024 * 1024;
+
+/** What an Admin may change about the Workspace. */
+interface WorkspaceChanges {
+  name?: string;
+  agentAccess?: AgentAccess;
+  silenceThresholdSeconds?: number;
+  attachmentMaxBytes?: number;
+  transcriptMaxBytes?: number;
+  artifactMaxBytes?: number;
+  artifactMaxFiles?: number;
+}
 
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -21,7 +33,7 @@ export function workspaceRoutes(ctx: AppContext) {
       },
     );
 
-    app.patch<{ Body: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; attachmentMaxBytes?: number; transcriptMaxBytes?: number } }>(
+    app.patch<{ Body: WorkspaceChanges }>(
       "/api/workspace",
       {
         schema: {
@@ -49,6 +61,18 @@ export function workspaceRoutes(ctx: AppContext) {
                 maximum: MAX_TRANSCRIPT_BYTES,
                 description: "The most a Transcript may hold, all its texts together, in bytes: 1 KB to 100 MB; 10 MB unless changed.",
               },
+              artifactMaxBytes: {
+                type: "integer",
+                minimum: MB,
+                maximum: 500 * MB,
+                description: "The most bytes one Version of an Artifact may hold, all its files together: 1 MB to 500 MB; 25 MB unless changed.",
+              },
+              artifactMaxFiles: {
+                type: "integer",
+                minimum: 1,
+                maximum: 10_000,
+                description: "The most files one Version of an Artifact may hold: 1 to 10,000; 500 unless changed.",
+              },
             },
           },
           response: { 200: answer("The changed Workspace", ref("Workspace")), ...errors(400, 401, 403, 410) },
@@ -57,13 +81,15 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change the Workspace");
-        const { name, agentAccess, silenceThresholdSeconds, attachmentMaxBytes, transcriptMaxBytes } = request.body;
+        const { name, agentAccess, silenceThresholdSeconds, attachmentMaxBytes, transcriptMaxBytes, artifactMaxBytes, artifactMaxFiles } = request.body;
         const workspace = await updateWorkspace(ctx.db, user.workspaceId, {
           ...(name !== undefined && { name: name.trim() }),
           ...(agentAccess !== undefined && { agentAccess }),
           ...(silenceThresholdSeconds !== undefined && { silenceThresholdSeconds }),
           ...(attachmentMaxBytes !== undefined && { attachmentMaxBytes }),
           ...(transcriptMaxBytes !== undefined && { transcriptMaxBytes }),
+          ...(artifactMaxBytes !== undefined && { artifactMaxBytes }),
+          ...(artifactMaxFiles !== undefined && { artifactMaxFiles }),
         });
         return publicWorkspace(workspace);
       },
@@ -77,7 +103,7 @@ export function workspaceRoutes(ctx: AppContext) {
           response: {
             200: answer("The storage used, by kind of file", {
               type: "object",
-              required: ["attachments"],
+              required: ["attachments", "artifacts"],
               properties: {
                 attachments: {
                   type: "object",
@@ -85,6 +111,14 @@ export function workspaceRoutes(ctx: AppContext) {
                   properties: {
                     files: { type: "integer", description: "How many Attachments there are." },
                     bytes: { type: "integer", description: "How many bytes their files take." },
+                  },
+                },
+                artifacts: {
+                  type: "object",
+                  required: ["files", "bytes"],
+                  properties: {
+                    files: { type: "integer", description: "How many files the Versions of Artifacts hold, every Version counted." },
+                    bytes: { type: "integer", description: "How many bytes those files take." },
                   },
                 },
               },
@@ -96,7 +130,7 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "see the storage used");
-        return { attachments: await attachmentStorage(ctx.db, user.workspaceId) };
+        return { attachments: await attachmentStorage(ctx.db, user.workspaceId), artifacts: await artifactStorage(ctx.db, user.workspaceId) };
       },
     );
   };

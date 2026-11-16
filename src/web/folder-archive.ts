@@ -12,11 +12,14 @@ const encoder = new TextEncoder();
 const pathOf = (file: File) => file.webkitRelativePath || file.name;
 
 /** A gzipped tar archive of the Markdown files among `files`, each at its path within the picked folder; undefined if there are none. */
-export async function packMarkdownFolder(files: Iterable<File>): Promise<Blob | undefined> {
+export const packMarkdownFolder = (files: Iterable<File>): Promise<Blob | undefined> => packFolder(files, (path) => MARKDOWN_FILE.test(path));
+
+/** A gzipped tar archive of the `files` whose path `keep` keeps (all of them by default), each at its path within the picked folder; undefined if none is kept. */
+export async function packFolder(files: Iterable<File>, keep: (path: string) => boolean = () => true): Promise<Blob | undefined> {
   const parts: BlobPart[] = [];
   for (const file of files) {
     const path = pathOf(file);
-    if (!MARKDOWN_FILE.test(path)) continue;
+    if (!keep(path)) continue;
     const bytes = new Uint8Array(await file.arrayBuffer());
     parts.push(...entry(path, bytes));
   }

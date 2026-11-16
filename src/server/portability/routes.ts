@@ -4,22 +4,12 @@ import { HttpError, requireActor, requireUser, type AppContext } from "../contex
 import { transaction } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
-import { packFolder, unpackFolder } from "./archive.js";
+import { ARCHIVE_TYPES, archiveBody, packFolder, unpackFolder } from "./archive.js";
 import { exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 import { listRenamedIds } from "./renamed-ids.js";
 
-/** The media types an uploaded archive may come as. */
-const ARCHIVE_TYPES = [
-  "application/gzip",
-  "application/x-gzip",
-  "application/x-tar",
-  "application/x-compressed-tar",
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/octet-stream",
-];
 /** The largest archive an import takes. */
 const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
@@ -235,9 +225,3 @@ const IMPORT_RULES =
   "A folder's `README.md` or `index.md`, or a file named like it beside it, is the folder's own Document; a folder without one becomes an empty Document named after it. " +
   "Files and folders are ordered by name, numbers counting as numbers. Files other than Markdown (`.md`, `.markdown`) and hidden ones are skipped, " +
   "and a single folder holding everything (as archiving a folder adds) is unwrapped.";
-
-/** The uploaded archive; a body sent as another type, such as JSON, is refused. */
-function archiveBody(body: unknown): Buffer {
-  if (Buffer.isBuffer(body)) return body;
-  throw new HttpError(400, `Send the archive itself as the request body, typed ${ARCHIVE_TYPES.join(", ")}`);
-}

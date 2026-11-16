@@ -9,6 +9,8 @@ import type {
   AgentSession,
   AgentToken,
   AgentRecordEntry,
+  Artifact,
+  ArtifactVersion,
   Attachment,
   Comment,
   Decision,
@@ -38,12 +40,15 @@ import type {
   RelationKind,
   Relations,
   Report,
+  ReopenChoice,
   Role,
   SearchKind,
   Storage,
   SearchResult,
   Status,
   StatusCategory,
+  SuggestedContent,
+  Suggestion,
   Term,
   TermVersion,
   Ticket,
@@ -69,6 +74,8 @@ export type {
   AgentSession,
   AgentToken,
   AgentRecordEntry,
+  Artifact,
+  ArtifactVersion,
   Attachment,
   Comment,
   Decision,
@@ -98,12 +105,15 @@ export type {
   RelationKind,
   Relations,
   Report,
+  ReopenChoice,
   Role,
   SearchKind,
   Storage,
   SearchResult,
   Status,
   StatusCategory,
+  SuggestedContent,
+  Suggestion,
   Term,
   TermVersion,
   Ticket,
@@ -151,6 +161,7 @@ export const staleVersionOf = (err: unknown): Version | undefined =>
 const scopePath = (projectKey?: string) => (projectKey ? `/api/projects/${encodeURIComponent(projectKey)}` : "/api/workspace");
 const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}`;
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
+const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -181,6 +192,10 @@ async function upload<T>(path: string, file: Blob, contentType = "application/oc
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   return data as T;
 }
+
+/** Uploads `file` as an Attachment of the item at `itemPath`, sent as itself with its own media type. */
+const attachTo = (itemPath: string, file: File) =>
+  upload<{ attachment: Attachment }>(`${itemPath}/attachments?${new URLSearchParams({ name: file.name || "pasted" })}`, file, file.type || undefined).then((r) => r.attachment);
 
 /** Where an Attachment's file is served: shown in the page when it is an image, video, audio or plain text, saved otherwise. */
 export const attachmentFileUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}/file`;
@@ -237,18 +252,28 @@ export const api = {
   signOut: () => request<void>("DELETE", "/api/sign-in"),
   me: () => request<{ user: User }>("GET", "/api/me").then((r) => r.user),
   workspace: () => request<Workspace>("GET", "/api/workspace"),
-  updateWorkspace: (changes: { name?: string; agentAccess?: AgentAccess; silenceThresholdSeconds?: number; attachmentMaxBytes?: number }) =>
+  updateWorkspace: (changes: {
+    name?: string;
+    agentAccess?: AgentAccess;
+    silenceThresholdSeconds?: number;
+    attachmentMaxBytes?: number;
+    artifactMaxBytes?: number;
+    artifactMaxFiles?: number;
+  }) =>
     request<Workspace>("PATCH", "/api/workspace", changes),
   /** How much storage the Workspace's files take; Admins only. */
   storage: () => request<Storage>("GET", "/api/workspace/storage"),
-  /** A Ticket's Attachments, in the order they were attached. */
+  /** Every Attachment on a Ticket, in its Comments and Reports too, in the order they were attached. */
   attachments: (key: string) =>
     request<{ attachments: Attachment[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/attachments`).then((r) => r.attachments),
+  /** Every Attachment on a Document or Report, in its Comments too, in the order they were attached. */
+  documentAttachments: (id: string) => request<{ attachments: Attachment[] }>("GET", `${documentPath(id)}/attachments`).then((r) => r.attachments),
   /** Attaches `file` to the Ticket `key`, sent as itself with its own media type. */
-  attach: (key: string, file: File) =>
-    upload<{ attachment: Attachment }>(`/api/tickets/${encodeURIComponent(key)}/attachments?${new URLSearchParams({ name: file.name || "pasted" })}`, file, file.type || undefined).then(
-      (r) => r.attachment,
-    ),
+  attach: (key: string, file: File) => attachTo(`/api/tickets/${encodeURIComponent(key)}`, file),
+  /** Attaches `file` to a Document or Report. */
+  attachToDocument: (id: string, file: File) => attachTo(documentPath(id), file),
+  /** Attaches `file` to a Comment the signed-in User posted. */
+  attachToComment: (id: string, file: File) => attachTo(`/api/comments/${encodeURIComponent(id)}`, file),
   deleteAttachment: (id: string) => request<void>("DELETE", `/api/attachments/${encodeURIComponent(id)}`),
 
   /** A Project's Decisions, or the Workspace's without a Project key, newest first. */
@@ -269,6 +294,25 @@ export const api = {
   decisionProtection: (key: string) => request<{ markings: ProtectionMarking[] }>("GET", `${decisionPath(key)}/protection`).then((r) => r.markings),
   decisionVersions: (key: string) =>
     request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
+
+  /** A Project's Artifacts, or the Workspace's without a Project key, most recently published first. */
+  artifacts: (projectKey?: string) => request<{ artifacts: Artifact[] }>("GET", `${scopePath(projectKey)}/artifacts`).then((r) => r.artifacts),
+  /** An Artifact with its Versions and where to frame its latest. */
+  artifact: (id: string) => request<{ artifact: Artifact }>("GET", artifactPath(id)).then((r) => r.artifact),
+  /** One Version of an Artifact, with its files and where to frame it. */
+  artifactVersion: (id: string, number: number) =>
+    request<{ version: ArtifactVersion }>("GET", `${artifactPath(id)}/versions/${number}`).then((r) => r.version),
+  /** Publishes a folder, packed as an archive, as a new Artifact. */
+  publishArtifact: (projectKey: string | undefined, title: string, archive: Blob) =>
+    upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${new URLSearchParams({ title })}`, archive, "application/gzip").then((r) => r.artifact),
+  /** Publishes a folder as the Artifact's next Version; refused with a 409 if a later Version than `baseVersion` was published meanwhile. */
+  publishArtifactVersion: (id: string, baseVersion: number, archive: Blob) =>
+    upload<{ artifact: Artifact }>(`${artifactPath(id)}/versions?${new URLSearchParams({ baseVersion: String(baseVersion) })}`, archive, "application/gzip").then(
+      (r) => r.artifact,
+    ),
+  protectArtifact: (id: string, value: boolean) =>
+    request<{ artifact: Artifact }>("POST", `${artifactPath(id)}/protection`, { protected: value }).then((r) => r.artifact),
+  artifactProtection: (id: string) => request<{ markings: ProtectionMarking[] }>("GET", `${artifactPath(id)}/protection`).then((r) => r.markings),
 
   /** The Workspace's Guidance, or with `projectKey` that Project's. */
   guidance: (projectKey?: string) => request<{ guidance: Guidance }>("GET", guidancePath(projectKey)).then((r) => r.guidance),
@@ -428,6 +472,22 @@ export const api = {
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
 
+  /**
+   * Accepts a Suggestion: as suggested, credited to its Agent, or with `content` as the User edited it, which credits the new
+   * Version to them if it differs.
+   */
+  acceptSuggestion: (id: string, content?: SuggestedContent) =>
+    request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/accept`, content === undefined ? {} : { content }).then((r) => r.suggestion),
+  /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
+  rejectSuggestion: (id: string, reason: string) =>
+    request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),
+  /**
+   * Reopens an Agent's Unverified completion back to its Delegate in a Started Status, with a Comment saying why, and a choice
+   * for each Ticket it blocks that already continued on the work.
+   */
+  reopen: (key: string, input: { comment: string; dependents: Record<string, ReopenChoice> }) =>
+    request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/reopen`, input),
+
   /** Accepts an Agent's Unverified completion, recording the User's Verification. */
   accept: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/accept`).then((r) => r.ticket),
 
@@ -470,6 +530,8 @@ export interface DocumentEvents {
   comment: { comment: Comment };
   /** A new Version was saved or restored; `version` is its number. */
   version: { version: number };
+  /** A file was attached to it or one of its Comments, or one was deleted. */
+  attachments: Record<string, never>;
 }
 
 /** Where a live-update stream is: in place, away and reconnecting, or closed for good. */

@@ -42,8 +42,8 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
   if (welcome.waitingWork.length === 0) lines.push("Nothing new since your last Agent Session.");
   else {
     lines.push(
-      "Comments that concern you, and rejections of Decisions you proposed, since your last Agent Session, oldest first. " +
-        "Read the whole conversation with the `comments` tool, and a Decision with the `decisions` tool.",
+      "Comments that concern you, and rejections of Decisions you proposed and Suggestions you made, since your last Agent Session, oldest first. " +
+        "Read the whole conversation with the `comments` tool, a Decision with the `decisions` tool, and a Suggestion with the `suggestions` tool.",
       "",
     );
   }
@@ -55,7 +55,7 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
 }
 
 /** Why a Comment waits for the Agent, as the welcome says it. */
-const WHY: Record<Exclude<WaitingWork["reason"], "rejected">, string> = {
+const WHY: Record<Exclude<WaitingWork["reason"], "rejected" | "suggestion_rejected">, string> = {
   answer: "answered your question",
   mention: "mentioned you",
   comment: "commented on your delegated Ticket",
@@ -64,6 +64,14 @@ const WHY: Record<Exclude<WaitingWork["reason"], "rejected">, string> = {
 /** One piece of waiting work as welcome lines: where, who and why, then the Comment, or the reason for a rejection, quoted. */
 export function waitingLines(work: WaitingWork): string[] {
   const quote = (text: string) => text.trim().split("\n").map((line) => `  > ${line}`);
+  if (work.reason === "suggestion_rejected") {
+    const { suggestion, ticket } = work;
+    const from = ticket ? ` from ${ticket.key}` : "";
+    return [
+      `- Your Suggestion ${suggestion.id} on ${suggestionItemName(suggestion.item)}${from}: ${suggestion.rejectedBy.name} rejected it, saying why:`,
+      ...quote(suggestion.reason),
+    ];
+  }
   if (work.reason === "rejected") {
     const { decision, ticket } = work;
     const from = ticket ? `, which you proposed from ${ticket.key}` : ", which you proposed";
@@ -73,6 +81,13 @@ export function waitingLines(work: WaitingWork): string[] {
   const where = ticket ? `${ticket.key}: ${ticket.title}` : `Document “${document!.title}” (${document!.id})`;
   const who = comment.actor.kind === "agent" ? `the Agent ${comment.actor.name}` : comment.actor.name;
   return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quote(comment.body)];
+}
+
+/** How the welcome names a Suggestion's item: "the Document “Architecture”", "CRONK-D3", "CRONK's Guidance". */
+function suggestionItemName(item: { kind: string; key: string | null; title: string; projectKey: string | null }): string {
+  if (item.kind === "decision") return `${item.key}: ${item.title}`;
+  if (item.kind === "guidance") return `${item.projectKey ?? "the Workspace"}'s Guidance`;
+  return `the ${item.kind === "document" ? "Document" : "Term"} “${item.title}”`;
 }
 
 /** One Ready Ticket as a welcome line: its key, title, Status, any Priority, and whether it is autonomous. */

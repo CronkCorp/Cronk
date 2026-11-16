@@ -289,6 +289,16 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .file-by { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .link-button { padding: 0; border: none; background: none; font: inherit; font-size: 13px; color: var(--accent); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .link-button:hover { text-decoration: underline; }
+/* Attachments shown where they were posted: in a Comment, under a Report's body. Images and video at most 360px tall, other files by name. */
+.inline-attachments { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.inline-attachment { display: flex; flex-direction: column; gap: 4px; max-width: 100%; font-size: 12px; }
+.inline-other, .inline-audio { flex-direction: row; align-items: center; gap: 8px; }
+.inline-media-button { padding: 0; border: none; background: none; cursor: zoom-in; }
+.inline-media { display: block; max-width: 100%; max-height: 360px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.inline-caption { display: flex; align-items: center; gap: 8px; }
+.inline-name { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.comment-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.comment-files li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .viewer { display: flex; justify-content: center; margin-bottom: 16px; }
 .viewer-media { max-width: 100%; max-height: 640px; border-radius: 8px; background: var(--surface-2); }
 .viewer-audio { width: 100%; }
@@ -327,6 +337,35 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .tl-report-decisions h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .tl-report-decisions ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 .inbox-decision-body { border-left: 3px solid var(--agent); padding: 4px 12px; background: var(--surface); }
+
+/* Suggestions: docs/ui.md § Reasoning, § Diff and § Inbox and Triage in Phase 2. */
+.reasoning { background: var(--agent-soft); border-left: 3px solid var(--agent); border-radius: 6px; padding: 8px 12px; font-size: 14px; }
+.reasoning .kind-label { display: block; margin-bottom: 2px; }
+.reasoning p { margin: 0 0 4px; }
+.diff-view { display: flex; flex-direction: column; gap: 8px; }
+.diff-switch { align-self: flex-start; }
+.diff-switch .segment { border: 0; background: none; font: inherit; font-size: 13px; cursor: pointer; }
+.diff-switch .segment + .segment { border-left: 1px solid var(--border); }
+.diff-switch .segment.active { background: var(--accent-soft); color: var(--accent); }
+.suggestion-diff { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); overflow: hidden; }
+.suggestion-diff-head { margin: 0; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+.suggestion-diff.unified .suggestion-diff-head { background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.suggestion-diff-lines { list-style: none; margin: 0; padding: 4px 0; font-family: var(--font-mono); font-size: 13px; max-height: 480px; overflow: auto; }
+.suggestion-diff-lines li { display: flex; gap: 8px; padding: 2px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion-diff-lines .diff-mark { width: 10px; flex: none; color: var(--muted); }
+.suggestion-diff-lines .diff-text { flex: 1; min-width: 0; }
+.suggestion-diff-lines .diff-removed .diff-text { text-decoration: line-through; }
+.suggestion-diff-split { display: flex; gap: 12px; }
+.suggestion-diff-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.suggestion-diff-side .suggestion-diff-lines { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); flex: 1; }
+.suggestion-diff-side .diff-removed .diff-text { text-decoration: none; }
+.suggestion-diff-narrow { display: none; }
+@media (max-width: 699px) {
+  .diff-switch, .suggestion-diff-split { display: none; }
+  .suggestion-diff-narrow { display: block; }
+}
+.suggestion-actions { align-items: center; flex-wrap: wrap; }
+.suggestion-editor { display: flex; flex-direction: column; }
 .decision-status-reason { margin-top: 4px; font-size: 13px; }
 .tl-report-body > :first-child { margin-top: 0; }
 .tl-report-body > :last-child { margin-bottom: 0; }
@@ -464,7 +503,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 
 /* Reading a Document: docs/ui.md § Document. The body in a panel, Comments down a 280px margin beside it. */
 .document-read { display: flex; flex-direction: column; gap: 24px; }
-.document-body { min-width: 0; }
+.document-body { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .document-body .markdown { padding: 16px 32px; font-size: 15px; line-height: 1.65; }
 .document-body .markdown > * { max-width: 720px; }
 .comment-margin { display: flex; flex-direction: column; gap: 8px; }
@@ -512,7 +551,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label.finding { color: var(--ok); }
 .kind-label.question { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
-.kind-label.report, .kind-label.decision { color: var(--agent); }
+.kind-label.report, .kind-label.decision, .kind-label.suggestion { color: var(--agent); }
 .kind-label.comment { color: var(--accent); }
 .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; color: var(--muted); }
 .priority.urgent { color: var(--on-accent); background: var(--danger); }
@@ -538,6 +577,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .dialog-overlay { position: fixed; inset: 0; z-index: 30; background: var(--overlay); }
 .dialog { position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%); width: calc(100% - 32px); max-width: 440px; max-height: calc(100% - 32px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 24px; }
 .dialog.wide { max-width: 880px; }
+.dialog.medium { max-width: 640px; }
 .dialog-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .dialog-description { color: var(--muted); margin: 0 0 16px; }
 .dialog-actions { justify-content: flex-end; }
@@ -654,3 +694,34 @@ a.register-row:hover { background: var(--bg); }
 .term-detail .term-definition { font-size: 15px; line-height: 1.65; margin-bottom: 8px; }
 .term-detail p.small { margin: 8px 0 0; }
 .term-version { display: flex; flex-direction: column; gap: 2px; }
+
+/* The Reopen dialog's dependents that already continued, each with its choice (docs/ui.md § Inbox and Triage in Phase 2). */
+.reopen-dependents { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 12px 0; }
+.reopen-dependents-head { background: var(--surface-2); padding: 10px 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.reopen-dependent { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.reopen-dependent + .reopen-dependent { border-top: 1px solid var(--border); }
+.reopen-dependent-text { flex-grow: 1; min-width: 0; }
+.reopen-dependent-title { display: flex; gap: 6px; align-items: baseline; }
+.reopen-dependent-title .key { min-width: 0; }
+.reopen-dependent-state { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 13px; }
+.reopen-note { font-size: 12px; margin: 0 0 16px; }
+
+/* An Artifact's page (docs/ui.md § Artifact): a thin bar over the Artifact in a sandboxed frame, full bleed. */
+.artifact-page { display: flex; flex-direction: column; gap: 8px; }
+.artifact-shell { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.artifact-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.artifact-title { font-size: 14px; font-weight: 600; margin: 0; }
+.artifact-source { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.artifact-source .key { min-width: 0; }
+.artifact-frame { display: block; width: 100%; height: calc(100vh - 180px); min-height: 480px; border: none; }
+.artifact-note { margin: 0; font-size: 12px; }
+.version-chip { font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
+.version-chip:hover { color: var(--text); }
+.version-menu { display: flex; flex-direction: column; gap: 4px; min-width: 300px; max-width: 360px; padding-bottom: 4px; }
+.version-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.version-row { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+.version-row:hover { background: var(--accent-soft); }
+.version-list li.current .version-row { background: var(--accent-soft); color: var(--accent); }
+.version-number { font-weight: 600; }
+.version-empty { margin: 0; padding: 0 12px 8px; font-size: 12px; }
+.version-menu > .btn { align-self: flex-start; }
