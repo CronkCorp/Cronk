@@ -3,28 +3,13 @@ import { actingUser } from "../actor.js";
 import { requireActor, requireUser, type AppContext } from "../context.js";
 import { requireAdmin, requireWorkspaceAccess, type AgentAccess } from "../identity/access.js";
 import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.js";
-import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
-import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
+import { getWorkspace, pickSettings, publicWorkspace, updateWorkspace, WORKSPACE_SETTINGS, type WorkspaceChanges } from "./workspaces.js";
 import { attachmentStorage } from "../files/attachments.js";
 import { artifactStorage } from "../files/artifacts.js";
 import { bareOrigins } from "../files/origins.js";
 
-const MB = 1024 * 1024;
 /** The most origins the Workspace's allow-list may hold. */
 const MAX_ALLOWED_ORIGINS = 50;
-
-/** What an Admin may change about the Workspace. */
-interface WorkspaceChanges {
-  name?: string;
-  agentAccess?: AgentAccess;
-  silenceThresholdSeconds?: number;
-  attachmentMaxBytes?: number;
-  transcriptMaxBytes?: number;
-  artifactMaxBytes?: number;
-  artifactMaxFiles?: number;
-  artifactAllowedOrigins?: string[];
-  artifactExtraOriginsAllowed?: boolean;
-}
 
 export function workspaceRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
@@ -48,36 +33,7 @@ export function workspaceRoutes(ctx: AppContext) {
             properties: {
               name: nameSchema,
               agentAccess: agentAccessSchema,
-              silenceThresholdSeconds: {
-                type: "integer",
-                minimum: 60,
-                maximum: 86_400,
-                description: "How long an Agent Session may stay silent before it ends and its Claims lapse: one minute to one day.",
-              },
-              attachmentMaxBytes: {
-                type: "integer",
-                minimum: MB,
-                maximum: 10 * 1024 * MB,
-                description: "The largest file an Attachment may be, in bytes: 1 MB to 10 GB.",
-              },
-              transcriptMaxBytes: {
-                type: "integer",
-                minimum: MIN_TRANSCRIPT_BYTES,
-                maximum: MAX_TRANSCRIPT_BYTES,
-                description: "The most a Transcript may hold, all its texts together, in bytes: 1 KB to 100 MB; 10 MB unless changed.",
-              },
-              artifactMaxBytes: {
-                type: "integer",
-                minimum: MB,
-                maximum: 500 * MB,
-                description: "The most bytes one Version of an Artifact may hold, all its files together: 1 MB to 500 MB; 25 MB unless changed.",
-              },
-              artifactMaxFiles: {
-                type: "integer",
-                minimum: 1,
-                maximum: 10_000,
-                description: "The most files one Version of an Artifact may hold: 1 to 10,000; 500 unless changed.",
-              },
+              ...Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, s.schema])),
               artifactAllowedOrigins: {
                 type: "array",
                 maxItems: MAX_ALLOWED_ORIGINS,
@@ -100,25 +56,11 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "change the Workspace");
-        const {
-          name,
-          agentAccess,
-          silenceThresholdSeconds,
-          attachmentMaxBytes,
-          transcriptMaxBytes,
-          artifactMaxBytes,
-          artifactMaxFiles,
-          artifactAllowedOrigins,
-          artifactExtraOriginsAllowed,
-        } = request.body;
+        const { name, agentAccess, artifactAllowedOrigins, artifactExtraOriginsAllowed } = request.body;
         const workspace = await updateWorkspace(ctx.db, user.workspaceId, {
           ...(name !== undefined && { name: name.trim() }),
           ...(agentAccess !== undefined && { agentAccess }),
-          ...(silenceThresholdSeconds !== undefined && { silenceThresholdSeconds }),
-          ...(attachmentMaxBytes !== undefined && { attachmentMaxBytes }),
-          ...(transcriptMaxBytes !== undefined && { transcriptMaxBytes }),
-          ...(artifactMaxBytes !== undefined && { artifactMaxBytes }),
-          ...(artifactMaxFiles !== undefined && { artifactMaxFiles }),
+          ...pickSettings(request.body),
           ...(artifactAllowedOrigins !== undefined && { artifactAllowedOrigins: bareOrigins(artifactAllowedOrigins, "artifactAllowedOrigins") }),
           ...(artifactExtraOriginsAllowed !== undefined && { artifactExtraOriginsAllowed }),
         });

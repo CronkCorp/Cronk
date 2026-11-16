@@ -984,18 +984,21 @@ describe("an export taken apart and archived again", () => {
   });
 });
 
+/** An export's files archived again with one Markdown file's frontmatter edited, and the file renamed if asked. */
+function editedExport(files: Record<string, string>, path: string, edit: (data: any) => void, rename?: string) {
+  const { data, body } = markdown(files[path]);
+  edit(data);
+  const copy = { ...files };
+  delete copy[path];
+  copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
+  return tarGz(copy);
+}
+
 describe("an export edited by hand", () => {
   it("is refused when it says what Cronk can't hold, naming the file", async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/export")).body);
-    const edited = async (path: string, edit: (data: any) => void, rename?: string) => {
-      const { data, body } = markdown(files[path]);
-      edit(data);
-      const copy = { ...files };
-      delete copy[path];
-      copy[rename ?? path] = `---\n${stringify(data)}---\n${body}`;
-      return tarGz(copy);
-    };
+    const edited = (path: string, edit: (data: any) => void, rename?: string) => editedExport(files, path, edit, rename);
     const { admin } = await startInstalledCronk("Elsewhere");
 
     const answeredPlan = await admin.upload("/api/import", await edited("projects/CRONK/tickets/CRONK-1.activities/1.md", (d) => (d.answer = 1)));
@@ -1205,5 +1208,42 @@ describe("Importing Artifacts", () => {
     const res = await elsewhere.upload("/api/import", await tarGz(edited));
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/index\.html/);
+  });
+});
+
+describe("the Workspace's settings in an export", () => {
+  /** A Workspace export from a fresh installation, with `workspace.md` edited. */
+  async function exportWith(edit: (data: any) => void) {
+    const { admin } = await startInstalledCronk("Acme");
+    return editedExport(await untarGz((await admin.download("/api/export")).body), "workspace.md", edit);
+  }
+
+  it("are refused on import outside the bounds the API allows, naming the setting and its range", async () => {
+    const { admin } = await startInstalledCronk("Elsewhere");
+
+    const tooQuiet = await admin.upload("/api/import", await exportWith((d) => (d.silenceThresholdSeconds = 59)));
+    expect(tooQuiet.status).toBe(400);
+    expect(tooQuiet.body.error).toMatch(/workspace\.md silenceThresholdSeconds must be from 60 to 86400/);
+
+    const tooSmall = await admin.upload("/api/import", await exportWith((d) => (d.attachmentMaxBytes = 1024 * 1024 - 1)));
+    expect(tooSmall.status).toBe(400);
+    expect(tooSmall.body.error).toMatch(/workspace\.md attachmentMaxBytes must be from 1048576 to 10737418240/);
+
+    expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);
+  });
+
+  it("left out of workspace.md, as in an export from before them, keep the Workspace's own values", async () => {
+    const { admin } = await startInstalledCronk("Elsewhere");
+    await admin.patch("/api/workspace", { silenceThresholdSeconds: 120, artifactMaxFiles: 50 });
+
+    const imported = await admin.upload("/api/import", await exportWith((d) => {
+      delete d.silenceThresholdSeconds;
+      delete d.artifactMaxFiles;
+      d.attachmentMaxBytes = 2 * 1024 * 1024;
+    }));
+    expect(imported.status).toBe(201);
+
+    const workspace = (await admin.get("/api/workspace")).body;
+    expect(workspace).toMatchObject({ name: "Acme", silenceThresholdSeconds: 120, artifactMaxFiles: 50, attachmentMaxBytes: 2 * 1024 * 1024 });
   });
 });
