@@ -716,7 +716,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   AgentRecordEntry: {
-    description: "One entry in an Agent's record: one thing it did. `kind` says which; the field named after it holds what, and the other three are null.",
+    description: "One entry in an Agent Record: one thing the Agent did. `kind` says which; the field named after it holds what, and the other three are null.",
     ...object({
       kind: { type: "string", enum: ["change", "activity", "comment", "version"], description: "A Change to a Ticket, an Activity, a Comment or a saved Version." },
       at: timestamp,
