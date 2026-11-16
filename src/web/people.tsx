@@ -1,4 +1,5 @@
 import { Button } from "./components/button.js";
+import { ConfirmDialog } from "./components/overlays.js";
 import { Chip } from "./components/tags.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor, userActor } from "./components/actor.js";
@@ -7,16 +8,30 @@ import { api, type Access, type Invitation, type Member, type Project, type Role
 import { AuthCard, Field, Show, useAction, useLoad, useSubmit } from "./ui.js";
 
 const inviteLink = (token: string) => `${location.origin}/invite/${token}`;
+const resetLink = (token: string) => `${location.origin}/reset-password/${token}`;
+
+/** A link the Admin just made and must pass on: what to do with it, and the link itself. */
+interface IssuedLink {
+  label: string;
+  note: string;
+  url: string;
+}
 
 /** The Workspace's Users and pending invitations, managed by an Admin. */
 export function UsersPage(props: { me: User }) {
   const [users, reloadUsers] = useLoad(() => api.users(), []);
   const [invitations, reloadInvitations] = useLoad(() => api.invitations(), []);
-  const [lastLink, setLastLink] = useState<string>();
+  const [lastLink, setLastLink] = useState<IssuedLink>();
   const invited = (token: string) => {
-    setLastLink(inviteLink(token));
+    setLastLink({ label: "Invitation link", note: "Send this link to the invitee. It works once, for 7 days.", url: inviteLink(token) });
     reloadInvitations();
   };
+  const reset = (user: User, token: string) =>
+    setLastLink({
+      label: "Password reset link",
+      note: `Send this link to ${user.name}. It lets them choose a new password once, for 7 days. Their sign-ins have ended; their Agents' Sessions keep running.`,
+      url: resetLink(token),
+    });
 
   return (
     <section>
@@ -26,8 +41,8 @@ export function UsersPage(props: { me: User }) {
       <InviteUser onDone={invited} />
       {lastLink && (
         <div className="panel wide" role="status">
-          <p>Send this link to the invitee. It works once, for 7 days.</p>
-          <input className="copy" readOnly value={lastLink} aria-label="Invitation link" onFocus={(e) => e.target.select()} />
+          <p>{lastLink.note}</p>
+          <input className="copy" readOnly value={lastLink.url} aria-label={lastLink.label} onFocus={(e) => e.target.select()} />
         </div>
       )}
       <Show state={invitations}>
@@ -38,7 +53,14 @@ export function UsersPage(props: { me: User }) {
         {(list) => (
           <ul className="rows" aria-label="Users">
             {list.map((user) => (
-              <UserRow key={user.id} user={user} isMe={user.id === props.me.id} onChanged={reloadUsers} onInvited={invited} />
+              <UserRow
+                key={user.id}
+                user={user}
+                isMe={user.id === props.me.id}
+                onChanged={reloadUsers}
+                onInvited={invited}
+                onReset={(token) => reset(user, token)}
+              />
             ))}
           </ul>
         )}
@@ -95,8 +117,22 @@ function Invitations(props: { invitations: Invitation[]; onChanged: () => void }
   );
 }
 
-function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onInvited: (token: string) => void }) {
+function UserRow(props: {
+  user: User;
+  isMe: boolean;
+  onChanged: () => void;
+  onInvited: (token: string) => void;
+  onReset: (token: string) => void;
+}) {
   const u = props.user;
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const reset = useAction(
+    () => api.issuePasswordReset(u.id),
+    (result) => {
+      setConfirmingReset(false);
+      props.onReset(result.token);
+    },
+  );
   const change = useAction((changes: { role?: Role; active?: boolean }) => api.updateUser(u.id, changes), props.onChanged);
   // A User an import brought in joins by accepting an invitation, keeping their role.
   const invite = useAction(() => api.invite({ email: u.email, role: u.role }), (result) => props.onInvited(result.token));
@@ -112,6 +148,7 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
         )}
         {change.error && <span className="error" role="alert"> {change.error}</span>}
         {invite.error && <span className="error" role="alert"> {invite.error}</span>}
+        {reset.error && <span className="error" role="alert"> {reset.error}</span>}
       </span>
       <select
         aria-label={`Role of ${u.name}`}
@@ -131,6 +168,23 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
         <Button variant="ghost" disabled={invite.busy} onClick={() => void invite.run()}>
           Invite
         </Button>
+      )}
+      {/* Users change their own password from the account menu; a deactivated User couldn't sign in with a new one. */}
+      {u.active && !props.isMe && (
+        <>
+          <Button variant="ghost" aria-label={`Reset password of ${u.name}`} disabled={reset.busy} onClick={() => setConfirmingReset(true)}>
+            Reset password
+          </Button>
+          <ConfirmDialog
+            open={confirmingReset}
+            onOpenChange={setConfirmingReset}
+            title={`Reset ${u.name}'s password?`}
+            description="This signs them out everywhere and gives you a link to pass on, which lets them choose a new password once within 7 days. Their Agents' Sessions keep running."
+            confirmLabel="Issue reset link"
+            busy={reset.busy}
+            onConfirm={() => void reset.run()}
+          />
+        </>
       )}
     </li>
   );
@@ -247,5 +301,67 @@ export function AcceptInvitationPage(props: { token: string; onDone: (user: User
         <Button type="submit" disabled={busy}>Join</Button>
       </form>
     </AuthCard>
+  );
+}
+
+/** Where a password reset link lands: sets a new password, then is signed in. */
+export function ResetPasswordPage(props: { token: string; onDone: (user: User) => void }) {
+  const [reset] = useLoad(() => api.passwordReset(props.token), [props.token]);
+  const [password, setPassword] = useState("");
+  const { submit, error, busy } = useSubmit(() => api.resetPassword(props.token, password), props.onDone);
+  if (reset.kind === "failed") {
+    return (
+      <AuthCard title="Reset link unavailable" intro="Ask an Admin for a new one.">
+        <p className="error" role="alert">{reset.message}</p>
+        <a className="link" href="/">Go to sign-in</a>
+      </AuthCard>
+    );
+  }
+  if (reset.kind === "loading") return null;
+  const r = reset.value;
+  return (
+    <AuthCard title="Choose a new password" intro={`For ${r.name} (${r.email}) in ${r.workspaceName}. The link works once.`}>
+      <form onSubmit={submit}>
+        <Field label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
+        {error && <p className="error" role="alert">{error}</p>}
+        <Button type="submit" disabled={busy}>Set password</Button>
+      </form>
+    </AuthCard>
+  );
+}
+
+/** The signed-in User's own account, at `/account`: who they are, and changing their password. */
+export function AccountPage(props: { me: User }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [password, setPassword] = useState("");
+  const [saved, setSaved] = useState(false);
+  const { submit, error, busy } = useSubmit(
+    () => {
+      setSaved(false);
+      return api.changePassword(currentPassword, password);
+    },
+    () => {
+      setCurrentPassword("");
+      setPassword("");
+      setSaved(true);
+    },
+  );
+  return (
+    <section className="panel">
+      <h1>Account</h1>
+      <p>
+        <Actor actor={userActor(props.me.name)} /> <span className="muted">{props.me.email} · {roleName(props.me.role)}</span>
+      </p>
+      <h2>Change password</h2>
+      <form onSubmit={submit}>
+        <Field label="Current password" type="password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
+        <Field label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="actions">
+          <Button type="submit" disabled={busy}>Change password</Button>
+          {saved && <span className="muted" role="status">Saved. Your other sign-ins have ended.</span>}
+        </div>
+      </form>
+    </section>
   );
 }
