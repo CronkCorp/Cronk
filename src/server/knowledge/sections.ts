@@ -484,11 +484,11 @@ export interface DecisionSide {
   supersedes: string[];
 }
 
-/** The three-way merge of a whole field: the side that changed it, or a conflict when both did, differently. */
-function mergeField<T>(base: T, mine: T, theirs: T, same: (a: T, b: T) => boolean): { merged: T } | { conflict: FieldConflict<T> } {
-  if (same(mine, theirs) || same(mine, base)) return { merged: theirs };
-  if (same(theirs, base)) return { merged: mine };
-  return { conflict: { base, mine, theirs } };
+/** The three-way merge of a whole field: the side that changed it, or null and a conflict when both did, differently. */
+function mergeField<T>(base: T, mine: T, theirs: T, same: (a: T, b: T) => boolean): { merged: T | null; conflict: FieldConflict<T> | null } {
+  if (same(mine, theirs) || same(mine, base)) return { merged: theirs, conflict: null };
+  if (same(theirs, base)) return { merged: mine, conflict: null };
+  return { merged: null, conflict: { base, mine, theirs } };
 }
 
 /**
@@ -500,14 +500,12 @@ export function mergeDecisionEdits(base: DecisionSide, mine: DecisionSide, their
   const merge = mergeEdits(base, mine, theirs);
   const group = mergeField(base.group, mine.group, theirs.group, (a, b) => a === b);
   const supersedes = mergeField(base.supersedes, mine.supersedes, theirs.supersedes, (a, b) => a.join("\n") === b.join("\n"));
-  const groupConflict = "conflict" in group ? group.conflict : null;
-  const supersedesConflict = "conflict" in supersedes ? supersedes.conflict : null;
   return {
     ...merge,
-    group: "merged" in group ? group.merged : null,
-    groupConflict,
-    supersedes: "merged" in supersedes ? supersedes.merged : null,
-    supersedesConflict,
-    conflicts: merge.conflicts + (groupConflict ? 1 : 0) + (supersedesConflict ? 1 : 0),
+    group: group.merged,
+    groupConflict: group.conflict,
+    supersedes: supersedes.merged,
+    supersedesConflict: supersedes.conflict,
+    conflicts: merge.conflicts + (group.conflict ? 1 : 0) + (supersedes.conflict ? 1 : 0),
   };
 }

@@ -672,7 +672,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         ...nullable(object({ base: nullable({ type: "string" }), mine: nullable({ type: "string" }), theirs: nullable({ type: "string" }) })),
         description: "Each side's group, set when both sides changed it differently.",
       },
-      supersedes: { ...nullable({ type: "array", items: { type: "string" } }), description: "The keys of the Decisions the merge supersedes; null when they conflict." },
+      supersedes: { ...nullable(keyList), description: "The keys of the Decisions the merge supersedes; null when they conflict." },
       supersedesConflict: {
         ...nullable(object({ base: keyList, mine: keyList, theirs: keyList })),
         description: "Each side's superseded Decisions, by key, set when both sides changed them differently; they merge as one field, never key by key.",
