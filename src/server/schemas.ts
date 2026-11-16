@@ -39,6 +39,7 @@ export type SharedSchemaName =
   | "Status"
   | "Ticket"
   | "TicketRef"
+  | "BlockingRef"
   | "Relations"
   | "RecordedChange"
   | "Activity"
@@ -454,11 +455,23 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "Another Ticket, as a Ticket lists it among its Sub-Tickets or relations.",
     ...object({ key: { type: "string" }, title: { type: "string" }, status: ref("Status") }),
   },
+  BlockingRef: {
+    description: "Another Ticket at the other end of a block, as a Ticket lists it among its relations.",
+    ...object({
+      key: { type: "string" },
+      title: { type: "string" },
+      status: ref("Status"),
+      block: {
+        ...nullable(object({ agent: { ...named, description: "The Agent that added it." }, reason: { type: "string" } })),
+        description: "Set on a block an Agent added from its own Discovered Ticket: the Agent that added it, and why. Null on any other block.",
+      },
+    }),
+  },
   Relations: {
     description: "A Ticket's relations to other Tickets, each list in key order.",
     ...object({
-      blocks: { type: "array", items: ref("TicketRef") },
-      blockedBy: { type: "array", items: ref("TicketRef") },
+      blocks: { type: "array", items: ref("BlockingRef") },
+      blockedBy: { type: "array", items: ref("BlockingRef") },
       relatesTo: { type: "array", items: ref("TicketRef") },
     }),
   },

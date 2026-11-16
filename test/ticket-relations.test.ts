@@ -59,7 +59,7 @@ describe("Ticket relations", () => {
 
     const one = (await admin.get("/api/tickets/CRONK-1")).body.relations;
     expect(keys(one.blocks)).toEqual(["CRONK-2", "CRONK-3"]);
-    expect(one.blockedBy).toEqual([{ key: "WEB-1", title: "Ticket 1", status: expect.objectContaining({ name: "Backlog" }) }]);
+    expect(one.blockedBy).toEqual([{ key: "WEB-1", title: "Ticket 1", status: expect.objectContaining({ name: "Backlog" }), block: null }]);
     expect(one.relatesTo).toEqual([]);
     const two = (await admin.get("/api/tickets/CRONK-2")).body.relations;
     expect(keys(two.blockedBy)).toEqual(["CRONK-1"]);

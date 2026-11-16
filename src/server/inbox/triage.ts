@@ -5,7 +5,7 @@ import { userActor } from "../actor.js";
 import { isWaitingDiscoverySql } from "../work/tickets.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
-import { asTicketItems, ENTERED_STATUS_AT, ticketItems, type DiscoveredItem, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
+import { asTicketItems, ENTERED_STATUS_AT, ticketItems, withBlocks, type DiscoveredItem, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
 
 /**
  * Triage: the shared list of waiting items with no clear User to go to. Each User sees the items they could
@@ -45,7 +45,7 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
     ...(wants("unverified") ? await unverified(db, projectIds) : []),
     ...(wants("unattended") ? await unattended(db, projectIds) : []),
     ...(wants("suggestion") ? await suggestions(db, user, projectIds, inWorkspace) : []),
-    ...(wants("discovered") ? await discovered(db, projectIds) : []),
+    ...(wants("discovered") ? await withBlocks(db, user, await discovered(db, projectIds)) : []),
   ];
   return items.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
@@ -59,7 +59,7 @@ function unverified(db: Queryable, projectIds: string[]): Promise<UnverifiedItem
  * The Discovered Tickets waiting in the Projects `projectIds` with no Assignee who can act on them: none, or one who is deactivated or
  * has no access to the Project (see `noAccessSql`). Any User with Write there may take one.
  */
-async function discovered(db: Queryable, projectIds: string[]): Promise<DiscoveredItem[]> {
+async function discovered(db: Queryable, projectIds: string[]): Promise<TicketItem<"discovered">[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
     `SELECT t.id, ${ENTERED_STATUS_AT} AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id LEFT JOIN users u ON u.id = t.assignee_id

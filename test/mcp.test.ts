@@ -283,6 +283,24 @@ describe("the tickets tool's Discovered Tickets", () => {
     await admin.patch("/api/tickets/CRONK-3", { delegateId: claude.agentId });
     expect((await callTool(mcp, "tickets", { action: "edit", key: "CRONK-3", title: "Again" })).isError).toBe(true);
   });
+
+  it("blocks other Tickets from the Agent's Discovered Ticket, when filing it or later, saying why", async () => {
+    const { cronk, admin, claude } = await delegatedSetup(2);
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const filed = await callTool(mcp, "tickets", { action: "file", project: "CRONK", title: "Orphans", blocks: ["CRONK-1"], reason: "Builds on the broken migration." });
+    expect(filed.isError).toBeFalsy();
+    expect(await callTool(mcp, "tickets", { action: "file", project: "CRONK", title: "No why", blocks: ["CRONK-1"] })).toEqual({
+      isError: true,
+      body: "The file action needs a reason for its blocks",
+    });
+    const related = await callTool(mcp, "tickets", { action: "relate", key: "CRONK-3", relation: "blocks", other: "CRONK-2", reason: "Same." });
+    expect(related.body.relations.blocks).toMatchObject([
+      { key: "CRONK-1", block: { reason: "Builds on the broken migration." } },
+      { key: "CRONK-2", block: { reason: "Same." } },
+    ]);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-3", block: { agent: { name: "claude-laptop" } } }]);
+  });
 });
 
 describe("the guidance tool", () => {

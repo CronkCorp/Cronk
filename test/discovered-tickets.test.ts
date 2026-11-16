@@ -79,7 +79,7 @@ describe("An Agent's own Discovered Ticket", () => {
     expect((await later.patch("/api/tickets/CRONK-2", { title: "Found: stale cache", description: "Details.", priority: "high", labels: ["bug"] })).status).toBe(200);
     expect((await later.upload("/api/tickets/CRONK-2/attachments?name=log.txt", Buffer.from("trace"), "text/plain")).status).toBe(201);
     expect((await later.post(`/api/tickets/CRONK-2/documents/${plan}`)).status).toBe(201);
-    // Relations still need the Claim: an Agent adds blocks from its Discovered Ticket as #167 describes.
+    // Other Relations still need the Claim: only blocks, with a reason, come from a Discovered Ticket without one.
     expect((await later.post("/api/tickets/CRONK-2/relations", { kind: "relates_to", ticketKey: "CRONK-1" })).status).toBe(409);
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket).toMatchObject({ title: "Found: stale cache", priority: "high", labels: ["bug"] });
 
