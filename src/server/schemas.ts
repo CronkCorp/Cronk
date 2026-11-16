@@ -517,7 +517,7 @@ const ERROR_MEANINGS = {
   401: "Not signed in, or the Agent token is unknown or revoked",
   403:
     "The caller may not do this: an Admin-only change, Read access where Write is needed, an Agent where only a User may act, " +
-    "or an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions)",
+    "an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions), or a signed-in write sent from another site",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",

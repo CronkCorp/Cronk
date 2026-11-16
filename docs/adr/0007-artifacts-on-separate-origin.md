@@ -5,4 +5,4 @@ Artifacts contain arbitrary code written by Agents, which may be buggy or steere
 ## Consequences
 
 - Every installation needs an extra hostname and certificate; setup docs and the Compose file add it with Artifacts in Phase 2 (Phase 1 ships neither).
-- A subdomain of Cronk's own domain is same-site with it, so cookies marked `SameSite=Lax` still reach it; whether to require a separate registrable domain or add an Origin check is settled in Phase 2.
+- A subdomain of Cronk's own domain is same-site with it, so cookies marked `SameSite=Lax` still reach it. Phase 2 settled this with an Origin check rather than a separate registrable domain: Cronk refuses signed-in writes whose `Origin` (or `Referer`) isn't its own, and marks the sign-in cookie `SameSite=Strict`, so a subdomain is enough.
