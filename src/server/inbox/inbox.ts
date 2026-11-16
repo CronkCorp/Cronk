@@ -18,7 +18,7 @@ import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge
  * Project items that they review (see `reviewerSql`). Suggestions on Workspace items go to Triage instead.
  */
 
-/** A Ticket waiting, with its Reports. `at` is when it entered its Status. */
+/** A Ticket waiting on someone, with its Reports. `at` is when it entered its Status. */
 export interface TicketItem<K extends string> {
   kind: K;
   at: Date;
@@ -194,18 +194,28 @@ export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
      ORDER BY at, p.key, t.number`,
     [which.assigneeId, which.projectIds],
   );
-  return withReports(db, kind, rows);
+  return asTicketItems(db, kind, rows);
 }
 
 /** When the Ticket `t` entered its Status, as SQL. */
 export const ENTERED_STATUS_AT =
   "COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at)";
 
-/** The Tickets with these ids as `kind` items, each with its Reports, in the order given. */
-export async function withReports<K extends string>(db: Queryable, kind: K, rows: { id: string; at: Date }[]): Promise<TicketItem<K>[]> {
-  const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
-  const at = new Map(rows.map((r) => [r.id, r.at]));
-  return Promise.all(tickets.map(async (ticket) => ({ kind, at: at.get(ticket.id)!, ticket, reports: await listTicketReports(db, ticket.id) })));
+/**
+ * The Tickets of these rows as `kind` items, each with its Reports and the row's other fields, in the order given.
+ */
+export async function asTicketItems<K extends string, R extends { id: string; at: Date }>(
+  db: Queryable,
+  kind: K,
+  rows: R[],
+): Promise<(TicketItem<K> & Omit<R, "id" | "at">)[]> {
+  const tickets = new Map((await findTicketsByIds(db, rows.map((r) => r.id))).map((t) => [t.id, t]));
+  return Promise.all(
+    rows.flatMap(({ id, at, ...rest }) => {
+      const ticket = tickets.get(id);
+      return ticket ? [listTicketReports(db, id).then((reports) => ({ ...rest, kind, at, ticket, reports }))] : [];
+    }),
+  );
 }
 
 /**

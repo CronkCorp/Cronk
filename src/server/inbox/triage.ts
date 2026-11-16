@@ -1,10 +1,10 @@
 import type { Queryable } from "../db/database.js";
-import { visibleProjects } from "../identity/access.js";
+import { noAccessSql, visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
-import { ENTERED_STATUS_AT, ticketItems, withReports, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
+import { asTicketItems, ENTERED_STATUS_AT, ticketItems, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
 
 /**
  * Triage: the shared list of waiting items with no clear User to go to. Each User sees the items they could
@@ -55,22 +55,19 @@ function unverified(db: Queryable, projectIds: string[]): Promise<UnverifiedItem
 
 /**
  * The unattended Tickets in the Projects `projectIds`: open, delegated or In Review, with an Assignee who is deactivated or
- * has no access to the Project, as `userAccess` in identity/access.ts resolves it (Admins have Write everywhere; a listed Member
- * has what is listed; otherwise an open Project gives Write and a private one nothing). `at` is when it entered its Status.
+ * has no access to the Project (see `noAccessSql`). `at` is when it entered its Status.
  */
 async function unattended(db: Queryable, projectIds: string[]): Promise<UnattendedItem[]> {
   const { rows } = await db.query<{ id: string; at: Date; reason: UnattendedReason }>(
     `SELECT t.id, ${ENTERED_STATUS_AT} AS at, CASE WHEN u.deactivated_at IS NOT NULL THEN 'deactivated' ELSE 'no_access' END AS reason
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id
-       LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = u.id
      WHERE t.project_id = ANY($1::uuid[]) AND s.category NOT IN ('completed', 'canceled')
        AND (t.delegate_id IS NOT NULL OR s.category = 'in_review')
-       AND (u.deactivated_at IS NOT NULL OR (u.role <> 'admin' AND m.user_id IS NULL AND p.visibility = 'private'))
+       AND (u.deactivated_at IS NOT NULL OR ${noAccessSql("u", "p")})
      ORDER BY at, p.key, t.number`,
     [projectIds],
   );
-  const reason = new Map(rows.map((r) => [r.id, r.reason]));
-  return (await withReports(db, "unattended", rows)).map((item) => ({ ...item, reason: reason.get(item.ticket.id)! }));
+  return asTicketItems(db, "unattended", rows);
 }
 
 /**
