@@ -24,6 +24,7 @@ import {
   deleteAttachment,
   findAttachment,
   insertAttachment,
+  listArtifactAttachments,
   listDocumentAttachments,
   listTicketAttachments,
   publicAttachment,
@@ -168,6 +169,23 @@ export function attachmentRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await documentFor(ctx.db, actor, request.params.id, "read");
         return { attachments: (await listDocumentAttachments(ctx.db, document.id)).map(publicAttachment) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/attachments",
+      {
+        schema: {
+          params: pathParams({ id: { type: "string", format: "uuid", description: "The Artifact's id." } }),
+          response: {
+            200: answer("Every Attachment in the Artifact's Comments, in the order they were attached", listing("attachments", ref("Attachment"))),
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const artifact = await artifactFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        return { attachments: (await listArtifactAttachments(ctx.db, artifact.id)).map(publicAttachment) };
       },
     );
 

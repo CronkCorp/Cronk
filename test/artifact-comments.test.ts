@@ -163,6 +163,8 @@ describe("Files attached to a Comment on an Artifact", () => {
     const attached = await admin.upload(`/api/comments/${comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain");
     expect(attached.status).toBe(201);
     expect(attached.body.attachment).toMatchObject({ on: "comment", commentId: comment.id, name: "phone.txt" });
+    expect((await admin.get(`/api/artifacts/${artifact.id}/attachments`)).body.attachments).toEqual([attached.body.attachment]);
+    expect((await bob.get(`/api/artifacts/${artifact.id}/attachments`)).status).toBe(404);
 
     const file = await admin.download(`/api/attachments/${attached.body.attachment.id}/file`);
     expect(file.status).toBe(200);

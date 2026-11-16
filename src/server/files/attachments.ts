@@ -136,6 +136,12 @@ export async function listDocumentAttachments(db: Queryable, documentId: string)
   return rows.map(toAttachment);
 }
 
+/** Every Attachment in an Artifact's Comments, in the order they were attached. */
+export async function listArtifactAttachments(db: Queryable, artifactId: string): Promise<Attachment[]> {
+  const { rows } = await db.query<AttachmentRow>(`${SELECT} WHERE ax.id = $1 ORDER BY x.at, x.seq`, [artifactId]);
+  return rows.map(toAttachment);
+}
+
 /** The ids of every Attachment on a Document, directly or in its Comments: those deleting it removes. */
 export async function documentAttachmentIds(db: Queryable, documentId: string): Promise<string[]> {
   const { rows } = await db.query<{ id: string }>(
