@@ -8,7 +8,7 @@ import type {
   AgentAccess,
   AgentSession,
   AgentToken,
-  AgentWork,
+  AgentRecordEntry,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -58,7 +58,7 @@ export type {
   AgentAccess,
   AgentSession,
   AgentToken,
-  AgentWork,
+  AgentRecordEntry,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -207,8 +207,9 @@ export const api = {
     request<{ tokens: AgentToken[] }>("GET", `/api/agents/${encodeURIComponent(id)}/tokens`).then((r) => r.tokens),
   issueAgentToken: (id: string, readOnly: boolean) =>
     request<IssuedAgentToken>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
-  /** What the Agent did, newest first, as far as the signed-in User may read. */
-  agentWork: (id: string) => request<{ work: AgentWork[] }>("GET", `/api/agents/${encodeURIComponent(id)}/work`).then((r) => r.work),
+  /** The Agent's record of what it did, newest first, as far as the signed-in User may read. */
+  agentRecord: (id: string) =>
+    request<{ record: AgentRecordEntry[] }>("GET", `/api/agents/${encodeURIComponent(id)}/record`).then((r) => r.record),
   revokeAgentToken: (id: string, tokenId: string) =>
     request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`),
 
@@ -331,8 +332,8 @@ export const api = {
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
 
-  ticketHistory: (key: string) =>
-    request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/history`).then((r) => r.changes),
+  ticketChanges: (key: string) =>
+    request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/changes`).then((r) => r.changes),
 };
 
 /** Narrows the Inbox: an item kind, a Project key, an Agent id. */

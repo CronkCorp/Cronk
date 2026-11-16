@@ -53,7 +53,7 @@ describe("Linking a Document to a Ticket", () => {
     expect((await agent.post(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(201);
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${plan}`)).status).toBe(200);
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.slice(-2)).toMatchObject([
       {
         change: "document linked",
@@ -99,7 +99,7 @@ describe("Document links and access", () => {
     expect(listed((await admin.get("/api/tickets/CRONK-1")).body.documents)).toEqual(["Runbook (linked)", "Secret notes (linked)"]);
     expect(listed((await bob.get("/api/tickets/CRONK-1")).body.documents)).toEqual(["Runbook (linked)"]);
     const titles = async (reader: typeof bob) =>
-      (await reader.get("/api/tickets/CRONK-1/history")).body.changes.filter((c: { document?: unknown }) => c.document).map((c: { change: string; document: { title: string } }) => `${c.change} ${c.document.title}`);
+      (await reader.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { document?: unknown }) => c.document).map((c: { change: string; document: { title: string } }) => `${c.change} ${c.document.title}`);
     expect(await titles(admin)).toEqual(["document linked Secret notes", "document linked Runbook", "document unlinked Secret notes", "document linked Secret notes"]);
     expect(await titles(bob)).toEqual(["document linked Runbook"]);
     expect((await bob.delete(`/api/tickets/CRONK-1/documents/${secret}`)).status).toBe(400);

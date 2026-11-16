@@ -137,7 +137,7 @@ describe("Statuses", () => {
     expect(names(await statuses(admin))).toEqual(["Backlog", "Todo", "In Progress", "In Review", "Shipped", "Canceled"]);
   });
 
-  it("in use are removed only by moving their Tickets to another Status, which their history records", async () => {
+  it("in use are removed only by moving their Tickets to another Status, which their Changes record", async () => {
     const { admin } = await startInstalledCronk();
     await createProject(admin, "CRONK");
     const qa = (await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" })).body.status;
@@ -167,8 +167,8 @@ describe("Statuses", () => {
       ["CRONK-2", "In Review"],
       ["CRONK-3", "Backlog"],
     ]);
-    const history = (await admin.get("/api/tickets/CRONK-1/history")).body.changes;
-    expect(history.at(-1)).toMatchObject({
+    const changes = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes;
+    expect(changes.at(-1)).toMatchObject({
       change: "status",
       actor: { name: "Ada" },
       from: { name: "In QA", category: "started" },

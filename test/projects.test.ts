@@ -103,7 +103,7 @@ describe("Projects", () => {
       await stranger.get("/api/projects/CRONK/tickets"),
       await stranger.get("/api/tickets/CRONK-1"),
       await stranger.patch("/api/tickets/CRONK-1", { title: "Pwned" }),
-      await stranger.get("/api/tickets/CRONK-1/history"),
+      await stranger.get("/api/tickets/CRONK-1/changes"),
     ]) {
       expect(res.status).toBe(401);
     }

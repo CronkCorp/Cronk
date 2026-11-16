@@ -29,7 +29,7 @@ import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { SearchResult } from "./search/search.js";
-import type { AgentWorkEntry } from "./coordination/agent-work.js";
+import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
 import type { QuestionItem, ReviewItem } from "./inbox/inbox.js";
 
 export type { Access, AgentAccess } from "./identity/access.js";
@@ -114,8 +114,8 @@ export type Activity = Serialized<ReturnType<typeof publicActivity>>;
 /** A message an Actor posted on a Ticket or a Document. */
 export type Comment = Serialized<ReturnType<typeof publicComment>>;
 
-/** One thing an Agent did: a change, an Activity, a Comment or a saved Version. */
-export type AgentWork = Serialized<AgentWorkEntry>;
+/** One entry in an Agent's record: a Change, an Activity, a Comment or a saved Version. */
+export type AgentRecordEntry = Serialized<StoredAgentRecordEntry>;
 
 /** A Comment waiting for an Agent, with why and what it is on. */
 export type WaitingWork = Serialized<StoredWaitingWork>;

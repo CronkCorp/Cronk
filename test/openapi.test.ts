@@ -56,10 +56,20 @@ describe("the OpenAPI description", () => {
     const body = (path: string, method: string, code: string) => doc.paths[path][method].responses[code].content["application/json"].schema;
     expect(body("/api/tickets/{key}", "get", "200").properties.ticket).toEqual({ $ref: "#/components/schemas/Ticket" });
     expect(body("/api/projects", "get", "200").properties.projects.items).toEqual({ $ref: "#/components/schemas/Project" });
-    const history = body("/api/tickets/{key}/history", "get", "200");
-    expect(history.properties.changes.items).toEqual({ $ref: "#/components/schemas/RecordedChange" });
+    const changes = body("/api/tickets/{key}/changes", "get", "200");
+    expect(changes.properties.changes.items).toEqual({ $ref: "#/components/schemas/RecordedChange" });
     expect(body("/api/agents", "post", "201").properties.agent).toEqual({ $ref: "#/components/schemas/Agent" });
+    expect(body("/api/agents/{id}/record", "get", "200").properties.record.items).toEqual({ $ref: "#/components/schemas/AgentRecordEntry" });
     expect(body("/api/workspace", "get", "200")).toEqual({ $ref: "#/components/schemas/Workspace" });
+  });
+
+  it("names an Agent's record and a Ticket's Changes as the glossary does", async () => {
+    const doc = await openapi();
+    expect(doc.components.schemas).not.toHaveProperty("AgentWork");
+    expect(doc.paths).not.toHaveProperty("/api/agents/{id}/work");
+    expect(doc.paths).not.toHaveProperty("/api/tickets/{key}/history");
+    expect(doc.components.schemas.RecordedChange.description).toMatch(/^One Change to a Ticket/);
+    expect(doc.components.schemas.RecordedChange.description).not.toMatch(/history/i);
   });
 
   it("describes the errors each operation can answer with the shared error shape", async () => {
@@ -103,6 +113,18 @@ describe("the OpenAPI description", () => {
     });
     const deleteParams = doc.paths["/api/documents/{id}"].delete.parameters.filter((p: { in: string }) => p.in === "query");
     expect(deleteParams).toEqual([expect.objectContaining({ name: "baseVersion", required: true })]);
+  });
+
+  it("says every write an Agent makes needs an Agent Session, and how a script starts and ends one", async () => {
+    const doc = await openapi();
+    expect(doc.info.description).toContain("POST /api/agent-sessions");
+    expect(doc.info.description).toContain("DELETE /api/agent-sessions/current");
+    expect(doc.info.description).toMatch(/[Rr]eads? .*without/);
+    for (const [label, op] of operations(doc)) {
+      // Starting a Session is the one change made outside one; routes anyone may call take no token.
+      if (label.startsWith("GET ") || op.security !== undefined || label === "POST /api/agent-sessions") continue;
+      expect(op.responses["403"]?.description, label).toMatch(/Agent Session/);
+    }
   });
 
   it("describes the archives imports take", async () => {

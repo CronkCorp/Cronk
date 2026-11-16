@@ -104,9 +104,9 @@ function UserRow(props: { user: User; isMe: boolean; onChanged: () => void; onIn
     <li className="row">
       <span className="grow">
         <Actor actor={userActor(u.name)} />
-        {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>
+        {props.isMe && <span className="muted"> (you)</span>} <span className="muted">{u.email}</span>{" "}
         {!u.joined ? (
-          <Chip>Imported, not signed in yet</Chip>
+          <Chip>Imported, hasn't joined yet</Chip>
         ) : (
           !u.active && <Chip>Deactivated</Chip>
         )}

@@ -260,6 +260,8 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await tokensDialog.getByRole("button", { name: "Issue full token" }).click();
   const token = await tokensDialog.getByLabel("New token").inputValue();
   await expect(tokensDialog.getByRole("button", { name: "Copy" })).toBeVisible();
+  // It also shows how a script changes things within an Agent Session, as an Agent must.
+  await expect(tokensDialog.getByLabel("Script using an Agent Session")).toHaveValue(/Cronk-Agent-Session/);
   await expect(tokensDialog.getByRole("list", { name: "Tokens of claude-laptop" })).toContainText("Full token");
   await tokensDialog.getByRole("button", { name: "Done" }).click();
   await expect(card).toContainText("1 token: full");
@@ -267,20 +269,23 @@ test("register an Agent, issue it a token, and see its change in a Ticket's hist
   await expect(tokensDialog.getByLabel("New token")).toHaveCount(0);
   await tokensDialog.getByRole("button", { name: "Done" }).click();
 
+  // Outside an Agent Session an Agent's token only reads.
+  const refused = await request.post("/api/projects/CRONK/tickets", { headers: { authorization: `Bearer ${token}` }, data: { title: "No Session" } });
+  expect(refused.status()).toBe(403);
+
+  // An Agent Session (one per MCP connection) shows on the Agents page and in the history of what it changed.
+  const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
+  expect(started.status()).toBe(201);
+  const session = (await started.json()).session.id as string;
   const created = await request.post("/api/projects/CRONK/tickets", {
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, "cronk-agent-session": session },
     data: { title: "Filed by an Agent" },
   });
   expect(created.status()).toBe(201);
   const { ticket } = await created.json();
 
   await page.goto(`/tickets/${ticket.key}`);
-  await expect(page.getByRole("list", { name: "Timeline" })).toContainText("claude-laptop for Ada created the Ticket");
-
-  // An Agent Session (one per MCP connection) shows on the Agents page and in the history of what it changed.
-  const started = await request.post("/api/agent-sessions", { headers: { authorization: `Bearer ${token}` } });
-  expect(started.status()).toBe(201);
-  const session = (await started.json()).session.id as string;
+  await expect(page.getByRole("list", { name: "Timeline" })).toContainText(/claude-laptop [a-z]+-[a-z]+ for Ada created the Ticket/);
   // Ada delegates the Ticket to her Agent, whose Session Claims it; the Ticket shows both.
   await page.goto(`/tickets/${ticket.key}`);
   await expect(page.getByTestId("ticket-claim")).toHaveCount(0);
