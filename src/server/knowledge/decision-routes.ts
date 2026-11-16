@@ -143,7 +143,9 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceClaimOf(tx, actor, scope.projectId, input.ticket, { noun: "Decision", refusedAction: "proposing a Decision from it" }, ctx.clock.now()));
+      const now = ctx.clock.now();
+      const source = await sourceClaimOf(tx, actor, { projectId: scope.projectId, ticketKey: input.ticket, now }, { noun: "Decision", refusedAction: "proposing a Decision from it" });
+      const decision = await insertDecision(tx, scope, content, actor, now, source);
       return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
     };
 

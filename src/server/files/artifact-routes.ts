@@ -100,7 +100,7 @@ export function artifactRoutes(ctx: AppContext) {
     const create = (actor: Actor, projectId: string | null, body: unknown, query: PublishQuery) =>
       publish(actor, body, async (tx, files) => {
         const now = ctx.clock.now();
-        const source = await sourceClaimOf(tx, actor, projectId, query.ticket, SOURCE, now);
+        const source = await sourceClaimOf(tx, actor, { projectId, ticketKey: query.ticket, now }, SOURCE);
         return insertArtifact(
           tx,
           { workspaceId: actingUser(actor).workspaceId, projectId },
@@ -177,7 +177,7 @@ export function artifactRoutes(ctx: AppContext) {
             );
           }
           const now = ctx.clock.now();
-          const source = await sourceClaimOf(tx, actor, current.projectId, request.query.ticket, SOURCE, now);
+          const source = await sourceClaimOf(tx, actor, { projectId: current.projectId, ticketKey: request.query.ticket, now }, SOURCE);
           const title = request.query.title?.trim() ?? current.title;
           return insertArtifactVersion(tx, current, { title, actor, sourceTicketId: source?.ticketId ?? null, files, now });
         });

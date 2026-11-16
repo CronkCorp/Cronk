@@ -6,7 +6,7 @@ import { listSessionClaims, requireClaimHolder, type SessionClaim } from "./clai
 
 /**
  * The Claim an Agent made something from, such as a Decision it proposed or an Artifact it published, in the Project
- * `projectId` (null for the Workspace): that of the Ticket `key` names, which its Agent Session must hold, or else the
+ * `from.projectId` (null for the Workspace): that of the Ticket `from.ticketKey` names, which its Agent Session must hold, or else the
  * one Claim it holds whose Ticket fits. A Ticket fits when everyone who can read the thing can read it: it is of the
  * thing's Project, or, for a thing of the Workspace, of an open Project. None for a User, who may not name one.
  * `noun` names the thing in refusals, such as "Decision", and `refusedAction` completes "Claim CRONK-1 in your Agent
@@ -15,12 +15,11 @@ import { listSessionClaims, requireClaimHolder, type SessionClaim } from "./clai
 export async function sourceClaimOf(
   tx: Queryable,
   actor: Actor,
-  projectId: string | null,
-  key: string | undefined,
+  from: { projectId: string | null; ticketKey: string | undefined; now: Date },
   what: { noun: string; refusedAction: string },
-  now: Date,
 ): Promise<SessionClaim | null> {
   const { noun } = what;
+  const { projectId, ticketKey: key, now } = from;
   if (actor.kind === "user") {
     if (key !== undefined) throw new HttpError(400, `Only an Agent names the Ticket a ${noun} came from, as the one it holds the Claim on`);
     return null;

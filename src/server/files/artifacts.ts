@@ -23,6 +23,19 @@ export interface Artifact {
   latest: ArtifactVersion;
 }
 
+/** Where an Artifact belongs: a Project of the Workspace, or the Workspace itself when `projectId` is null. */
+export interface ArtifactPlace {
+  workspaceId: string;
+  projectId: string | null;
+}
+
+/** An Artifact as a publish names it: its id, Workspace and latest Version. */
+export interface ArtifactRef {
+  id: string;
+  workspaceId: string;
+  version: number;
+}
+
 /** One publish of an Artifact, without its files. */
 export interface ArtifactVersion {
   number: number;
@@ -125,7 +138,7 @@ export async function findArtifact(db: Queryable, workspaceId: string, id: strin
 }
 
 /** The Artifacts of a Project, or of the Workspace outside any Project, most recently published first. */
-export async function listArtifacts(db: Queryable, place: { workspaceId: string; projectId: string | null }): Promise<Artifact[]> {
+export async function listArtifacts(db: Queryable, place: ArtifactPlace): Promise<Artifact[]> {
   const { rows } = await db.query<ArtifactRow>(
     `${ARTIFACT_SELECT} WHERE x.workspace_id = $1 AND x.project_id IS NOT DISTINCT FROM $2 ORDER BY x.updated_at DESC, x.id`,
     [place.workspaceId, place.projectId],
@@ -185,15 +198,15 @@ export interface Publish {
 }
 
 /** Creates an Artifact in a Project or the Workspace with `publish` as its Version 1. Run inside a transaction. */
-export async function insertArtifact(db: Queryable, place: { workspaceId: string; projectId: string | null }, publish: Publish): Promise<Artifact> {
+export async function insertArtifact(db: Queryable, place: ArtifactPlace, publish: Publish): Promise<Artifact> {
   return insertArtifactVersion(db, await insertArtifactRow(db, { ...place, title: publish.title, now: publish.now }), publish);
 }
 
 /** Creates an Artifact with no Version yet, as an import does before adding the Versions it holds. Run inside a transaction. */
 export async function insertArtifactRow(
   db: Queryable,
-  input: { id?: string; workspaceId: string; projectId: string | null; title: string; now: Date },
-): Promise<{ id: string; workspaceId: string; version: number }> {
+  input: ArtifactPlace & { id?: string; title: string; now: Date },
+): Promise<ArtifactRef> {
   const { rows } = await db.query<{ id: string }>(
     "INSERT INTO artifacts (id, workspace_id, project_id, title, created_at, updated_at) VALUES (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $5) RETURNING id",
     [input.id ?? null, input.workspaceId, input.projectId, input.title, input.now],
@@ -207,7 +220,7 @@ export async function insertArtifactRow(
  */
 export async function insertArtifactVersion(
   db: Queryable,
-  artifact: { id: string; workspaceId: string; version: number },
+  artifact: ArtifactRef,
   publish: Publish,
   number = artifact.version + 1,
 ): Promise<Artifact> {
@@ -230,22 +243,17 @@ export async function insertArtifactVersion(
   return (await findArtifact(db, artifact.workspaceId, artifact.id))!;
 }
 
-async function findArtifactRow(db: Queryable, id: string): Promise<{ id: string; workspaceId: string; version: number } | undefined> {
-  const { rows } = await db.query<{ id: string; workspace_id: string; version: number }>("SELECT id, workspace_id, version FROM artifacts WHERE id = $1", [id]);
-  return rows[0] && { id: rows[0].id, workspaceId: rows[0].workspace_id, version: rows[0].version };
-}
-
 /** The secret the Workspace's Artifact addresses are signed with. */
 export async function artifactSigningKey(db: Queryable, workspaceId: string): Promise<string> {
   const { rows } = await db.query<{ artifact_signing_key: string }>("SELECT artifact_signing_key FROM workspaces WHERE id = $1", [workspaceId]);
   return rows[0]!.artifact_signing_key;
 }
 
-/** The Workspace an Artifact belongs to, and its latest Version, looked up by id alone, as the Artifact hostname must. */
-export async function findArtifactAnywhere(db: Queryable, id: string): Promise<{ workspaceId: string; version: number } | undefined> {
+/** An Artifact's Workspace and latest Version, looked up by id alone, as the Artifact hostname must, having no caller to ask. */
+export async function findArtifactAnywhere(db: Queryable, id: string): Promise<ArtifactRef | undefined> {
   if (!UUID.test(id)) return undefined;
-  const row = await findArtifactRow(db, id);
-  return row && { workspaceId: row.workspaceId, version: row.version };
+  const { rows } = await db.query<{ id: string; workspace_id: string; version: number }>("SELECT id, workspace_id, version FROM artifacts WHERE id = $1", [id]);
+  return rows[0] && { id: rows[0].id, workspaceId: rows[0].workspace_id, version: rows[0].version };
 }
 
 /** How many files every Version of the Workspace's Artifacts holds, and how many bytes they take. */
