@@ -161,9 +161,10 @@ export async function wasEverDelegated(db: Queryable, ticketId: string): Promise
   return rowCount !== 0;
 }
 
-/** Records a User's Keep in Backlog of a Discovered Ticket, which settles it; returns the Ticket as kept. */
-export async function keepDiscovery(db: Queryable, ticket: Ticket, now: Date): Promise<Ticket> {
+/** Records a User's Keep in Backlog of a Discovered Ticket, which settles it, in its history too; returns the Ticket as kept. */
+export async function keepDiscovery(db: Queryable, ticket: Ticket, actor: Actor, now: Date): Promise<Ticket> {
   await db.query("UPDATE tickets SET discovery_kept = true, updated_at = $2 WHERE id = $1", [ticket.id, now]);
+  await recordChange(db, ticket.id, actor, now, { change: "kept" });
   return (await findTicketById(db, ticket.id))!;
 }
 
@@ -415,6 +416,8 @@ export type TicketChange =
   | { change: "parent"; from: TicketName | null; to: TicketName | null }
   | { change: "autonomous"; from: boolean; to: boolean }
   | { change: "verification"; from: Verification | null; to: Verification | null }
+  /** A User kept a Discovered Ticket in Backlog. */
+  | { change: "kept" }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
   | { change: "document linked" | "document unlinked"; document: DocumentName };
 

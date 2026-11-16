@@ -883,7 +883,7 @@ export function workRoutes(ctx: AppContext) {
         const ticket = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (!isAwaitingDecision(ticket)) throw new HttpError(409, `${ticket.key} isn't a Discovered Ticket waiting in Backlog, so there is nothing to keep`);
-          return keepDiscovery(tx, ticket, ctx.clock.now());
+          return keepDiscovery(tx, ticket, actor, ctx.clock.now());
         });
         waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         ticketsChanged(ctx.live, [ticket]);

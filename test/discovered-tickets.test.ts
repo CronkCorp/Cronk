@@ -154,6 +154,9 @@ describe("Discovered Tickets in the Inbox", () => {
     const kept = await admin.post("/api/tickets/CRONK-3/keep");
     expect(kept.status).toBe(200);
     expect(kept.body.ticket).toMatchObject({ status: { category: "backlog" }, delegate: null, discovered: { kept: true } });
+    // Keeping it is recorded in its history, as the User's.
+    const { changes } = (await admin.get("/api/tickets/CRONK-3/changes")).body;
+    expect(changes.at(-1)).toMatchObject({ change: "kept", actor: { kind: "user", name: "Ada" } });
     expect((await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "canceled") })).status).toBe(200);
 
     expect(await waiting(admin)).toEqual([]);

@@ -471,7 +471,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification", "kept"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
         ],
@@ -493,6 +493,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
       object({ change: { const: "autonomous" }, from: { type: "boolean" }, to: { type: "boolean" } }),
       object({ change: { const: "verification" }, from: nullable({ type: "string", enum: VERIFICATIONS }), to: nullable({ type: "string", enum: VERIFICATIONS }) }),
+      { ...object({ change: { const: "kept" } }), description: "A User kept a Discovered Ticket in Backlog." },
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },

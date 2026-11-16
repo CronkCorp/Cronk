@@ -368,6 +368,8 @@ export function describeChange(change: RecordedChange): ReactNode {
       if (change.to === "unverified") return "completed it on its own, Unverified until a User Accepts it";
       if (change.to === "verified") return "Accepted the completion";
       return "ended its Verification";
+    case "kept":
+      return "kept it in Backlog";
   }
 }
 
