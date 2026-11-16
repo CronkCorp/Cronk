@@ -127,6 +127,19 @@ describe("An Agent Session's event stream", () => {
     expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
   });
 
+  it("tells the Agent of its Tickets that a removed In Review Status moves back into Started work", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const checking = (await admin.post("/api/projects/CRONK/statuses", { name: "Checking", category: "in_review" })).body.status;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: checking.id });
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const started = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "started").id;
+    expect((await admin.delete(`/api/projects/CRONK/statuses/${checking.id}?moveTo=${started}`)).status).toBe(204);
+    expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
+  });
+
   it("leaves a read-only token's Agent Sessions out, as they can't Claim anything", async () => {
     const { cronk, admin, claude } = await undelegatedSetup();
     const readOnly = await startSession(cronk, (await admin.post(`/api/agents/${claude.agentId}/tokens`, { readOnly: true })).body.secret);

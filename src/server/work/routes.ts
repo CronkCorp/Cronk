@@ -18,7 +18,7 @@ import {
 } from "../schemas.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
 import { addRelation, listRelations, removeRelation } from "./relations.js";
-import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
+import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
@@ -382,8 +382,11 @@ export function workRoutes(ctx: AppContext) {
           let mayBecomeReady: string[] = [];
           let readyBefore = new Map<string, string>();
           if (target) {
-            // Moving Tickets into or out of finished work may make them, or the Tickets they block, Ready.
-            if (FINISHED_CATEGORIES.includes(status.category) !== FINISHED_CATEGORIES.includes(target.category)) {
+            // Moving Tickets out of review, or into or out of finished work, may make them, or the Tickets they block, Ready.
+            if (
+              WORKABLE_CATEGORIES.includes(status.category) !== WORKABLE_CATEGORIES.includes(target.category) ||
+              FINISHED_CATEGORIES.includes(status.category) !== FINISHED_CATEGORIES.includes(target.category)
+            ) {
               const ids = (await listTickets(tx, project.id, { statusIds: [status.id] })).map((t) => t.id);
               mayBecomeReady = [...ids, ...(await ticketsBlockedBy(tx, ids))];
               readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
