@@ -168,27 +168,27 @@ async function openQuestions(db: Queryable, user: User, projectIds: string[]): P
 }
 
 function reviews(db: Queryable, user: User, projectIds: string[]): Promise<ReviewItem[]> {
-  return assignedTickets(db, user, projectIds, "s.category = 'in_review'", "review");
+  return ticketItems(db, "t.assignee_id = $1 AND s.category = 'in_review' AND t.project_id = ANY($2::uuid[])", [user.id, projectIds], "review");
 }
 
 function unverified(db: Queryable, user: User, projectIds: string[]): Promise<UnverifiedItem[]> {
-  return assignedTickets(db, user, projectIds, "t.verification = 'unverified'", "unverified");
+  return ticketItems(db, `t.assignee_id = $1 AND ${UNVERIFIED} AND t.project_id = ANY($2::uuid[])`, [user.id, projectIds], "unverified");
 }
 
-/** The Tickets `user` is Assignee of that match `where`, each with its Reports, at when it entered its Status. */
-async function assignedTickets<K extends "review" | "unverified">(
-  db: Queryable,
-  user: User,
-  projectIds: string[],
-  where: string,
-  kind: K,
-): Promise<TicketItem<K>[]> {
+/** SQL for whether the Ticket aliased `t` is an Unverified completion. */
+export const UNVERIFIED = "t.verification = 'unverified'";
+
+/**
+ * The Tickets, as `t` with their Status as `s`, that match `where` with `params`, each with its Reports, at when it
+ * entered its Status, oldest first.
+ */
+export async function ticketItems<K extends "review" | "unverified">(db: Queryable, where: string, params: unknown[], kind: K): Promise<TicketItem<K>[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
     `SELECT t.id, COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at) AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id
-     WHERE t.assignee_id = $1 AND ${where} AND t.project_id = ANY($2::uuid[])
+     WHERE ${where}
      ORDER BY at, p.key, t.number`,
-    [user.id, projectIds],
+    params,
   );
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
   const at = new Map(rows.map((r) => [r.id, r.at]));
