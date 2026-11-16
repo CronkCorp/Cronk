@@ -58,7 +58,7 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
-  | "AgentWork";
+  | "AgentRecordEntry";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -268,7 +268,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   RecordedChange: {
-    description: "One change in a Ticket's history. `change` says which; the other fields depend on it.",
+    description: "One Change to a Ticket: `change` says which; the other fields depend on it.",
     ...object({
       at: timestamp,
       actor: { ...recordedActor, description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in." },
@@ -455,19 +455,19 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       sections: mergedSections("Markdown"),
     }),
   },
-  AgentWork: {
-    description: "One thing an Agent did. `kind` says which; the field named after it holds what, and the other three are null.",
+  AgentRecordEntry: {
+    description: "One entry in an Agent's record: one thing it did. `kind` says which; the field named after it holds what, and the other three are null.",
     ...object({
-      kind: { type: "string", enum: ["change", "activity", "comment", "version"], description: "A change to a Ticket, an Activity, a Comment or a saved Version." },
+      kind: { type: "string", enum: ["change", "activity", "comment", "version"], description: "A Change to a Ticket, an Activity, a Comment or a saved Version." },
       at: timestamp,
-      session: { ...nullable(object({ id })), description: "The Agent Session it was done in; null for imported history that names none." },
+      session: { ...nullable(object({ id })), description: "The Agent Session it was done in; null for an imported entry that names none." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for a Document in the Workspace outside any Project." },
-      ticket: { ...nullable(ticketName), description: "The Ticket it was on: a change's, Activity's or Comment's, or a Report's." },
+      ticket: { ...nullable(ticketName), description: "The Ticket it was on: a Change's, Activity's or Comment's, or a Report's." },
       document: {
         ...nullable(object({ id, title: { type: "string" } })),
         description: "The Document or Report it was on, for a Comment or a saved Version.",
       },
-      change: { ...nullable(ref("RecordedChange")), description: "A change it made to the Ticket." },
+      change: { ...nullable(ref("RecordedChange")), description: "A Change it made to the Ticket." },
       activity: {
         ...nullable(object({ id, kind: { type: "string", enum: ACTIVITY_KINDS }, body: { type: "string" }, blocking: { type: "boolean" } })),
         description: "An Activity it logged; the body is Markdown.",

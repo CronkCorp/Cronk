@@ -46,7 +46,7 @@ import {
   findTicketByKey,
   findTicketsByIds,
   insertTicket,
-  listHistory,
+  listChanges,
   listLabels,
   moveTicketsBetweenStatuses,
   wouldNestUnderItself,
@@ -62,7 +62,7 @@ import {
 import { findAgent } from "../identity/agents.js";
 import { clearClaim, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
-import { ticketDetail, ticketDetailSchema, ticketFor, visibleHistory, visibleRelations } from "./ticket-reads.js";
+import { ticketDetail, ticketDetailSchema, ticketFor, visibleChanges, visibleRelations } from "./ticket-reads.js";
 import { inboxesChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
 import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
@@ -759,13 +759,13 @@ export function workRoutes(ctx: AppContext) {
     );
 
     app.get<{ Params: { key: string } }>(
-      "/api/tickets/:key/history",
+      "/api/tickets/:key/changes",
       {
         schema: {
           params: ticketParams,
           response: {
             200: answer(
-              "The Ticket's history, oldest first, leaving out relations to Tickets and links to Documents the caller can't see",
+              "The Ticket's Changes, oldest first, leaving out Relations to Tickets and links to Documents the caller can't see",
               listing("changes", ref("RecordedChange")),
             ),
             ...errors(401, 404, 410),
@@ -775,7 +775,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const ticket = await ticketFor(ctx.db, actor, request.params.key, "read");
-        return { changes: await visibleHistory(ctx.db, actor, await listHistory(ctx.db, ticket.id)) };
+        return { changes: await visibleChanges(ctx.db, actor, await listChanges(ctx.db, ticket.id)) };
       },
     );
   };

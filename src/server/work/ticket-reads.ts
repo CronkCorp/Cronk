@@ -70,10 +70,10 @@ export async function visibleRelations(db: Queryable, actor: Actor, relations: R
 }
 
 /**
- * A Ticket's history, leaving out Relation changes with Tickets of Projects `actor` can't see, and
+ * A Ticket's Changes, leaving out Relation Changes with Tickets of Projects `actor` can't see, and
  * Document links to Documents of places they can't read.
  */
-export async function visibleHistory(db: Queryable, actor: Actor, changes: RecordedChange[]): Promise<RecordedChange[]> {
+export async function visibleChanges(db: Queryable, actor: Actor, changes: RecordedChange[]): Promise<RecordedChange[]> {
   const keys = await visibleProjectKeys(db, actor);
   const workspaceReadable = await canRead(db, actor, null);
   return changes.filter((c) => {
