@@ -25,7 +25,7 @@ import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { documentFor } from "./document-reads.js";
 import { deleteDocument, findDocument, findProtectedUnder, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
-import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
+import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
@@ -493,7 +493,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       { schema: { params: documentParams, response: { 200: protectionHistoryAnswer, ...errors(400, 401, 403, 404, 410) } } },
       async (request) => {
         const document = await documentFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
-        return { changes: await listProtectionChanges(ctx.db, { kind: "document", id: document.id }) };
+        return { markings: await listProtectionMarkings(ctx.db, { kind: "document", id: document.id }) };
       },
     );
 

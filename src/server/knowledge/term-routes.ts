@@ -7,7 +7,7 @@ import { answer, errors, holding, listing, noContent, pathParams, projectKeyPara
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
-import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
+import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 import {
   deleteTerm,
   findProtectedWorkspaceTerm,
@@ -337,7 +337,7 @@ export function termRoutes(ctx: AppContext) {
       { schema: { params: termParams, response: { 200: protectionHistoryAnswer, ...errors(401, 403, 404, 410) } } },
       async (request) => {
         const term = await termFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
-        return { changes: await listProtectionChanges(ctx.db, { kind: "term", id: term.id }) };
+        return { markings: await listProtectionMarkings(ctx.db, { kind: "term", id: term.id }) };
       },
     );
 

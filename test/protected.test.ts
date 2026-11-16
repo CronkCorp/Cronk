@@ -21,7 +21,7 @@ describe("marking a Document Protected", () => {
 
     const history = await admin.get(`/api/documents/${document.id}/protection`);
     expect(history.status).toBe(200);
-    expect(history.body.changes).toEqual([
+    expect(history.body.markings).toEqual([
       { protected: false, at: "2026-01-01T09:02:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
       { protected: true, at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
     ]);
@@ -35,7 +35,7 @@ describe("marking a Document Protected", () => {
     await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
     await admin.post(`/api/workspace/documents`, { title: "Other" });
 
-    expect((await admin.get(`/api/documents/${document.id}/protection`)).body.changes).toHaveLength(1);
+    expect((await admin.get(`/api/documents/${document.id}/protection`)).body.markings).toHaveLength(1);
   });
 
   it("is refused to a User with only Read, and to Agents", async () => {
@@ -178,7 +178,7 @@ describe("a Protected Term", () => {
     expect(marked.body.term).toMatchObject({ protected: true, version: 1 });
     expect((await admin.get("/api/projects/CRONK/terms")).body.terms[0].protected).toBe(true);
     expect((await agent.post(`/api/terms/${term.id}/protection`, { protected: false })).status).toBe(403);
-    expect((await admin.get(`/api/terms/${term.id}/protection`)).body.changes).toEqual([
+    expect((await admin.get(`/api/terms/${term.id}/protection`)).body.markings).toEqual([
       { protected: true, at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
     ]);
   });
@@ -216,7 +216,7 @@ describe("a Protected Decision", () => {
     const accepted = await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
     expect(accepted.body.decision.protected).toBe(true);
     expect((await admin.get("/api/projects/CRONK/decisions")).body.decisions[0].protected).toBe(true);
-    expect((await admin.get("/api/decisions/CRONK-D1/protection")).body.changes).toEqual([
+    expect((await admin.get("/api/decisions/CRONK-D1/protection")).body.markings).toEqual([
       { protected: true, at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
     ]);
 
@@ -257,17 +257,17 @@ describe("upgrading an installation with accepted Decisions", () => {
 
     await cronk.undoMigration(
       "0026_protected",
-      `DROP TABLE protection_changes;
+      `DROP TABLE protection_markings;
        ALTER TABLE documents DROP COLUMN protected; ALTER TABLE terms DROP COLUMN protected; ALTER TABLE decisions DROP COLUMN protected`,
     );
     await cronk.restart();
 
     expect((await admin.get("/api/decisions/CRONK-D1")).body.decision.protected).toBe(true);
-    expect((await admin.get("/api/decisions/CRONK-D1/protection")).body.changes).toEqual([
+    expect((await admin.get("/api/decisions/CRONK-D1/protection")).body.markings).toEqual([
       { protected: true, at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: graceId, name: "Grace" } },
     ]);
     expect((await admin.get("/api/decisions/CRONK-D2")).body.decision.protected).toBe(false);
-    expect((await admin.get("/api/decisions/CRONK-D2/protection")).body.changes).toEqual([]);
+    expect((await admin.get("/api/decisions/CRONK-D2/protection")).body.markings).toEqual([]);
   });
 });
 

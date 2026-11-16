@@ -70,7 +70,7 @@ export type SharedSchemaName =
   | "TermVersion"
   | "StaleTermVersion"
   | "RenamedId"
-  | "ProtectionChange"
+  | "ProtectionMarking"
   | "Attachment"
   | "AvoidedWord";
 
@@ -500,7 +500,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       updatedAt: timestamp,
     }),
   },
-  ProtectionChange: {
+  ProtectionMarking: {
     description: "One marking or unmarking of an item as Protected, with the User who did it.",
     ...object({
       protected: { type: "boolean", description: "True when it was marked, false when unmarked." },
@@ -812,5 +812,5 @@ export const protectionBody = {
 /** An item's protection history, newest first. */
 export const protectionHistoryAnswer = answer(
   "Each time a User marked it Protected or unmarked it, newest first",
-  listing("changes", ref("ProtectionChange")),
+  listing("markings", ref("ProtectionMarking")),
 );

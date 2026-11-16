@@ -646,7 +646,7 @@ export const migrations: Migration[] = [
       ALTER TABLE decisions ADD COLUMN protected boolean NOT NULL DEFAULT false;
 
       -- Every time a User marked or unmarked an item, its protection history. Exactly one item column is set.
-      CREATE TABLE protection_changes (
+      CREATE TABLE protection_markings (
         id bigserial PRIMARY KEY,
         document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
         term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
@@ -656,12 +656,12 @@ export const migrations: Migration[] = [
         actor_user_id uuid NOT NULL REFERENCES users(id),
         CHECK (num_nonnulls(document_id, term_id, decision_id) = 1)
       );
-      CREATE INDEX protection_changes_document ON protection_changes (document_id) WHERE document_id IS NOT NULL;
-      CREATE INDEX protection_changes_term ON protection_changes (term_id) WHERE term_id IS NOT NULL;
-      CREATE INDEX protection_changes_decision ON protection_changes (decision_id) WHERE decision_id IS NOT NULL;
+      CREATE INDEX protection_markings_document ON protection_markings (document_id) WHERE document_id IS NOT NULL;
+      CREATE INDEX protection_markings_term ON protection_markings (term_id) WHERE term_id IS NOT NULL;
+      CREATE INDEX protection_markings_decision ON protection_markings (decision_id) WHERE decision_id IS NOT NULL;
 
       -- Accepted Decisions are Protected by default: mark those already accepted, as by the User who accepted them, then.
-      INSERT INTO protection_changes (decision_id, protected, at, actor_user_id)
+      INSERT INTO protection_markings (decision_id, protected, at, actor_user_id)
       SELECT d.id, true, v.at, v.actor_user_id
       FROM decisions d JOIN decision_versions v ON v.decision_id = d.id
       WHERE d.status = 'accepted'

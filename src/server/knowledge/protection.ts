@@ -10,65 +10,58 @@ import type { Queryable } from "../db/database.js";
 
 /** An item that can be marked Protected. */
 export type ProtectableKind = "document" | "term" | "decision";
+/** One item that can be marked Protected, by its kind and id. */
 export interface ProtectableItem {
   kind: ProtectableKind;
   id: string;
 }
 
 const TABLE: Record<ProtectableKind, string> = { document: "documents", term: "terms", decision: "decisions" };
-const COLUMN: Record<ProtectableKind, string> = { document: "document_id", term: "term_id", decision: "decision_id" };
+/** The column of `protection_markings` naming each kind of item. */
+export const PROTECTION_COLUMN: Record<ProtectableKind, string> = { document: "document_id", term: "term_id", decision: "decision_id" };
 
-/** One marking or unmarking of an item, with the User who did it. */
-export interface ProtectionChange {
+/** One marking of an item as Protected, or unmarking, with the User who did it. */
+export interface ProtectionMarking {
   protected: boolean;
   at: Date;
   actor: RecordedActor & { kind: "user" };
 }
 
 /**
- * Marks the item Protected, or unmarks it, as a change by the User `userId`, and records it in the item's
+ * Marks the item Protected, or unmarks it, by the User `userId`, and records it in the item's
  * protection history; returns false, recording nothing, when it already was as asked.
  */
-export async function setProtected(db: Queryable, item: ProtectableItem, value: boolean, userId: string, at: Date): Promise<boolean> {
-  const { rowCount } = await db.query(`UPDATE ${TABLE[item.kind]} SET protected = $2 WHERE id = $1 AND protected <> $2`, [item.id, value]);
+export async function setProtected(db: Queryable, item: ProtectableItem, marked: boolean, userId: string, at: Date): Promise<boolean> {
+  const { rowCount } = await db.query(`UPDATE ${TABLE[item.kind]} SET protected = $2 WHERE id = $1 AND protected <> $2`, [item.id, marked]);
   if (rowCount === 0) return false;
-  await insertProtectionChange(db, item, { protected: value, at, userId });
+  await insertProtectionMarking(db, item, { protected: marked, at, userId });
   return true;
 }
 
 /** Sets the item's mark as given without recording it, as an import does before writing the history it holds. */
-export async function setProtectedFlag(db: Queryable, item: ProtectableItem, value: boolean): Promise<void> {
-  await db.query(`UPDATE ${TABLE[item.kind]} SET protected = $2 WHERE id = $1`, [item.id, value]);
+export async function setProtectedFlag(db: Queryable, item: ProtectableItem, marked: boolean): Promise<void> {
+  await db.query(`UPDATE ${TABLE[item.kind]} SET protected = $2 WHERE id = $1`, [item.id, marked]);
 }
 
 /** Records one marking or unmarking in an item's protection history, as an import writes it; changes no mark. */
-export async function insertProtectionChange(db: Queryable, item: ProtectableItem, change: { protected: boolean; at: Date; userId: string }): Promise<void> {
-  await db.query(`INSERT INTO protection_changes (${COLUMN[item.kind]}, protected, at, actor_user_id) VALUES ($1, $2, $3, $4)`, [
+export async function insertProtectionMarking(db: Queryable, item: ProtectableItem, marking: { protected: boolean; at: Date; userId: string }): Promise<void> {
+  await db.query(`INSERT INTO protection_markings (${PROTECTION_COLUMN[item.kind]}, protected, at, actor_user_id) VALUES ($1, $2, $3, $4)`, [
     item.id,
-    change.protected,
-    change.at,
-    change.userId,
+    marking.protected,
+    marking.at,
+    marking.userId,
   ]);
 }
 
 /** An item's protection history, newest first. */
-export async function listProtectionChanges(db: Queryable, item: ProtectableItem): Promise<ProtectionChange[]> {
+export async function listProtectionMarkings(db: Queryable, item: ProtectableItem): Promise<ProtectionMarking[]> {
   const { rows } = await db.query<{ protected: boolean; at: Date; user_id: string; user_name: string }>(
     `SELECT c.protected, c.at, u.id AS user_id, u.name AS user_name
-     FROM protection_changes c JOIN users u ON u.id = c.actor_user_id
-     WHERE c.${COLUMN[item.kind]} = $1 ORDER BY c.id DESC`,
+     FROM protection_markings c JOIN users u ON u.id = c.actor_user_id
+     WHERE c.${PROTECTION_COLUMN[item.kind]} = $1 ORDER BY c.id DESC`,
     [item.id],
   );
   return rows.map((r) => ({ protected: r.protected, at: r.at, actor: { kind: "user", id: r.user_id, name: r.user_name } }));
-}
-
-/** An item's protection history as stored, oldest first, as an export writes it. */
-export async function protectionChangesToExport(db: Queryable, item: ProtectableItem): Promise<{ protected: boolean; at: Date; actor_user_id: string }[]> {
-  const { rows } = await db.query<{ protected: boolean; at: Date; actor_user_id: string }>(
-    `SELECT protected, at, actor_user_id FROM protection_changes WHERE ${COLUMN[item.kind]} = $1 ORDER BY id`,
-    [item.id],
-  );
-  return rows;
 }
 
 /**

@@ -22,7 +22,7 @@ import {
   type DecisionScope,
   type DecisionVersion,
 } from "./decisions.js";
-import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
+import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 
 /** A Decision title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -316,7 +316,7 @@ export function decisionRoutes(ctx: AppContext) {
       { schema: { params: decisionParams, response: { 200: protectionHistoryAnswer, ...errors(400, 401, 403, 404, 410) } } },
       async (request) => {
         const decision = await decisionFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
-        return { changes: await listProtectionChanges(ctx.db, { kind: "decision", id: decision.id }) };
+        return { markings: await listProtectionMarkings(ctx.db, { kind: "decision", id: decision.id }) };
       },
     );
 
