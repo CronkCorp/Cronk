@@ -6,7 +6,7 @@ import { Link, navigate } from "./router.js";
 import { Show, useLoad } from "./ui.js";
 import { FilterSelect } from "./work.js";
 
-const KIND_NAMES: Record<SearchKind, string> = { ticket: "Ticket", document: "Document", report: "Report", comment: "Comment" };
+const KIND_NAMES: Record<SearchKind, string> = { ticket: "Ticket", document: "Document", report: "Report", comment: "Comment", term: "Term" };
 
 /** What the search page searches for: the query, and optionally one kind and one Project key. */
 export interface SearchFilter {
@@ -57,8 +57,9 @@ export function SearchBox() {
   );
 }
 
-/** Where a search result opens: its Ticket or its Document. */
-const resultPath = (r: SearchResult) => (r.documentId ? `/documents/${r.documentId}` : `/tickets/${r.ticketKey}`);
+/** Where a search result opens: its Term, its Document or its Ticket. */
+const resultPath = (r: SearchResult) =>
+  r.termId ? `/terms/${r.termId}` : r.documentId ? `/documents/${r.documentId}` : `/tickets/${r.ticketKey}`;
 
 /** What the search for `filter` found, best match first, with controls to narrow it to a kind and a Project. */
 export function SearchPage(props: { filter: SearchFilter }) {

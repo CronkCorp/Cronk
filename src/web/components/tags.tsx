@@ -5,7 +5,7 @@ import type { DecisionStatus, Priority, Status } from "../api.js";
 // Small labels set into rows and headings: docs/ui.md § Component conventions.
 
 /** What an entry is. Each kind has its colour, which backs up the label and never replaces it. */
-export type Kind = "plan" | "progress" | "finding" | "question" | "blocking" | "error" | "report" | "comment" | "review" | "unverified" | "decision" | "suggestion" | "discovered";
+export type Kind = "plan" | "progress" | "finding" | "question" | "blocking" | "error" | "report" | "comment" | "review" | "unverified" | "unattended" | "decision" | "suggestion" | "discovered";
 
 /** An 11px uppercase label saying what an Activity, Comment or Report is. */
 export function KindLabel(props: { kind: Kind; children: ReactNode }) {

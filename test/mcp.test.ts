@@ -803,6 +803,19 @@ describe("the search tool", () => {
     expect(tickets.body.results.map((r: { ticketKey: string }) => r.ticketKey)).toEqual(["CRONK-1"]);
     expect(await callTool(mcp, "search", { query: "rotate", project: ["SECRET"] })).toEqual({ isError: true, body: "No such Project" });
   });
+
+  it("finds Terms, and says so in its description", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work.", avoid: ["issue"] })).body.term.id;
+    await admin.post("/api/workspace/documents", { title: "Issue tracker", body: "Where issues used to live." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const found = await callTool(mcp, "search", { query: "issue", kind: ["term"] });
+    expect(found.body.results).toEqual([expect.objectContaining({ kind: "term", title: "Ticket", termId: term })]);
+    const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
+    expect(search.description).toMatch(/Terms[\s\S]*terms tool/);
+    expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["term"]) } });
+  });
 });
 
 describe("work waiting for an Agent over MCP", () => {

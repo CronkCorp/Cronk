@@ -550,7 +550,7 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .kind-label.progress, .kind-label.review, .kind-label.unverified { color: var(--info); }
 .kind-label.finding { color: var(--ok); }
-.kind-label.question, .kind-label.discovered { color: var(--warn); }
+.kind-label.question, .kind-label.unattended, .kind-label.discovered { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
 .kind-label.report, .kind-label.decision, .kind-label.suggestion { color: var(--agent); }
 .kind-label.comment { color: var(--accent); }

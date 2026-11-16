@@ -27,12 +27,20 @@ export interface AccessTarget {
 /**
  * What a User has in a Project. Admins have Write everywhere. A Member listed in a Project
  * has the access listed; otherwise an open Project gives them Write and a private one nothing.
+ * Keep it in step with `noAccessSql`.
  */
 function userAccess(user: User, project: AccessTarget, listed: Access | undefined): Level {
   if (user.role === "admin") return "write";
   if (listed) return listed;
   return project.visibility === "open" ? "write" : "none";
 }
+
+/**
+ * SQL for whether the User row `u` has no access to the Project row `p`, as `userAccess` resolves it: not an Admin, not listed in
+ * the Project, and the Project private. Keep it in step with `userAccess`.
+ */
+export const noAccessSql = (u: string, p: string) =>
+  `(${u}.role <> 'admin' AND ${p}.visibility = 'private' AND NOT EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ${p}.id AND pm.user_id = ${u}.id))`;
 
 /** How much an Actor may do somewhere: nothing, or some Access. */
 type Level = "none" | Access;
@@ -150,6 +158,7 @@ export interface Readable {
 /**
  * SQL for whether the Document aliased `document` lies where a `Readable` lets its Actor read, given
  * SQL for its `projectIds` (a uuid[]) and its `workspaceId` (a uuid, NULL when the Workspace isn't readable).
+ * Anything else placed like a Document, with a `project_id` (NULL in the Workspace) and a `workspace_id`, such as a Term, is read the same way.
  */
 export const documentReadableSql = (document: string, projectIds: string, workspaceId: string) =>
   `(${document}.project_id = ANY(${projectIds}) OR (${document}.project_id IS NULL AND ${document}.workspace_id = ${workspaceId}))`;
