@@ -1,11 +1,11 @@
 import type { StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { bytesOf, isStored, textOf, type StoredFile, type StoredFolder } from "./archive.js";
+import { bytesOf, isStored, textOf, type FileContents, type StoredFolder } from "./archive.js";
 import type { FileStore } from "../files/store.js";
 import { natural, refuse, type File } from "./fields.js";
 import { readFrontmatter } from "./frontmatter.js";
 import { recordRenamedId, type RenamedId } from "./renamed-ids.js";
-import { getWorkspace } from "../workspace/workspaces.js";
+import { getWorkspace, type Workspace } from "../workspace/workspaces.js";
 
 /** Where an import stores the files of Attachments and Artifacts, and the keys it stored them under so far. */
 export interface ImportedFiles {
@@ -14,11 +14,7 @@ export interface ImportedFiles {
 }
 
 /** A Workspace's limits on the files an import brings in. */
-export interface FileLimits {
-  attachmentMaxBytes: number;
-  artifactMaxBytes: number;
-  artifactMaxFiles: number;
-}
+export type FileLimits = Pick<Workspace, "attachmentMaxBytes" | "artifactMaxBytes" | "artifactMaxFiles">;
 
 /**
  * What every part of an import shares: the export's files, and the ids the Users, Agents and
@@ -64,7 +60,7 @@ export class ImportContext {
    * again, and answers its size. A file the import streamed into the store is moved there from its temporary key; one
    * the export names twice is copied from where it went the first time.
    */
-  async storeFile(key: string, contents: string | Buffer | StoredFile): Promise<number> {
+  async storeFile(key: string, contents: FileContents): Promise<number> {
     this.files.stored.push(key);
     const { store } = this.files;
     if (!isStored(contents)) return store.put(key, bytesOf(contents));
@@ -73,11 +69,6 @@ export class ImportContext {
     await store.move(contents.key, key);
     this.moved.set(contents.key, key);
     return contents.size;
-  }
-
-  /** The size of `contents`, a file of the export, in bytes. */
-  sizeOf(contents: string | Buffer | StoredFile): number {
-    return isStored(contents) ? contents.size : bytesOf(contents).length;
   }
 
   /** The Workspace's limits on files, as its own settings or, once imported, the export's `workspace.md` set them. */

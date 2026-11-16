@@ -1,5 +1,5 @@
 import type { Queryable } from "../db/database.js";
-import { isStored, type StoredFile, type StoredFolder } from "./archive.js";
+import { isStored, type FileContents, type StoredFolder } from "./archive.js";
 import { exportArtifacts } from "./artifacts.js";
 import { exportDecisions } from "./decisions.js";
 import { exportTree } from "./documents.js";
@@ -60,6 +60,6 @@ export async function exportFolder(db: Queryable, scope: ExportScope): Promise<S
 
   // README first, then people, so someone opening the archive reads them first; then the other Markdown files, and the stored
   // files last, so an import has every Markdown file, workspace.md's limits among them, before the first large file arrives.
-  const rank = ([path, contents]: [string, string | Buffer | StoredFile]) => (path === "README.md" ? 0 : path === "people.md" ? 1 : isStored(contents) ? 3 : 2);
+  const rank = ([path, contents]: [string, FileContents]) => (path === "README.md" ? 0 : path === "people.md" ? 1 : isStored(contents) ? 3 : 2);
   return new Map([...ctx.folder].sort((a, b) => rank(a) - rank(b) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
 }

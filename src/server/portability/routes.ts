@@ -1,21 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
-import { getWorkspace, type Workspace } from "../workspace/workspaces.js";
-import { ARCHIVE_TYPES, archiveBody, isStored, packFolderStream, textOf, unpackFolder, unpackFolderStream, unwrapFolder, type StoredFolder } from "./archive.js";
-import { readFrontmatter } from "./frontmatter.js";
+import { getWorkspace } from "../workspace/workspaces.js";
+import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
+import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream } from "./archive.js";
 import { exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 import { listRenamedIds } from "./renamed-ids.js";
 
-/** The largest archive a Markdown-folder import takes; an export's import streams, and only its Markdown files count (see `archive.ts`). */
-const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
 /** The request body of an import: an archive, which the content-type parser hands over as bytes (so it has no type to check). */
 const archiveBodySchema = { description: "The folder as a zip archive, or a tar archive gzipped or not." };
@@ -43,7 +41,7 @@ export function portabilityRoutes(ctx: AppContext) {
     });
     // A folder of Markdown files arrives as raw bytes, held whole.
     await app.register(async (buffered) => {
-      buffered.addContentTypeParser(ARCHIVE_TYPES, { parseAs: "buffer", bodyLimit: MAX_ARCHIVE_BYTES }, (_request, body, done) => done(null, body));
+      buffered.addContentTypeParser(ARCHIVE_TYPES, { parseAs: "buffer", bodyLimit: MAX_PACKED_BYTES }, (_request, body, done) => done(null, body));
       markdownImportRoutes(buffered, ctx);
     });
   };
@@ -139,7 +137,7 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
       const user = await requireUser(ctx, request);
       requireAdmin(user, "import an export");
       const body = archiveStream(request.body);
-      const here = await getWorkspace(ctx.db, user.workspaceId);
+      const workspace = await getWorkspace(ctx.db, user.workspaceId);
       // The keys of the files the import streams in, held there until moved to their places, and of those places, so
       // none stays if it fails at any point: unpacking, a refused value, the commit or a dropped connection.
       const importId = randomUUID();
@@ -153,19 +151,20 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
             temporary.push(key);
             return key;
           },
-          maxBytes: (_path, markdown) => streamedFileLimit(markdown, here),
+          isMarkdown: isExportMarkdown,
+          limit: (path, markdown) => streamedFileLimit(path, markdown, workspace),
         });
         const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
         return reply.code(201).send(imported);
       } catch (err) {
-        for (const key of stored) await ctx.files.delete(key);
+        await removeFiles(request, ctx, stored);
         // The database refusing a value (a constraint or a malformed value) means the export holds data Cronk can't take.
         const code = (err as { code?: unknown }).code;
         if (typeof code === "string" && /^2[23]/.test(code)) throw new HttpError(400, `The export holds data Cronk can't take: ${(err as Error).message}`);
         throw err;
       } finally {
         // Those moved to their places are gone already; any left, such as a file no index names, go now.
-        for (const key of temporary) await ctx.files.delete(key);
+        await removeFiles(request, ctx, temporary);
       }
     },
   );
@@ -193,7 +192,7 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post(
     "/api/workspace/documents/import",
     {
-      bodyLimit: MAX_ARCHIVE_BYTES,
+      bodyLimit: MAX_PACKED_BYTES,
       schema: {
         consumes: ARCHIVE_TYPES,
         body: archiveBodySchema,
@@ -214,7 +213,7 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post<{ Params: { key: string } }>(
     "/api/projects/:key/documents/import",
     {
-      bodyLimit: MAX_ARCHIVE_BYTES,
+      bodyLimit: MAX_PACKED_BYTES,
       schema: {
         consumes: ARCHIVE_TYPES,
         body: archiveBodySchema,
@@ -236,28 +235,17 @@ function markdownImportRoutes(app: FastifyInstance, ctx: AppContext) {
   );
 }
 
+/** Removes the files under `keys`, each tried even if another fails, so one failure hides neither the rest nor why the import failed. */
+async function removeFiles(request: FastifyRequest, ctx: AppContext, keys: string[]): Promise<void> {
+  const removed = await Promise.allSettled(keys.map((key) => ctx.files.delete(key)));
+  for (const [i, result] of removed.entries()) {
+    if (result.status === "rejected") request.log.error({ err: result.reason, key: keys[i] }, "An import couldn't remove a file it stored");
+  }
+}
+
 /** The uploaded archive as a stream; a body sent as another type, such as JSON, is refused. */
 function archiveStream(body: unknown): Readable {
   return body instanceof Readable ? body : Readable.from([archiveBody(body)]);
-}
-
-/**
- * The most bytes a file streamed in by an import may take: what the Workspace will allow an Attachment, or an Artifact
- * Version's files, once the import is done. That is the export's own `workspace.md` limits, if it is a Workspace export
- * and they have arrived, as an export's Markdown files arrive before its other files; else this Workspace's.
- */
-function streamedFileLimit(markdown: StoredFolder, here: Workspace): number {
-  const settings = unwrapFolder(markdown).get("workspace.md");
-  let data: Record<string, unknown> = {};
-  if (settings !== undefined && !isStored(settings)) {
-    try {
-      data = readFrontmatter(textOf(settings)).data;
-    } catch {
-      // A workspace.md that can't be read is refused once the import reads it.
-    }
-  }
-  const limit = (value: unknown, own: number) => (Number.isSafeInteger(value) && (value as number) > 0 ? (value as number) : own);
-  return Math.max(limit(data.attachmentMaxBytes, here.attachmentMaxBytes), limit(data.artifactMaxBytes, here.artifactMaxBytes));
 }
 
 const EXPORT_FORMAT =

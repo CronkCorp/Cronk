@@ -32,10 +32,16 @@ export interface StoredFile {
  * A folder whose large files, such as Attachments and Artifact files, are kept in the file store and only the
  * small ones in memory: an export as it is written, or one as an import unpacks it.
  */
-export type StoredFolder = Map<string, string | Buffer | StoredFile>;
+export type StoredFolder = Map<string, FileContents>;
+
+/** What a file of a `StoredFolder` holds: text or bytes in memory, or a file in the store. */
+export type FileContents = string | Buffer | StoredFile;
 
 /** Whether `contents` is a file kept in the file store rather than in memory. */
-export const isStored = (contents: string | Buffer | StoredFile): contents is StoredFile => typeof contents === "object" && !Buffer.isBuffer(contents);
+export const isStored = (contents: FileContents): contents is StoredFile => typeof contents === "object" && !Buffer.isBuffer(contents);
+
+/** How many bytes a file holds. */
+export const sizeOf = (contents: FileContents): number => (isStored(contents) ? contents.size : bytesOf(contents).length);
 
 /** A file's contents as bytes, text as UTF-8. */
 export const bytesOf = (contents: string | Buffer): Buffer => (typeof contents === "string" ? Buffer.from(contents, "utf8") : contents);
@@ -63,7 +69,10 @@ export function archiveBody(body: unknown): Buffer {
 /** The most an archive may unpack to, so a small upload can't fill the memory; a streamed import counts only its Markdown files. */
 const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
 
-/** The most an archive's Markdown files may take packed, in a streamed import: as much as an archive held in memory may take whole. */
+/**
+ * The most an archive held in memory may take packed; in a streamed import, the most its Markdown files may. A tar
+ * archive's are counted as the packed bytes read while unpacking them, which read-ahead makes approximate.
+ */
 export const MAX_PACKED_BYTES = 200 * 1024 * 1024;
 
 /** Packs `folder` into a gzipped tar archive. */
@@ -295,36 +304,35 @@ export interface Unpacking {
   store: FileStore;
   /** A new key to store the next such file under for now; the caller removes every one it gives, whatever happens. */
   temporaryKey(): string;
-  /** The most bytes the file at `path` may take, given the Markdown files unpacked so far. */
-  maxBytes(path: string, markdown: StoredFolder): number;
+  /** Whether the file at `path` is Markdown, held in memory, rather than a file streamed into the store. */
+  isMarkdown(path: string): boolean;
+  /** The most bytes the file at `path` may take, given the Markdown files unpacked so far, and what it is, for refusing it. */
+  limit(path: string, markdown: StoredFolder): { maxBytes: number; of: string };
 }
 
-/** Whether a file at `path` is held in memory by a streamed import, as Markdown is, rather than streamed into the store. */
-const isMarkdown = (path: string) => path.endsWith(".md");
-
 /**
- * The files of the archive `body` streams in, as `unpackFolder` reads them, but held in memory only when they are
- * Markdown: every other file is streamed into the store under a temporary key as it arrives, capped at the size
- * `how.maxBytes` allows, and stands in the folder as a `StoredFile`. The archive limits count only the Markdown files.
+ * The files of the archive `body` streams in, as `unpackFolder` reads them, but held in memory only when
+ * `unpacking.isMarkdown` says they are Markdown: every other file is streamed into the store under a temporary key as it
+ * arrives, capped at the size `unpacking.limit` allows, and stands in the folder as a `StoredFile`. The archive limits count only the Markdown files.
  * A gzipped or plain tar archive is read as it streams; a zip archive, whose directory is at its end, is written
  * to a temporary file on local disk first and read from there.
  */
-export async function unpackFolderStream(body: Readable, how: Unpacking): Promise<StoredFolder> {
+export async function unpackFolderStream(body: Readable, unpacking: Unpacking): Promise<StoredFolder> {
   const [head, rest] = await peek(body, 4);
   if (signedAt(head, 0, ZIP_LOCAL) || signedAt(head, 0, ZIP_END)) {
     const dir = await mkdtemp(join(tmpdir(), "cronk-import-"));
     try {
       const path = join(dir, "upload.zip");
       await pipeline(rest, createWriteStream(path));
-      return await unzipFileToStore(path, how);
+      return await unzipFileToStore(path, unpacking);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   }
-  return untarToStore(rest, head[0] === 0x1f && head[1] === 0x8b, how);
+  return untarToStore(rest, head[0] === 0x1f && head[1] === 0x8b, unpacking);
 }
 
-/** The first `n` bytes of `body` (fewer if it is shorter), and `body` whole again, those bytes included. */
+/** Peeks at the start of `body`: its first `n` bytes (fewer if it is shorter), and `body` whole again, those bytes included. */
 async function peek(body: Readable, n: number): Promise<[Buffer, Readable]> {
   const reading = body[Symbol.asyncIterator]();
   const chunks: Buffer[] = [];
@@ -386,19 +394,19 @@ class MarkdownBudget {
 }
 
 /** Streams the file at `path`, which `file` gives, into the store under a temporary key, refusing it past its cap with a 413 naming it. */
-async function storeUnpacked(path: string, file: Readable, how: Unpacking, folder: StoredFolder): Promise<void> {
-  const maxBytes = how.maxBytes(path, folder);
-  const key = how.temporaryKey();
+async function storeUnpacked(path: string, file: Readable, unpacking: Unpacking, folder: StoredFolder): Promise<void> {
+  const { maxBytes, of } = unpacking.limit(path, folder);
+  const key = unpacking.temporaryKey();
   try {
-    folder.set(path, { key, size: await how.store.put(key, file, { maxBytes }) });
+    folder.set(path, { key, size: await unpacking.store.put(key, file, { maxBytes }) });
   } catch (err) {
-    if (err instanceof FileTooLarge) throw new HttpError(413, `${path} is larger than ${formatBytes(maxBytes)}, the most a file of this import may be in this Workspace`);
+    if (err instanceof FileTooLarge) throw new HttpError(413, `${path} is larger than ${formatBytes(maxBytes)}, the most ${of} may take in this Workspace`);
     throw err;
   }
 }
 
-/** Counts the bytes passing through it. */
-function counter(): { stream: Transform; count: () => number } {
+/** A stream counting the bytes passing through it. */
+function byteCounter(): { stream: Transform; count: () => number } {
   let count = 0;
   const stream = new Transform({
     transform(chunk: Buffer, _encoding, done) {
@@ -410,13 +418,13 @@ function counter(): { stream: Transform; count: () => number } {
 }
 
 /** The files of a tar archive, gzipped if `gzipped`, as `body` streams them in; see `unpackFolderStream`. */
-async function untarToStore(body: Readable, gzipped: boolean, how: Unpacking): Promise<StoredFolder> {
+async function untarToStore(body: Readable, gzipped: boolean, unpacking: Unpacking): Promise<StoredFolder> {
   const folder: StoredFolder = new Map();
   const budget = new MarkdownBudget();
   // The packed bytes read so far, for what the Markdown files take packed, and the first 512 bytes of the tar inside.
-  const packed = counter();
+  const packed = byteCounter();
   let tarHead = Buffer.alloc(0);
-  const raw = new Transform({
+  const keepTarHead = new Transform({
     transform(chunk: Buffer, _encoding, done) {
       if (tarHead.length < 512) tarHead = Buffer.concat([tarHead, chunk.subarray(0, 512 - tarHead.length)]);
       done(null, chunk);
@@ -426,7 +434,7 @@ async function untarToStore(body: Readable, gzipped: boolean, how: Unpacking): P
   let unreadable = false;
   let bodyFailed = false;
   body.once("error", () => (bodyFailed = true));
-  const stages: NodeJS.ReadWriteStream[] = gzipped ? [createGunzip(), raw] : [raw];
+  const stages: NodeJS.ReadWriteStream[] = gzipped ? [createGunzip(), keepTarHead] : [keepTarHead];
   const feeding = pipeline(body, packed.stream, ...stages, extract as unknown as NodeJS.WritableStream).catch((err: unknown) => {
     if (!bodyFailed) unreadable = true;
     throw err;
@@ -439,12 +447,12 @@ async function untarToStore(body: Readable, gzipped: boolean, how: Unpacking): P
       if (entry.header.type !== "file" || path === undefined) {
         file.resume();
         await new Promise((resolve) => file.once("end", resolve));
-      } else if (isMarkdown(path)) {
+      } else if (unpacking.isMarkdown(path)) {
         const start = packed.count();
         folder.set(path, await budget.read(file));
         budget.addPacked(packed.count() - start);
       } else {
-        await storeUnpacked(path, file, how, folder);
+        await storeUnpacked(path, file, unpacking, folder);
       }
     }
     await feeding;
@@ -460,10 +468,10 @@ async function untarToStore(body: Readable, gzipped: boolean, how: Unpacking): P
 }
 
 /** The files of the zip archive in the file at `path`, read from its central directory; see `unpackFolderStream`. */
-async function unzipFileToStore(path: string, how: Unpacking): Promise<StoredFolder> {
+async function unzipFileToStore(path: string, unpacking: Unpacking): Promise<StoredFolder> {
   const file = await open(path);
   try {
-    return await readZipFile(file, path, how);
+    return await readZipFile(file, path, unpacking);
   } catch (err) {
     if (err instanceof HttpError) throw err;
     // Reading past the end of the file, or inflating what doesn't inflate, means a damaged archive.
@@ -481,7 +489,8 @@ async function readAt(file: FileHandle, at: number, length: number): Promise<Buf
   return bytes.subarray(0, bytesRead);
 }
 
-async function readZipFile(file: FileHandle, path: string, how: Unpacking): Promise<StoredFolder> {
+/** The files of the zip archive open as `file`, at `path`, read entry by entry from its central directory. */
+async function readZipFile(file: FileHandle, path: string, unpacking: Unpacking): Promise<StoredFolder> {
   const { size } = await file.stat();
   const tailStart = Math.max(0, size - 22 - 0xffff);
   const tail = await readAt(file, tailStart, size - tailStart);
@@ -496,11 +505,11 @@ async function readZipFile(file: FileHandle, path: string, how: Unpacking): Prom
     const packed = entry.packedSize === 0 ? Readable.from([]) : createReadStream(path, { start, end: start + entry.packedSize - 1 });
     const data = entry.method === 0 ? packed : packed.pipe(createInflateRaw());
     if (entry.method !== 0) packed.once("error", (err: Error) => data.destroy(err));
-    if (isMarkdown(entry.path)) {
+    if (unpacking.isMarkdown(entry.path)) {
       budget.addPacked(entry.packedSize);
       folder.set(entry.path, await budget.read(data));
     } else {
-      await storeUnpacked(entry.path, data, how, folder);
+      await storeUnpacked(entry.path, data, unpacking, folder);
     }
   }
   return folder;

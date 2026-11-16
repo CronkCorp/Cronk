@@ -4,6 +4,7 @@ import { mediaTypeOf } from "../files/artifact-routes.js";
 import { extraOrigins, type ExtraOrigin } from "../files/origins.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { HttpError } from "../context.js";
+import { sizeOf } from "./archive.js";
 import { formatBytes } from "../files/sizes.js";
 import { date, integer, isUuid, list, refuse, text } from "./fields.js";
 import { slug } from "./format.js";
@@ -112,7 +113,7 @@ export async function importArtifacts(ctx: ImportContext, dir: string, projectId
       if (contents.length > limits.artifactMaxFiles) {
         throw new HttpError(413, `${base}/${number}/ holds ${contents.length} files, more than the ${limits.artifactMaxFiles} an Artifact Version may hold in this Workspace`);
       }
-      const bytes = contents.reduce((sum, c) => sum + ctx.sizeOf(c.contents), 0);
+      const bytes = contents.reduce((sum, c) => sum + sizeOf(c.contents), 0);
       if (bytes > limits.artifactMaxBytes) {
         throw new HttpError(413, `${base}/${number}/'s files take ${formatBytes(bytes)}, more than the ${formatBytes(limits.artifactMaxBytes)} an Artifact Version may take in this Workspace`);
       }

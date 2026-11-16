@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { attachmentKey, insertAttachment, type AttachmentTarget } from "../files/attachments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { HttpError } from "../context.js";
+import { sizeOf } from "./archive.js";
 import { formatBytes } from "../files/sizes.js";
 import { date, list, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -60,8 +61,8 @@ export async function importAttachments(ctx: ImportContext, base: string, target
     const path = `${base}.attachments/${text(entry.file, `${where} file`)}`;
     const contents = ctx.folder.get(path) ?? refuse(`${where} names ${path}, which the export doesn't hold`);
     const { attachmentMaxBytes } = await ctx.fileLimits();
-    if (ctx.sizeOf(contents) > attachmentMaxBytes) {
-      throw new HttpError(413, `${path} is larger than ${formatBytes(attachmentMaxBytes)}, the most an Attachment may be in this Workspace`);
+    if (sizeOf(contents) > attachmentMaxBytes) {
+      throw new HttpError(413, `${path} is larger than ${formatBytes(attachmentMaxBytes)}, the most an Attachment may take in this Workspace`);
     }
     const id = await freeId(ctx, entry.id);
     const size = await ctx.storeFile(attachmentKey(id), contents);

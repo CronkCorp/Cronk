@@ -276,7 +276,21 @@ describe("a file larger than the import allows", () => {
     expect((await elsewhere.admin.patch("/api/workspace", { attachmentMaxBytes: MB, artifactMaxBytes: MB })).status).toBe(200);
     const res = await elsewhere.admin.upload("/api/import", exported);
     expect(res.status).toBe(413);
-    expect(res.body.error).toBe("projects/CRONK/tickets/CRONK-1.attachments/1-dump.bin is larger than 1 MB, the most a file of this import may be in this Workspace");
+    expect(res.body.error).toBe("projects/CRONK/tickets/CRONK-1.attachments/1-dump.bin is larger than 1 MB, the most an Attachment may take in this Workspace");
+  });
+
+  it("refuses an Artifact file over this Workspace's Artifact Version limit with a 413 naming it, whatever it is named", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<p>v1</p>", "notes.md": "#".repeat(1.5 * MB) }));
+    const exported = (await admin.download("/api/projects/CRONK/export")).body;
+
+    const elsewhere = await installationWithFilesIn("Elsewhere");
+    expect((await elsewhere.admin.patch("/api/workspace", { attachmentMaxBytes: 2 * MB, artifactMaxBytes: MB })).status).toBe(200);
+    const res = await elsewhere.admin.upload("/api/import", exported);
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe("projects/CRONK/artifacts/1-limits/1/notes.md is larger than 1 MB, the most an Artifact Version may take in this Workspace");
+    expect(await elsewhere.stored()).toEqual([]);
     expect(await elsewhere.stored()).toEqual([]);
   });
 
