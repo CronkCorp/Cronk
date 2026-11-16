@@ -2,7 +2,7 @@ import { insertAgent } from "../identity/agents.js";
 import { insertUserWithoutPassword } from "../identity/users.js";
 import { roleSchema } from "../schemas.js";
 import { iso, type ExportContext } from "./export-context.js";
-import { date, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
+import { date, isUuid, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
@@ -81,6 +81,7 @@ async function importAgents(ctx: ImportContext, people: File): Promise<void> {
       removedAt === null
         ? await ctx.db.query<{ id: string }>("SELECT id FROM agents WHERE owner_id = $1 AND lower(name) = lower($2) AND removed_at IS NULL", [ownerId, name])
         : { rows: [] };
+    const exportedId = text(a.id, `${where}.id`);
     const id =
       existing[0]?.id ??
       (
@@ -89,9 +90,11 @@ async function importAgents(ctx: ImportContext, people: File): Promise<void> {
           name,
           now: date(a.createdAt, `${where}.createdAt`),
           removedAt,
+          id: await freeId(ctx, "agents", exportedId),
         })
       ).id;
-    ctx.agentIds.set(text(a.id, `${where}.id`), { id, ownerId });
+    ctx.agentIds.set(exportedId, { id, ownerId });
+    await ctx.keepRenamedId("agent", exportedId, id);
   }
 }
 
@@ -100,15 +103,25 @@ async function importSessions(ctx: ImportContext, people: File): Promise<void> {
   for (const [i, s] of list(people, "sessions").entries()) {
     const where = `people.md sessions[${i}]`;
     const lastSeenAt = date(s.lastSeenAt, `${where}.lastSeenAt`);
+    const exportedId = text(s.id, `${where}.id`);
     const { rows } = await ctx.db.query<{ id: string }>(
-      "INSERT INTO agent_sessions (agent_id, started_at, last_seen_at, ended_at) VALUES ($1, $2, $3, $4) RETURNING id",
+      "INSERT INTO agent_sessions (id, agent_id, started_at, last_seen_at, ended_at) VALUES (COALESCE($5, gen_random_uuid()), $1, $2, $3, $4) RETURNING id",
       [
         ctx.agent(s.agent, `${where}.agent`).id,
         date(s.startedAt, `${where}.startedAt`),
         lastSeenAt,
         optionalDate(s.endedAt, `${where}.endedAt`) ?? lastSeenAt,
+        await freeId(ctx, "agent_sessions", exportedId),
       ],
     );
-    ctx.sessionIds.set(text(s.id, `${where}.id`), rows[0]!.id);
+    ctx.sessionIds.set(exportedId, rows[0]!.id);
+    await ctx.keepRenamedId("agentSession", exportedId, rows[0]!.id);
   }
+}
+
+/** `id`, the id an Agent or Agent Session had in the export, if it can keep it here: no row of `table` has it yet. */
+async function freeId(ctx: ImportContext, table: "agents" | "agent_sessions", id: string): Promise<string | undefined> {
+  if (!isUuid(id)) return undefined;
+  const { rows } = await ctx.db.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id]);
+  return rows.length === 0 ? id : undefined;
 }
