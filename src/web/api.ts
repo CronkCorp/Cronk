@@ -230,8 +230,9 @@ export const api = {
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveDecision: (key: string, input: { baseVersion: number; title?: string; body?: string; group?: string | null; supersedes?: string[] }) =>
     request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
-  setDecisionStatus: (key: string, status: DecisionStatus) =>
-    request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status }).then((r) => r.decision),
+  /** Changes a Decision's status; rejecting needs a `reason`, which reaches the Agent that proposed it. */
+  setDecisionStatus: (key: string, status: DecisionStatus, reason?: string) =>
+    request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status, ...(reason === undefined ? {} : { reason }) }).then((r) => r.decision),
   decisionVersions: (key: string) =>
     request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
 

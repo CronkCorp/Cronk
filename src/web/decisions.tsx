@@ -10,7 +10,7 @@ import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionS
 import { CronkMarkdown } from "./markdown.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Link, navigate } from "./router.js";
-import { Field, Show, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
+import { Field, Show, TextArea, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
 
 // The Decisions register and a Decision's page: docs/ui.md § Decisions.
 
@@ -207,6 +207,17 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
   const canWrite = useCanWrite(d.projectKey);
   const [editing, setEditing] = useState(props.startEditing);
   const status = useAction((to: DecisionStatus) => api.setDecisionStatus(d.key, to), props.onChanged);
+  // Rejecting needs a reason, typed into a box the Reject action opens.
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const reject = useAction(
+    () => api.setDecisionStatus(d.key, "rejected", reason),
+    (changed: Decision) => {
+      setRejecting(false);
+      setReason("");
+      props.onChanged(changed);
+    },
+  );
   const moves: [DecisionStatus, string][] = [
     ["accepted", "Accept"],
     ["rejected", "Reject"],
@@ -239,7 +250,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
                 <Menu
                   label="Change status"
                   trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
-                  items={otherMoves.map(([to, label]) => ({ label, onSelect: () => void status.run(to), disabled: status.busy }))}
+                  items={otherMoves.map(([to, label]) => ({
+                    label: to === "rejected" ? `${label}…` : label,
+                    onSelect: () => (to === "rejected" ? setRejecting(true) : void status.run(to)),
+                    disabled: status.busy,
+                  }))}
                 />
               )}
               {d.status === "proposed" && <Button onClick={() => void status.run("accepted")} disabled={status.busy}>Accept</Button>}
@@ -247,6 +262,23 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           )}
         </div>
         {status.error && <p className="error" role="alert">{status.error}</p>}
+        {rejecting && (
+          <form
+            className="comment-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void reject.run();
+            }}
+          >
+            <TextArea label="Why reject it" value={reason} onChange={setReason} rows={3} />
+            {d.proposedBy.kind === "agent" && <p className="muted small">{`The reason reaches ${d.proposedBy.name} as Waiting Work.`}</p>}
+            {reject.error && <p className="error" role="alert">{reject.error}</p>}
+            <div className="actions">
+              <Button type="submit" disabled={reject.busy || !reason.trim()}>Reject</Button>
+              <Button type="button" variant="secondary" onClick={() => setRejecting(false)}>Cancel</Button>
+            </div>
+          </form>
+        )}
         <h1 className="decision-title">{d.title}</h1>
         {d.supersedes.length > 0 && (
           <Banner tone="info" role="status">
@@ -282,6 +314,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
             <h4>Status</h4>
             <div><DecisionStatusPill status={d.status} /></div>
             <span className="muted small">by {d.statusChangedBy.name}, <RelativeTime at={d.statusChangedAt} /></span>
+            {d.statusReason && (
+              <div className="markdown decision-status-reason">
+                <CronkMarkdown>{d.statusReason}</CronkMarkdown>
+              </div>
+            )}
           </div>
           <div className="side-group">
             <h4>Group</h4>
@@ -290,6 +327,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           <div className="side-group">
             <h4>Proposed by</h4>
             <Actor actor={d.proposedBy} />
+            {d.sourceTicket && (
+              <span className="muted small">
+                from <Link to={`/tickets/${d.sourceTicket.key}`} className="link"><span className="mono">{d.sourceTicket.key}</span> {d.sourceTicket.title}</Link>
+              </span>
+            )}
           </div>
           <div className="side-group">
             <h4>Version</h4>
