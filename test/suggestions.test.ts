@@ -282,3 +282,65 @@ describe("making a Suggestion", () => {
     expect((await suggest(agent)).status).toBe(404);
   });
 });
+
+describe("Suggestions on other kinds of item", () => {
+  it("change a Protected Term, keeping the fields left out", async () => {
+    const { cronk, admin, agent } = await protectedDocument();
+    const { term } = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold.", avoid: ["Lock"] })).body;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+
+    const made = await agent.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition: "A temporary hold.", avoid: ["Lock", " lease "] }, reasoning: "Say it ends." });
+    expect(made.status).toBe(201);
+    expect(made.body.suggestion).toMatchObject({
+      item: { kind: "term", id: term.id, title: "Claim", protected: true },
+      base: { name: "Claim", definition: "A hold.", avoid: ["Lock"], group: null },
+      content: { name: "Claim", definition: "A temporary hold.", avoid: ["Lock", "lease"], group: null },
+    });
+    cronk.clock.advance(60_000);
+    await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`);
+
+    expect((await admin.get(`/api/terms/${term.id}`)).body.term).toMatchObject({ definition: "A temporary hold.", avoid: ["Lock", "lease"], version: 2 });
+    expect((await admin.get(`/api/terms/${term.id}/versions`)).body.versions[0]).toMatchObject({
+      actor: { kind: "agent", name: "claude-laptop" },
+      suggestion: { id: made.body.suggestion.id, acceptedWithEdits: false },
+    });
+  });
+
+  it("change an accepted Decision, which is Protected, but not a proposed one the Agent may edit", async () => {
+    const { admin, agent } = await protectedDocument();
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres", body: "v1" });
+    await agent.post("/api/projects/CRONK/decisions", { title: "Compose", body: "v1" });
+    const suggest = (key: string, baseVersion: number) =>
+      agent.post("/api/suggestions", { item: { kind: "decision", key }, baseVersion, content: { body: "v2", group: " Storage " }, reasoning: "Clearer." });
+
+    expect((await suggest("CRONK-D2", 1)).status).toBe(409);
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    const made = await suggest("cronk-d1", 2);
+    expect(made.status).toBe(201);
+    expect(made.body.suggestion).toMatchObject({ item: { kind: "decision", key: "CRONK-D1", title: "Postgres", protected: true }, content: { title: "Postgres", body: "v2", group: "Storage" } });
+
+    await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`, { content: { title: "Postgres for storage" } });
+
+    expect((await admin.get("/api/decisions/CRONK-D1")).body.decision).toMatchObject({ title: "Postgres for storage", body: "v2", group: "Storage", status: "accepted", version: 3 });
+    expect((await admin.get("/api/decisions/CRONK-D1/versions/3")).body.version).toMatchObject({ actor: { kind: "user" }, suggestion: { acceptedWithEdits: true } });
+  });
+
+  it("change Guidance, which only Users write, from its first Version on; the Workspace's takes an Admin to accept", async () => {
+    const { cronk, admin, agent } = await protectedDocument();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+
+    const project = await agent.post("/api/suggestions", { item: { kind: "guidance", project: "cronk" }, baseVersion: 0, content: { markdown: "Use pnpm." }, reasoning: "We do." });
+    expect(project.body.suggestion).toMatchObject({ item: { kind: "guidance", id: null, title: "Guidance", projectKey: "CRONK", version: 0 }, base: { markdown: "" } });
+    await bob.post(`/api/suggestions/${project.body.suggestion.id}/accept`);
+    expect((await admin.get("/api/projects/CRONK/guidance/versions")).body.versions).toMatchObject([
+      { version: 1, markdown: "Use pnpm.", actor: { kind: "agent", name: "claude-laptop" }, suggestion: { id: project.body.suggestion.id } },
+    ]);
+
+    await admin.put("/api/workspace/guidance", { markdown: "Be kind.", baseVersion: 0 });
+    const workspace = await agent.post("/api/suggestions", { item: { kind: "guidance" }, baseVersion: 1, content: { markdown: "Be kind and brief." }, reasoning: "Shorter." });
+    expect(workspace.body.suggestion).toMatchObject({ item: { projectKey: null }, reviewer: null });
+    expect((await bob.post(`/api/suggestions/${workspace.body.suggestion.id}/accept`)).status).toBe(403);
+    await admin.post(`/api/suggestions/${workspace.body.suggestion.id}/accept`);
+    expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Be kind and brief.", version: 2 });
+  });
+});
