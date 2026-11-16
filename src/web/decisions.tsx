@@ -3,6 +3,7 @@ import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
+import { RejectDecisionForm } from "./components/reject-decision.js";
 import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip } from "./components/tags.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
@@ -10,7 +11,7 @@ import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionS
 import { CronkMarkdown } from "./markdown.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 import { Link, navigate } from "./router.js";
-import { Field, Show, TextArea, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
+import { Field, Show, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
 
 // The Decisions register and a Decision's page: docs/ui.md § Decisions.
 
@@ -262,22 +263,16 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           )}
         </div>
         {status.error && <p className="error" role="alert">{status.error}</p>}
+        {reject.error && <p className="error" role="alert">{reject.error}</p>}
         {rejecting && (
-          <form
-            className="comment-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void reject.run();
-            }}
-          >
-            <TextArea label="Why reject it" value={reason} onChange={setReason} rows={3} />
-            {d.proposedBy.kind === "agent" && <p className="muted small">{`The reason reaches ${d.proposedBy.name} as Waiting Work.`}</p>}
-            {reject.error && <p className="error" role="alert">{reject.error}</p>}
-            <div className="actions">
-              <Button type="submit" disabled={reject.busy || !reason.trim()}>Reject</Button>
-              <Button type="button" variant="secondary" onClick={() => setRejecting(false)}>Cancel</Button>
-            </div>
-          </form>
+          <RejectDecisionForm
+            proposedBy={d.proposedBy}
+            reason={reason}
+            onReasonChange={setReason}
+            onReject={() => void reject.run()}
+            onCancel={() => setRejecting(false)}
+            busy={reject.busy}
+          />
         )}
         <h1 className="decision-title">{d.title}</h1>
         {d.supersedes.length > 0 && (

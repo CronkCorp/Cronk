@@ -93,7 +93,7 @@ A message any Actor posts on a Ticket or Document, possibly in reply to another 
 _Avoid_: Reply, note, message, discussion
 
 **Waiting Work**:
-A Comment that concerns an Agent: it answers the Agent's Question, @mentions it, or is on a Ticket delegated to it or an Artifact Version it published. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
+A Comment that concerns an Agent: it answers the Agent's Question, @mentions it, or is on a Ticket delegated to it or an Artifact Version it published. A User's rejection of a Decision the Agent proposed, with the reason, is Waiting Work too. Listed in the welcome of the Agent's next Agent Session and pushed to its live ones (ADR 0005).
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
@@ -101,7 +101,7 @@ An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:
-A User's personal list of everything waiting on them: Tickets In Review, Unverified completions, Agent questions, Suggestions and Discovered Tickets that concern them.
+A User's personal list of everything waiting on them: Tickets In Review, Unverified completions, Agent questions, Suggestions, Discovered Tickets and proposed Decisions that concern them.
 _Avoid_: Review queue, notifications, to-do
 
 **Triage**:
@@ -149,7 +149,7 @@ A glossary entry naming one concept: its canonical name, definition and the word
 _Avoid_: Glossary entry, definition, word
 
 **Decision**:
-A recorded choice with its reasoning and a lifecycle status (proposed, accepted, rejected, deprecated, superseded), which may supersede earlier Decisions. Only Users change its status; accepting a Decision that supersedes another marks the other superseded.
+A recorded choice with its reasoning and a lifecycle status (proposed, accepted, rejected, deprecated, superseded), which may supersede earlier Decisions. Only Users change its status, and rejecting one takes a reason; accepting a Decision that supersedes another marks the other superseded. An Agent may propose one and refine it while it is proposed; a User then reviews it: the Assignee of the Ticket the Agent held the Claim on (its **source Ticket**), or else the Agent's Owner.
 _Avoid_: ADR (in the product), RFC, ruling
 
 ### Actors

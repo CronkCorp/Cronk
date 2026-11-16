@@ -8,7 +8,7 @@ import { answer, errors, holding, listing, pathParams, projectKeyParam, ref, sav
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
-import { markRejected, rejectionOf, waitingEvent } from "../coordination/waiting-work.js";
+import { markRejected, rejectionOf, waitingEvent, type RejectionWork } from "../coordination/waiting-work.js";
 import { agentTopic } from "../live/topics.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { listSessionClaims, requireClaimHolder, type SessionClaim } from "../coordination/claims.js";
@@ -343,7 +343,7 @@ export function decisionRoutes(ctx: AppContext) {
         // stream before it commits, and pushed once it has (as for a Comment; see conversation/routes.ts).
         const forget: (() => void)[] = [];
         const positioned = (agentId: string, seq: string) => forget.push(ctx.live.expect(agentTopic(agentId), seq));
-        let told: { agentId: string; seq: string } | undefined;
+        let told: { agentId: string; seq: string; work: RejectionWork } | undefined;
         const changed: Decision[] = [];
         let decision: Decision;
         try {
@@ -358,7 +358,7 @@ export function decisionRoutes(ctx: AppContext) {
             const proposer = saved.proposedBy;
             if (status === "rejected" && saved.version !== current.version && proposer.kind === "agent") {
               const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
-              if (seq) told = { agentId: proposer.id, seq };
+              if (seq) told = { agentId: proposer.id, seq, work: rejectionOf(saved, (await findDecisionVersion(tx, saved, saved.version))!) };
             }
             return saved;
           });
@@ -366,7 +366,7 @@ export function decisionRoutes(ctx: AppContext) {
           for (const f of forget) f();
           throw err;
         }
-        if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, rejectionOf(decision)));
+        if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
         await reviewersHear([decision, ...changed]);
         return { decision };
       },

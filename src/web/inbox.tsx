@@ -7,6 +7,7 @@ import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type StatusCategory } from "./api.js";
+import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
@@ -551,7 +552,6 @@ function DecisionDetail(props: DetailProps<DecisionItem>) {
     if (rejecting) reasonBox.current?.focus();
   }, [rejecting]);
   useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept, sendBack: () => (rejecting ? reasonBox.current?.focus() : setRejecting(true)) });
-  const agent = decision.proposedBy.kind === "agent" ? decision.proposedBy.name : undefined;
 
   return (
     <div className="inbox-detail-body">
@@ -579,20 +579,16 @@ function DecisionDetail(props: DetailProps<DecisionItem>) {
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       {rejecting ? (
-        <form
-          className="comment-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void reject.run();
-          }}
-        >
-          <TextArea label="Why reject it" value={reason} onChange={setReason} rows={3} inputRef={reasonBox} disabled={props.resolved} />
-          {agent && <p className="muted small">{`The reason reaches ${agent} as Waiting Work.`}</p>}
-          <div className="actions">
-            <Button type="submit" disabled={props.resolved || reject.busy || !reason.trim()}>Reject</Button>
-            <Button type="button" variant="secondary" onClick={() => setRejecting(false)}>Cancel</Button>
-          </div>
-        </form>
+        <RejectDecisionForm
+          proposedBy={decision.proposedBy}
+          reason={reason}
+          onReasonChange={setReason}
+          onReject={() => void reject.run()}
+          onCancel={() => setRejecting(false)}
+          busy={reject.busy}
+          disabled={props.resolved}
+          inputRef={reasonBox}
+        />
       ) : (
         <div className="actions">
           <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>

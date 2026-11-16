@@ -9,7 +9,7 @@ import { listAgents, type Agent } from "../identity/agents.js";
 import type { User } from "../identity/users.js";
 import { findCommentsByIds, publicComment, type Comment, type CommentOn } from "../conversation/comments.js";
 import { WAITING_REASONS, type WaitingReason } from "../../shared/values.js";
-import { findDecisionById, findDecisionVersion, type Decision } from "../knowledge/decisions.js";
+import { findDecisionById, findDecisionVersion, type Decision, type DecisionVersion } from "../knowledge/decisions.js";
 
 export type { WaitingReason };
 
@@ -58,12 +58,12 @@ export interface RejectedDecision {
   at: Date;
 }
 
-/** The rejection `decision`, just rejected, as Waiting Work: as its rejecting Version says it. */
-export function rejectionOf(decision: Decision): RejectionWork {
+/** The rejection of `decision` at Version `rejecting` as Waiting Work: as that Version says it. */
+export function rejectionOf(decision: Pick<Decision, "key" | "sourceTicket">, rejecting: DecisionVersion): RejectionWork {
   return {
     reason: "rejected",
     comment: null,
-    decision: { key: decision.key, title: decision.title, reason: decision.statusReason ?? "", rejectedBy: decision.statusChangedBy, at: decision.statusChangedAt },
+    decision: { key: decision.key, title: rejecting.title, reason: rejecting.statusReason ?? "", rejectedBy: rejecting.actor, at: rejecting.at },
     ticket: decision.sourceTicket,
     document: null,
   };
@@ -300,8 +300,7 @@ async function waitingWorkFor(db: Queryable, agent: AgentActor, rows: WaitingRow
       const decision = await findDecisionById(db, row.decision_id!);
       const version = decision && (await findDecisionVersion(db, decision, row.decision_version!));
       if (!decision || !version || !(await canRead(db, agent, decision.projectId))) continue;
-      const rejected = { ...decision, title: version.title, statusReason: version.statusReason, statusChangedBy: version.actor, statusChangedAt: version.at };
-      work.push({ seq: row.seq, work: rejectionOf(rejected) });
+      work.push({ seq: row.seq, work: rejectionOf(decision, version) });
     }
   }
   return work;
