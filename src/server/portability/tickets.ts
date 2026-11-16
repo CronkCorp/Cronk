@@ -44,6 +44,7 @@ interface TicketRow {
 
 interface RelationRow {
   kind: string;
+  reason: string | null;
   from_id: string;
   from_key: string;
   to_id: string;
@@ -60,7 +61,7 @@ export async function exportTickets(ctx: ExportContext, dir: string, p: ProjectR
     [p.id],
   );
   const { rows: relations } = await ctx.db.query<RelationRow>(
-    `SELECT r.kind, r.from_ticket_id AS from_id, ${ticketKeySql("fp", "f")} AS from_key, r.to_ticket_id AS to_id, ${ticketKeySql("tp", "t")} AS to_key
+    `SELECT r.kind, r.reason, r.from_ticket_id AS from_id, ${ticketKeySql("fp", "f")} AS from_key, r.to_ticket_id AS to_id, ${ticketKeySql("tp", "t")} AS to_key
      FROM ticket_relations r
        JOIN tickets f ON f.id = r.from_ticket_id JOIN projects fp ON fp.id = f.project_id
        JOIN tickets t ON t.id = r.to_ticket_id JOIN projects tp ON tp.id = t.project_id
@@ -100,7 +101,7 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
         // Written only when set, as a Ticket from before Autonomous Delegation has neither.
         autonomous: t.autonomous || undefined,
         verification: t.verification ?? undefined,
-        discovered: discoveryOf(ctx, projectKey, t),
+        discovered: discoveryOf(ctx, projectKey, t, relations),
         blocks: sorted(related("blocks", "from")),
         blockedBy: sorted(related("blocks", "to")),
         relatesTo: sorted([...related("relates_to", "from"), ...related("relates_to", "to")]),
@@ -122,8 +123,13 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
  * A Discovered Ticket's marker as its file writes it: the Agent and Agent Session that filed it, the Ticket it came from with
  * that Claim's id, so the Reports of the Claim still list it, and whether a User kept it in Backlog; each written only when set.
  */
-function discoveryOf(ctx: ExportContext, projectKey: string, t: TicketRow) {
+function discoveryOf(ctx: ExportContext, projectKey: string, t: TicketRow, relations: RelationRow[]) {
   if (t.discovered_by_agent_id === null) return undefined;
+  // Only the Agent that filed it adds blocks from it, so each needs just its reason.
+  const reasons = relations
+    .filter((r) => r.kind === "blocks" && r.from_id === t.id && r.reason !== null)
+    .sort((a, b) => natural(a.to_key, b.to_key))
+    .map((r) => [r.to_key, r.reason!] as const);
   const by = ctx.agentActor({ actor_user_id: t.discovered_by_owner_id!, actor_agent_id: t.discovered_by_agent_id, actor_session_id: t.discovered_session_id });
   const sourced = t.source_number !== null;
   return {
@@ -132,6 +138,7 @@ function discoveryOf(ctx: ExportContext, projectKey: string, t: TicketRow) {
     sourceTicket: sourced ? `${projectKey}-${t.source_number}` : undefined,
     sourceClaim: sourced ? (t.discovered_source_claim_id ?? undefined) : undefined,
     kept: t.discovery_kept || undefined,
+    blockReasons: reasons.length > 0 ? Object.fromEntries(reasons) : undefined,
   };
 }
 
@@ -176,6 +183,8 @@ interface PendingRelation {
   from: string;
   kind: "blocks" | "relates_to";
   to: string;
+  /** The Agent and reason of a block from its Discovered Ticket. */
+  block?: { agentId: string; reason: string };
 }
 
 /** A Document a Ticket file links, by the path of its file, to store once every Document is in. */
@@ -201,11 +210,12 @@ export class ImportedTickets {
 
   /** Stores the relations between Tickets this import brought in: a key elsewhere may name another Ticket here. */
   async storeRelations(ctx: ImportContext): Promise<void> {
-    for (const r of this.relations) {
+    // Both ends name each relation; the Discovered Ticket's side, which knows why it blocks, goes first.
+    for (const r of [...this.relations].sort((a, b) => Number(b.block !== undefined) - Number(a.block !== undefined))) {
       const from = this.ids.get(r.from);
       const to = this.ids.get(r.to);
       if (!from || !to || from === to) continue;
-      await storeRelation(ctx.db, { kind: r.kind, from, to });
+      await storeRelation(ctx.db, { kind: r.kind, from, to, block: r.block ?? null });
     }
   }
 
@@ -256,13 +266,18 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
   const parents: { ticketId: string; parent: string; path: string }[] = [];
   for (const path of ctx.filesIn(`projects/${dirKey}/tickets`).filter((p) => !p.endsWith(".history.md"))) {
     const t = ctx.need(path);
-    const { key, id, assignedToOwner, discoverySource } = await importTicket(ctx, t, project);
+    const { key, id, assignedToOwner, discoverySource, blockReasons } = await importTicket(ctx, t, project);
     if (discoverySource) tickets.discoverySources.push({ ticketId: id, ...discoverySource });
     if (assignedToOwner) tickets.assignedToOwner.push({ ticketId: id, ownerId: assignedToOwner });
     if (tickets.ids.has(key)) refuse(`Two Tickets have the key ${key}`);
     tickets.ids.set(key, id);
     if (typeof t.data.parent === "string") parents.push({ ticketId: id, parent: t.data.parent.toUpperCase(), path });
-    tickets.relations.push(...relationsOf(t, key));
+    tickets.relations.push(
+      ...relationsOf(t, key).map((r) => {
+        const reason = r.kind === "blocks" && r.from === key ? blockReasons?.reasons.get(r.to) : undefined;
+        return reason === undefined ? r : { ...r, block: { agentId: blockReasons!.agentId, reason } };
+      }),
+    );
     tickets.documentLinks.push(...documentLinksOf(t, id));
     const base = path.slice(0, -".md".length);
     const history = ctx.read(`${base}.history.md`);
@@ -289,7 +304,13 @@ async function importTicket(
   ctx: ImportContext,
   t: File,
   project: ImportedProject,
-): Promise<{ key: string; id: string; assignedToOwner?: string; discoverySource?: PendingDiscoverySource }> {
+): Promise<{
+  key: string;
+  id: string;
+  assignedToOwner?: string;
+  discoverySource?: PendingDiscoverySource;
+  blockReasons?: { agentId: string; reasons: Map<string, string> };
+}> {
   const key = text(t.data.key, `${t.path} key`).toUpperCase();
   const number = Number(new RegExp(`^${project.key}-([1-9][0-9]{0,8})$`).exec(key)?.[1]);
   if (!number) refuse(`${t.path} key must be a key of ${project.key}, such as ${project.key}-1`);
@@ -325,7 +346,13 @@ async function importTicket(
       discovered?.kept ?? false,
     ],
   );
-  return { key, id: rows[0]!.id, assignedToOwner, discoverySource: discovered?.source };
+  return {
+    key,
+    id: rows[0]!.id,
+    assignedToOwner,
+    discoverySource: discovered?.source,
+    blockReasons: discovered && { agentId: discovered.agentId, reasons: discovered.blockReasons },
+  };
 }
 
 /** The Discovered marker the Ticket file `t` holds, if any, with the key of its source Ticket to link once every Ticket is in. */
@@ -334,12 +361,20 @@ async function discoveryIn(ctx: ImportContext, t: File) {
   if (d === undefined || d === null) return undefined;
   const where = `${t.path} discovered`;
   if (typeof d !== "object" || Array.isArray(d)) refuse(`${where} must name the Agent that filed it`);
-  const { agent, session, sourceTicket, sourceClaim, kept } = d as Record<string, unknown>;
+  const { agent, session, sourceTicket, sourceClaim, kept, blockReasons } = d as Record<string, unknown>;
   const by = await ctx.actor({ agent, session }, where);
   if (kept !== undefined && typeof kept !== "boolean") refuse(`${where} kept must be true or false`);
   if (sourceTicket !== undefined && sourceTicket !== null && typeof sourceTicket !== "string") refuse(`${where} sourceTicket must be a Ticket key`);
   const source = typeof sourceTicket === "string" ? { sourceKey: sourceTicket, claimId: isUuid(sourceClaim) ? sourceClaim : null, where: `${where} sourceTicket` } : undefined;
-  return { agentId: by.agentId!, sessionId: by.sessionId, kept: kept === true, source };
+  const reasons = new Map<string, string>();
+  if (blockReasons !== undefined && blockReasons !== null) {
+    if (typeof blockReasons !== "object" || Array.isArray(blockReasons)) refuse(`${where} blockReasons must map Ticket keys to why it blocks them`);
+    for (const [key, reason] of Object.entries(blockReasons)) {
+      if (typeof reason !== "string" || reason.trim() === "") refuse(`${where} blockReasons must say why it blocks ${key}`);
+      reasons.set(key.toUpperCase(), reason);
+    }
+  }
+  return { agentId: by.agentId!, sessionId: by.sessionId, kept: kept === true, source, blockReasons: reasons };
 }
 
 /** The relations the Ticket file `t`, keyed `key`, names. */

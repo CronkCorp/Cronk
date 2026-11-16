@@ -375,8 +375,8 @@ async function busyWorkspace() {
   await admin.post(`/api/suggestions/${suggestions[0]}/accept`);
   await admin.post(`/api/suggestions/${suggestions[1]}/accept`, { content: { avoid: ["Issue", "job"] } });
   await grace.post(`/api/suggestions/${suggestions[2]}/reject`, { reason: "Keep the title." });
-  // Discovered Tickets it files from CRONK-4, which its Report lists: CRONK-5 waits in Ada's Inbox, CRONK-6 she keeps in Backlog.
-  await suggester.post("/api/projects/CRONK/tickets", { title: "Dead links in the docs" });
+  // Discovered Tickets it files from CRONK-4, which its Report lists: CRONK-5 waits in Ada's Inbox, blocking CRONK-3; CRONK-6 she keeps in Backlog.
+  await suggester.post("/api/projects/CRONK/tickets", { title: "Dead links in the docs", blocks: [{ ticketKey: "CRONK-3", reason: "Its docs link to the dead pages." }] });
   await suggester.post("/api/projects/CRONK/tickets", { title: "Docs build is slow" });
   await suggester.post("/api/tickets/CRONK-4/reports", { title: "Tidied", body: "Found two more." });
   await admin.post("/api/tickets/CRONK-6/keep");
@@ -665,14 +665,14 @@ describe("an export without Versions", () => {
 });
 
 describe("Discovered Tickets in an export", () => {
-  it("carry their Discovered marker in their frontmatter: the Agent and Agent Session that filed them, their source and whether kept", async () => {
+  it("carry their Discovered marker in their frontmatter: the Agent and Agent Session that filed them, their source, whether kept and why they block", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
     await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
     await admin.post("/api/tickets/CRONK-2/keep");
     const elsewhere = await startSession(cronk, claude.secret);
-    await elsewhere.post("/api/projects/CRONK/tickets", { title: "Found later" });
+    await elsewhere.post("/api/projects/CRONK/tickets", { title: "Found later", blocks: [{ ticketKey: "CRONK-1", reason: "Same cache." }] });
 
     const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
 
@@ -683,7 +683,10 @@ describe("Discovered Tickets in an export", () => {
       sourceClaim: expect.any(String),
       kept: true,
     });
-    expect(markdown(files["projects/CRONK/tickets/CRONK-3.md"]).data.discovered).toEqual({ agent: claude.agentId, session: elsewhere.sessionId });
+    expect(markdown(files["projects/CRONK/tickets/CRONK-3.md"]).data).toMatchObject({
+      discovered: { agent: claude.agentId, session: elsewhere.sessionId, blockReasons: { "CRONK-1": "Same cache." } },
+      blocks: ["CRONK-1"],
+    });
     expect(markdown(files["projects/CRONK/tickets/CRONK-1.md"]).data.discovered).toBeUndefined();
   });
 });
