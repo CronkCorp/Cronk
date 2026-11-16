@@ -273,7 +273,8 @@ function ChangeEntry(props: { change: RecordedChange; className: string }) {
   return (
     <TimelineEntry className={`tl-change${props.className}`} gutter={<span className="tl-ring" aria-hidden="true" />}>
       <p className="tl-change-line">
-        <Actor actor={recordedActor(change.actor)} /> {change.change === "status" && change.sentBack ? <>sent it back: {change.from.name} → {change.to.name}</> : describeChange(change)}{" "}
+        {change.actor.kind === "system" ? <span className="actor system">Cronk</span> : <Actor actor={recordedActor(change.actor)} />}{" "}
+        {change.change === "status" && change.sentBack ? <>sent it back: {change.from.name} → {change.to.name}</> : describeChange(change)}{" "}
         <RelativeTime at={change.at} clock />
       </p>
     </TimelineEntry>
