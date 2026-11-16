@@ -609,7 +609,36 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0025_mentions",
+    id: "0025_transcripts",
+    sql: `
+      -- The most a Transcript may hold, all its texts together, in bytes: 10 MB unless an Admin changes it.
+      ALTER TABLE workspaces ADD COLUMN transcript_max_bytes integer NOT NULL DEFAULT 10485760 CHECK (transcript_max_bytes > 0);
+
+      -- The verbatim chat behind an Agent's changes (transcripts/transcripts.ts), one per Agent and client chat id. markdown is
+      -- the latest upload's text; earlier holds, oldest first, texts a later upload didn't continue. Its Owner is its Agent's.
+      CREATE TABLE transcripts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        agent_id uuid NOT NULL REFERENCES agents(id),
+        chat_id text NOT NULL,
+        markdown text NOT NULL,
+        earlier text[] NOT NULL DEFAULT '{}',
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        UNIQUE (agent_id, chat_id)
+      );
+
+      -- The uploading Agent's Agent Sessions a Transcript names, and so everything they changed. Links only grow.
+      CREATE TABLE transcript_sessions (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        session_id uuid NOT NULL REFERENCES agent_sessions(id),
+        PRIMARY KEY (transcript_id, session_id)
+      );
+      CREATE INDEX transcript_sessions_session ON transcript_sessions (session_id);
+    `,
+  },
+  {
+    id: "0026_mentions",
     sql: `
       -- What mentions each Decision and Term (knowledge/mentions.ts): the Ticket, Document, Comment, Term or
       -- Decision whose current text names a Decision's key (kept as written, so a mention counts once a Decision

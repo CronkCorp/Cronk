@@ -13,6 +13,7 @@ import { importPeople } from "./people.js";
 import { importProject } from "./projects.js";
 import type { RenamedId } from "./renamed-ids.js";
 import { ImportedTickets, importTickets } from "./tickets.js";
+import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 
@@ -75,6 +76,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await tickets.importHistories(ctx);
   // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.
   await recordAllMentions(db, workspaceId);
+  // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
+  if (scope === "workspace") await importTranscripts(ctx);
   return { scope, projects: created, renamedIds: ctx.renamedIds };
 }
 

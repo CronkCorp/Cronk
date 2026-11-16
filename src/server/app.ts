@@ -22,6 +22,7 @@ import { documentLinkRoutes } from "./work/document-link-routes.js";
 import { workspaceRoutes } from "./workspace/routes.js";
 import { LiveUpdates } from "./live/live-updates.js";
 import { inboxRoutes } from "./inbox/routes.js";
+import { transcriptRoutes } from "./transcripts/routes.js";
 import { watchSilence } from "./coordination/lapses.js";
 import { refuseWritesFromOtherSites } from "./identity/same-site.js";
 import { attachmentRoutes } from "./files/attachment-routes.js";
@@ -182,6 +183,7 @@ export async function buildApp(opts: {
   await app.register(searchRoutes(ctx));
   await app.register(inboxRoutes(ctx));
   await app.register(portabilityRoutes(ctx));
+  await app.register(transcriptRoutes(ctx));
   await app.register(mcpRoutes(ctx));
 
   const webRoot = opts.config.webRoot;
