@@ -130,16 +130,20 @@ function hasWord(text: string, word: string): boolean {
   return false;
 }
 
+/**
+ * Everything the Agent Sessions `$1` did, as the Ticket or Document each record is on: the Ticket changes they made, the
+ * Activities and Comments they wrote and the Document Versions they saved.
+ */
+const SESSION_RECORDS = `
+  SELECT ticket_id, NULL::uuid AS document_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT ticket_id, document_id FROM comments WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT NULL, document_id FROM document_versions WHERE actor_session_id = ANY($1::uuid[])`;
+
 /** Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment or a Document Version. */
 export async function changedAnything(db: Queryable, sessionIds: string[]): Promise<boolean> {
   if (sessionIds.length === 0) return false;
-  const { rows } = await db.query(
-    `SELECT 1 FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
-     UNION ALL SELECT 1 FROM activities WHERE actor_session_id = ANY($1::uuid[])
-     UNION ALL SELECT 1 FROM comments WHERE actor_session_id = ANY($1::uuid[])
-     UNION ALL SELECT 1 FROM document_versions WHERE actor_session_id = ANY($1::uuid[]) LIMIT 1`,
-    [sessionIds],
-  );
+  const { rows } = await db.query(`SELECT 1 FROM (${SESSION_RECORDS}) r LIMIT 1`, [sessionIds]);
   return rows.length > 0;
 }
 
@@ -203,15 +207,12 @@ interface Places {
 /** The Tickets changed by these Sessions (`$1`), with the Project each lies in. */
 const CHANGED_TICKETS = `
   SELECT t.id, ${ticketKeySql("p", "t")} AS key, t.title, t.project_id, t.number FROM tickets t JOIN projects p ON p.id = t.project_id
-  WHERE t.id IN (SELECT ticket_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
-                 UNION SELECT ticket_id FROM activities WHERE actor_session_id = ANY($1::uuid[])
-                 UNION SELECT ticket_id FROM comments WHERE ticket_id IS NOT NULL AND actor_session_id = ANY($1::uuid[]))`;
+  WHERE t.id IN (SELECT ticket_id FROM (${SESSION_RECORDS}) r)`;
 
 /** The Documents and Reports changed by these Sessions (`$1`), with the Project each lies in: a Report's Ticket's; null for the Workspace. */
 const CHANGED_DOCUMENTS = `
   SELECT d.id, d.title, coalesce(rt.project_id, d.project_id) AS project_id, d.created_at FROM documents d LEFT JOIN tickets rt ON rt.id = d.ticket_id
-  WHERE d.id IN (SELECT document_id FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
-                 UNION SELECT document_id FROM comments WHERE document_id IS NOT NULL AND actor_session_id = ANY($1::uuid[]))`;
+  WHERE d.id IN (SELECT document_id FROM (${SESSION_RECORDS}) r)`;
 
 /** What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents in the order they were created. */
 export async function changedItems(db: Queryable, sessionIds: string[]) {
