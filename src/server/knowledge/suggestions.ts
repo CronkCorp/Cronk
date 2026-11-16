@@ -1,7 +1,7 @@
 import { actingUser, userActor, type Actor, type AgentActor, type RecordedActor, type StoredActor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
-import { requireAdmin, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
+import { canRead, requireAdmin, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { findProjectById, findProjectByKey } from "../work/projects.js";
 import { ticketKeySql } from "../work/tickets.js";
@@ -19,11 +19,8 @@ import { findTerm, listTermVersions, saveTermVersion, tidyFields } from "./terms
  * Decisions and Guidance (which only Users write, so Agents always suggest changes to it).
  */
 
-export const SUGGESTION_KINDS = ["document", "term", "decision", "guidance"] as const;
-export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
-
-export const SUGGESTION_STATES = ["open", "accepted", "rejected"] as const;
-export type SuggestionState = (typeof SUGGESTION_STATES)[number];
+export { SUGGESTION_KINDS, SUGGESTION_STATES, type SuggestionKind, type SuggestionState } from "../../shared/values.js";
+import type { DecisionStatus, SuggestionKind, SuggestionState } from "../../shared/values.js";
 
 /**
  * What a Suggestion proposes: the item's whole content as its next Version would hold it. A Document's
@@ -56,6 +53,8 @@ export interface SuggestionItem {
   key: string | null;
   /** A Document's or Decision's title, a Term's name; "Guidance" for Guidance. */
   title: string;
+  /** A Decision's status; null for the other kinds. */
+  status: DecisionStatus | null;
   /** Null for a Workspace item. */
   projectId: string | null;
   projectKey: string | null;
@@ -103,35 +102,36 @@ interface Suggestable {
   save(db: Queryable, content: SuggestedContent, actor: Actor | StoredActor, now: Date): Promise<number | string>;
 }
 
-/** Where a loaded item lives, and its row's ids, as a Suggestion stores it. */
-interface Located {
+/** Where a loaded item lives, and its row's ids, as a Suggestion's columns store it. */
+interface ItemColumns {
   documentId: string | null;
   termId: string | null;
   decisionId: string | null;
   projectId: string | null;
 }
 
-const located = (kind: SuggestionKind, item: SuggestionItem): Located => ({
+const itemColumns = (kind: SuggestionKind, item: SuggestionItem): ItemColumns => ({
   documentId: kind === "document" ? item.id : null,
   termId: kind === "term" ? item.id : null,
   decisionId: kind === "decision" ? item.id : null,
   projectId: item.projectId,
 });
 
-const str = (v: unknown) => v as string;
+/** A field of content `completeContent` has checked is text, as text. */
+const textOf = (v: unknown) => v as string;
 
 async function documentItem(db: Queryable, workspaceId: string, id: string): Promise<Suggestable | undefined> {
   const d = await findDocument(db, workspaceId, id);
   if (!d) return undefined;
   return {
-    item: { kind: "document", id: d.id, key: null, title: d.title, projectId: d.projectId, projectKey: d.projectKey, protected: d.protected, version: d.version },
+    item: { kind: "document", id: d.id, key: null, title: d.title, status: null, projectId: d.projectId, projectKey: d.projectKey, protected: d.protected, version: d.version },
     openToAgents: !d.protected,
     current: { title: d.title, body: d.body },
     contentAt: async (q, n) => {
       const v = await findVersion(q, d.id, n);
       return v && { title: v.title, body: v.body };
     },
-    save: async (q, c, actor, now) => (await saveVersion(q, d, { title: str(c.title), body: str(c.body), actor, now })).version,
+    save: async (q, c, actor, now) => (await saveVersion(q, d, { title: textOf(c.title), body: textOf(c.body), actor, now })).version,
   };
 }
 
@@ -140,7 +140,7 @@ async function termItem(db: Queryable, workspaceId: string, id: string): Promise
   if (!t) return undefined;
   const fields = (f: { name: string; definition: string; avoid: string[]; group: string | null }) => ({ name: f.name, definition: f.definition, avoid: f.avoid, group: f.group });
   return {
-    item: { kind: "term", id: t.id, key: null, title: t.name, projectId: t.projectId, projectKey: t.projectKey, protected: t.protected, version: t.version },
+    item: { kind: "term", id: t.id, key: null, title: t.name, status: null, projectId: t.projectId, projectKey: t.projectKey, protected: t.protected, version: t.version },
     openToAgents: !t.protected,
     current: fields(t),
     contentAt: async (q, n) => {
@@ -149,16 +149,15 @@ async function termItem(db: Queryable, workspaceId: string, id: string): Promise
     },
     save: async (q, c, actor, now) => {
       const saved = await saveTermVersion(q, workspaceId, t, { fields: c as unknown as Parameters<typeof tidyFields>[0], actor, now });
-      return saved === "name taken" ? `There is already a Term named ${str(c.name)} here; names are unique ignoring case` : saved.version;
+      return saved === "name taken" ? `There is already a Term named ${textOf(c.name)} here; names are unique ignoring case` : saved.version;
     },
   };
 }
 
-async function decisionItem(db: Queryable, found: Awaited<ReturnType<typeof findDecisionById>>): Promise<Suggestable | undefined> {
-  const d = found;
+function decisionItem(d: Awaited<ReturnType<typeof findDecisionById>>): Suggestable | undefined {
   if (!d) return undefined;
   return {
-    item: { kind: "decision", id: d.id, key: d.key, title: d.title, projectId: d.projectId, projectKey: d.projectKey, protected: d.protected, version: d.version },
+    item: { kind: "decision", id: d.id, key: d.key, title: d.title, status: d.status, projectId: d.projectId, projectKey: d.projectKey, protected: d.protected, version: d.version },
     // An Agent edits a Decision only while it is proposed, and not then if it is Protected.
     openToAgents: d.status === "proposed" && !d.protected,
     current: { title: d.title, body: d.body, group: d.group },
@@ -167,7 +166,7 @@ async function decisionItem(db: Queryable, found: Awaited<ReturnType<typeof find
       return v && { title: v.title, body: v.body, group: v.group };
     },
     save: async (q, c, actor, now) =>
-      (await saveDecision(q, d, { ...decisionContentOf(d), title: str(c.title), body: str(c.body), group: c.group as string | null }, actor, now)).version,
+      (await saveDecision(q, d, { ...decisionContentOf(d), title: textOf(c.title), body: textOf(c.body), group: c.group as string | null }, actor, now)).version,
   };
 }
 
@@ -175,7 +174,7 @@ async function guidanceItem(db: Queryable, workspaceId: string, projectId: strin
   const owner = { workspaceId, projectId };
   const g = await getGuidance(db, owner);
   return {
-    item: { kind: "guidance", id: null, key: null, title: "Guidance", projectId, projectKey, protected: true, version: g.version },
+    item: { kind: "guidance", id: null, key: null, title: "Guidance", status: null, projectId, projectKey, protected: true, version: g.version },
     // Only Users write Guidance.
     openToAgents: false,
     current: { markdown: g.markdown },
@@ -184,7 +183,7 @@ async function guidanceItem(db: Queryable, workspaceId: string, projectId: strin
       return markdown === undefined ? undefined : { markdown };
     },
     save: async (q, c, actor, now) => {
-      const saved = await writeGuidance(q, owner, { markdown: str(c.markdown), baseVersion: g.version, actor, now });
+      const saved = await writeGuidance(q, owner, { markdown: textOf(c.markdown), baseVersion: g.version, actor, now });
       return saved ? saved.version : "The Guidance changed meanwhile; try again";
     },
   };
@@ -209,7 +208,7 @@ async function itemFor(db: Queryable, actor: Actor, ref: ItemRef, need: Access):
   let found: Suggestable | undefined;
   if (ref.kind === "document") found = await documentItem(db, workspaceId, ref.id);
   else if (ref.kind === "term") found = await termItem(db, workspaceId, ref.id);
-  else if (ref.kind === "decision") found = await decisionItem(db, await findDecisionByKey(db, workspaceId, ref.key));
+  else if (ref.kind === "decision") found = decisionItem(await findDecisionByKey(db, workspaceId, ref.key));
   else if (!ref.project) found = await guidanceItem(db, workspaceId, null, null);
   else {
     const project = await findProjectByKey(db, workspaceId, ref.project.toUpperCase());
@@ -235,7 +234,7 @@ const nameOf = (item: SuggestionItem) =>
 async function itemOf(db: Queryable, row: SuggestionRow): Promise<Suggestable> {
   if (row.kind === "document") return (await documentItem(db, row.workspace_id, row.document_id!))!;
   if (row.kind === "term") return (await termItem(db, row.workspace_id, row.term_id!))!;
-  if (row.kind === "decision") return (await decisionItem(db, await findDecisionById(db, row.decision_id!)))!;
+  if (row.kind === "decision") return decisionItem(await findDecisionById(db, row.decision_id!))!;
   const project = row.project_id === null ? undefined : await findProjectById(db, row.project_id);
   return guidanceItem(db, row.workspace_id, row.project_id, project?.key ?? null);
 }
@@ -390,16 +389,9 @@ export async function listAgentSuggestions(db: Queryable, agent: AgentActor, sta
     `${SELECT_SUGGESTIONS} WHERE s.actor_agent_id = $1 AND ($2::text[] IS NULL OR s.state = ANY($2::text[])) ORDER BY s.at DESC, s.id`,
     [agent.agent.id, states ?? null],
   );
-  const readable: SuggestionRow[] = [];
-  for (const row of rows) {
-    try {
-      await requirePlace(db, agent, { kind: row.kind, projectId: row.project_id } as SuggestionItem, "read", "");
-      readable.push(row);
-    } catch (err) {
-      if (!(err instanceof HttpError)) throw err;
-    }
-  }
-  return Promise.all(readable.map((r) => toSuggestion(db, r)));
+  const places = new Map<string | null, boolean>();
+  for (const projectId of new Set(rows.map((r) => r.project_id))) places.set(projectId, await canRead(db, agent, projectId));
+  return Promise.all(rows.filter((r) => places.get(r.project_id)).map((r) => toSuggestion(db, r)));
 }
 
 /** What an Agent sends to suggest a change. */
@@ -427,7 +419,7 @@ export async function createSuggestion(db: Queryable, actor: Actor, input: NewSu
   const reasoning = input.reasoning.trim();
   if (!reasoning) throw new HttpError(400, "A Suggestion needs reasoning: why the change, so a User can judge it");
   const source = await sourceClaimOf(db, actor, item.projectId, input.ticket, now, "a Suggestion");
-  const where = located(item.kind, item);
+  const where = itemColumns(item.kind, item);
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO suggestions (workspace_id, kind, document_id, term_id, decision_id, project_id, base_version, content, reasoning, at,
        actor_user_id, actor_agent_id, actor_session_id, source_ticket_id)
@@ -485,13 +477,9 @@ export async function acceptSuggestion(db: Queryable, user: User, id: string, ed
   const content = edited === undefined ? suggestion.content : completeContent(item.item.kind, edited, suggestion.content);
   const withEdits = !same(content, suggestion.content);
   if (same(content, item.current)) throw new HttpError(400, "Accepting it like this would change nothing; reject it instead");
-  const { proposedBy } = suggestion;
-  const agent: StoredActor = {
-    kind: "agent",
-    userId: proposedBy.kind === "agent" ? proposedBy.owner.id : proposedBy.id,
-    agentId: proposedBy.id,
-    sessionId: proposedBy.kind === "agent" ? (proposedBy.session?.id ?? null) : null,
-  };
+  // Only Agents make Suggestions, so it records an Agent, with the Owner it acted for.
+  const proposedBy = suggestion.proposedBy as Extract<RecordedActor, { kind: "agent" }>;
+  const agent: StoredActor = { kind: "agent", userId: proposedBy.owner.id, agentId: proposedBy.id, sessionId: proposedBy.session?.id ?? null };
   const version = await item.save(db, content, withEdits ? userActor(user) : agent, now);
   if (typeof version === "string") throw new HttpError(409, version);
   await db.query(

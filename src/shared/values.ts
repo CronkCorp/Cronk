@@ -73,6 +73,14 @@ export type SearchKind = (typeof SEARCH_KINDS)[number];
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
 export const MARKDOWN_FILE = /\.(md|markdown)$/i;
 
+/** The kinds of item a Suggestion can change (ADR 0014). */
+export const SUGGESTION_KINDS = ["document", "term", "decision", "guidance"] as const;
+export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
+
+/** Where a Suggestion stands: open until a User accepts or rejects it. */
+export const SUGGESTION_STATES = ["open", "accepted", "rejected"] as const;
+export type SuggestionState = (typeof SUGGESTION_STATES)[number];
+
 /** A Decision's lifecycle status. Only Users change it; a Decision becomes superseded when one superseding it is accepted. */
 export const DECISION_STATUSES = ["proposed", "accepted", "rejected", "deprecated", "superseded"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];

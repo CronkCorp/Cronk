@@ -1338,7 +1338,6 @@ test("see the selected item marked Resolved elsewhere once it is answered in ano
   await expect(detail.getByRole("button", { name: "Post answer" })).toBeVisible();
 });
 
-/** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */
 // Runs after the tests above, so Ada exists. It works in a Project of its own, filtered to it.
 test("open a Suggestion from the Inbox, switch to side by side, and accept it", async ({ page, request }) => {
   await signIn(page);
@@ -1379,6 +1378,7 @@ test("open a Suggestion from the Inbox, switch to side by side, and accept it", 
   expect(saved).toMatchObject({ version: 2, body: "Five per email.\n\nFifty per IP.\n" });
 });
 
+/** A Ticket delegated to a new Agent, which writes a Report on it and moves it to In Review, so it waits in Ada's Inbox. */
 async function reviewWithReport(
   page: import("@playwright/test").Page,
   request: import("@playwright/test").APIRequestContext,

@@ -20,12 +20,16 @@ export type VersionedItem =
 
 const COLUMN = { document: "document_id", term: "term_id", decision: "decision_id" } as const;
 
+/** SQL picking the Suggestions on `item` from `suggestions s`, with its parameters, numbered from $1. */
+export function suggestionsOnSql(item: VersionedItem): [where: string, params: unknown[]] {
+  return item.kind === "guidance"
+    ? ["s.kind = 'guidance' AND s.workspace_id = $1 AND s.project_id IS NOT DISTINCT FROM $2", [item.workspaceId, item.projectId]]
+    : [`s.${COLUMN[item.kind]} = $1`, [item.id]];
+}
+
 /** The accepted Suggestion each of the item's Versions came from, by Version number; Versions made otherwise are left out. */
 export async function versionSuggestions(db: Queryable, item: VersionedItem): Promise<Map<number, VersionSuggestion>> {
-  const [where, params] =
-    item.kind === "guidance"
-      ? ["s.kind = 'guidance' AND s.workspace_id = $1 AND s.project_id IS NOT DISTINCT FROM $2", [item.workspaceId, item.projectId]]
-      : [`s.${COLUMN[item.kind]} = $1`, [item.id]];
+  const [where, params] = suggestionsOnSql(item);
   const { rows } = await db.query<{ id: string; result_version: number; with_edits: boolean; user_id: string; user_name: string }>(
     `SELECT s.id, s.result_version, s.with_edits, u.id AS user_id, u.name AS user_name
      FROM suggestions s JOIN users u ON u.id = s.decided_by_user_id

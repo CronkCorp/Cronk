@@ -27,7 +27,7 @@ describe("an Agent suggesting a new Version of a Protected Document", () => {
     const suggestion = made.body.suggestion;
     expect(suggestion).toMatchObject({
       id: expect.any(String),
-      item: { kind: "document", id: documentId, key: null, title: "Sign-in limits", projectKey: "CRONK", protected: true },
+      item: { kind: "document", id: documentId, key: null, title: "Sign-in limits", status: null, projectKey: "CRONK", protected: true },
       baseVersion: 1,
       base: { title: "Sign-in limits", body: "Five per minute.\n" },
       content: { title: "Sign-in limits", body: "Five per minute, and fifty per IP.\n" },
@@ -317,7 +317,7 @@ describe("Suggestions on other kinds of item", () => {
     await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
     const made = await suggest("cronk-d1", 2);
     expect(made.status).toBe(201);
-    expect(made.body.suggestion).toMatchObject({ item: { kind: "decision", key: "CRONK-D1", title: "Postgres", protected: true }, content: { title: "Postgres", body: "v2", group: "Storage" } });
+    expect(made.body.suggestion).toMatchObject({ item: { kind: "decision", key: "CRONK-D1", title: "Postgres", status: "accepted", protected: true }, content: { title: "Postgres", body: "v2", group: "Storage" } });
 
     await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`, { content: { title: "Postgres for storage" } });
 

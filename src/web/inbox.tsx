@@ -422,6 +422,7 @@ function DetailHead(props: { item: InboxItem }) {
       <KindLabel kind={kind}>{full}</KindLabel>
       <span className="key">{key}</span>
       <Link to={to!} className="link">{title}</Link>
+      {item.kind === "suggestion" && item.suggestion.item.status && <DecisionStatusPill status={item.suggestion.item.status} />}
       {item.kind === "suggestion" && item.suggestion.item.protected && item.suggestion.item.kind !== "guidance" && <ProtectedMark />}
     </div>
   );
@@ -688,7 +689,7 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
       </div>
       {suggestion.outdated && (
         <Banner tone="info" role="status">
-          <p>{`Outdated: the item is at Version ${item.version} now, newer than Version ${suggestion.baseVersion} this Suggestion started from. It can't be accepted as it is; reject it, saying why, so the Agent can suggest it again.`}</p>
+          <p>{`Outdated: the item is at Version ${item.version} now, newer than Version ${suggestion.baseVersion} this Suggestion started from. It stays open; accepting it needs a merge with Version ${item.version}.`}</p>
         </Banner>
       )}
       <Reasoning projectKey={item.projectKey}>{suggestion.reasoning}</Reasoning>

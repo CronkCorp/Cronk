@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -535,7 +535,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           ...object({
             id,
             item: object({
-              kind: { type: "string", enum: ["document", "term", "decision", "guidance"] },
+              kind: { type: "string", enum: SUGGESTION_KINDS },
               id: nullable(id),
               key: nullable({ type: "string" }),
               title: { type: "string" },
@@ -825,10 +825,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       item: {
         description: "The item it would change, as it stands now.",
         ...object({
-          kind: { type: "string", enum: ["document", "term", "decision", "guidance"] },
+          kind: { type: "string", enum: SUGGESTION_KINDS },
           id: { ...nullable(id), description: "The Document's, Term's or Decision's id; null for Guidance." },
           key: { ...nullable({ type: "string" }), description: "A Decision's key; null for the other kinds." },
           title: { type: "string", description: "A Document's or Decision's title, a Term's name, or `Guidance`." },
+          status: { ...nullable(decisionStatus), description: "A Decision's status; null for the other kinds." },
           projectId: { ...nullable(id), description: "Null for a Workspace item." },
           projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace item." },
           protected: { type: "boolean", description: protectedDescription("it is marked Protected (Guidance always is)") },
@@ -847,7 +848,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description:
           "The User whose Inbox it is in: on a Project item, the source Ticket's Assignee, else the Agent's Owner; null when it is in Triage, as on a Workspace item.",
       },
-      state: { type: "string", enum: ["open", "accepted", "rejected"] },
+      state: { type: "string", enum: SUGGESTION_STATES },
       outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then needs a merge." },
       acceptedWithEdits: { ...nullable({ type: "boolean" }), description: "Whether the User changed it before accepting it; null unless accepted." },
       resultVersion: { ...nullable({ type: "integer" }), description: "The Version of the item accepting it made; null unless accepted." },

@@ -1,4 +1,6 @@
 import { CONTENT_FIELDS, SUGGESTION_STATES, type SuggestionKind } from "../knowledge/suggestions.js";
+import { suggestionsOnSql } from "../knowledge/version-suggestions.js";
+import { ticketKeySql } from "../work/tickets.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, integer, isUuid, oneOf, refuse, text } from "./fields.js";
 import { isRecord } from "./format.js";
@@ -14,7 +16,6 @@ import type { ImportedTickets } from "./tickets.js";
 /** The item a Suggestion is on: a Document, Term or Decision by id, or the Guidance of a Project (null for the Workspace's). */
 export type SuggestedItem = { kind: "document" | "term" | "decision"; id: string } | { kind: "guidance"; projectId: string | null };
 
-const COLUMN = { document: "document_id", term: "term_id", decision: "decision_id" } as const;
 
 interface SuggestionRow {
   id: string;
@@ -36,12 +37,9 @@ interface SuggestionRow {
 
 /** The frontmatter field holding the Suggestions on `item`. */
 export async function suggestionsToExport(ctx: ExportContext, item: SuggestedItem) {
-  const [where, params] =
-    item.kind === "guidance"
-      ? ["s.kind = 'guidance' AND s.workspace_id = $1 AND s.project_id IS NOT DISTINCT FROM $2", [ctx.scope.workspaceId, item.projectId]]
-      : [`s.${COLUMN[item.kind]} = $1`, [item.id]];
+  const [where, params] = suggestionsOnSql(item.kind === "guidance" ? { ...item, workspaceId: ctx.scope.workspaceId } : item);
   const { rows } = await ctx.db.query<SuggestionRow>(
-    `SELECT s.*, tp.key || '-' || t.number AS source_ticket
+    `SELECT s.*, ${ticketKeySql("tp", "t")} AS source_ticket
      FROM suggestions s LEFT JOIN tickets t ON t.id = s.source_ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
      WHERE ${where} ORDER BY s.at, s.id`,
     params,
@@ -129,6 +127,8 @@ async function taken(ctx: ImportContext, id: string): Promise<boolean> {
   return (await ctx.db.query("SELECT 1 FROM suggestions WHERE id = $1", [id])).rows.length > 0;
 }
 
+const NAMES = { document: "Document", term: "Term", decision: "Decision" } as const;
+
 /** A Suggestion's content as an export holds it: exactly the fields its kind holds, each of the right type. */
 function contentOf(kind: SuggestionKind, value: unknown, where: string): Record<string, unknown> {
   if (!isRecord(value)) refuse(`${where} must be a mapping`);
@@ -141,6 +141,6 @@ function contentOf(kind: SuggestionKind, value: unknown, where: string): Record<
     content[field] = v;
   }
   const stray = Object.keys(value).find((f) => !fields.includes(f));
-  if (stray) refuse(`${where} holds ${stray}, which a Suggestion on ${kind === "guidance" ? "Guidance" : `a ${kind}`} doesn't`);
+  if (stray) refuse(`${where} holds ${stray}, which a Suggestion on ${kind === "guidance" ? "Guidance" : `a ${NAMES[kind]}`} doesn't`);
   return content;
 }

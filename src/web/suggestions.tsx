@@ -12,7 +12,7 @@ import { Field, TextArea } from "./ui.js";
 export function Reasoning(props: { children: string; projectKey?: string | null }) {
   return (
     <div className="reasoning">
-      <KindLabel kind="decision">Why</KindLabel>
+      <KindLabel kind="suggestion">Why</KindLabel>
       <CronkMarkdown projectKey={props.projectKey ?? undefined}>{props.children}</CronkMarkdown>
     </div>
   );
