@@ -27,4 +27,23 @@ describe("losing database connections", () => {
 
     expect((await admin.get("/api/workspace")).body).toMatchObject({ name: "Acme" });
   });
+
+  it("keeps answering when it reconnects while Postgres is still terminating its connections", async () => {
+    const { cronk, admin } = await startInstalledCronk("Acme");
+    let busy = true;
+    const traffic = Promise.all(
+      Array.from({ length: 5 }, async () => {
+        while (busy) await admin.get("/api/workspace");
+      }),
+    );
+
+    try {
+      await cronk.terminateConnections();
+    } finally {
+      busy = false;
+      await traffic;
+    }
+
+    expect((await admin.get("/api/workspace")).body).toMatchObject({ name: "Acme" });
+  });
 });

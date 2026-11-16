@@ -232,7 +232,8 @@ export interface Cronk {
   restart(): Promise<void>;
   /**
    * Has Postgres terminate every connection to this test's database, as it does when
-   * it restarts, and waits until they are gone.
+   * it restarts, and waits until they are gone. Connections the server opens meanwhile
+   * to recover are left alone and not waited on.
    */
   terminateConnections(): Promise<void>;
   /**
@@ -331,10 +332,13 @@ export async function startCronk(opts: { publicUrl?: string } = {}): Promise<Cro
       const admin = new pg.Client({ connectionString: adminUrl });
       await admin.connect();
       try {
-        await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1", [dbName]);
-        const connections = async () =>
-          (await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1", [dbName])).rows[0]!.n;
-        await pollUntil(async () => (await connections()) === 0, async () => `${await connections()} connections to ${dbName} outlived pg_terminate_backend`);
+        // Only the connections open now count: the server reconnects as soon as it notices, and those new connections are what the test observes.
+        const { rows } = await admin.query<{ pid: number }>("SELECT pid FROM pg_stat_activity WHERE datname = $1", [dbName]);
+        const pids = rows.map((r) => r.pid);
+        await admin.query("SELECT pg_terminate_backend(pid) FROM unnest($1::int[]) AS pid", [pids]);
+        const outliving = async () =>
+          (await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid = ANY($1)", [pids])).rows[0]!.n;
+        await pollUntil(async () => (await outliving()) === 0, async () => `${await outliving()} connections to ${dbName} outlived pg_terminate_backend`);
       } finally {
         await admin.end();
       }
