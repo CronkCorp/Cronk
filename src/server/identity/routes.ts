@@ -306,8 +306,8 @@ export function identityRoutes(ctx: AppContext) {
         );
         if (updated === "last admin") throw new HttpError(409, "The Workspace needs at least one active Admin");
         if (!updated) throw new HttpError(404, "No such User");
-        // Deactivating ended their Agents' Sessions, and so the Claims those held.
-        await claimsEnded(ctx, updated.ended.ticketIds);
+        // Deactivating ended their Agents' Sessions, so the Claims those held lapsed.
+        await claimsEnded(ctx, updated.endedClaims.ticketIds);
         // A new role can show or hide private Projects, and so the items in them.
         if (request.body.role !== undefined) inboxesChanged(ctx.live, [updated.user.id]);
         return { user: publicUser(updated.user) };

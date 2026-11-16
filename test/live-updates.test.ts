@@ -97,10 +97,10 @@ describe("A Project's live updates", () => {
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
   });
 
-  it("tell which Tickets changed when their Claims end because the Agents' Owner is deactivated", async () => {
+  it("tell which Tickets changed when their Claims lapse because the Agents' Owner is deactivated", async () => {
     const { cronk, admin } = await delegatedSetup(2);
     const bob = await joinAs(cronk, admin, "bob@example.com");
-    const bobId = (await admin.get("/api/users")).body.users.find((u: any) => u.email === "bob@example.com").id;
+    const bobId: string = (await bob.get("/api/me")).body.user.id;
     const first = await registerAgent(bob, "bob-laptop");
     const second = await registerAgent(bob, "bob-desktop");
     await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: first.agentId });
@@ -122,7 +122,7 @@ describe("A Project's live updates", () => {
     const { cronk, admin } = await delegatedSetup(2);
     const threshold = (await admin.get("/api/workspace")).body.silenceThresholdSeconds;
     const bob = await joinAs(cronk, admin, "bob@example.com");
-    const bobId = (await admin.get("/api/users")).body.users.find((u: any) => u.email === "bob@example.com").id;
+    const bobId: string = (await bob.get("/api/me")).body.user.id;
     const laptop = await registerAgent(bob, "bob-laptop");
     await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: laptop.agentId });
     expect((await (await startSession(cronk, laptop.secret)).post("/api/tickets/CRONK-1/claim")).status).toBe(200);

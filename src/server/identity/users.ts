@@ -123,7 +123,7 @@ export async function listUsers(db: Queryable, workspaceId: string): Promise<Use
  * Agents' Sessions, so the Claims those held lapse at once.
  * Making them an Admin drops their Project listings, since Admins have Write everywhere;
  * demoting them later starts them with only the open Projects.
- * Returns the changed User with the Claims deactivating them ended (none otherwise), or undefined
+ * Returns the changed User with the Tickets whose Claims deactivating them lapsed (none otherwise), or undefined
  * if there is no such User. Run inside a transaction.
  */
 export async function updateUser(
@@ -132,7 +132,7 @@ export async function updateUser(
   id: string,
   changes: { role?: Role; active?: boolean },
   now: Date,
-): Promise<{ user: User; ended: ClaimHolders } | undefined | "last admin"> {
+): Promise<{ user: User; endedClaims: ClaimHolders } | undefined | "last admin"> {
   // Locking the active Admins makes concurrent demotions queue, so they can't each leave the other as the last.
   const { rows: admins } = await db.query<{ id: string }>(
     "SELECT id FROM users WHERE workspace_id = $1 AND role = 'admin' AND deactivated_at IS NULL FOR UPDATE",
@@ -151,11 +151,11 @@ export async function updateUser(
     [workspaceId, id, changes.role ?? null, changes.active ?? null, now],
   );
   if (!rows[0]) return undefined;
-  let ended: ClaimHolders = { ticketIds: [] };
+  let endedClaims: ClaimHolders = { ticketIds: [] };
   if (changes.active === false) {
     await db.query("DELETE FROM sign_ins WHERE user_id = $1", [id]);
-    ended = await endAgentSessionsOfOwner(db, id, now);
+    endedClaims = await endAgentSessionsOfOwner(db, id, now);
   }
   if (changes.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [id]);
-  return { user: toUser(rows[0]), ended };
+  return { user: toUser(rows[0]), endedClaims };
 }
