@@ -16,6 +16,8 @@ export async function exportWorkspaceSettings(ctx: ExportContext): Promise<void>
     silenceThresholdSeconds: w.silenceThresholdSeconds,
     attachmentMaxBytes: w.attachmentMaxBytes,
     transcriptMaxBytes: w.transcriptMaxBytes,
+    artifactMaxBytes: w.artifactMaxBytes,
+    artifactMaxFiles: w.artifactMaxFiles,
   });
 }
 
@@ -30,6 +32,9 @@ export async function importWorkspaceSettings(ctx: ImportContext): Promise<void>
     ...(w.data.attachmentMaxBytes !== undefined && { attachmentMaxBytes: integer(w.data.attachmentMaxBytes, "workspace.md attachmentMaxBytes") }),
     // Exports from before Transcripts leave it out, keeping the default.
     ...(w.data.transcriptMaxBytes !== undefined && { transcriptMaxBytes: transcriptMaxBytes(w.data.transcriptMaxBytes) }),
+    // Exports from before Artifacts leave their limits out, keeping the defaults.
+    ...(w.data.artifactMaxBytes !== undefined && { artifactMaxBytes: positive(w.data.artifactMaxBytes, "workspace.md artifactMaxBytes") }),
+    ...(w.data.artifactMaxFiles !== undefined && { artifactMaxFiles: positive(w.data.artifactMaxFiles, "workspace.md artifactMaxFiles") }),
   });
 }
 
@@ -40,4 +45,11 @@ function transcriptMaxBytes(value: unknown): number {
     refuse(`workspace.md transcriptMaxBytes must be from ${MIN_TRANSCRIPT_BYTES} to ${MAX_TRANSCRIPT_BYTES}`);
   }
   return bytes;
+}
+
+/** A limit `workspace.md` sets, which must be a whole number above 0. */
+function positive(value: unknown, where: string): number {
+  const n = integer(value, where);
+  if (n < 1) refuse(`${where} must be above 0`);
+  return n;
 }

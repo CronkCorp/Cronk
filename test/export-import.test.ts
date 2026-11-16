@@ -231,7 +231,7 @@ async function busyWorkspace() {
   const { cronk, admin, session } = await delegatedSetup(3);
   const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
   const graceId = (await grace.get("/api/me")).body.user.id;
-  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024 });
+  await admin.patch("/api/workspace", { name: "Acme Labs", agentAccess: "write", silenceThresholdSeconds: 600, attachmentMaxBytes: 5 * 1024 * 1024, artifactMaxBytes: 30 * 1024 * 1024, artifactMaxFiles: 800 });
   await admin.put("/api/workspace/guidance", { baseVersion: 0, markdown: "Be kind." });
   await admin.put("/api/workspace/guidance", { baseVersion: 1, markdown: "Be kind. Be brief." });
   await admin.put("/api/projects/CRONK/guidance", { baseVersion: 0, markdown: "Run the tests." });
