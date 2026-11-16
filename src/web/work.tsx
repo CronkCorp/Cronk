@@ -314,7 +314,7 @@ export function ProjectPage(props: { projectKey: string; view: ProjectView; sect
                             disabled={p.access !== "write" || autonomousByDefault.busy}
                             onChange={(e) => void autonomousByDefault.run(e.target.value === "on")}
                           >
-                            <option value="off">Stop at In Review</option>
+                            <option value="off">Stops at In Review</option>
                             <option value="on">Autonomous</option>
                           </select>
                         </label>

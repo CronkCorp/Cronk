@@ -14,21 +14,19 @@ import { listOpenQuestions, type Activity } from "../coordination/activities.js"
  * the Unverified completions of Tickets they are Assignee of, and the open questions of the Agents they own.
  */
 
-/** A Ticket waiting for its Assignee's review, with its Reports. `at` is when it entered its Status. */
-export interface ReviewItem {
-  kind: "review";
+/** A Ticket waiting on its Assignee, with its Reports. `at` is when it entered its Status. */
+interface TicketItem<K extends string> {
+  kind: K;
   at: Date;
   ticket: Ticket;
   reports: Report[];
 }
 
-/** An Agent's completion under Autonomous Delegation, waiting for its Assignee to Accept it, with its Reports. `at` is when it was completed. */
-export interface UnverifiedItem {
-  kind: "unverified";
-  at: Date;
-  ticket: Ticket;
-  reports: Report[];
-}
+/** A Ticket waiting for its Assignee's review. */
+export type ReviewItem = TicketItem<"review">;
+
+/** An Agent's completion under Autonomous Delegation, waiting for its Assignee to Accept it. */
+export type UnverifiedItem = TicketItem<"unverified">;
 
 /** An open question of one of the User's Agents, with the Ticket it is on. `at` is when it was asked. */
 export interface QuestionItem {
@@ -94,7 +92,7 @@ async function assignedTickets<K extends "review" | "unverified">(
   projectIds: string[],
   where: string,
   kind: K,
-): Promise<{ kind: K; at: Date; ticket: Ticket; reports: Report[] }[]> {
+): Promise<TicketItem<K>[]> {
   const { rows } = await db.query<{ id: string; at: Date }>(
     `SELECT t.id, COALESCE((SELECT max(c.at) FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change IN ('created', 'status')), t.created_at) AS at
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id

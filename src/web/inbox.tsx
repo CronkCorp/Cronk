@@ -6,7 +6,7 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind } from "./api.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type StatusCategory } from "./api.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
@@ -463,7 +463,7 @@ function ReviewDetail(props: DetailProps<ReviewItem>) {
 }
 
 /** Started, In Review or finished: work that went on after its blocker was completed. */
-const CONTINUED = ["started", "in_review", "completed"];
+const CONTINUED: readonly StatusCategory[] = ["started", "in_review", "completed"];
 
 /**
  * An Agent's Unverified completion: the Reports like a review, the Tickets that already continued on it,

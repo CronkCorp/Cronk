@@ -81,7 +81,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
 - **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour. The `danger` pill also marks a merge's "Both changed".
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
-- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, and Comment `--accent`.
+- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report `--agent`, Comment `--accent`, and To review and Unverified `--info`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
@@ -112,7 +112,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 The Project page is shown in `docs/ui/frame.png`.
 
 - **Page head:** the title, a List / Board / Reports segmented control, a "…" menu, and New Ticket as the only primary action, last. The "…" menu holds Documents (the Project's page tree), Project settings (read-only without Write access), and for those with Write access Archive Project (Restore Project once archived), which asks for confirmation.
-- **Project settings** (`?view=settings`): one section each for Access (Admins), Agent Access, Statuses and Guidance. The old addresses `?view=statuses` and `?view=guidance` open it at that section.
+- **Project settings** (`?view=settings`): one section each for Access (Admins), Agent Access, Autonomous Delegation (the default delegating pre-fills: Autonomous, or Stops at In Review), Statuses and Guidance. The old addresses `?view=statuses` and `?view=guidance` open it at that section.
 - **List rows:** Status dot, key, title, Labels, Priority tag, and the Delegate's and Assignee's avatars, each named in its tooltip ("Delegate: claude-laptop").
 - **Board:** open columns share the main column's width. Columns in the Completed and Canceled Status Categories start collapsed to their dot and count, and clicking one opens it until the User leaves the page; nothing is stored. So a 1280px screen shows every Status without sideways scrolling. Cards show the key, Priority, title, Labels and the avatars.
 
@@ -126,7 +126,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **A question** shows the Agent, its Agent Session and the full question, with an answer box underneath. "Post answer" says the answer reaches the Agent as Waiting Work.
   - **A review** shows the Ticket's Status and the full Report rendered inline. The action bar holds **Complete** (primary), **Send back…** (opens a required "What is left to do" box) and a link to the Ticket.
 - **Filters:** chips for kind, Project and Agent, kept in the address as today.
-- **Keyboard:** J and K move through the list, A focuses the answer box, C completes and S sends back. None of them fire while focus is in a text field. A line under the split names them.
+- **Keyboard:** J and K move through the list, A focuses the answer box, C completes (Accepts an Unverified completion) and S sends back. None of them fire while focus is in a text field. A line under the split names them.
 - **Selection:** the selected item is kept in the address (`item=`) alongside the filters, so a reload or a shared link reopens it. Without one, the first item is selected.
 - **Acting on an item:** the next item is selected, or the previous one when it was the last. It never jumps to the top of the list.
 - **Resolved elsewhere:** see [Live updates](#live-updates). The list drops the item while the detail pane keeps it, and J/K move on from where it was.
