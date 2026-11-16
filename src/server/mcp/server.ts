@@ -104,7 +104,7 @@ export function mcpRoutes(ctx: AppContext) {
           { instructions: welcomeText(welcome, session.id), capabilities: { logging: {} } },
         );
         const host = request.headers.host;
-        registerTools(server, { readOnly: welcome.readOnly, api: (caller) => (...args) => callApi(app, { ...caller, host }, ...args) });
+        registerTools(server, { readOnly: welcome.readOnly, artifacts: welcome.artifacts, api: (caller) => (...args) => callApi(app, { ...caller, host }, ...args) });
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => session.id, enableJsonResponse: true });
         // Work starting to wait for the Agent, and Tickets becoming Ready for it, reach it as log messages, from the API's own stream
         // of it, which ends as soon as the Agent Session does or its token is revoked. That stream needs

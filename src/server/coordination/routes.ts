@@ -37,7 +37,7 @@ const WELCOME_READY_LIMIT = 20;
 /** What an Agent is told when its Agent Session starts (see `welcome`). */
 const welcomeSchema = {
   type: "object",
-  required: ["workspace", "agent", "readOnly", "projects", "readyTickets", "waitingWork"],
+  required: ["workspace", "agent", "readOnly", "projects", "readyTickets", "waitingWork", "artifacts"],
   properties: {
     workspace: {
       anyOf: [
@@ -97,6 +97,17 @@ const welcomeSchema = {
         "Comments on Tickets delegated to it. A full token's welcome takes them, so the next one lists only newer ones; a read-only " +
         "token's leaves them waiting. Work in places the Agent can't see right now is left out, and waits until it can.",
       items: ref("WaitingWork"),
+    },
+    artifacts: {
+      type: "object",
+      description: "What an Artifact published in the Workspace may load and hold, as an Admin set it.",
+      required: ["allowedOrigins", "extraOriginsAllowed", "maxBytes", "maxFiles"],
+      properties: {
+        allowedOrigins: { type: "array", items: { type: "string" }, description: "The origins every Artifact may load scripts, styles and fonts from." },
+        extraOriginsAllowed: { type: "boolean", description: "Whether a publish may declare extra origins for its Version." },
+        maxBytes: { type: "integer", description: "The most bytes one Version may hold, all its files together." },
+        maxFiles: { type: "integer", description: "The most files one Version may hold." },
+      },
     },
   },
 } as const;
@@ -449,8 +460,8 @@ function requireSession(actor: Actor): AgentSession {
  * What an Agent is told when it connects: who it is and for whom, whether it may only
  * read, the Workspace's Guidance, the Projects it can see with each one's Guidance, and its
  * Ready Tickets, and the work waiting for it, which the welcome takes so the next one doesn't
- * list it again. The Workspace, with its name and Guidance, is left out if the Workspace's
- * Agent Access is None.
+ * list it again, and what an Artifact may load and hold. The Workspace, with its name and Guidance,
+ * is left out if the Workspace's Agent Access is None.
  */
 export async function welcome(ctx: AppContext, agent: AgentActor & { session: AgentSession }) {
   const workspaceId = agent.owner.workspaceId;
@@ -469,6 +480,7 @@ export async function welcome(ctx: AppContext, agent: AgentActor & { session: Ag
     terms: (await listTerms(ctx.db, { workspaceId, projectId: null })).map((t) => t.name),
   };
   const projectTerms = await termNamesByProject(ctx.db, projects.map((p) => p.id));
+  const settings = await getWorkspace(ctx.db, workspaceId);
   return {
     workspace: workspace || null,
     agent: publicAgent(agent.agent, agent.owner),
@@ -476,6 +488,13 @@ export async function welcome(ctx: AppContext, agent: AgentActor & { session: Ag
     projects: projects.map((p) => ({ key: p.key, name: p.name, access: p.access, guidance: guidance.get(p.id)!, terms: projectTerms.get(p.id)! })),
     readyTickets: await readyTickets(ctx, agent),
     waitingWork: await takeWaitingWork(ctx.db, agent, agent.session.id, ctx.clock.now()),
+    // Artifacts may be published in its Projects even when the Workspace itself is hidden from the Agent.
+    artifacts: {
+      allowedOrigins: settings.artifactAllowedOrigins,
+      extraOriginsAllowed: settings.artifactExtraOriginsAllowed,
+      maxBytes: settings.artifactMaxBytes,
+      maxFiles: settings.artifactMaxFiles,
+    },
   };
 }
 
