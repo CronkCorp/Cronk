@@ -46,6 +46,7 @@ describe("Agent Sessions", () => {
     expect((await bInA.post("/api/projects/CRONK/tickets", { title: "From B" })).status).toBe(410);
     expect((await admin.get("/api/projects/CRONK/tickets")).body.tickets).toHaveLength(1);
     expect((await admin.get("/api/agents")).body.agents[0].sessions[0]).toMatchObject({ id: a.sessionId, lastSeenAt: "2026-01-01T09:00:00.000Z" });
+    expect((await a.get("/api/agent-sessions/current")).status).toBe(200);
   });
 
   it("can't be acted in by a read-only token of the same Agent", async () => {
@@ -74,11 +75,14 @@ describe("Agent Sessions", () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const a = await session();
     expect((await a.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
-    const b = cronk.client((await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).body.secret);
+    const bSecret = (await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).body.secret;
+    const b = cronk.client(bSecret);
 
     expect((await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`)).status).toBe(204);
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
     expect((await admin.get("/api/agents")).body.agents[0].sessions).toEqual([]);
+    expect((await a.get("/api/agent-sessions/current")).status).toBe(401);
+    expect((await cronk.client(bSecret, { "cronk-agent-session": a.sessionId }).get("/api/agent-sessions/current")).status).toBe(410);
     expect((await b.get("/api/tickets/CRONK-1")).status).toBe(200);
   });
 

@@ -55,7 +55,7 @@ export const isLiveAt = (nowParam: string, alias: { session: string; workspace: 
   `${alias.session}.ended_at IS NULL AND ${alias.session}.last_seen_at > ${nowParam}::timestamptz - make_interval(secs => ${alias.workspace}.silence_threshold_seconds)`;
 
 /** Starts a live Session for the Agent whose token `tokenId` is. */
-export async function startAgentSession(db: Queryable, input: { agentId: string; tokenId: string; now: Date }): Promise<AgentSession> {
+export async function startAgentSession(db: Queryable, input: SessionCaller & { now: Date }): Promise<AgentSession> {
   const { rows } = await db.query<AgentSessionRow>(
     `WITH s AS (INSERT INTO agent_sessions (agent_id, token_id, started_at, last_seen_at) VALUES ($1, $2, $3, $3) RETURNING *)
      SELECT s.*, w.silence_threshold_seconds FROM s ${WITH_WORKSPACE}`,
