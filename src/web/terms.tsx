@@ -6,11 +6,11 @@ import { Chip } from "./components/tags.js";
 import { ConfirmDialog, Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { api, glossaryUrl, type Term, type TermInput, type TermVersion } from "./api.js";
-import { explainStale, useCanWrite } from "./documents.js";
+import { explainStale } from "./documents.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { termsAddress } from "./routes.js";
-import { Field, Show, TextArea, useAction, useLoad } from "./ui.js";
+import { Field, Show, TextArea, useAction, useCanWrite, useLoad } from "./ui.js";
 
 // The Terms page and a Term's page: docs/ui.md § Terms.
 
