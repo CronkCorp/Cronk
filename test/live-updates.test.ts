@@ -12,6 +12,21 @@ describe("A Project's live updates", () => {
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
   });
 
+  it("tell which Tickets lost their Delegate when its Agent is removed", async () => {
+    const { admin, claude } = await delegatedSetup(2);
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: null });
+    const board = await admin.events("/api/projects/CRONK/events");
+    const page = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await board.next())?.event).toBe("ready");
+    expect((await page.next())?.event).toBe("ready");
+
+    await admin.delete(`/api/agents/${claude.agentId}`);
+    await admin.patch("/api/tickets/CRONK-2", { title: "Marker" });
+    expect(await board.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+    expect(await board.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
+    expect(await page.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+  });
+
   it("end once the watcher can no longer see the Project", async () => {
     const { cronk, admin } = await delegatedSetup(1);
     const bob = await joinAs(cronk, admin, "bob@example.com");
