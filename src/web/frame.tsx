@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Actor, userActor } from "./components/actor.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
-import { api, watchInbox, type Project, type User, type Workspace } from "./api.js";
+import { api, watchInbox, watchTriage, type Project, type User, type Workspace } from "./api.js";
 import { Link, navigate, useLocation } from "./router.js";
 import { decisionsAddress } from "./decisions.js";
 import { routeOf, projectKeyOf, projectKeyOfTicket, termsAddress, type Route } from "./routes.js";
@@ -18,6 +18,7 @@ function currentItem(route: Route): string | undefined {
     case "term":
       return "terms";
     case "inbox":
+    case "triage":
     case "documents":
     case "document":
     case "agents":
@@ -65,8 +66,11 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
   const [agents] = useLoad(() => api.agents(), [path]);
   const [inbox, reloadInbox] = useLoad(() => api.inbox(), []);
   useEffect(() => watchInbox({ ready: reloadInbox, on: { changed: reloadInbox } }), []);
+  const [triage, reloadTriage] = useLoad(() => api.triage(), []);
+  useEffect(() => watchTriage({ ready: reloadTriage, on: { changed: reloadTriage } }), []);
 
   const waiting = inbox.kind === "loaded" ? inbox.value.length : 0;
+  const untriaged = triage.kind === "loaded" ? triage.value.length : 0;
   const liveSessions = agents.kind === "loaded" ? agents.value.reduce((n, a) => n + a.sessions.length, 0) : 0;
   const projectList: Project[] = projects.kind === "loaded" ? projects.value : [];
   const workspaceLinks = [
@@ -102,6 +106,10 @@ export function Sidebar(props: { me: User; workspace: Workspace | undefined; onS
         <NavItem to="/inbox" current={current === "inbox"}>
           <span className="nav-text">Inbox</span>
           <NavCount count={waiting} className="nav-count" unit="waiting" />
+        </NavItem>
+        <NavItem to="/triage" current={current === "triage"}>
+          <span className="nav-text">Triage</span>
+          <NavCount count={untriaged} className="nav-muted" unit="you could act on" />
         </NavItem>
         <NavItem to="/documents" current={current === "documents"}>
           <span className="nav-text">Documents</span>

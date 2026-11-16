@@ -13,6 +13,7 @@ export type Route =
   | { page: "decisions" }
   | { page: "decision"; key: string }
   | { page: "inbox" }
+  | { page: "triage" }
   | { page: "terms" }
   | { page: "term"; id: string }
   | { page: "agents" }
@@ -28,6 +29,7 @@ const FIXED: Record<string, Route> = {
   "/artifacts": { page: "artifacts" },
   "/decisions": { page: "decisions" },
   "/inbox": { page: "inbox" },
+  "/triage": { page: "triage" },
   "/terms": { page: "terms" },
   "/agents": { page: "agents" },
   "/search": { page: "search" },

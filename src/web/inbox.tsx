@@ -6,7 +6,7 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type SuggestedContent, type User } from "./api.js";
+import { api, watchInbox, watchTriage, type InboxFilter, type InboxItem, type InboxKind, type SuggestedContent, type TriageFilter, type TriageKind, type User } from "./api.js";
 import { ContentEditor, contentText, creditNote, Diff, Reasoning, useDiffView } from "./suggestions.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CONTINUED, ReopenDialog } from "./components/reopen-dialog.js";
@@ -16,7 +16,8 @@ import { CommentForm, ReportCard, useArrivals } from "./timeline.js";
 import { Show, TextArea, useAction, useLoad } from "./ui.js";
 
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
-// one on the right, where the User reads it in full and acts on it without leaving the Inbox.
+// one on the right, where the User reads it in full and acts on it without leaving the Inbox. Triage is the
+// same split view over the waiting items with no clear User (docs/ui.md § Inbox and Triage in Phase 2).
 
 const KIND_NAMES: Record<InboxKind, string> = {
   question: "Questions",
@@ -68,11 +69,17 @@ const itemId = (item: InboxItem) =>
         ? `suggestion-${item.suggestion.id}`
         : `${item.kind}-${item.ticket.key}`;
 
+/** A group of the list: its name, and which items it holds. */
+interface Group {
+  name: string;
+  holds: (item: InboxItem) => boolean;
+}
+
 /**
  * The list's groups, in the order they are shown: what blocks an Agent first, then the other questions, then reviews, then Unverified
  * completions, then Agents' Suggestions, then Decisions Agents proposed.
  */
-const GROUPS: { name: string; holds: (item: InboxItem) => boolean }[] = [
+const GROUPS: Group[] = [
   { name: "Blocking", holds: (item) => item.kind === "question" && item.question.blocking },
   { name: "Questions", holds: (item) => item.kind === "question" && !item.question.blocking },
   { name: "To review", holds: (item) => item.kind === "review" },
@@ -137,8 +144,106 @@ export function InboxPage(props: { address: InboxAddress; me: User }) {
           <InboxSplit
             key={`${filter.project ?? ""}/${filter.agent ?? ""}/${filter.kind ?? ""}`}
             items={loaded.filter((item) => !filter.kind || item.kind === filter.kind)}
-            kind={filter.kind}
-            address={props.address}
+            item={props.address.item}
+            pathTo={(item) => inboxPath({ filter, ...(item ? { item: itemId(item) } : {}) })}
+            groups={GROUPS}
+            label="Inbox items"
+            empty={{
+              heading: NOTHING[filter.kind ?? "all"],
+              hint: "Agents' questions, Tickets handed over for review, Agents' Unverified completions, and the Suggestions and Decisions they propose show up here.",
+            }}
+            keysHint="J / K moves through the list, A answers, C completes or Accepts, S sends back, reopens or rejects."
+            me={props.me}
+            onChanged={reload}
+          />
+        )}
+      </Show>
+    </section>
+  );
+}
+
+/** Where Triage is: its filter, and the item selected in it, if the address names one. */
+export interface TriageAddress {
+  filter: TriageFilter;
+  item?: string;
+}
+
+/** The kinds Triage holds, by the names its chips give them. */
+const TRIAGE_KIND_NAMES: Record<TriageKind, string> = { unverified: "Unverified", suggestion: "Suggestions" };
+
+/** Triage's groups, in the order they are shown. */
+const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.name === "Unverified" || group.name === "Suggestions");
+
+/** The Triage filter and selected item in a page address. */
+export function triageAddressFrom(search: URLSearchParams): TriageAddress {
+  const kind = search.get("kind");
+  const item = search.get("item");
+  return {
+    filter: {
+      ...(kind && kind in TRIAGE_KIND_NAMES ? { kind: kind as TriageKind } : {}),
+      ...(search.get("project") ? { project: search.get("project")! } : {}),
+    },
+    ...(item ? { item } : {}),
+  };
+}
+
+const triagePath = (address: TriageAddress) => {
+  const entries = [...Object.entries(address.filter), ["item", address.item]];
+  const query = new URLSearchParams(entries.filter((entry): entry is [string, string] => !!entry[1]));
+  return `/triage${query.size ? `?${query}` : ""}`;
+};
+
+/**
+ * Triage: the waiting items with no clear User that the signed-in User could act on (Admins see all), in the Inbox's split view
+ * with its keyboard. It loads again whenever the server says it may have changed; acting on an item takes it out for everyone.
+ */
+export function TriagePage(props: { address: TriageAddress; me: User }) {
+  const { filter } = props.address;
+  const [items, reload] = useLoad(() => api.triage({ project: filter.project }), [filter.project]);
+  const [projects] = useLoad(() => api.projects(), []);
+  const [live, onLive] = useLiveState();
+  useEffect(() => watchTriage({ ready: reload, onLive, on: { changed: reload } }), [filter.project]);
+  const setFilter = (changes: TriageFilter) => navigate(triagePath({ filter: { ...filter, ...changes } }));
+  const all = items.kind === "loaded" ? items.value : [];
+  const count = (kind?: TriageKind) => all.filter((item) => !kind || item.kind === kind).length;
+
+  return (
+    <section className="inbox">
+      <div className="page-head">
+        <h1>Triage</h1>
+        <div className="inbox-filters" role="group" aria-label="Filters">
+          <LiveIndicator state={live} />
+          <FilterChip pressed={!filter.kind} onClick={() => setFilter({ kind: undefined })}>{`Everything ${count()}`}</FilterChip>
+          {(Object.keys(TRIAGE_KIND_NAMES) as TriageKind[]).map((kind) => (
+            <FilterChip key={kind} pressed={filter.kind === kind} onClick={() => setFilter({ kind })}>
+              {`${TRIAGE_KIND_NAMES[kind]} ${count(kind)}`}
+            </FilterChip>
+          ))}
+          <Menu
+            label="Filter by Project"
+            trigger={<FilterChip menu pressed={!!filter.project}>{filter.project ? `Project: ${filter.project} ▾` : "Project ▾"}</FilterChip>}
+            items={[
+              { label: "All Projects", onSelect: () => setFilter({ project: undefined }) },
+              ...(projects.kind === "loaded" ? projects.value.map((p) => ({ label: `${p.key} ${p.name}`, onSelect: () => setFilter({ project: p.key }) })) : []),
+            ]}
+          />
+        </div>
+      </div>
+      <p className="muted page-intro">Waiting items with nobody clear to go to. You see the ones you could act on.</p>
+      <Show state={items}>
+        {(loaded) => (
+          <InboxSplit
+            key={`${filter.project ?? ""}/${filter.kind ?? ""}`}
+            items={loaded.filter((item) => !filter.kind || item.kind === filter.kind)}
+            item={props.address.item}
+            pathTo={(item) => triagePath({ filter, ...(item ? { item: itemId(item) } : {}) })}
+            groups={TRIAGE_GROUPS}
+            label="Triage items"
+            empty={{
+              heading: "Nothing in Triage",
+              hint: "Agents' Unverified completions of Tickets with no Assignee, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
+            }}
+            keysHint="J / K moves through the list, C Accepts, S reopens or rejects."
             me={props.me}
             onChanged={reload}
           />
@@ -202,10 +307,27 @@ const NOTHING: Record<InboxKind | "all", string> = {
   decision: "No proposed Decisions",
 };
 
+/** What the split view shows and where: its items, the one the address names, and how it groups and names them. */
+interface SplitProps {
+  items: InboxItem[];
+  /** The id of the item the address selects, if any. */
+  item: string | undefined;
+  /** The address of the view with `item` selected, or with none. */
+  pathTo: (item?: InboxItem) => string;
+  groups: Group[];
+  /** The list's accessible name. */
+  label: string;
+  /** What the view says when nothing is waiting. */
+  empty: { heading: string; hint: string };
+  /** The line below the view naming its keyboard shortcuts. */
+  keysHint: string;
+  me: User;
+  onChanged: () => void;
+}
+
 /** The split view over the loaded items: the grouped list, and the selected item's detail. */
-function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; address: InboxAddress; me: User; onChanged: () => void }) {
-  const { items } = props;
-  const pathTo = (item?: InboxItem) => inboxPath({ filter: props.address.filter, ...(item ? { item: itemId(item) } : {}) });
+function InboxSplit(props: SplitProps) {
+  const { items, pathTo } = props;
   // Items acted on here leave the list as the action succeeds rather than waiting for the reload, which would
   // otherwise find them gone and show them as resolved elsewhere; while the action runs, `busy` holds its item
   // for a reload that lands before the action's reply. Once a load no longer holds an acted-on item, it is
@@ -213,13 +335,13 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
   const acted = useRef(new Set<string>());
   const busy = useRef<string>(undefined);
   for (const id of acted.current) if (!items.some((item) => itemId(item) === id)) acted.current.delete(id);
-  const ordered = GROUPS.flatMap((group) => items.filter((item) => group.holds(item) && !acted.current.has(itemId(item))));
+  const ordered = props.groups.flatMap((group) => items.filter((item) => group.holds(item) && !acted.current.has(itemId(item))));
   // The selected item as last seen in the list, and where it was. When a reload drops it because it was
   // resolved elsewhere, the detail pane keeps showing it until the User moves on (docs/ui.md § Live updates).
   const seen = useRef<Seen>(undefined);
   const at = (id: string | undefined) => ordered.findIndex((item) => itemId(item) === id);
   // An address naming an item that isn't here, as an old link does, opens what was shown, or else the first.
-  let wanted = props.address.item;
+  let wanted = props.item;
   if (!wanted || (at(wanted) < 0 && wanted !== seen.current?.id)) wanted = seen.current?.id ?? (ordered[0] && itemId(ordered[0]));
   let index = at(wanted);
   // Whether the selected item has left the list, and whether that was someone else's doing.
@@ -290,20 +412,18 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
   if (!selected) {
     return (
       <div className="empty">
-        <h2>{NOTHING[props.kind ?? "all"]}</h2>
-        <p className="muted">
-          Agents' questions, Tickets handed over for review, Agents' Unverified completions, and the Suggestions and Decisions they propose show up here.
-        </p>
+        <h2>{props.empty.heading}</h2>
+        <p className="muted">{props.empty.hint}</p>
       </div>
     );
   }
 
   return (
     <div className="inbox-view">
-      <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
-        <section className="inbox-list" aria-label="Inbox items">
+      <div className={`inbox-split${props.item ? " picked" : ""}`}>
+        <section className="inbox-list" aria-label={props.label}>
           {ordered.length === 0 && <p className="muted inbox-none">Nothing else is waiting.</p>}
-          {GROUPS.map((group) => {
+          {props.groups.map((group) => {
             const held = ordered.filter(group.holds);
             if (held.length === 0) return null;
             return (
@@ -337,7 +457,7 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
           )}
         </section>
       </div>
-      <p className="muted inbox-keys">J / K moves through the list, A answers, C completes or Accepts, S sends back, reopens or rejects.</p>
+      <p className="muted inbox-keys">{props.keysHint}</p>
     </div>
   );
 }
