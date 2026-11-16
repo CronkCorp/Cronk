@@ -431,7 +431,27 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0018_decisions",
+    id: "0018_assign_delegated_tickets",
+    sql: `
+      -- Cronk itself may record a Ticket change, as this upgrade does: a 'system' change has no acting User.
+      ALTER TABLE ticket_changes DROP CONSTRAINT IF EXISTS ticket_changes_actor_kind_check;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_kind_check CHECK (actor_kind IN ('user', 'agent', 'system'));
+      ALTER TABLE ticket_changes DROP CONSTRAINT IF EXISTS ticket_changes_actor_user;
+      ALTER TABLE ticket_changes ADD CONSTRAINT ticket_changes_actor_user CHECK ((actor_kind = 'system') = (actor_user_id IS NULL));
+
+      -- Delegated work always has a clear User: each delegated Ticket without an Assignee goes to its Delegate's Owner.
+      CREATE TEMPORARY TABLE assigned_on_upgrade ON COMMIT DROP AS
+        SELECT t.id AS ticket_id, u.id AS user_id, u.name AS user_name
+        FROM tickets t JOIN agents a ON a.id = t.delegate_id JOIN users u ON u.id = a.owner_id
+        WHERE t.assignee_id IS NULL;
+      UPDATE tickets t SET assignee_id = x.user_id, updated_at = now() FROM assigned_on_upgrade x WHERE t.id = x.ticket_id;
+      INSERT INTO ticket_changes (ticket_id, at, actor_kind, change, data)
+        SELECT ticket_id, now(), 'system', 'assignee', jsonb_build_object('from', NULL, 'to', jsonb_build_object('id', user_id, 'name', user_name))
+        FROM assigned_on_upgrade ORDER BY ticket_id;
+    `,
+  },
+  {
+    id: "0019_decisions",
     sql: `
       -- The number the next Decision of a Project, or of the Workspace outside any Project, gets;
       -- taken and bumped in one UPDATE so numbers never repeat.

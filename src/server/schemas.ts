@@ -316,7 +316,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "One Change to a Ticket: `change` says which; the other fields depend on it.",
     ...object({
       at: timestamp,
-      actor: { ...recordedActor, description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in." },
+      actor: {
+        description:
+          "Who made the change: a User, an Agent with the Owner it acted for and the Agent Session it was in, " +
+          "or Cronk itself (`kind` `system`) for a change no one made, such as one an upgrade makes.",
+        anyOf: [recordedActor, object({ kind: { const: "system" } })],
+      },
       change: {
         type: "string",
         enum: [
