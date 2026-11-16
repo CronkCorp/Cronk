@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -58,6 +58,7 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
+  | "Mention"
   | "Transcript"
   | "TranscriptSummary"
   | "AgentRecordEntry"
@@ -537,6 +538,20 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         enum: LINK_REASONS,
         description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
       },
+    }),
+  },
+  Mention: {
+    description:
+      "Something whose current text mentions a Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term or Decision.",
+    ...object({
+      kind: { type: "string", enum: MENTION_KINDS, description: "What mentions it." },
+      id: { ...id, description: "Its id; read a Ticket or Decision by its key instead." },
+      key: { ...nullable({ type: "string" }), description: "A Ticket's or Decision's key; null for the others." },
+      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket or Document it is on." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
+      ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, or a Report: the Ticket's key." },
+      documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
+      at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
     }),
   },
   DocumentTreeEntry: {
