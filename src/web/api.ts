@@ -602,6 +602,13 @@ export const watchTicket = (key: string, handlers: Parameters<typeof watch<Ticke
 export const watchProject = (key: string, handlers: Parameters<typeof watch<ProjectEvents>>[1]) =>
   watch<ProjectEvents>(`/api/projects/${encodeURIComponent(key)}/events`, handlers);
 
+/**
+ * Watches the Terms that apply in a Project, or the Workspace's when `projectKey` is left out; `changed` arrives whenever
+ * one may have been created, changed or deleted, including a Term that overrides one or is overridden (see `watch`).
+ */
+export const watchTerms = (projectKey: string | null | undefined, handlers: Parameters<typeof watch<{ changed: object }>>[1]) =>
+  watch<{ changed: object }>(`${scopePath(projectKey ?? undefined)}/terms/events`, handlers);
+
 /** Watches one Document's new Comments and Versions as they happen (see `watch`). */
 export const watchDocument = (id: string, handlers: Parameters<typeof watch<DocumentEvents>>[1]) =>
   watch<DocumentEvents>(`${documentPath(id)}/events`, handlers);

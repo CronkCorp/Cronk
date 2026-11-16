@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button, buttonClass } from "./components/button.js";
@@ -6,7 +6,8 @@ import { Chip, ProtectedMark } from "./components/tags.js";
 import { ProtectionHistory } from "./components/protection.js";
 import { ConfirmDialog, Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
-import { api, glossaryUrl, type Term, type TermInput, type TermVersion } from "./api.js";
+import { api, ApiError, glossaryUrl, watchTerms, type Term, type TermInput, type TermVersion } from "./api.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
 import { explainStale } from "./documents.js";
 import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
 import { MentionedIn } from "./mentions.js";
@@ -65,7 +66,10 @@ function byGroup(terms: Term[]): [string | null, Term[]][] {
  */
 export function TermsPage(props: { projectKey?: string | undefined }) {
   const projectKey = props.projectKey?.toUpperCase();
-  const [terms] = useLoad(() => api.terms(projectKey), [projectKey]);
+  const [terms, reload] = useLoad(() => api.terms(projectKey), [projectKey]);
+  const [live, onLive] = useLiveState();
+  // On (re)connecting and on each change, the list is read again in place.
+  useEffect(() => watchTerms(projectKey, { onLive, ready: reload, on: { changed: reload } }), [projectKey]);
   const canWrite = useCanWrite(projectKey);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState("");
@@ -77,6 +81,7 @@ export function TermsPage(props: { projectKey?: string | undefined }) {
           <h1>Terms</h1>
         </div>
         <div className="actions">
+          <LiveIndicator state={live} />
           <ScopeSwitch projectKey={projectKey} />
           <a className={buttonClass("secondary")} href={glossaryUrl(projectKey)} download="GLOSSARY.md">Export GLOSSARY.md</a>
           {canWrite && !creating && <Button onClick={() => setCreating(true)}>New Term</Button>}
@@ -262,6 +267,47 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
     },
   );
   const protect = useAction((value: boolean) => api.protectTerm(t.id, value), props.onChanged);
+  // The Term as its place's stream last found it, shown once the User isn't editing, so nothing changes under an edit;
+  // and whether it was deleted elsewhere.
+  const [fresh, setFresh] = useState<Term>();
+  const [deleted, setDeleted] = useState(false);
+  const [live, onLive] = useLiveState();
+  useEffect(() => {
+    const refetch = () =>
+      api.term(t.id).then(setFresh, (err) => {
+        if (err instanceof ApiError && err.status === 404) setDeleted(true);
+      });
+    return watchTerms(t.projectKey, { onLive, ready: refetch, on: { changed: refetch } });
+  }, [t.id, t.projectKey]);
+  useEffect(() => {
+    if (!fresh || editing) return;
+    setFresh(undefined);
+    props.onChanged(fresh);
+  }, [fresh, editing]);
+  if (deleted) {
+    return (
+      <section className="term-page">
+        <div className="page-head">
+          <div>
+            <Crumbs projectKey={t.projectKey} />
+            <h1>{t.name}</h1>
+          </div>
+        </div>
+        <Banner tone="warn" role="status">
+          <p>
+            This Term was deleted elsewhere, with all its Versions.{" "}
+            <Link to={termsAddress(t.projectKey)} className="link">Back to {placeName(t.projectKey)} Terms</Link>
+          </p>
+        </Banner>
+        <section className="panel wide term-detail">
+          <div className="markdown term-definition">
+            <CronkMarkdown>{t.definition}</CronkMarkdown>
+          </div>
+          <Avoid words={t.avoid} />
+        </section>
+      </section>
+    );
+  }
   return (
     <section className="term-page">
       <div className="page-head">
@@ -271,19 +317,22 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
             {t.name} {t.protected && <ProtectedMark />}
           </h1>
         </div>
-        {canWrite && !editing && (
-          <div className="actions">
-            <Menu
-              label="More"
-              trigger={<Button variant="secondary" aria-label="More">…</Button>}
-              items={[
-                { label: t.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!t.protected), disabled: protect.busy },
-                { label: "Delete", danger: true, onSelect: () => setConfirmingDelete(true) },
-              ]}
-            />
-            <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
-          </div>
-        )}
+        <div className="actions">
+          <LiveIndicator state={live} />
+          {canWrite && !editing && (
+            <>
+              <Menu
+                label="More"
+                trigger={<Button variant="secondary" aria-label="More">…</Button>}
+                items={[
+                  { label: t.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!t.protected), disabled: protect.busy },
+                  { label: "Delete", danger: true, onSelect: () => setConfirmingDelete(true) },
+                ]}
+              />
+              <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
+            </>
+          )}
+        </div>
         <ConfirmDialog
           open={confirmingDelete}
           onOpenChange={setConfirmingDelete}
