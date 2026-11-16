@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
 
 /** Ada, the Admin, with the Project CRONK holding the Protected Document "Sign-in limits" at Version 1, and her Agent claude-laptop. */
 async function protectedDocument() {
@@ -166,5 +166,71 @@ describe("rejecting a Suggestion", () => {
     await admin.post(`/api/suggestions/${suggestion.id}/reject`, { reason: "No." });
 
     expect(await stream.next()).toMatchObject({ event: "waiting", data: { waiting: { reason: "suggestion_rejected", suggestion: { id: suggestion.id, reason: "No." } } } });
+  });
+});
+
+/** The Inbox of `client`, as `kind title` lines, in order. */
+const inboxLines = async (client: Client) =>
+  ((await client.get("/api/inbox")).body.items as { kind: string; suggestion?: { item: { title: string } }; ticket?: { key: string } | null }[]).map(
+    (i) => `${i.kind} ${i.suggestion?.item.title ?? i.ticket?.key}`,
+  );
+
+describe("where a Suggestion waits", () => {
+  it("on a Project item made outside any Claim, is the Agent's Owner's Inbox, until a User decides it", async () => {
+    const { cronk, admin, agent, documentId } = await protectedDocument();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const inbox = await admin.events("/api/inbox/events");
+    expect((await inbox.next())?.event).toBe("ready");
+
+    const suggestion = await suggestBody(agent, documentId, "Fifty per IP.\n");
+
+    expect((await inbox.next())?.event).toBe("changed");
+    expect(suggestion.reviewer).toMatchObject({ name: "Ada" });
+    expect((await admin.get("/api/inbox")).body.items).toMatchObject([
+      { kind: "suggestion", at: "2026-01-01T09:00:00.000Z", suggestion: { id: suggestion.id, reasoning: "Better.", base: { body: "Five per minute.\n" } } },
+    ]);
+    expect(await inboxLines(bob)).toEqual([]);
+    expect((await admin.get("/api/inbox?kind=suggestion")).body.items).toHaveLength(1);
+    expect((await admin.get("/api/inbox?kind=review")).body.items).toEqual([]);
+    expect((await admin.get(`/api/inbox?agent=${suggestion.proposedBy.id}`)).body.items).toHaveLength(1);
+
+    await bob.post(`/api/suggestions/${suggestion.id}/accept`);
+    expect((await inbox.next())?.event).toBe("changed");
+    expect(await inboxLines(admin)).toEqual([]);
+  });
+
+  it("made while holding a Claim, is the Inbox of the Ticket's Assignee, even once reassigned", async () => {
+    const { cronk, admin, session } = await delegatedSetup(1);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Architecture", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const suggestion = await suggestBody(agent, document.id, "v2");
+
+    expect(suggestion.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+    expect(await inboxLines(admin)).toEqual(["suggestion Architecture"]);
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId });
+    expect(await inboxLines(admin)).toEqual([]);
+    expect(await inboxLines(bob)).toEqual(["suggestion Architecture"]);
+    expect((await bob.get(`/api/suggestions/${suggestion.id}`)).body.suggestion.reviewer).toMatchObject({ id: bobId });
+
+    await bob.post(`/api/suggestions/${suggestion.id}/reject`, { reason: "Not now." });
+    expect(await inboxLines(bob)).toEqual([]);
+  });
+
+  it("on a Workspace item, is Triage: nobody's Inbox", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const { document } = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const agent = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const suggestion = await suggestBody(agent, document.id, "v2");
+
+    expect(suggestion.reviewer).toBeNull();
+    expect(await inboxLines(admin)).toEqual([]);
+    expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`)).body.suggestion.state).toBe("accepted");
   });
 });
