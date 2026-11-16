@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
 import { Button, buttonClass } from "./components/button.js";
-import { Chip } from "./components/tags.js";
+import { Chip, ProtectedMark } from "./components/tags.js";
+import { ProtectionHistory } from "./components/protection.js";
 import { ConfirmDialog, Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { api, glossaryUrl, type Term, type TermInput, type TermVersion } from "./api.js";
@@ -160,6 +161,7 @@ function TermRow(props: { term: Term }) {
     <li className="term">
       <div className="term-head">
         <Link to={`/terms/${t.id}`} className="term-name">{t.name}</Link>
+        {t.protected && <ProtectedMark />}
         <OverridePill term={t} />
         <span className="muted small">{placeName(t.projectKey)}</span>
         <span className="grow" />
@@ -259,19 +261,25 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
       navigate(termsAddress(t.projectKey));
     },
   );
+  const protect = useAction((value: boolean) => api.protectTerm(t.id, value), props.onChanged);
   return (
     <section className="term-page">
       <div className="page-head">
         <div>
           <Crumbs projectKey={t.projectKey} />
-          <h1>{t.name}</h1>
+          <h1>
+            {t.name} {t.protected && <ProtectedMark />}
+          </h1>
         </div>
         {canWrite && !editing && (
           <div className="actions">
             <Menu
               label="More"
               trigger={<Button variant="secondary" aria-label="More">…</Button>}
-              items={[{ label: "Delete", danger: true, onSelect: () => setConfirmingDelete(true) }]}
+              items={[
+                { label: t.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!t.protected), disabled: protect.busy },
+                { label: "Delete", danger: true, onSelect: () => setConfirmingDelete(true) },
+              ]}
             />
             <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
           </div>
@@ -287,6 +295,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
         />
       </div>
       {remove.error && <p className="error" role="alert">{remove.error}</p>}
+      {protect.error && <p className="error" role="alert">{protect.error}</p>}
       <OverrideBanner term={t} />
       {editing ? (
         <section className="panel wide">
@@ -368,6 +377,7 @@ function History(props: { term: Term }) {
           </ol>
         )}
       </Show>
+      <ProtectionHistory load={() => api.termProtection(props.term.id)} reloadOn={[props.term.id, props.term.protected]} />
     </section>
   );
 }

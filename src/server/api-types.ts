@@ -33,6 +33,7 @@ import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
 import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
+import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/protection.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
 import type { QuestionItem, DecisionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
 import type {
@@ -145,6 +146,8 @@ export type Version = Serialized<StoredVersion>;
 export type Term = Serialized<StoredTerm>;
 /** One saved state of a Term, with the Actor who saved it. */
 export type TermVersion = Serialized<StoredTermVersion>;
+/** One marking of a Document, Term or Decision as Protected, or unmarking, with the User who did it. */
+export type ProtectionMarking = Serialized<StoredProtectionMarking>;
 /** A Version without its body, as a Document's Version list shows it. */
 export type VersionSummary = Omit<Version, "body">;
 /** A Document as its page tree lists it. */

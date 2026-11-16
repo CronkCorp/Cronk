@@ -309,7 +309,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "Prefer `replace_section` to change one section: small edits rarely clash with anyone else's. " +
       "A Report is the Document of findings you write on a Ticket you hold the Claim on, with `write_report`; it stays with the Ticket, " +
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
-      "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides.",
+      "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
+      "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
+      "move, or create Documents under; propose a change to it as a Suggestion instead.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
@@ -410,7 +412,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "CRONK-D7 (D7 in the Workspace). Each has a status: proposed, accepted, rejected, deprecated, or superseded by a newer accepted " +
       "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status. When you make a choice " +
       "worth keeping, propose a Decision: a User reviews it (the Assignee of the Ticket you hold the Claim on, or else your Owner) and " +
-      "accepts or rejects it; a rejection reaches you as waiting work, with the reason. Saving text that uses a word a Term says to " +
+      "accepts or rejects it; a rejection reaches you as waiting work, with the reason. You may update your proposal while it is " +
+      "proposed, unless a User marked it `protected`; an accepted Decision is Protected, so propose a change to it as a Suggestion. Saving text that uses a word a Term says to " +
       "avoid still goes through: the result lists each such word with the Term to use, as `avoidedWords`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list, propose)"),

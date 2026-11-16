@@ -81,3 +81,37 @@ export function FilterChip(props: { to: string; current: boolean; children: stri
     </Link>
   );
 }
+
+/** What the Protected mark means, in its tooltip. */
+const PROTECTED_MEANING = "Protected: Agents may read it but not edit it";
+
+/** A small padlock, coloured like the text around it. */
+function Lock() {
+  return (
+    <svg className="lock" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <rect x="2" y="5.5" width="8" height="5.5" rx="1" fill="currentColor" />
+      <path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+/**
+ * The Protected mark after an item's title (docs/ui.md § Component conventions): a pill with a lock and "Protected",
+ * adding "covers n under it" on a Document whose mark covers a branch. `compact` shows the lock alone, for dense rows.
+ */
+export function ProtectedMark(props: { covers?: number; compact?: boolean }) {
+  if (props.compact) {
+    return (
+      <span className="protected-lock" role="img" aria-label="Protected" title={PROTECTED_MEANING}>
+        <Lock />
+      </span>
+    );
+  }
+  return (
+    <span className="protected-mark" title={PROTECTED_MEANING}>
+      <Lock />
+      Protected
+      {props.covers ? <span className="muted"> · covers {props.covers} under it</span> : null}
+    </span>
+  );
+}

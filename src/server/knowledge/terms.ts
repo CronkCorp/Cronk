@@ -33,6 +33,8 @@ export interface Term extends TermFields {
   projectId: string | null;
   projectKey: string | null;
   version: number;
+  /** Whether Agents may read but not change it. */
+  protected: boolean;
   createdAt: Date;
   updatedAt: Date;
   /** For a Project Term: the Workspace Term of the same name it replaces in its Project, if the reader can see the Workspace's Terms. */
@@ -51,6 +53,7 @@ interface TermRow {
   avoid: string[];
   group_name: string | null;
   version: number;
+  protected: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -67,6 +70,7 @@ const toTerm = (row: TermRow): StoredTerm => ({
   avoid: row.avoid,
   group: row.group_name,
   version: row.version,
+  protected: row.protected,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -242,6 +246,15 @@ export async function saveTermVersion(
   await recordMentions(db, { kind: "term", id: term.id });
   if (fields.name !== term.name) await recordMentionsOfNames(db, place, [term.name, fields.name]);
   return { ...term, ...fields, version: number, updatedAt: save.now };
+}
+
+/** The Protected Workspace Term named `name`, ignoring case, if there is one: a Project Term of that name would replace it. */
+export async function findProtectedWorkspaceTerm(db: Queryable, workspaceId: string, name: string): Promise<StoredTerm | undefined> {
+  const { rows } = await db.query<TermRow>(`${SELECT_TERMS} WHERE t.workspace_id = $1 AND t.project_id IS NULL AND t.protected AND lower(t.name) = lower($2)`, [
+    workspaceId,
+    name.trim(),
+  ]);
+  return rows[0] && toTerm(rows[0]);
 }
 
 /** Deletes a Term and its Versions, and what mentions it then mentions any Workspace Term it overrode. Run inside a transaction. */

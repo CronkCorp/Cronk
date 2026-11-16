@@ -687,4 +687,37 @@ export const migrations: Migration[] = [
       ALTER TABLE waiting_work ADD UNIQUE (agent_id, decision_id, decision_version);
     `,
   },
+  {
+    id: "0028_protected",
+    sql: `
+      -- Protected (ADR 0004): Agents may read the item but never change it. Only Users set or unset the mark.
+      -- A Document's mark also covers every Document under it in the page tree, worked out when read.
+      ALTER TABLE documents ADD COLUMN protected boolean NOT NULL DEFAULT false;
+      ALTER TABLE terms ADD COLUMN protected boolean NOT NULL DEFAULT false;
+      ALTER TABLE decisions ADD COLUMN protected boolean NOT NULL DEFAULT false;
+
+      -- Every time a User marked or unmarked an item, its protection history. Exactly one item column is set.
+      CREATE TABLE protection_markings (
+        id bigserial PRIMARY KEY,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        term_id uuid REFERENCES terms(id) ON DELETE CASCADE,
+        decision_id uuid REFERENCES decisions(id) ON DELETE CASCADE,
+        protected boolean NOT NULL,
+        at timestamptz NOT NULL,
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        CHECK (num_nonnulls(document_id, term_id, decision_id) = 1)
+      );
+      CREATE INDEX protection_markings_document ON protection_markings (document_id) WHERE document_id IS NOT NULL;
+      CREATE INDEX protection_markings_term ON protection_markings (term_id) WHERE term_id IS NOT NULL;
+      CREATE INDEX protection_markings_decision ON protection_markings (decision_id) WHERE decision_id IS NOT NULL;
+
+      -- Accepted Decisions are Protected by default: mark those already accepted, as by the User who accepted them, then.
+      INSERT INTO protection_markings (decision_id, protected, at, actor_user_id)
+      SELECT d.id, true, v.at, v.actor_user_id
+      FROM decisions d JOIN decision_versions v ON v.decision_id = d.id
+      WHERE d.status = 'accepted'
+        AND v.number = (SELECT coalesce(max(number), 0) + 1 FROM decision_versions WHERE decision_id = d.id AND status <> 'accepted');
+      UPDATE decisions SET protected = true WHERE status = 'accepted';
+    `,
+  },
 ];

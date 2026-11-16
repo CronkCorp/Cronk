@@ -25,6 +25,12 @@ export interface Document {
   body: string;
   /** The number of its current Version. */
   version: number;
+  /** Whether Agents may read but not change it: it is marked Protected, or sits under a Document that is. */
+  protected: boolean;
+  /** The Document whose Protected mark covers it: itself if marked, else the nearest marked Document above it; null if none. */
+  protectedBy: { id: string; title: string } | null;
+  /** How many Documents sit under it, all covered by its mark, when it is itself marked Protected; 0 otherwise. */
+  covers: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +45,10 @@ interface DocumentRow {
   title: string;
   body: string;
   version: number;
+  protected: boolean;
+  protected_by_id: string | null;
+  protected_by_title: string | null;
+  covers: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -52,6 +62,9 @@ const toDocument = (row: DocumentRow): Document => ({
   title: row.title,
   body: row.body,
   version: row.version,
+  protected: row.protected_by_id !== null,
+  protectedBy: row.protected_by_id === null ? null : { id: row.protected_by_id, title: row.protected_by_title! },
+  covers: row.covers,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -60,6 +73,25 @@ const SELECT_DOCUMENTS = `
   SELECT d.*, p.key AS project_key, ${ticketKeySql("tp", "t")} AS ticket_key
   FROM documents d LEFT JOIN projects p ON p.id = d.project_id
     LEFT JOIN tickets t ON t.id = d.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id`;
+
+/**
+ * A Document's row with what its Protected mark covers: the Document whose mark covers it (itself, or the
+ * nearest marked one above it) and, when marked itself, how many Documents sit under it.
+ */
+const SELECT_DOCUMENT_WITH_PROTECTION = `
+  WITH RECURSIVE found AS (${SELECT_DOCUMENTS} WHERE d.workspace_id = $1 AND d.id = $2),
+  above(id, parent_id, title, protected, depth) AS (
+    SELECT id, parent_id, title, protected, 0 FROM found
+    UNION ALL SELECT x.id, x.parent_id, x.title, x.protected, above.depth + 1 FROM documents x JOIN above ON x.id = above.parent_id
+  ),
+  below(id) AS (
+    SELECT x.id FROM documents x JOIN found ON x.parent_id = found.id WHERE found.protected
+    UNION ALL SELECT x.id FROM documents x JOIN below ON x.parent_id = below.id
+  ),
+  cover AS (SELECT id, title FROM above WHERE protected ORDER BY depth LIMIT 1)
+  SELECT found.*, (SELECT id FROM cover) AS protected_by_id, (SELECT title FROM cover) AS protected_by_title,
+         (SELECT count(*)::int FROM below) AS covers
+  FROM found`;
 
 /** The page tree a Document sits in: a Project's, or the Workspace's when `projectId` is null. */
 export interface Tree {
@@ -79,19 +111,21 @@ export interface TreeEntry {
   title: string;
   /** How deep it sits: 0 at the top. */
   depth: number;
+  /** Whether Agents may read but not change it: it, or a Document above it, is marked Protected. */
+  protected: boolean;
 }
 
 /** A page tree's Documents depth first: each followed by those under it, siblings in their order. Reports are left out. */
 export async function listTree(db: Queryable, tree: Tree): Promise<TreeEntry[]> {
   const { rows } = await db.query<TreeEntry>(
     `WITH RECURSIVE tree AS (
-       SELECT id, parent_id, title, 0 AS depth, ARRAY[position] AS path
+       SELECT id, parent_id, title, 0 AS depth, ARRAY[position] AS path, protected
        FROM documents WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2 AND parent_id IS NULL AND ticket_id IS NULL
        UNION ALL
-       SELECT d.id, d.parent_id, d.title, t.depth + 1, t.path || d.position
+       SELECT d.id, d.parent_id, d.title, t.depth + 1, t.path || d.position, t.protected OR d.protected
        FROM documents d JOIN tree t ON d.parent_id = t.id
      )
-     SELECT id, parent_id AS "parentId", title, depth FROM tree ORDER BY path`,
+     SELECT id, parent_id AS "parentId", title, depth, protected FROM tree ORDER BY path`,
     [tree.workspaceId, tree.projectId],
   );
   return rows;
@@ -186,10 +220,8 @@ export async function findDocument(
   id: string,
   opts: { forUpdate?: boolean } = {},
 ): Promise<Document | undefined> {
-  const { rows } = await db.query<DocumentRow>(
-    `${SELECT_DOCUMENTS} WHERE d.workspace_id = $1 AND d.id = $2${opts.forUpdate ? " FOR UPDATE OF d" : ""}`,
-    [workspaceId, id],
-  );
+  if (opts.forUpdate) await db.query("SELECT 1 FROM documents WHERE workspace_id = $1 AND id = $2 FOR UPDATE", [workspaceId, id]);
+  const { rows } = await db.query<DocumentRow>(SELECT_DOCUMENT_WITH_PROTECTION, [workspaceId, id]);
   return rows[0] && toDocument(rows[0]);
 }
 
@@ -304,7 +336,20 @@ export async function moveDocument(
      FROM unnest($1::uuid[]) WITH ORDINALITY AS ordered(id, position) WHERE documents.id = ordered.id`,
     [order],
   );
-  return { ...document, parentId: to.parentId };
+  return (await findDocument(db, tree.workspaceId, document.id))!;
+}
+
+/** The first Document marked Protected anywhere under `documentId` in its page tree, if any. */
+export async function findProtectedUnder(db: Queryable, documentId: string): Promise<{ id: string; title: string } | undefined> {
+  const { rows } = await db.query<{ id: string; title: string }>(
+    `WITH RECURSIVE below(id, title, protected) AS (
+       SELECT id, title, protected FROM documents WHERE parent_id = $1
+       UNION ALL SELECT d.id, d.title, d.protected FROM documents d JOIN below b ON d.parent_id = b.id
+     )
+     SELECT id, title FROM below WHERE protected LIMIT 1`,
+    [documentId],
+  );
+  return rows[0];
 }
 
 /** Deletes a Document and its Versions, or returns false if any Document sits under it. Run inside a transaction. */

@@ -4,7 +4,7 @@ import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, errors, holding, listing, pathParams, projectKeyParam, ref, savedHolding } from "../schemas.js";
+import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, savedHolding } from "../schemas.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
@@ -30,6 +30,7 @@ import {
   type DecisionVersion,
 } from "./decisions.js";
 import { listMentions } from "./mentions.js";
+import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 
 /** A Decision title: non-blank, at most 500 characters. */
 const title = { type: "string", minLength: 1, maxLength: 500, pattern: "\\S" } as const;
@@ -126,6 +127,11 @@ export function decisionRoutes(ctx: AppContext) {
       const now = ctx.clock.now();
       const saved = await saveDecision(tx, current, content, actor, now);
       changed.push(...(await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now)));
+      // A Decision becoming accepted is marked Protected by default (ADR 0004), as by whoever accepted it.
+      if (current.status !== "accepted" && saved.status === "accepted" && !saved.protected) {
+        await setProtected(tx, { kind: "decision", id: saved.id }, true, actingUser(actor).id, now);
+        return { ...saved, protected: true };
+      }
       return saved;
     };
 
@@ -287,8 +293,11 @@ export function decisionRoutes(ctx: AppContext) {
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (actor.kind === "agent" && current.status !== "proposed") {
-            throw new HttpError(403, `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}; only Users change it now`);
+            const instead = current.protected ? ". It is Protected: make a Suggestion of the change instead, for a User to accept or reject" : "";
+            throw new HttpError(403, `An Agent edits a Decision only while it is proposed, and ${current.key} is ${current.status}; only Users change it now${instead}`);
           }
+          // A proposal a User marked Protected is closed to Agents too.
+          requireUnprotected(actor, current, current.key);
           await requireCurrent(tx, current, request.body.baseVersion);
           const { title: newTitle, body: newBody, group: newGroup, supersedes: newSupersedes } = request.body;
           const content = {
@@ -364,6 +373,39 @@ export function decisionRoutes(ctx: AppContext) {
         );
         await reviewersHear([decision, ...changed]);
         return { decision };
+      },
+    );
+
+    app.post<{ Params: { key: string }; Body: { protected: boolean } }>(
+      "/api/decisions/:key/protection",
+      {
+        schema: {
+          params: decisionParams,
+          body: protectionBody,
+          response: {
+            200: answer("The Decision marked Protected or unmarked, at the same Version", holding("decision", "Decision")),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const decision = await transaction(ctx.db, async (tx) => {
+          const decision = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          requireUserActor(actor, "mark a Decision Protected or unmark it");
+          await setProtected(tx, { kind: "decision", id: decision.id }, request.body.protected, actor.user.id, ctx.clock.now());
+          return { ...decision, protected: request.body.protected };
+        });
+        return { decision };
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/decisions/:key/protection",
+      { schema: { params: decisionParams, response: { 200: protectionHistoryAnswer, ...errors(400, 401, 403, 404, 410) } } },
+      async (request) => {
+        const decision = await decisionFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        return { markings: await listProtectionMarkings(ctx.db, { kind: "decision", id: decision.id }) };
       },
     );
 

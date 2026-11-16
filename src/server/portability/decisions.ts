@@ -3,6 +3,7 @@ import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, integer, isUuid, oneOf, refuse, text, type File } from "./fields.js";
 import { slug } from "./format.js";
+import { importProtection, protectionToExport } from "./protection.js";
 import type { ImportContext } from "./import-context.js";
 import type { ImportedTickets } from "./tickets.js";
 
@@ -23,6 +24,7 @@ interface DecisionRow {
   supersedes: number[];
   superseded_by: number | null;
   version: number;
+  protected: boolean;
   created_at: Date;
   updated_at: Date;
   source_claim_id: string | null;
@@ -30,7 +32,7 @@ interface DecisionRow {
   source_ticket: string | null;
 }
 
-type VersionRow = ActorColumns & Omit<DecisionRow, "id" | "version" | "created_at" | "updated_at" | "superseded_by"> & { at: Date };
+type VersionRow = ActorColumns & Omit<DecisionRow, "id" | "version" | "protected" | "created_at" | "updated_at" | "superseded_by"> & { at: Date };
 
 const keys = (projectKey: string | null, numbers: number[]) => (numbers.length === 0 ? undefined : [...numbers].sort((a, b) => a - b).map((n) => decisionKey(projectKey, n)));
 
@@ -57,6 +59,7 @@ export async function exportDecisions(ctx: ExportContext, dir: string, projectId
         supersedes: keys(projectKey, d.supersedes),
         supersededBy: d.superseded_by === null ? undefined : decisionKey(projectKey, d.superseded_by),
         version: d.version,
+        ...(await protectionToExport(ctx, { kind: "decision", id: d.id }, d.protected)),
         createdAt: iso(d.created_at),
         createdBy: ctx.actor(versions[0]!),
         updatedAt: iso(d.updated_at),
@@ -140,6 +143,8 @@ export async function importDecisions(
       updatedAt: date(d.data.updatedAt, `${path} updatedAt`),
     });
     if (typeof sourceTicket === "string") tickets.decisionSources.push({ decisionId: id, ticketKey: sourceTicket, claimId: isUuid(d.data.sourceClaim) ? d.data.sourceClaim : null });
+    // An export from before Protected marks says nothing of them; accepted Decisions are Protected by default.
+    await importProtection(ctx, { kind: "decision", id }, d.data, path, content.status === "accepted");
     if (versions.length === 0) {
       // Without its Versions, it starts at Version 1 by whoever first wrote it.
       const by = await ctx.actor(d.data.createdBy, `${path} createdBy`);

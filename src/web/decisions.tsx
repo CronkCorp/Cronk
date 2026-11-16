@@ -4,7 +4,8 @@ import { Banner } from "./components/banner.js";
 import { Button } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
-import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip } from "./components/tags.js";
+import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip, ProtectedMark } from "./components/tags.js";
+import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
 import { api, staleVersionOf, type Decision, type DecisionStatus, type DecisionSummary } from "./api.js";
@@ -146,6 +147,7 @@ function Register(props: { projectKey: string | undefined; decisions: DecisionSu
                 <span className="register-title">
                   {d.title}
                   {d.supersededBy && <span className="superseded-by"> → {d.supersededBy.key}</span>}
+                  {d.protected && <> <ProtectedMark compact /></>}
                 </span>
                 <span className="register-status"><DecisionStatusPill status={d.status} /></span>
                 <span className="register-group">{d.group ?? ""}</span>
@@ -225,6 +227,7 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
       props.onChanged(changed);
     },
   );
+  const protect = useAction((value: boolean) => api.protectDecision(d.key, value), props.onChanged);
   const moves: [DecisionStatus, string][] = [
     ["accepted", "Accept"],
     ["rejected", "Reject"],
@@ -250,25 +253,28 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
         <div className="decision-head">
           <span className="key">{d.key}</span>
           <DecisionStatusPill status={d.status} />
+          {d.protected && <ProtectedMark />}
           {canWrite && (
             <div className="actions">
               <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
-              {otherMoves.length > 0 && (
-                <Menu
-                  label="Change status"
-                  trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
-                  items={otherMoves.map(([to, label]) => ({
+              <Menu
+                label="More actions"
+                trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
+                items={[
+                  ...otherMoves.map(([to, label]) => ({
                     label: to === "rejected" ? `${label}…` : label,
                     onSelect: () => (to === "rejected" ? setRejecting(true) : void status.run(to)),
                     disabled: status.busy,
-                  }))}
-                />
-              )}
+                  })),
+                  { label: d.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!d.protected), disabled: protect.busy },
+                ]}
+              />
               {d.status === "proposed" && <Button onClick={() => void status.run("accepted")} disabled={status.busy}>Accept</Button>}
             </div>
           )}
         </div>
         {status.error && <p className="error" role="alert">{status.error}</p>}
+        {protect.error && <p className="error" role="alert">{protect.error}</p>}
         {reject.error && <p className="error" role="alert">{reject.error}</p>}
         {rejecting && (
           <RejectDecisionForm
@@ -339,6 +345,11 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
             <span>Version {d.version}, <RelativeTime at={d.updatedAt} /></span>
           </div>
           <MentionedIn load={() => api.decisionMentions(d.key)} deps={[d.key, d.version]} what="its key" compact />
+          <div className="side-group">
+            <h4>Protected</h4>
+            <span>{d.protected ? "Yes: Agents may read it but not edit it" : <span className="muted">No</span>}</span>
+            <ProtectionHistory load={() => api.decisionProtection(d.key)} reloadOn={[d.key, d.protected]} />
+          </div>
         </div>
       </aside>
     </div>

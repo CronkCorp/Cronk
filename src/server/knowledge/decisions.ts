@@ -40,6 +40,8 @@ export interface Decision {
   body: string;
   /** The number of its current Version. */
   version: number;
+  /** Whether Agents may read but not change it. Accepting a Decision marks it Protected. */
+  protected: boolean;
   /** The Decisions it replaces once accepted, in key order. */
   supersedes: DecisionRef[];
   /** The accepted Decision that replaced it, if it is superseded. */
@@ -101,6 +103,7 @@ interface DecisionRow {
   supersedes: number[];
   superseded_by: number | null;
   version: number;
+  protected: boolean;
   created_at: Date;
   updated_at: Date;
   source_ticket_key: string | null;
@@ -123,6 +126,7 @@ const summarize = (row: DecisionRow, refs: Map<number, DecisionRef>): DecisionSu
   status: row.status,
   group: row.group_name,
   version: row.version,
+  protected: row.protected,
   supersededBy: row.superseded_by === null ? null : (refs.get(row.superseded_by) ?? null),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
