@@ -25,7 +25,7 @@ Each connection is an Agent Session, listed under its Agent until it disconnects
 
 ### From a script
 
-A script can call the HTTP API with the token alone to read, but an Agent changes things only within an Agent Session: a change sent without one is refused. Start a Session, send its id as the `Cronk-Agent-Session` header on every change, and end it when done:
+A script can call the HTTP API with the token alone to read, but an Agent changes things only within an Agent Session: a write sent without one is refused. Start a Session, send its id as the `Cronk-Agent-Session` header on every write, and end it when done:
 
 ```sh
 SESSION=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/agent-sessions | jq -r .session.id)
@@ -34,7 +34,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION
 curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" http://localhost:3000/api/agent-sessions/current
 ```
 
-Every change then shows in history with the Session it was made in. The full API is described at `/api/openapi.json`.
+Everything the script changes then shows in history with the Session it was made in. The full API is described at `/api/openapi.json`.
 
 ## Configuration
 

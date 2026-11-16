@@ -105,7 +105,7 @@ describe("the OpenAPI description", () => {
     expect(deleteParams).toEqual([expect.objectContaining({ name: "baseVersion", required: true })]);
   });
 
-  it("says every change an Agent makes needs an Agent Session, and how a script starts and ends one", async () => {
+  it("says every write an Agent makes needs an Agent Session, and how a script starts and ends one", async () => {
     const doc = await openapi();
     expect(doc.info.description).toContain("POST /api/agent-sessions");
     expect(doc.info.description).toContain("DELETE /api/agent-sessions/current");
