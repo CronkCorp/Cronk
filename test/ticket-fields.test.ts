@@ -22,7 +22,7 @@ describe("Ticket Priority", () => {
     await admin.patch("/api/tickets/CRONK-1", { priority: "high" });
     await admin.patch("/api/tickets/CRONK-1", { priority: "high" });
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.slice(1)).toMatchObject([{ change: "priority", from: "none", to: "high" }]);
   });
 });
@@ -50,7 +50,7 @@ describe("Ticket Labels", () => {
     await admin.patch("/api/tickets/CRONK-1", { labels: ["bug "] });
     await admin.patch("/api/tickets/CRONK-1", { labels: [] });
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.slice(1)).toMatchObject([
       { change: "labels", from: [], to: ["bug"] },
       { change: "labels", from: ["bug"], to: [] },
@@ -90,7 +90,7 @@ describe("Ticket Assignee", () => {
 
     expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: null })).body.ticket.assignee).toBeNull();
 
-    const { changes } = (await admin.get("/api/tickets/CRONK-1/history")).body;
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.slice(1)).toMatchObject([
       { change: "assignee", from: null, to: { id: ada.id, name: "Ada" } },
       { change: "assignee", from: { id: ada.id, name: "Ada" }, to: null },

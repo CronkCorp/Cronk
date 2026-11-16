@@ -268,7 +268,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   RecordedChange: {
-    description: "One change in a Ticket's history. `change` says which; the other fields depend on it.",
+    description: "One Change to a Ticket: `change` says which; the other fields depend on it.",
     ...object({
       at: timestamp,
       actor: { ...recordedActor, description: "Who made the change: a User, or an Agent with the Owner it acted for and the Agent Session it was in." },

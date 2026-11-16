@@ -167,7 +167,7 @@ describe("Statuses", () => {
       ["CRONK-2", "In Review"],
       ["CRONK-3", "Backlog"],
     ]);
-    const history = (await admin.get("/api/tickets/CRONK-1/history")).body.changes;
+    const history = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes;
     expect(history.at(-1)).toMatchObject({
       change: "status",
       actor: { name: "Ada" },

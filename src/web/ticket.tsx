@@ -36,7 +36,7 @@ import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui
 export function TicketPage(props: { ticketKey: string }) {
   const key = props.ticketKey;
   const [detail, reloadDetail] = useLoad(() => api.ticket(key), [key]);
-  const [changes, reloadChanges] = useLoad(() => api.ticketHistory(key), [key]);
+  const [changes, reloadChanges] = useLoad(() => api.ticketChanges(key), [key]);
   const [loaded, reloadLists] = useLoad(
     async () => {
       const [activities, reports, comments] = await Promise.all([api.activities(key), api.ticketReports(key), api.ticketComments(key)]);
