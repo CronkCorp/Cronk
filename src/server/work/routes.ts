@@ -13,9 +13,11 @@ import {
   pathParams,
   projectKeyParam,
   ref,
+  savedHolding,
   ticketKeyParam,
   userIdParam,
 } from "../schemas.js";
+import { avoidedWordsIn, titleAndDescription } from "../knowledge/avoided-words.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
 import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
@@ -521,19 +523,19 @@ export function workRoutes(ctx: AppContext) {
             properties: { title, description },
           },
           response: {
-            201: answer("The new Ticket, in the Project's first Status", holding("ticket", "Ticket")),
+            201: answer("The new Ticket, in the Project's first Status", savedHolding("ticket", "Ticket")),
             ...errors(400, 401, 403, 404, 410),
           },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const ticket = await transaction(ctx.db, async (tx) => {
+        const { ticket, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
           await lockProject(tx, project.id);
           const [firstStatus] = await listStatuses(tx, project.id);
-          return insertTicket(tx, {
+          const ticket = await insertTicket(tx, {
             project,
             title: request.body.title.trim(),
             description: request.body.description ?? "",
@@ -541,9 +543,10 @@ export function workRoutes(ctx: AppContext) {
             actor: actor,
             now: ctx.clock.now(),
           });
+          return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
         ticketsChanged(ctx.live, [ticket]);
-        return reply.code(201).send({ ticket });
+        return reply.code(201).send({ ticket, avoidedWords });
       },
     );
 
@@ -561,7 +564,7 @@ export function workRoutes(ctx: AppContext) {
           response: {
             201: answer(
               "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee, Delegate and Autonomous Delegation. An Agent must hold the parent's Claim.",
-              holding("ticket", "Ticket"),
+              savedHolding("ticket", "Ticket"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
@@ -570,7 +573,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const now = ctx.clock.now();
-        const { parent, ticket } = await transaction(ctx.db, async (tx) => {
+        const { parent, ticket, avoidedWords } = await transaction(ctx.db, async (tx) => {
           // The Project first, as creating Tickets and removing Statuses lock it, then the parent.
           await lockProject(tx, (await ticketFor(tx, actor, request.params.key, "write")).projectId);
           const parent = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
@@ -586,12 +589,13 @@ export function workRoutes(ctx: AppContext) {
             now,
           });
           const inherited = { parent, assignee: parent.assignee, delegate: parent.delegate, autonomous: parent.autonomous };
-          return { parent, ticket: await updateTicket(tx, created, inherited, actor, now) };
+          const ticket = await updateTicket(tx, created, inherited, actor, now);
+          return { parent, ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
         // The parent lists its Sub-Tickets.
         ticketsChanged(ctx.live, [ticket, parent]);
         await tellNewlyReady(ctx, [ticket.id], new Map());
-        return reply.code(201).send({ ticket });
+        return reply.code(201).send({ ticket, avoidedWords });
       },
     );
 
@@ -713,7 +717,10 @@ export function workRoutes(ctx: AppContext) {
             },
           },
           response: {
-            200: answer("The changed Ticket. An Agent must hold its Claim to change its fields or move it, and can't assign or delegate it.", holding("ticket", "Ticket")),
+            200: answer(
+              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to change its fields or move it, and can't assign or delegate it.",
+              savedHolding("ticket", "Ticket"),
+            ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -727,7 +734,7 @@ export function workRoutes(ctx: AppContext) {
         if (actor.kind === "agent" && autonomous !== undefined) {
           throw new HttpError(403, "Only a User can turn Autonomous Delegation on or off, not an Agent");
         }
-        const { before, ticket, alsoChanged, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
+        const { before, ticket, alsoChanged, blockedIds, mayBecomeReady, readyBefore, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const editsFields = [title, description, priority, labels, parentKey].some((v) => v !== undefined);
           if (actor.kind === "agent" && editsFields) await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "editing it");
@@ -784,7 +791,8 @@ export function workRoutes(ctx: AppContext) {
           // pre-fill from the Project default stays on the Ticket delegated, as its Sub-Tickets may have Delegates of their own.
           const cascades = updated.autonomous !== ticket.autonomous && (autonomous !== undefined || changes.parent !== undefined);
           const below = cascades ? await setAutonomousBelow(tx, ticket.id, updated.autonomous, actor, ctx.clock.now()) : [];
-          return { before: ticket, ticket: updated, alsoChanged: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore };
+          const avoidedWords = await avoidedWordsIn(tx, actor, ticket.projectId, titleAndDescription({ title, description }));
+          return { before: ticket, ticket: updated, alsoChanged: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore, avoidedWords };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
         if (ticket !== before) {
@@ -794,7 +802,7 @@ export function workRoutes(ctx: AppContext) {
           ticketsChanged(ctx.live, [ticket, ...alsoChanged, ...(await findTicketsByIds(ctx.db, blockedIds))]);
           await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         }
-        return { ticket };
+        return { ticket, avoidedWords };
       },
     );
 

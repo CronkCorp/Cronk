@@ -85,7 +85,7 @@ function termLines({ workspace, projects }: Welcome): string[] {
     "## Terms",
     "",
     "The glossary's Term names. Use them, and avoid the words each Term lists; within a Project, its own Terms replace the Workspace's of the same name. " +
-      "Look a Term up with the `terms` tool.",
+      "Look a Term up with the `terms` tool. A save that uses a word to avoid still goes through, and its result lists each one with the Term to use.",
     "",
     ...lines,
   ];
