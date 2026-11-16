@@ -60,10 +60,36 @@ Cronk is a plain Node.js process configured only through environment variables, 
 | `COOKIE_SECURE` | `false`               | Mark the sign-in cookie Secure (use behind HTTPS)              |
 | `PUBLIC_URL`    | (the request's host)  | Address Users reach Cronk at, e.g. `https://cronk.example`; set it behind a proxy that rewrites the `Host` header |
 | `WEB_ROOT`      | `dist/web` if present | Directory of the built web client                              |
-| `FILES_DIR`     | `data/files`          | Directory the files of Attachments and Artifacts are stored in, relative to the working directory |
+| `FILES_STORAGE` | `disk`                | Where the files of Attachments and Artifacts are stored: `disk`, or `s3` for any S3-compatible store (see below) |
+| `FILES_DIR`     | `data/files`          | With `disk`: directory the files are stored in, relative to the working directory |
 | `ARTIFACTS_URL` | (none; recommended)   | Address of a hostname of its own that serves Artifacts, e.g. `https://artifacts.cronk.example`; needs `PUBLIC_URL` too |
 
-Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files.
+By default Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files.
+
+### S3-compatible storage
+
+With `FILES_STORAGE=s3`, Cronk keeps the files in a bucket of an S3-compatible store instead: AWS S3, MinIO, Cloudflare R2 and the like. Everything works the same, downloads of part of a file and exports included. Create the bucket first and give Cronk's keys permission to put, get, delete and list objects in it; keep it private, since Cronk serves every file itself.
+
+| Variable               | Default                          | Meaning                                                       |
+| ---------------------- | -------------------------------- | ------------------------------------------------------------- |
+| `S3_BUCKET`            | (required)                       | Bucket the files are stored in                                |
+| `S3_ENDPOINT`          | AWS S3                           | Address of the store, e.g. `http://minio:9000` or `https://<account>.r2.cloudflarestorage.com` |
+| `S3_REGION`            | `us-east-1`                      | The bucket's region; `auto` for R2                            |
+| `S3_ACCESS_KEY_ID`     | (the AWS SDK's usual sources)    | Access key; set it together with `S3_SECRET_ACCESS_KEY`. Without both, the `AWS_*` variables, a profile or an instance role are used |
+| `S3_SECRET_ACCESS_KEY` | (the AWS SDK's usual sources)    | Secret key                                                    |
+| `S3_FORCE_PATH_STYLE`  | `true` with `S3_ENDPOINT`, else `false` | Address the bucket as `endpoint/bucket` rather than `bucket.endpoint`; MinIO needs `true` |
+
+`compose.yaml` passes these through, so with Docker Compose put them in the `.env` file next to it. For example, for a MinIO at `minio.internal`:
+
+```sh
+FILES_STORAGE=s3
+S3_ENDPOINT=http://minio.internal:9000
+S3_BUCKET=cronk
+S3_ACCESS_KEY_ID=cronk
+S3_SECRET_ACCESS_KEY=…
+```
+
+Back the bucket up with the database, as you would `FILES_DIR`. Switching an existing installation between disk and S3 doesn't move its files: copy them across first, keeping their paths (`aws s3 sync data/files s3://cronk --exclude "*~partial"` with the same keys does it, leaving out files half-written when Cronk last stopped).
 
 ### The Artifact hostname
 
@@ -75,7 +101,7 @@ Artifacts are pages Agents and Users publish, and their code may be buggy or ste
 
 That hostname serves Artifacts' files and nothing else, never reads the sign-in cookie, and opens a Version only at a signed address Cronk hands out to whoever may read the Artifact, valid for 12 hours. Every file is served under a strict content policy: the page may load scripts, styles and fonts only from itself, cdnjs, jsDelivr, unpkg and Google Fonts, and may make no network requests. Without `ARTIFACTS_URL`, Cronk serves Artifacts from its own hostname in the same sandbox, which still gives them an origin of their own but is less safe; set it before Agents publish anything you haven't read.
 
-Each Version of an Artifact may hold 500 files and 25 MB unless an Admin changes the limits in Workspace settings. Artifact files live under `FILES_DIR` beside Attachments, and exports include them.
+Each Version of an Artifact may hold 500 files and 25 MB unless an Admin changes the limits in Workspace settings. Artifact files are stored beside Attachments, on disk or in S3, and exports include them.
 
 Signed-in writes are only accepted from Cronk's own site: a browser request whose `Origin` (or `Referer`) is another site is refused, and the sign-in cookie is `SameSite=Strict`. Cronk's own site is `PUBLIC_URL`, or without it, the host a request was sent to. Agents' token requests aren't affected.
 
@@ -97,3 +123,5 @@ npm run test:e2e     # Playwright smoke test (run `npx playwright install chromi
 ```
 
 Read `docs/testing.md` before writing tests. API tests use `startCronk()` from `test/harness.ts`: it starts the app in-process on a fresh database and gives you API clients with their own cookie jars and a controllable clock (`cronk.clock.advance(ms)`). Set `TEST_POSTGRES_URL` to use an existing Postgres server instead of a container.
+
+The Files storage contract (`test/file-store.test.ts`) runs against local disk and against a disposable MinIO that the tests start with Testcontainers; set `TEST_S3_ENDPOINT`, `TEST_S3_ACCESS_KEY_ID` and `TEST_S3_SECRET_ACCESS_KEY` to use an existing S3-compatible server instead. When neither is available, the S3 tests are skipped.

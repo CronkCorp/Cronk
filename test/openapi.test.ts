@@ -72,7 +72,7 @@ describe("the OpenAPI description", () => {
     expect(body("/api/workspace", "get", "200")).toEqual({ $ref: "#/components/schemas/Workspace" });
   });
 
-  it("names an Agent's record and a Ticket's Changes as the glossary does", async () => {
+  it("keeps the old names of the Agent Record and a Ticket's Changes out", async () => {
     const doc = await openapi();
     expect(doc.components.schemas).not.toHaveProperty("AgentWork");
     expect(doc.paths).not.toHaveProperty("/api/agents/{id}/work");

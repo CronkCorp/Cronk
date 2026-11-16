@@ -321,7 +321,7 @@ export const api = {
     request<{ tokens: AgentToken[] }>("GET", `/api/agents/${encodeURIComponent(id)}/tokens`).then((r) => r.tokens),
   issueAgentToken: (id: string, readOnly: boolean) =>
     request<IssuedAgentToken>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
-  /** The Agent's record of what it did, newest first, as far as the signed-in User may read. */
+  /** The Agent Record: what the Agent did, newest first, as far as the signed-in User may read. */
   agentRecord: (id: string) =>
     request<{ record: AgentRecordEntry[] }>("GET", `/api/agents/${encodeURIComponent(id)}/record`).then((r) => r.record),
   revokeAgentToken: (id: string, tokenId: string) =>
