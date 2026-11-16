@@ -89,7 +89,7 @@ One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or 
 _Avoid_: Event, history entry, field change
 
 **Comment**:
-A message any Actor posts on a Ticket or Document, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. Conversation, as opposed to an Agent's own Activities.
+A message any Actor posts on a Ticket, Document or Artifact, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. On an Artifact it records the Version being viewed. Conversation, as opposed to an Agent's own Activities.
 _Avoid_: Reply, note, message, discussion
 
 **Waiting Work**:

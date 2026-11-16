@@ -59,6 +59,7 @@ const WHY: Record<Exclude<WaitingWork["reason"], "rejected" | "suggestion_reject
   answer: "answered your question",
   mention: "mentioned you",
   comment: "commented on your delegated Ticket",
+  published: "commented on a Version you published",
 };
 
 /** One piece of waiting work as welcome lines: where, who and why, then the Comment, or the reason for a rejection, quoted. */
@@ -77,8 +78,12 @@ export function waitingLines(work: WaitingWork): string[] {
     const from = ticket ? `, which you proposed from ${ticket.key}` : ", which you proposed";
     return [`- ${decision.key}: ${decision.title}: ${decision.rejectedBy.name} rejected it${from}, saying why:`, ...quote(decision.reason)];
   }
-  const { reason, comment, ticket, document } = work;
-  const where = ticket ? `${ticket.key}: ${ticket.title}` : `Document “${document!.title}” (${document!.id})`;
+  const { reason, comment, ticket, document, artifact } = work;
+  const where = ticket
+    ? `${ticket.key}: ${ticket.title}`
+    : artifact
+      ? `Artifact “${artifact.title}” (${artifact.id}), Version ${artifact.version}`
+      : `Document “${document!.title}” (${document!.id})`;
   const who = comment.actor.kind === "agent" ? `the Agent ${comment.actor.name}` : comment.actor.name;
   return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quote(comment.body)];
 }
