@@ -466,7 +466,25 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0020_attachments",
+    id: "0020_renamed_ids",
+    sql: `
+      -- An Agent or Agent Session an import (portability/people.ts) couldn't give the id it had in the
+      -- export, because the id was taken here: the id it had there and the one it got. Transcripts name
+      -- Agent Sessions by id, so linking one written before the import looks its ids up here too.
+      -- from_id is text: an export edited by hand may name them by anything.
+      CREATE TABLE renamed_ids (
+        seq bigserial PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        kind text NOT NULL CHECK (kind IN ('agent', 'agent_session')),
+        from_id text NOT NULL,
+        to_id uuid NOT NULL,
+        at timestamptz NOT NULL
+      );
+      CREATE INDEX renamed_ids_from ON renamed_ids (workspace_id, from_id);
+    `,
+  },
+  {
+    id: "0021_attachments",
     sql: `
       -- A file attached to a Ticket (files/attachments.ts). Its bytes live in the file store under
       -- attachments/<id>; the row is what Cronk knows of it. It is readable by whoever can read its Ticket.
