@@ -289,6 +289,16 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .file-by { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .link-button { padding: 0; border: none; background: none; font: inherit; font-size: 13px; color: var(--accent); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .link-button:hover { text-decoration: underline; }
+/* Attachments shown where they were posted: in a Comment, under a Report's body. Images and video at most 360px tall, other files by name. */
+.inline-attachments { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.inline-attachment { display: flex; flex-direction: column; gap: 4px; max-width: 100%; font-size: 12px; }
+.inline-other, .inline-audio { flex-direction: row; align-items: center; gap: 8px; }
+.inline-media-button { padding: 0; border: none; background: none; cursor: zoom-in; }
+.inline-media { display: block; max-width: 100%; max-height: 360px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.inline-caption { display: flex; align-items: center; gap: 8px; }
+.inline-name { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.comment-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.comment-files li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .viewer { display: flex; justify-content: center; margin-bottom: 16px; }
 .viewer-media { max-width: 100%; max-height: 640px; border-radius: 8px; background: var(--surface-2); }
 .viewer-audio { width: 100%; }
@@ -493,7 +503,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 
 /* Reading a Document: docs/ui.md § Document. The body in a panel, Comments down a 280px margin beside it. */
 .document-read { display: flex; flex-direction: column; gap: 24px; }
-.document-body { min-width: 0; }
+.document-body { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .document-body .markdown { padding: 16px 32px; font-size: 15px; line-height: 1.65; }
 .document-body .markdown > * { max-width: 720px; }
 .comment-margin { display: flex; flex-direction: column; gap: 8px; }

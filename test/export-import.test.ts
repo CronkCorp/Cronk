@@ -137,11 +137,16 @@ async function snapshot(admin: Client): Promise<unknown> {
     if (res.status !== 200) throw new Error(`GET ${path} answered ${res.status}: ${JSON.stringify(res.body)}`);
     return res.body;
   };
+  const attachments = async (path: string) =>
+    Promise.all(
+      (await get(path)).attachments.map(async (a: { id: string }) => ({ ...a, file: (await admin.download(`/api/attachments/${a.id}/file`)).body.toString("base64") })),
+    );
   const document = async (id: string) => ({
     ...(await get(`/api/documents/${id}`)),
     protection: await get(`/api/documents/${id}/protection`),
     versions: await Promise.all((await get(`/api/documents/${id}/versions`)).versions.map((v: { number: number }) => get(`/api/documents/${id}/versions/${v.number}`))),
     comments: await get(`/api/documents/${id}/comments`),
+    attachments: await attachments(`/api/documents/${id}/attachments`),
   });
   const decisions = async (path: string) => {
     const { decisions: listed } = await get(path);
@@ -177,12 +182,7 @@ async function snapshot(admin: Client): Promise<unknown> {
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
             changes: await get(`/api/tickets/${t.key}/changes`),
-            attachments: await Promise.all(
-              (await get(`/api/tickets/${t.key}/attachments`)).attachments.map(async (a: { id: string }) => ({
-                ...a,
-                file: (await admin.download(`/api/attachments/${a.id}/file`)).body.toString("base64"),
-              })),
-            ),
+            attachments: await attachments(`/api/tickets/${t.key}/attachments`),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };
@@ -246,6 +246,12 @@ async function busyWorkspace() {
   await agent.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe]), "image/png");
   await admin.upload("/api/tickets/CRONK-1/attachments?name=.env.example", Buffer.from("A=1"), "text/plain");
   await admin.upload("/api/tickets/CRONK-2/attachments?name=notes.md", Buffer.from("---\ntitle: not a Ticket\n---\n"), "text/markdown");
+  // ...and on the Report, on Ada's answer, and on the Agent's own Comment.
+  // Each a minute apart: Attachments list in the order attached, which an import, going item by item, can't keep for ties.
+  cronk.clock.advance(60_000);
+  await agent.upload(`/api/documents/${report.id}/attachments?name=trace.log`, Buffer.from("cache miss"), "text/plain");
+  cronk.clock.advance(60_000);
+  await admin.upload(`/api/comments/${answer.id}/attachments?name=disk.png`, Buffer.from([0x89, 0x50, 0x01]), "image/png");
   await agent.patch(`/api/documents/${report.id}`, { baseVersion: 1, body: "It was the disk cache." });
   const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
   expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
@@ -279,7 +285,11 @@ async function busyWorkspace() {
   await admin.patch(`/api/documents/${guide.id}`, { baseVersion: 1, body: "# Guide\n\nStart here, then read on." });
   await admin.post(`/api/documents/${guide.id}/versions/1/restore`, { baseVersion: 2 });
   const remark = (await grace.post(`/api/documents/${guide.id}/comments`, { body: "Which here?", anchor: { passage: "Start here" } })).body.comment;
-  await admin.post(`/api/documents/${guide.id}/comments`, { body: "This one.", replyToCommentId: remark.id });
+  const reply = (await admin.post(`/api/documents/${guide.id}/comments`, { body: "This one.", replyToCommentId: remark.id })).body.comment;
+  // Attachments on a Document, kept across its Versions, and on a Comment on it.
+  await admin.upload(`/api/documents/${guide.id}/attachments?name=map.png`, Buffer.from([0x89, 0x50, 0x02]), "image/png");
+  cronk.clock.advance(60_000);
+  await admin.upload(`/api/comments/${reply.id}/attachments?name=here.png`, Buffer.from([0x89, 0x50, 0x03]), "image/png");
   await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome." });
   // A line of dashes, as frontmatter ends with, in a title, a body and an anchored passage.
   const notes = (await admin.post("/api/workspace/documents", { title: "Notes ---", body: "intro\n---\nmore" })).body.document;
@@ -722,14 +732,14 @@ describe("Protected marks in an export", () => {
     const ada = "ada@example.com";
 
     const guide = markdown(files[Object.keys(files).find((path) => /projects\/CRONK\/documents\/\d+-guide\.md$/.test(path))!]).data;
-    expect(guide).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:05:00.000Z", by: "grace@example.com" }] });
+    expect(guide).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:08:00.000Z", by: "grace@example.com" }] });
     const docker = markdown(files[Object.keys(files).find((path) => /guide\/\d+-setup-docker\.md$/.test(path))!]).data;
     expect(docker).toMatchObject({ protected: false });
     expect(docker.protection).toBeUndefined();
     const [customer] = markdown(files["projects/CRONK/terms.md"]).data.terms;
     expect(customer).toMatchObject({ protected: false, protection: [{ protected: true, by: ada }, { protected: false, by: ada }] });
     const accepted = markdown(files[Object.keys(files).find((path) => path.startsWith("projects/CRONK/docs/adr/0004-"))!]).data;
-    expect(accepted).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:04:00.000Z", by: "grace@example.com" }] });
+    expect(accepted).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:07:00.000Z", by: "grace@example.com" }] });
   });
 
   it("leave an accepted Decision Protected when an older export, from before them, says nothing of them", async () => {
@@ -910,6 +920,19 @@ describe("a delegated Ticket without an Assignee in an export", () => {
 });
 
 describe("Attachments in an export", () => {
+  it("are beside the Document or Comment they are on, as a Ticket's are", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide" })).body.document;
+    await admin.upload(`/api/documents/${guide.id}/attachments?name=map.png`, Buffer.from([0x89, 0x50]), "image/png");
+    const comment = (await admin.post(`/api/documents/${guide.id}/comments`, { body: "Here." })).body.comment;
+    await admin.upload(`/api/comments/${comment.id}/attachments?name=here.txt`, Buffer.from("here"), "text/plain");
+
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(markdown(files["projects/CRONK/documents/1-guide.attachments/index.md"]).data.attachments).toMatchObject([{ file: "1-map.png", name: "map.png" }]);
+    expect(files["projects/CRONK/documents/1-guide.comments/1.attachments/1-here.txt"]).toBe("here");
+  });
+
   it("keep their ids, so links to their files still work after the move", async () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });

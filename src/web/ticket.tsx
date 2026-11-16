@@ -24,7 +24,7 @@ import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
-import { AttachmentViewer, FilesPanel, type AttachmentsView, TicketAttachments, useAttach, usePageDrop } from "./attachments.js";
+import { AttachmentThumbnails, AttachmentViewer, FilesPanel, PageAttachments, type AttachmentsView, useAttach, usePageDrop } from "./attachments.js";
 import type { Attachment } from "./api.js";
 import { both, Field, Show, TextArea, useAction, useLoad, useSubmit } from "./ui.js";
 
@@ -151,7 +151,7 @@ function TicketView(props: {
   const [opened, setOpened] = useState<Attachment>();
   const archived = project.kind === "loaded" && project.value.project.archived;
   const canWrite = project.kind === "loaded" && project.value.project.access === "write";
-  const attaching = useAttach(t.key, props.onAttached);
+  const attaching = useAttach((file) => api.attach(t.key, file), props.onAttached);
   const dragging = usePageDrop(canWrite, (files) => void attaching.attach(files));
   const files: AttachmentsView = {
     attachments: props.attachments,
@@ -187,9 +187,9 @@ function TicketView(props: {
               {t.description.trim() ? <CronkMarkdown>{t.description}</CronkMarkdown> : <p className="muted">No description.</p>}
             </div>
           )}
-          <TicketAttachments {...files} />
+          <AttachmentThumbnails {...files} attachments={props.attachments.filter((a) => a.on === "ticket")} />
           <h2>Timeline</h2>
-          {props.timeline(canWrite)}
+          <PageAttachments.Provider value={{ attachments: props.attachments, onOpen: setOpened }}>{props.timeline(canWrite)}</PageAttachments.Provider>
         </div>
         <aside className="ticket-side" aria-label="Ticket fields">
           <TicketFields ticket={t} canWrite={canWrite} statuses={project.kind === "loaded" ? project.value.statuses : [t.status]} />

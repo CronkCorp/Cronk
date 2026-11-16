@@ -145,7 +145,7 @@ A live, viewable thing built by an Actor, such as an HTML prototype, served in i
 _Avoid_: Prototype (as the general term), app, preview, page
 
 **Attachment**:
-A plain file, such as an image, video, PDF or log, attached to a Document, Report or Ticket. It belongs to that item and is readable by whoever can read it.
+A plain file, such as an image, video, PDF or log, attached to a Document, Report, Ticket or Comment. It belongs to that item and is readable by whoever can read it; on a Document it belongs to the Document rather than a Version, so every Version can show it.
 _Avoid_: Upload, asset, media, file (as the term)
 
 **Term**:

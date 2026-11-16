@@ -900,6 +900,26 @@ describe("the attachments tool", () => {
     expect(listed.body).toEqual((await admin.get("/api/tickets/CRONK-1/attachments")).body);
   });
 
+  it("attaches to and lists a Document's or Report's files, and attaches to the Agent's own Comment", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Architecture" })).body.document;
+
+    const onDoc = await callTool(mcp, "attachments", { action: "attach", documentId: doc.id, name: "diagram.txt", content: "proxy -> api" });
+    expect(onDoc.body.attachment).toMatchObject({ on: "document", documentId: doc.id });
+    expect((await callTool(mcp, "attachments", { action: "list", documentId: doc.id })).body).toEqual((await admin.get(`/api/documents/${doc.id}/attachments`)).body);
+
+    const comment = (await callTool(mcp, "comments", { action: "post", key: "CRONK-1", body: "Log attached." })).body.comment;
+    const onComment = await callTool(mcp, "attachments", { action: "attach", commentId: comment.id, name: "run.log", content: "ok" });
+    expect(onComment.body.attachment).toMatchObject({ on: "comment", commentId: comment.id, ticketKey: "CRONK-1" });
+
+    expect(await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", documentId: doc.id, name: "x", content: "x" })).toEqual({
+      isError: true,
+      body: "The attach action needs one of key, documentId or commentId",
+    });
+  });
+
   it("takes files of several MB, not only what fits a small JSON request", async () => {
     const { cronk, claude } = await delegatedSetup();
     const mcp = await connectMcp(cronk, claude.secret);
