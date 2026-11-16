@@ -4,7 +4,7 @@ import type { Queryable } from "../db/database.js";
 import { visibleProjects, type Access } from "../identity/access.js";
 import { ticketsBlockedBy } from "../coordination/ready.js";
 import { listAllProjects } from "./projects.js";
-import { lockTicketsByIds, type Ticket } from "./tickets.js";
+import { findTicketsByIds, lockTicketsByIds, type Ticket } from "./tickets.js";
 
 /**
  * Reopening an Agent's Unverified completion reaches the Tickets it blocks: each one that already continued on the
@@ -22,11 +22,12 @@ export interface Dependent {
 }
 
 /**
- * The Tickets `ticket` blocks that `actor` can see, locked in id order, with the caller's access to each. Those they
- * can't see take no choice and aren't told: the caller can't know of them.
+ * The Tickets `ticket` blocks that `actor` can see, locked in id order unless `lock` is false, with the caller's access
+ * to each. Those they can't see take no choice and aren't told: the caller can't know of them.
  */
-export async function dependentsOf(db: Queryable, actor: Actor, ticket: Ticket): Promise<Dependent[]> {
-  const blocked = await lockTicketsByIds(db, await ticketsBlockedBy(db, [ticket.id]));
+export async function dependentsOf(db: Queryable, actor: Actor, ticket: Ticket, { lock = true } = {}): Promise<Dependent[]> {
+  const ids = await ticketsBlockedBy(db, [ticket.id]);
+  const blocked = lock ? await lockTicketsByIds(db, ids) : await findTicketsByIds(db, ids);
   const projects = await visibleProjects(db, actor, await listAllProjects(db, actingUser(actor).workspaceId));
   const access = new Map(projects.map((p) => [p.id, p.access]));
   return blocked.flatMap((t) => (access.has(t.projectId) ? [{ ticket: t, access: access.get(t.projectId)! }] : []));

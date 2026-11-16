@@ -268,10 +268,12 @@ export function conversationRoutes(ctx: AppContext) {
             const posted = await comment(reopened, reason);
             // Each dependent's Agent is told what the Reopen means for it, where the User may write.
             const told = new Set([ticket.id, ...dependents.map((d) => d.ticket.id)]);
-            const tell = async ({ ticket: t, access }: Dependent, body: string) => {
+            const tellAgent = async ({ ticket: t, access }: Dependent, body: string) => {
               if (t.delegate && access === "write" && t.status.category !== "canceled") await comment(t, body);
             };
+            // The Tickets the Reopen changed, then every one it blocks again, kept or not, whose watchers see that.
             const changed: Ticket[] = [reopened];
+            const blockedAgain: Ticket[] = dependents.map((d) => d.ticket);
             for (const dependent of dependents) {
               const d = dependent.ticket;
               const choice = chosen.get(d.id) ?? "keep";
@@ -279,30 +281,32 @@ export function conversationRoutes(ctx: AppContext) {
                 await clearClaim(tx, d.id);
                 const paused = await updateTicket(tx, d, { status: await statusOf(tx, d, "unstarted") }, actor, now);
                 changed.push(paused);
-                await tell({ ...dependent, ticket: paused }, dependentNote(ticket, reason, { pausedTo: paused.status.name }));
+                await tellAgent({ ...dependent, ticket: paused }, dependentNote(ticket, reason, { pausedTo: paused.status.name }));
               } else if (choice === "reopen") {
-                const too = await reopen(d);
-                changed.push(too);
-                await tell({ ...dependent, ticket: too }, dependentNote(ticket, reason, { reopenedToo: true }));
-                // What builds on a Ticket Reopened too is blocked again as well, so its Agents are told; it keeps going.
-                for (const next of await dependentsOf(tx, actor, d)) {
+                const alsoReopened = await reopen(d);
+                changed.push(alsoReopened);
+                await tellAgent({ ...dependent, ticket: alsoReopened }, dependentNote(ticket, reason, { reopenedToo: true }));
+                // What builds on a Ticket Reopened too is blocked again as well, so its Agents are told; it keeps going, so it
+                // isn't changed, or locked, here.
+                for (const next of await dependentsOf(tx, actor, d, { lock: false })) {
                   if (told.has(next.ticket.id)) continue;
                   told.add(next.ticket.id);
-                  await tell(next, dependentNote(too, reason, { kept: next.ticket }));
+                  blockedAgain.push(next.ticket);
+                  await tellAgent(next, dependentNote(alsoReopened, reason, { kept: next.ticket }));
                 }
               } else {
-                await tell(dependent, dependentNote(ticket, reason, { kept: d }));
+                await tellAgent(dependent, dependentNote(ticket, reason, { kept: d }));
               }
             }
-            return { ticket: reopened, posted, posts, changed };
+            return { ticket: reopened, posted, posts, changed, blockedAgain };
           },
-          ({ posts, changed }) => {
+          ({ posts, changed, blockedAgain }) => {
             for (const { ticket, posted } of posts) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
               pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
             }
             inboxesChanged(ctx.live, changed.map((t) => t.assignee?.id));
-            ticketsChanged(ctx.live, changed);
+            ticketsChanged(ctx.live, [...changed, ...blockedAgain]);
           },
         );
         // Reopening it makes it Ready again; Completed, it wasn't Ready before.

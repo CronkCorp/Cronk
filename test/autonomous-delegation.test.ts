@@ -399,6 +399,19 @@ describe("Reopen with dependents that continued", () => {
     expect((await reopen(all)).status).toBe(200);
   });
 
+  it("tells the watchers of a dependent it blocks again, even one kept as it is", async () => {
+    const { admin } = await continuedSetup(6);
+    const stream = await admin.events("/api/tickets/CRONK-6/events");
+    expect((await stream.next())?.event).toBe("ready");
+    await admin.post("/api/tickets/CRONK-1/reopen", {
+      comment: "Not right.",
+      dependents: { "CRONK-2": "keep", "CRONK-3": "keep", "CRONK-4": "keep", "CRONK-5": "keep" },
+    });
+    // Its Delegate's note arrives as a Comment too.
+    const events = [await stream.next(), await stream.next()].map((e) => e?.event).sort();
+    expect(events).toEqual(["changed", "comment"]);
+  });
+
   it("blocks them again: a dependent not yet taken up is no longer Ready", async () => {
     const { admin, session } = await continuedSetup(6);
     const agent = await session();
