@@ -517,6 +517,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         writes: true,
         run: (api, a) => {
           const kind = required(a.kind, "a kind", "create");
+          if (a.itemId !== undefined && a.parentId !== undefined) {
+            throw new ToolError("The create action takes an itemId to change a Document, or a parentId to suggest a new one, not both");
+          }
           const item =
             kind === "decision"
               ? { kind, key: required(a.key, "a key for a Decision", "create") }

@@ -349,6 +349,10 @@ describe("the suggestions tool and a new Document", () => {
       isError: true,
       body: "The create action needs an itemId for a Document, or a parentId for a new one",
     });
+    expect(await callTool(mcp, "suggestions", { action: "create", kind: "document", itemId: document.id, parentId: document.id, baseVersion: 0, title: "Backups", reasoning: "Missing." })).toEqual({
+      isError: true,
+      body: "The create action takes an itemId to change a Document, or a parentId to suggest a new one, not both",
+    });
     await mcp.disconnect();
     await admin.post(`/api/suggestions/${made.body.suggestion.id}/reject`, { reason: "It's in the runbook." });
 
