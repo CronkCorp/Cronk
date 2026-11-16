@@ -443,6 +443,33 @@ export function s3Server() {
   return inject("s3Server");
 }
 
+/** A client of the bucket `config` names, for tests to look into it without going through Cronk. */
+function bucketClient(config: S3StorageConfig): S3Client {
+  return new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    forcePathStyle: config.forcePathStyle,
+    credentials: { accessKeyId: config.accessKeyId!, secretAccessKey: config.secretAccessKey! },
+  });
+}
+
+/** The keys of every object in the bucket `config` names, in order, however many pages they take. */
+export async function bucketKeys(config: S3StorageConfig): Promise<string[]> {
+  const s3 = bucketClient(config);
+  try {
+    const keys: string[] = [];
+    let ContinuationToken: string | undefined;
+    do {
+      const page = await s3.send(new ListObjectsV2Command({ Bucket: config.bucket, ContinuationToken }));
+      keys.push(...(page.Contents ?? []).map(({ Key }) => Key!));
+      ContinuationToken = page.NextContinuationToken;
+    } while (ContinuationToken);
+    return keys.sort();
+  } finally {
+    s3.destroy();
+  }
+}
+
 /**
  * A new, empty bucket on the run's S3-compatible server, emptied and removed when the test ends, as storage
  * configuration for it. Only call it where `s3Server()` answered a server.
@@ -459,16 +486,13 @@ export async function disposableBucket(): Promise<S3StorageConfig> {
     secretAccessKey: server.secretAccessKey,
     forcePathStyle: true,
   };
-  const s3 = new S3Client({
-    endpoint: config.endpoint,
-    region: config.region,
-    forcePathStyle: true,
-    credentials: { accessKeyId: server.accessKeyId, secretAccessKey: server.secretAccessKey },
-  });
+  const s3 = bucketClient(config);
   await s3.send(new CreateBucketCommand({ Bucket: config.bucket }));
   onTestFinished(async () => {
-    const { Contents = [] } = await s3.send(new ListObjectsV2Command({ Bucket: config.bucket }));
-    if (Contents.length) await s3.send(new DeleteObjectsCommand({ Bucket: config.bucket, Delete: { Objects: Contents.map(({ Key }) => ({ Key })) } }));
+    const keys = await bucketKeys(config);
+    for (let i = 0; i < keys.length; i += 1000) {
+      await s3.send(new DeleteObjectsCommand({ Bucket: config.bucket, Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })) } }));
+    }
     await s3.send(new DeleteBucketCommand({ Bucket: config.bucket }));
     s3.destroy();
   });

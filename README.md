@@ -88,7 +88,7 @@ S3_ACCESS_KEY_ID=cronk
 S3_SECRET_ACCESS_KEY=…
 ```
 
-Back the bucket up with the database, as you would `FILES_DIR`. Switching an existing installation between disk and S3 doesn't move its files: copy them across first, keeping their paths (`aws s3 sync data/files s3://cronk` with the same keys does it).
+Back the bucket up with the database, as you would `FILES_DIR`. Switching an existing installation between disk and S3 doesn't move its files: copy them across first, keeping their paths (`aws s3 sync data/files s3://cronk --exclude "*~partial"` with the same keys does it, leaving out files half-written when Cronk last stopped).
 
 Signed-in writes are only accepted from Cronk's own site: a browser request whose `Origin` (or `Referer`) is another site is refused, and the sign-in cookie is `SameSite=Strict`. Cronk's own site is `PUBLIC_URL`, or without it, the host a request was sent to. Agents' token requests aren't affected.
 

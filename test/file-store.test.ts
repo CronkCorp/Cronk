@@ -112,3 +112,14 @@ storageContract("Local disk", async () => {
 });
 
 storageContract("S3-compatible", async () => new S3Store(await disposableBucket()), !s3Server());
+
+describe.skipIf(!s3Server())("S3-compatible storage failing", () => {
+  it("names the store's own error when an upload fails partway, not the stream it stopped reading", async () => {
+    const store = new S3Store({ ...(await disposableBucket()), bucket: "cronk-no-such-bucket" });
+    const MB = 1024 * 1024;
+
+    const upload = store.put("attachments/a1", Readable.from(Array.from({ length: 12 }, () => Buffer.alloc(MB))));
+
+    await expect(upload).rejects.toThrow(/bucket/i);
+  });
+});

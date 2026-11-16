@@ -1,8 +1,8 @@
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { PassThrough, Readable, Transform } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { FileTooLarge, KEY, type ByteRange, type FileStore } from "./store.js";
+import { checkKey, countingBytes, FileTooLarge, type ByteRange, type FileStore } from "./store.js";
 
 /** Where an S3-compatible store (AWS S3, MinIO, Cloudflare R2, …) keeps Cronk's files, and how to reach it. */
 export interface S3StorageConfig {
@@ -37,47 +37,37 @@ export class S3Store implements FileStore {
     });
   }
 
-  private key(key: string): string {
-    if (!KEY.test(key)) throw new Error(`Not a file key: ${key}`);
-    return key;
-  }
-
   async put(key: string, bytes: Readable | Buffer, opts: { maxBytes?: number } = {}): Promise<number> {
-    const Key = this.key(key);
-    let size = 0;
-    const counting = new Transform({
-      transform(chunk: Buffer, _encoding, done) {
-        size += chunk.length;
-        if (opts.maxBytes !== undefined && size > opts.maxBytes) done(new FileTooLarge(opts.maxBytes));
-        else done(null, chunk);
-      },
-    });
+    const Key = checkKey(key);
+    const counting = countingBytes(opts.maxBytes);
     const source = Buffer.isBuffer(bytes) ? Readable.from([bytes]) : bytes;
-    // Kept so the error of whichever side failed first is the one thrown, `FileTooLarge` included.
     let readError: unknown;
-    const reading = pipeline(source, counting).catch((err: unknown) => {
+    const reading = pipeline(source, counting.stream).catch((err: unknown) => {
       readError = err;
     });
     // A file is uploaded in parts of 5 MB, so one of any size is never held in memory whole; a failed one leaves no parts.
-    const upload = new Upload({ client: this.s3, params: { Bucket: this.bucket, Key, Body: counting } });
+    const upload = new Upload({ client: this.s3, params: { Bucket: this.bucket, Key, Body: counting.stream } });
     try {
       await upload.done();
     } catch (err) {
-      counting.destroy();
+      // Stops reading what is left; a file too large is the reason to give, else the store's own error.
+      counting.stream.destroy();
       await reading;
-      throw readError ?? err;
+      throw readError instanceof FileTooLarge ? readError : err;
     }
     await reading;
     if (readError) throw readError;
-    return size;
+    return counting.size();
   }
 
   get(key: string, range?: ByteRange): Readable {
-    const Key = this.key(key);
+    const Key = checkKey(key);
     const out = new PassThrough();
     // A reader that stops early, such as a player seeking elsewhere, ends the request to the store too.
     const abort = new AbortController();
-    out.once("close", () => abort.abort());
+    out.once("close", () => {
+      if (!out.readableEnded) abort.abort();
+    });
     this.s3
       .send(new GetObjectCommand({ Bucket: this.bucket, Key, Range: range && `bytes=${range.start}-${range.end}` }), { abortSignal: abort.signal })
       .then(({ Body }) => pipeline(Body as Readable, out))
@@ -89,15 +79,19 @@ export class S3Store implements FileStore {
     const keys: string[] = [];
     let ContinuationToken: string | undefined;
     do {
-      const page = await this.s3.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: `${this.key(prefix)}/`, ContinuationToken }));
+      const page = await this.s3.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: `${checkKey(prefix)}/`, ContinuationToken }));
       for (const { Key } of page.Contents ?? []) if (Key) keys.push(Key);
       ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (ContinuationToken);
     return keys.sort();
   }
 
+  async close(): Promise<void> {
+    this.s3.destroy();
+  }
+
   async delete(key: string): Promise<void> {
     // S3 answers a delete of a missing object as done.
-    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: this.key(key) }));
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: checkKey(key) }));
   }
 }

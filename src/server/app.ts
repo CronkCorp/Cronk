@@ -87,7 +87,7 @@ export async function buildApp(opts: {
   const stopWatchingLapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
   app.addHook("onClose", async () => {
     stopWatchingLapses();
-    await db.end();
+    await Promise.all([db.end(), ctx.files.close()]);
   });
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
   // so a new route can't forget to. The web shell and the OpenAPI document take any query string.
