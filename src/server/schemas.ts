@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, VERIFICATIONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -288,6 +288,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     archived: { type: "boolean" },
     visibility: { type: "string", enum: ["open", "private"] },
     agentAccess: agentAccessSchema,
+    autonomousByDefault: {
+      type: "boolean",
+      description: "What delegating one of its Tickets sets Autonomous Delegation to, unless the delegating User says otherwise. Off unless a User turns it on.",
+    },
     access: { ...accessSchema, description: "What the caller may do in the Project." },
   }),
   Status: object({
@@ -309,6 +313,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     assignee: nullable(named),
     delegate: { ...nullable(named), description: "The Agent the Assignee handed the Ticket to; always one of the Assignee's own." },
     parent: { ...nullable(ticketName), description: "Set on a Sub-Ticket." },
+    autonomous: {
+      type: "boolean",
+      description: "Autonomous Delegation: the Delegate may complete the Ticket itself, each completion Unverified until a User Accepts it. Only Users set it.",
+    },
+    verification: {
+      ...nullable({ type: "string", enum: VERIFICATIONS }),
+      description:
+        "Where an Agent's completion under Autonomous Delegation stands: `unverified` until a User Accepts it, then `verified`. Null for any other Ticket.",
+    },
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
@@ -337,7 +350,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       change: {
         type: "string",
         enum: [
-          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent"],
+          ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
         ],
@@ -356,6 +369,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       object({ change: { const: "labels" }, from: labels, to: labels }),
       ...(["assignee", "delegate"] as const).map((c) => object({ change: { const: c }, from: nullable(named), to: nullable(named) })),
       object({ change: { const: "parent" }, from: nullable(ticketName), to: nullable(ticketName) }),
+      object({ change: { const: "autonomous" }, from: { type: "boolean" }, to: { type: "boolean" } }),
+      object({ change: { const: "verification" }, from: nullable({ type: "string", enum: VERIFICATIONS }), to: nullable({ type: "string", enum: VERIFICATIONS }) }),
       object({
         change: { type: "string", enum: ["relation added", "relation removed"] },
         kind: { type: "string", enum: RELATION_KINDS },

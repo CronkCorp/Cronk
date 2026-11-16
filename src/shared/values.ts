@@ -13,6 +13,10 @@ export const FINISHED_CATEGORIES: readonly StatusCategory[] = ["completed", "can
 /** The Status Categories of work an Agent can take up: a Ticket In Review waits on a User, and finished work has nothing left to do. */
 export const WORKABLE_CATEGORIES: readonly StatusCategory[] = ["backlog", "unstarted", "started"];
 
+/** Where an Agent's completion under Autonomous Delegation stands: Unverified until a User Accepts it, then Verified. */
+export const VERIFICATIONS = ["unverified", "verified"] as const;
+export type Verification = (typeof VERIFICATIONS)[number];
+
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];

@@ -31,7 +31,7 @@ import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { SearchResult } from "./search/search.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
-import type { QuestionItem, ReviewItem } from "./inbox/inbox.js";
+import type { QuestionItem, ReviewItem, UnverifiedItem } from "./inbox/inbox.js";
 import type {
   Decision as StoredDecision,
   DecisionSummary as StoredDecisionSummary,
@@ -42,7 +42,7 @@ export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
-export type { ActivityKind, DecisionStatus, Priority, RelationKind, SearchKind, StatusCategory } from "../shared/values.js";
+export type { ActivityKind, DecisionStatus, Priority, RelationKind, SearchKind, StatusCategory, Verification } from "../shared/values.js";
 export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
 
@@ -146,8 +146,8 @@ export type Merge = StoredMerge & { onto: Version };
 export type GuidanceMerge = MarkdownMerge & { onto: Guidance };
 export type { Conflict, MergedSection } from "./knowledge/sections.js";
 
-/** One item in a User's Inbox: a Ticket to review, or an open question of one of their Agents. */
-export type InboxItem = Serialized<ReviewItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
+/** One item in a User's Inbox: a Ticket to review, an Unverified completion, or an open question of one of their Agents. */
+export type InboxItem = Serialized<ReviewItem> | Serialized<UnverifiedItem> | (Serialized<Omit<QuestionItem, "question">> & { question: Activity });
 export type InboxKind = InboxItem["kind"];
 
 /** A recorded choice with its reasoning and status, at its current Version. */

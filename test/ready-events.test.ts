@@ -43,7 +43,7 @@ describe("An Agent Session's event stream", () => {
     await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId });
     expect(await stream.next()).toEqual({
       event: "ticketReady",
-      data: { ticket: { key: "CRONK-1", title: "Ticket 1", priority: "none", status: expect.objectContaining({ name: "Backlog", category: "backlog" }) } },
+      data: { ticket: { key: "CRONK-1", title: "Ticket 1", priority: "none", status: expect.objectContaining({ name: "Backlog", category: "backlog" }), autonomous: false } },
     });
   });
 

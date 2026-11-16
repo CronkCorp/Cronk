@@ -52,6 +52,7 @@ import {
   wouldNestUnderItself,
   normalizeLabels,
   listTickets,
+  setAutonomousBelow,
   updateTicket,
   type Ticket,
   type TicketChanges,
@@ -166,7 +167,7 @@ export function workRoutes(ctx: AppContext) {
 
     app.patch<{
       Params: { key: string };
-      Body: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess };
+      Body: { name?: string; archived?: boolean; visibility?: Visibility; agentAccess?: AgentAccess; autonomousByDefault?: boolean };
     }>(
       "/api/projects/:key",
       {
@@ -180,6 +181,7 @@ export function workRoutes(ctx: AppContext) {
               archived: { type: "boolean" },
               visibility: { type: "string", enum: ["open", "private"] },
               agentAccess: agentAccessSchema,
+              autonomousByDefault: { type: "boolean", description: "Only Users change it." },
             },
           },
           response: { 200: answer("The changed Project", holding("project", "Project")), ...errors(400, 401, 403, 404, 410) },
@@ -188,15 +190,17 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { project, access } = await projectFor(ctx.db, actor, request.params.key, "write");
-        const { name, archived, visibility, agentAccess } = request.body;
+        const { name, archived, visibility, agentAccess, autonomousByDefault } = request.body;
         if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
         if (agentAccess !== undefined) requireUserActor(actor, "change Agent Access");
+        if (autonomousByDefault !== undefined) requireUserActor(actor, "change the Autonomous Delegation default");
         if (name !== undefined || archived !== undefined) requireUserActor(actor, "rename or archive a Project");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
           ...(visibility !== undefined && { visibility }),
           ...(agentAccess !== undefined && { agentAccess }),
+          ...(autonomousByDefault !== undefined && { autonomousByDefault }),
         };
         // Unarchiving, opening, or raising Agent Access can make the Project's delegated Tickets Ready.
         const opensUp = archived === false || visibility === "open" || agentAccess === "write";
@@ -556,7 +560,7 @@ export function workRoutes(ctx: AppContext) {
           },
           response: {
             201: answer(
-              "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee and Delegate. An Agent must hold the parent's Claim.",
+              "The new Sub-Ticket, in the Project's first Status, with the parent's Assignee, Delegate and Autonomous Delegation. An Agent must hold the parent's Claim.",
               holding("ticket", "Ticket"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -581,7 +585,8 @@ export function workRoutes(ctx: AppContext) {
             actor,
             now,
           });
-          return { parent, ticket: await updateTicket(tx, created, { parent, assignee: parent.assignee, delegate: parent.delegate }, actor, now) };
+          const inherited = { parent, assignee: parent.assignee, delegate: parent.delegate, autonomous: parent.autonomous };
+          return { parent, ticket: await updateTicket(tx, created, inherited, actor, now) };
         });
         // The parent lists its Sub-Tickets.
         ticketsChanged(ctx.live, [ticket, parent]);
@@ -701,6 +706,10 @@ export function workRoutes(ctx: AppContext) {
               assigneeId: { type: ["string", "null"], format: "uuid" },
               delegateId: { type: ["string", "null"], format: "uuid", description: "One of the Assignee's own Agents. Only Users assign and delegate." },
               parentKey: { type: ["string", "null"], maxLength: 30 },
+              autonomous: {
+                type: "boolean",
+                description: "Autonomous Delegation: whether the Delegate may complete the Ticket itself. Only Users set it.",
+              },
             },
           },
           response: {
@@ -711,11 +720,14 @@ export function workRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { title, description, statusId, priority, labels, assigneeId, delegateId, parentKey } = request.body;
+        const { title, description, statusId, priority, labels, assigneeId, delegateId, parentKey, autonomous } = request.body;
         if (actor.kind === "agent" && (assigneeId !== undefined || delegateId !== undefined)) {
           throw new HttpError(403, "Only a User can assign or delegate a Ticket, not an Agent");
         }
-        const { before, ticket, parents, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
+        if (actor.kind === "agent" && autonomous !== undefined) {
+          throw new HttpError(403, "Only a User can turn Autonomous Delegation on or off, not an Agent");
+        }
+        const { before, ticket, alsoChanged, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const editsFields = [title, description, priority, labels, parentKey].some((v) => v !== undefined);
           if (actor.kind === "agent" && editsFields) await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "editing it");
@@ -724,12 +736,18 @@ export function workRoutes(ctx: AppContext) {
             ...(description !== undefined && { description }),
             ...(priority !== undefined && { priority }),
             ...(labels !== undefined && { labels: normalizeLabels(labels) }),
+            ...(autonomous !== undefined && { autonomous }),
           };
           if (statusId !== undefined) {
             const status = await findStatusToMoveInto(tx, ticket.projectId, statusId);
             if (!status) throw new HttpError(400, "That Status isn't one of this Ticket's Project");
             if (actor.kind === "agent" && status.id !== ticket.status.id) await requireAgentMayMove(tx, actor, ticket, status, ctx.clock.now());
             changes.status = status;
+            // An Agent's completion stays Unverified until a User Accepts it; leaving Completed ends its Verification.
+            if (status.id !== ticket.status.id) {
+              if (actor.kind === "agent" && status.category === "completed") changes.verification = "unverified";
+              else if (status.category !== "completed") changes.verification = null;
+            }
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
           // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it,
@@ -741,11 +759,17 @@ export function workRoutes(ctx: AppContext) {
           const assignee = changes.assignee === undefined ? ticket.assignee : changes.assignee;
           if (delegateId !== undefined) {
             changes.delegate = delegateId === null ? null : await delegableAgent(tx, actingUser(actor).workspaceId, assignee, delegateId);
+            // A new Delegation starts from the Project's default, unless the User says otherwise.
+            if (changes.delegate && changes.delegate.id !== ticket.delegate?.id && autonomous === undefined) {
+              changes.autonomous = (await findProjectById(tx, ticket.projectId))!.autonomousByDefault;
+            }
           } else if (assignee?.id !== ticket.assignee?.id && ticket.delegate && !(await ownsAgent(tx, actingUser(actor).workspaceId, assignee, ticket.delegate.id))) {
             // A new Assignee doesn't take over someone else's Agent.
             changes.delegate = null;
           }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
+          // A Ticket moved under another becomes one of its Sub-Tickets, so it takes on the parent's Autonomous Delegation.
+          if (changes.parent && autonomous === undefined) changes.autonomous = changes.parent.autonomous;
           // Both parents list their Sub-Tickets.
           const parents = changes.parent === undefined ? [] : [changes.parent, ticket.parent && (await findTicketByKey(tx, actingUser(actor).workspaceId, ticket.parent.key))];
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
@@ -756,15 +780,46 @@ export function workRoutes(ctx: AppContext) {
           const mayBecomeReady = [ticket.id, ...blockedIds];
           const readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
           const updated = await updateTicket(tx, ticket, changes, actor, ctx.clock.now());
-          return { before: ticket, ticket: updated, parents, blockedIds, mayBecomeReady, readyBefore };
+          // Sub-Tickets follow their parent's Autonomous Delegation, so a User sets it once for a whole piece of work. A Delegation's
+          // pre-fill from the Project default stays on the Ticket delegated, as its Sub-Tickets may have Delegates of their own.
+          const cascades = updated.autonomous !== ticket.autonomous && (autonomous !== undefined || changes.parent !== undefined);
+          const below = cascades ? await setAutonomousBelow(tx, ticket.id, updated.autonomous, actor, ctx.clock.now()) : [];
+          return { before: ticket, ticket: updated, alsoChanged: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
         if (ticket !== before) {
           inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
           // The Tickets it blocks show its Status, and may now be unblocked.
-          ticketsChanged(ctx.live, [ticket, ...parents, ...(await findTicketsByIds(ctx.db, blockedIds))]);
+          // Its parents list their Sub-Tickets, and Sub-Tickets may have followed its Autonomous Delegation.
+          ticketsChanged(ctx.live, [ticket, ...alsoChanged, ...(await findTicketsByIds(ctx.db, blockedIds))]);
           await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         }
+        return { ticket };
+      },
+    );
+
+    // An Inbox action: records a User's Verification of an Agent's completion under Autonomous Delegation.
+    app.post<{ Params: { key: string } }>(
+      "/api/tickets/:key/accept",
+      {
+        schema: {
+          params: ticketParams,
+          response: {
+            200: answer("The Ticket, its completion now Verified. Only Users with Write Accept, and only an Unverified completion.", holding("ticket", "Ticket")),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "Accept a completion");
+        const ticket = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          if (ticket.verification !== "unverified") throw new HttpError(409, `${ticket.key} isn't an Unverified completion, so there is nothing to Accept`);
+          return updateTicket(tx, ticket, { verification: "verified" }, actor, ctx.clock.now());
+        });
+        inboxesChanged(ctx.live, [ticket.assignee?.id]);
+        ticketsChanged(ctx.live, [ticket]);
         return { ticket };
       },
     );
@@ -802,7 +857,7 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
   return { id: assignee.id, name: assignee.name };
 }
 
-/** The Status Categories an Agent may move a Ticket into; only Users complete, cancel or shelve work. */
+/** The Status Categories an Agent may always move a Ticket into; `requireAgentMayMove` adds Completed under Autonomous Delegation. */
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
 
 /**
@@ -813,16 +868,22 @@ const endsClaim = (status: Status) => !WORKABLE_CATEGORIES.includes(status.categ
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
- * In Review (a 403) and the Agent calls within the Agent Session holding the Ticket's live Claim (a 409).
- * Moving into In Review hands the work over, so it also needs a Report written during that Claim (a 409).
- * (Agents can't complete Tickets yet; once Autonomous Delegation lets them, completing needs one too.)
+ * In Review, or Completed under Autonomous Delegation (a 403), and the Agent calls within the Agent
+ * Session holding the Ticket's live Claim (a 409). Moving into In Review or completing hands the work
+ * over, so it also needs a Report written during that Claim (a 409).
  */
 async function requireAgentMayMove(db: Queryable, agent: AgentActor, ticket: Ticket, status: Status, now: Date): Promise<void> {
-  if (!AGENT_CATEGORIES.includes(status.category)) {
-    throw new HttpError(403, "Agents may only move Tickets into Unstarted, Started or In Review Statuses; a User decides the rest");
+  const completes = status.category === "completed" && ticket.autonomous;
+  if (!AGENT_CATEGORIES.includes(status.category) && !completes) {
+    throw new HttpError(
+      403,
+      status.category === "completed"
+        ? `${ticket.key} isn't under Autonomous Delegation, so move it to In Review for a User to complete`
+        : "Agents may only move Tickets into Unstarted, Started or In Review Statuses, or complete them under Autonomous Delegation; a User decides the rest",
+    );
   }
   const claimId = await requireClaimHolder(db, agent, ticket, now, "moving it");
-  if (status.category === "in_review" && !(await hasReportFromClaim(db, ticket.id, claimId))) {
+  if ((status.category === "in_review" || completes) && !(await hasReportFromClaim(db, ticket.id, claimId))) {
     throw new HttpError(
       409,
       `Write a Report on ${ticket.key} before moving it to ${status.name}: handing work over needs a Report written during your current Claim`,
