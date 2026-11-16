@@ -37,7 +37,7 @@ export async function readyScope(db: Queryable, agent: AgentActor): Promise<Read
 export async function whyNotReady(db: Queryable, agent: AgentActor, scope: ReadyScope, ticket: Ticket, now: Date): Promise<string> {
   if (ticket.delegate?.id !== agent.agent.id) return `${ticket.key} isn't delegated to ${agent.agent.name}`;
   if (FINISHED_CATEGORIES.includes(ticket.status.category)) return `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`;
-  if (ticket.status.category === "in_review") return `${ticket.key} is ${ticket.status.name}, waiting on a User to send it back`;
+  if (ticket.status.category === "in_review") return `${ticket.key} is ${ticket.status.name}, waiting until a User Sends it back`;
   if (!scope.projectIds.includes(ticket.projectId)) {
     const project = await findProjectById(db, ticket.projectId);
     if (project?.archived) return `${ticket.key} is in the archived Project ${project.key}`;

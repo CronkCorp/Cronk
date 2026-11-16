@@ -5,6 +5,7 @@ describe("Claiming a Ticket", () => {
   it("gives the Agent Session the Ticket's Claim, shown on the Ticket", async () => {
     const { admin, session } = await delegatedSetup();
     const first = await session();
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.status.category).toBe("backlog");
 
     const claimed = await first.post("/api/tickets/CRONK-1/claim");
     expect(claimed.status).toBe(200);
@@ -69,7 +70,7 @@ describe("Claiming a Ticket", () => {
 
     const inReview = await agent.post("/api/tickets/CRONK-1/claim");
     expect(inReview.status).toBe(409);
-    expect(inReview.body.error).toBe("CRONK-1 is In Review, waiting on a User to send it back");
+    expect(inReview.body.error).toBe("CRONK-1 is In Review, waiting until a User Sends it back");
     const blocked = await agent.post("/api/tickets/CRONK-2/claim");
     expect(blocked.status).toBe(409);
     expect(blocked.body.error).toBe("CRONK-2 is blocked by CRONK-3 and CRONK-4, which aren't finished");
@@ -150,13 +151,13 @@ describe("A Claim", () => {
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
   });
 
-  it("ends when a User completes or cancels its Ticket, so the Agent Session can't keep working on it", async () => {
-    const { admin, session } = await delegatedSetup(2);
+  it("ends when a User moves its Ticket into review, completes or cancels it, so the Agent Session can't keep working on it", async () => {
+    const { admin, session } = await delegatedSetup(3);
     const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
     const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
     const agent = await session();
 
-    for (const [key, category] of [["CRONK-1", "completed"], ["CRONK-2", "canceled"]] as const) {
+    for (const [key, category] of [["CRONK-1", "in_review"], ["CRONK-2", "completed"], ["CRONK-3", "canceled"]] as const) {
       await agent.post(`/api/tickets/${key}/claim`);
       await admin.patch(`/api/tickets/${key}`, { statusId: inCategory(category) });
 

@@ -382,7 +382,8 @@ export function workRoutes(ctx: AppContext) {
           let mayBecomeReady: string[] = [];
           let readyBefore = new Map<string, string>();
           if (target) {
-            // Moving Tickets out of review, or into or out of finished work, may make them, or the Tickets they block, Ready.
+            // Moving Tickets between work an Agent can take up and work it can't (In Review or finished) may make
+            // them Ready, and moving them into or out of finished work may make the Tickets they block Ready.
             if (
               WORKABLE_CATEGORIES.includes(status.category) !== WORKABLE_CATEGORIES.includes(target.category) ||
               FINISHED_CATEGORIES.includes(status.category) !== FINISHED_CATEGORIES.includes(target.category)
@@ -793,7 +794,7 @@ const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"]
  * Whether moving a Ticket into `status` ends its Claim: a Ticket In Review is handed over, so its
  * Report and the Ticket mustn't change under the reviewer, and a finished one has no work left to Claim.
  */
-const endsClaim = (status: Status) => status.category === "in_review" || FINISHED_CATEGORIES.includes(status.category);
+const endsClaim = (status: Status) => !WORKABLE_CATEGORIES.includes(status.category);
 
 /**
  * Refuses an Agent's move of `ticket` into `status` unless the Status is Unstarted, Started or
