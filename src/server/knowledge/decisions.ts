@@ -361,7 +361,7 @@ async function scopeKey(db: Queryable, projectId: string): Promise<string> {
  * change by `actor`: once accepted, each Decision it newly supersedes (all of them, when it has just
  * become accepted) is marked superseded, unless superseded or rejected already; and each Decision it
  * no longer supersedes that it had superseded goes back to the status it had before. Run inside the
- * transaction that saved it.
+ * transaction that saved it. Returns the Decisions it changed.
  */
 export async function applySuperseding(
   db: Queryable,
@@ -370,13 +370,14 @@ export async function applySuperseding(
   decision: Decision,
   actor: Actor | StoredActor,
   now: Date,
-): Promise<void> {
+): Promise<Decision[]> {
+  const changed: Decision[] = [];
   const numbers = contentOf(decision).supersedes;
   const added = before.status === "accepted" ? numbers.filter((n) => !before.supersedes.includes(n)) : numbers;
   const dropped = before.supersedes.filter((n) => !numbers.includes(n));
   if (decision.status === "accepted" && added.length > 0) {
     for (const older of await lockedIn(db, scope, added, "d.status NOT IN ('superseded', 'rejected')")) {
-      await saveDecision(db, older, { ...contentOf(older), status: "superseded", statusReason: null }, actor, now);
+      changed.push(await saveDecision(db, older, { ...contentOf(older), status: "superseded", statusReason: null }, actor, now));
       await db.query("UPDATE decisions SET superseded_by = $2 WHERE id = $1", [older.id, decision.number]);
     }
   }
@@ -386,9 +387,10 @@ export async function applySuperseding(
         "SELECT status FROM decision_versions WHERE decision_id = $1 AND status <> 'superseded' ORDER BY number DESC LIMIT 1",
         [older.id],
       );
-      await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted", statusReason: null }, actor, now);
+      changed.push(await saveDecision(db, older, { ...contentOf(older), status: rows[0]?.status ?? "accepted", statusReason: null }, actor, now));
     }
   }
+  return changed;
 }
 
 /** The Decisions of a scope with these numbers that meet `condition` (SQL on `d`), locked until the transaction ends, in number order. */

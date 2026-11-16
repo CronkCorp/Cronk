@@ -11,7 +11,7 @@ import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
 import { markRejected, rejectionOf, waitingEvent } from "../coordination/waiting-work.js";
 import { agentTopic } from "../live/topics.js";
 import { ticketFor } from "../work/ticket-reads.js";
-import { listSessionClaims, requireClaimHolder } from "../coordination/claims.js";
+import { listSessionClaims, requireClaimHolder, type SessionClaim } from "../coordination/claims.js";
 import {
   contentOf,
   DECISION_TEMPLATE,
@@ -90,7 +90,8 @@ const newDecisionBody = {
       maxLength: 30,
       description:
         "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds; its Assignee reviews the Decision, " +
-        "and the Reports of that Claim list it. Left out, the Ticket of the one Claim the Agent Session holds, if it holds exactly one.",
+        "and the Reports of that Claim list it. It must be of the Decision's Project, or, for a Workspace Decision, of an open Project. " +
+        "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
     },
   },
 } as const;
@@ -112,14 +113,18 @@ export async function decisionFor(db: Queryable, actor: Actor, key: string, need
 
 export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
-    /** Tells the Inbox of whoever reviews `decision`, if an Agent proposed it, that it may have changed. Call once committed. */
-    const reviewerHears = async (decision: Decision) => inboxesChanged(ctx.live, [await decisionReviewer(ctx.db, decision.id)]);
+    /** Tells the Inbox of whoever reviews each of `decisions`, if an Agent proposed it, that it may have changed. Call once committed. */
+    const reviewersHear = async (decisions: Decision[]) =>
+      inboxesChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
 
-    /** Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step. */
-    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent) => {
+    /**
+     * Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step, adding
+     * those it changed to `changed`, whose reviewers' Inboxes may then have changed too.
+     */
+    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent, changed: Decision[]) => {
       const now = ctx.clock.now();
       const saved = await saveDecision(tx, current, content, actor, now);
-      await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now);
+      changed.push(...(await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now)));
       return saved;
     };
 
@@ -133,25 +138,42 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, input.ticket));
+      const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, scope, input.ticket));
       return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
     };
 
     /**
-     * The Claim an Agent proposes a Decision in: that of the Ticket `key` names, which its Agent
-     * Session must hold, or else the one Claim it holds, if it holds exactly one. None for a User.
+     * The Claim an Agent proposes a Decision in `scope` from: that of the Ticket `key` names, which its Agent
+     * Session must hold, or else the one Claim it holds whose Ticket fits. A Ticket fits when everyone who can
+     * read the Decision can read it: it is of the Decision's Project, or, for a Workspace Decision, of an open
+     * Project. None for a User.
      */
-    const sourceOf = async (tx: Queryable, actor: Actor, key: string | undefined): Promise<DecisionSource | null> => {
+    const sourceOf = async (tx: Queryable, actor: Actor, scope: DecisionScope, key: string | undefined): Promise<DecisionSource | null> => {
       if (actor.kind === "user") {
         if (key !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Decision came from, as the one it holds the Claim on");
         return null;
       }
+      const held = actor.session ? await listSessionClaims(tx, actor.session.id) : [];
+      const fits = (claim: SessionClaim) => (scope.projectId === null ? !claim.private : claim.projectId === scope.projectId);
       if (key === undefined) {
-        const held = actor.session ? await listSessionClaims(tx, actor.session.id) : [];
-        return held.length === 1 ? held[0]! : null;
+        const fitting = held.filter(fits);
+        if (fitting.length > 1) {
+          throw new HttpError(400, `Your Agent Session holds the Claims on ${fitting.map((c) => c.ticketKey).join(", ")}; name the Ticket the Decision came from as \`ticket\``);
+        }
+        return fitting[0] ?? null;
       }
       const ticket = await ticketFor(tx, actor, key, "read");
-      return { ticketId: ticket.id, claimId: await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "proposing a Decision from it") };
+      const claimId = await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "proposing a Decision from it");
+      const claim = held.find((c) => c.claimId === claimId)!;
+      if (!fits(claim)) {
+        throw new HttpError(
+          400,
+          scope.projectId === null
+            ? `${ticket.key} is in a private Project, so a Workspace Decision can't name it: not everyone who reads the Decision may read it`
+            : `${ticket.key} isn't a Ticket of the Decision's Project; a Decision names a source Ticket of its own Project`,
+        );
+      }
+      return claim;
     };
 
     interface RegisterQuery {
@@ -204,7 +226,7 @@ export function decisionRoutes(ctx: AppContext) {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           return create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
         });
-        await reviewerHears(saved.decision);
+        await reviewersHear([saved.decision]);
         return reply.code(201).send(saved);
       },
     );
@@ -221,7 +243,7 @@ export function decisionRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
         const saved = await transaction(ctx.db, (tx) => create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body));
-        await reviewerHears(saved.decision);
+        await reviewersHear([saved.decision]);
         return reply.code(201).send(saved);
       },
     );
@@ -260,6 +282,7 @@ export function decisionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
+        const changed: Decision[] = [];
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (actor.kind === "agent" && current.status !== "proposed") {
@@ -275,11 +298,11 @@ export function decisionRoutes(ctx: AppContext) {
             ...(newSupersedes !== undefined && { supersedes: await requireSuperseded(tx, scopeOf(actor, current), current.number, newSupersedes) }),
           };
           return {
-            decision: await save(tx, actor, current, content),
+            decision: await save(tx, actor, current, content, changed),
             avoidedWords: await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body)),
           };
         });
-        await reviewerHears(saved.decision);
+        await reviewersHear([saved.decision, ...changed]);
         return saved;
       },
     );
@@ -316,12 +339,12 @@ export function decisionRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { status } = request.body;
         const reason = request.body.reason?.trim() || null;
-        if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
         // A rejection waits for the Agent that proposed the Decision: its position is expected on the Agent's
         // stream before it commits, and pushed once it has (as for a Comment; see conversation/routes.ts).
         const forget: (() => void)[] = [];
         const positioned = (agentId: string, seq: string) => forget.push(ctx.live.expect(agentTopic(agentId), seq));
         let told: { agentId: string; seq: string } | undefined;
+        const changed: Decision[] = [];
         let decision: Decision;
         try {
           decision = await transaction(ctx.db, async (tx) => {
@@ -330,7 +353,8 @@ export function decisionRoutes(ctx: AppContext) {
             if (status === "superseded") {
               throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
             }
-            const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason });
+            if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
+            const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason }, changed);
             const proposer = saved.proposedBy;
             if (status === "rejected" && saved.version !== current.version && proposer.kind === "agent") {
               const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
@@ -343,7 +367,7 @@ export function decisionRoutes(ctx: AppContext) {
           throw err;
         }
         if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, rejectionOf(decision)));
-        await reviewerHears(decision);
+        await reviewersHear([decision, ...changed]);
         return { decision };
       },
     );

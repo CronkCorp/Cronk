@@ -121,7 +121,7 @@ describe("a proposed Decision in the Inbox", () => {
     expect(await inboxLines(bob)).toEqual([]);
   });
 
-  it("names a source Ticket only if the Agent Session holds its Claim", async () => {
+  it("names a source Ticket only if the Agent Session holds its Claim, and asks which when it holds several", async () => {
     const { admin, session } = await delegatedSetup(2);
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
@@ -130,11 +130,31 @@ describe("a proposed Decision in the Inbox", () => {
     // Holding two Claims, the Agent names the one the Decision came from.
     const named = await agent.post("/api/projects/CRONK/decisions", { title: "From the second", ticket: "cronk-2" });
     expect(named.body.decision.sourceTicket).toMatchObject({ key: "CRONK-2" });
-    expect((await agent.post("/api/projects/CRONK/decisions", { title: "From either" })).body.decision.sourceTicket).toBeNull();
+    const unnamed = await agent.post("/api/projects/CRONK/decisions", { title: "From either" });
+    expect(unnamed.status).toBe(400);
+    expect(unnamed.body.error).toMatch(/CRONK-1, CRONK-2/);
     await admin.post("/api/projects/CRONK/tickets", { title: "Not claimed" });
     const refused = await agent.post("/api/projects/CRONK/decisions", { title: "From elsewhere", ticket: "CRONK-3" });
     expect(refused.status).toBe(409);
     expect((await admin.post("/api/projects/CRONK/decisions", { title: "A User's", ticket: "CRONK-1" })).status).toBe(400);
+  });
+
+  it("names a source Ticket only where everyone who reads the Decision can read the Ticket", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.post("/api/projects", { name: "Site", key: "SITE" });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    // A Decision of another Project, or of the Workspace while the Ticket's Project is private, comes from no Ticket.
+    expect((await agent.post("/api/projects/SITE/decisions", { title: "Elsewhere" })).body.decision.sourceTicket).toBeNull();
+    expect((await agent.post("/api/workspace/decisions", { title: "Everywhere" })).body.decision.sourceTicket).toBeNull();
+    const named = await agent.post("/api/workspace/decisions", { title: "Named", ticket: "CRONK-1" });
+    expect(named.status).toBe(400);
+    expect(named.body.error).toMatch(/private/);
+    expect((await agent.post("/api/projects/CRONK/decisions", { title: "Here" })).body.decision.sourceTicket).toMatchObject({ key: "CRONK-1" });
+    await admin.patch("/api/projects/CRONK", { visibility: "open" });
+    expect((await agent.post("/api/workspace/decisions", { title: "Open now" })).body.decision.sourceTicket).toMatchObject({ key: "CRONK-1" });
   });
 });
 
@@ -151,6 +171,21 @@ describe("a proposed Decision's reviewer", () => {
     expect((await inbox.next())?.event).toBe("changed");
     await admin.post("/api/decisions/D1/status", { status: "accepted" });
     expect((await inbox.next())?.event).toBe("changed");
+  });
+
+  it("hears when one leaves their Inbox because an accepted Decision superseded it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/workspace/decisions", { title: "Compose for installs" });
+    const grace = await joinAs(cronk, admin, "grace@example.com");
+    await grace.post("/api/workspace/decisions", { title: "A single binary", supersedes: ["D1"] });
+    const inbox = await admin.events("/api/inbox/events");
+    expect((await inbox.next())?.event).toBe("ready");
+
+    await grace.post("/api/decisions/D2/status", { status: "accepted" });
+
+    expect((await inbox.next())?.event).toBe("changed");
+    expect(await inboxLines(admin)).toEqual([]);
   });
 });
 
