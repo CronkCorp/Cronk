@@ -7,6 +7,7 @@ import { answer, errors, holding, listing, pathParams, projectKeyParam, ref } fr
 import type { Project } from "../work/projects.js";
 import { getGuidance, guidanceAt, listGuidanceVersions, writeGuidance, type Guidance, type GuidanceOwner } from "./guidance.js";
 import { mergeMarkdown } from "./sections.js";
+import { SUGGEST_INSTEAD } from "./protection.js";
 
 /** A save of Guidance: its new Markdown and the Version it is based on. */
 interface GuidanceWrite {
@@ -128,9 +129,10 @@ function guidanceResource<Params>(app: FastifyInstance, ctx: AppContext, resourc
       },
     },
     async (request) => {
-      const user = await requireUser(ctx, request);
-      const owner = await resource.ownerToWrite(user, request.params as Params);
-      return { guidance: await save(ctx, owner, request.body, user) };
+      const actor = await requireActor(ctx, request, { outsideSession: true });
+      if (actor.kind === "agent") throw new HttpError(403, `Only Users write Guidance; ${SUGGEST_INSTEAD}`);
+      const owner = await resource.ownerToWrite(actor.user, request.params as Params);
+      return { guidance: await save(ctx, owner, request.body, actor.user) };
     },
   );
 

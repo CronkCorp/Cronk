@@ -344,3 +344,22 @@ describe("Suggestions on other kinds of item", () => {
     expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Be kind and brief.", version: 2 });
   });
 });
+
+describe("an Agent refused a change it may not make", () => {
+  it("is told how to suggest it instead", async () => {
+    const { admin, agent, documentId } = await protectedDocument();
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres", body: "v1" });
+    await admin.post("/api/decisions/CRONK-D1/protection", { protected: false });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/CRONK-D1/protection", { protected: false });
+
+    for (const refused of [
+      await agent.patch(`/api/documents/${documentId}`, { baseVersion: 1, body: "v2" }),
+      await agent.patch("/api/decisions/CRONK-D1", { baseVersion: 2, body: "v2" }),
+      await agent.put("/api/projects/CRONK/guidance", { markdown: "v1", baseVersion: 0 }),
+    ]) {
+      expect(refused.status).toBe(403);
+      expect(refused.body.error).toMatch(/POST \/api\/suggestions/);
+    }
+  });
+});
