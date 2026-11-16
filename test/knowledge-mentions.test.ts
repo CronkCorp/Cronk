@@ -123,6 +123,13 @@ describe("What mentions a Term", () => {
     expect((await admin.patch(`/api/terms/${lease.id}`, { baseVersion: 1, name: "Hold" })).status).toBe(200);
     expect(await mentionsOfTerm(admin, lease.id)).toEqual(["document: Project notes"]);
   });
+
+  it("counts text written before the Term where Markdown escapes the punctuation in its name", async () => {
+    const { admin } = await withDecisions();
+    await admin.post("/api/projects/CRONK/documents", { title: "Notes", body: "Each Lease\\_Hold ends." });
+    const term = (await admin.post("/api/workspace/terms", { name: "Lease_Hold", definition: "A hold." })).body.term;
+    expect(await mentionsOfTerm(admin, term.id)).toEqual(["document: Notes"]);
+  });
 });
 
 describe("Mentions of Decisions and Terms", () => {

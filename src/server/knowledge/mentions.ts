@@ -4,6 +4,8 @@ import { documentReadableSql, type Readable } from "../identity/access.js";
 import { replaceReferenceText } from "../../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowledge-references.js";
 import type { MentionKind } from "../../shared/values.js";
+import { ticketKeySql } from "../work/tickets.js";
+import { decisionKeySql } from "./decisions.js";
 
 /**
  * What mentions each Decision and Term: the Tickets, Documents, Comments, Terms and Decisions whose
@@ -71,7 +73,7 @@ const decisionKeysIn = (texts: string[]) => [...new Set(texts.flatMap((text) => 
 /** The key of the Decision with this id, for leaving out its mentions of itself. */
 async function ownDecisionKey(db: Queryable, id: string): Promise<string | undefined> {
   const { rows } = await db.query<{ key: string }>(
-    "SELECT CASE WHEN p.key IS NULL THEN 'D' || d.number ELSE p.key || '-D' || d.number END AS key FROM decisions d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = $1",
+    `SELECT ${decisionKeySql("p", "d")} AS key FROM decisions d LEFT JOIN projects p ON p.id = d.project_id WHERE d.id = $1`,
     [id],
   );
   return rows[0]?.key;
@@ -125,8 +127,9 @@ export async function recordMentions(db: Queryable, source: MentionSource): Prom
  * takes or gives up one of those names. Run in the transaction that changes the Term.
  */
 export async function recordMentionsOfNames(db: Queryable, place: { workspaceId: string; projectId: string | null }, names: string[]): Promise<void> {
-  // Any text naming one of them holds its longest word, whatever the case.
-  const words = names.map((name) => normalName(name).split(" ").reduce((a, b) => (b.length > a.length ? b : a)).toLowerCase());
+  // Any text naming one of them holds the longest run of letters and digits in its name, whatever the case, even
+  // where Markdown escapes the punctuation around it.
+  const words = names.map((name) => (name.match(/[\p{L}\p{N}]+/gu) ?? [name]).reduce((a, b) => (b.length > a.length ? b : a)).toLowerCase());
   const { rows } = await db.query<SourceRow>(
     `SELECT * FROM ${SOURCES}
      WHERE s.workspace_id = $1 AND ($2::uuid IS NULL OR s.project_id = $2)
@@ -179,8 +182,6 @@ export interface Mention {
 /** How many mentions a Decision or Term lists. */
 const MENTIONS_LIMIT = 50;
 
-const KEY_OF = (project: string, number: string) => `${project}.key || '-' || ${number}`;
-
 /**
  * What mentions a Decision (`decisionKey`) or a Term (`termId`), most recently changed first (at most
  * 50), leaving out what lies where `readable` doesn't let its reader read.
@@ -190,15 +191,15 @@ export async function listMentions(db: Queryable, target: { decisionKey: string 
   const { rows } = await db.query<Mention>(
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
-       SELECT 'ticket' AS kind, t.id, ${KEY_OF("p", "t.number")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
+       SELECT 'ticket' AS kind, t.id, ${ticketKeySql("p", "t")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
               t.updated_at AS at, t.project_id, p.workspace_id
        FROM m JOIN tickets t ON t.id = m.ticket_id JOIN projects p ON p.id = t.project_id
        UNION ALL
-       SELECT 'document', d.id, NULL, d.title, p.key, ${KEY_OF("tp", "tt.number")}, NULL, d.updated_at, d.project_id, d.workspace_id
+       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, d.updated_at, d.project_id, d.workspace_id
        FROM m JOIN documents d ON d.id = m.document_id LEFT JOIN projects p ON p.id = d.project_id
          LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
        UNION ALL
-       SELECT 'comment', c.id, NULL, coalesce(t.title, d.title), coalesce(tp.key, dp.key), ${KEY_OF("tp", "t.number")}, c.document_id, c.at,
+       SELECT 'comment', c.id, NULL, coalesce(t.title, d.title), coalesce(tp.key, dp.key), ${ticketKeySql("tp", "t")}, c.document_id, c.at,
               coalesce(t.project_id, d.project_id), coalesce(tp.workspace_id, d.workspace_id)
        FROM m JOIN comments c ON c.id = m.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
          LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
@@ -206,7 +207,7 @@ export async function listMentions(db: Queryable, target: { decisionKey: string 
        SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, tm.updated_at, tm.project_id, tm.workspace_id
        FROM m JOIN terms tm ON tm.id = m.term_id LEFT JOIN projects p ON p.id = tm.project_id
        UNION ALL
-       SELECT 'decision', dc.id, CASE WHEN p.key IS NULL THEN 'D' || dc.number ELSE ${KEY_OF("p", "('D' || dc.number)")} END, dc.title, p.key, NULL, NULL,
+       SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL,
               dc.updated_at, dc.project_id, dc.workspace_id
        FROM m JOIN decisions dc ON dc.id = m.decision_id LEFT JOIN projects p ON p.id = dc.project_id
      )
