@@ -762,3 +762,17 @@ describe("a Ticket becoming Ready over MCP", () => {
     });
   });
 });
+
+describe("the documents tool and a Protected Document", () => {
+  it("shows it Protected and passes on the API's refusal to change it, pointing to Suggestions", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const { document } = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "Welcome." })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    expect((await callTool(mcp, "documents", { action: "get", id: document.id })).body.document).toMatchObject({ protected: true });
+    const update = await callTool(mcp, "documents", { action: "update", id: document.id, baseVersion: 1, body: "Rewritten." });
+    expect(update.isError).toBe(true);
+    expect(update.body).toMatch(/^Handbook is Protected: Agents may read it but not change it\. Make a Suggestion/);
+  });
+});
