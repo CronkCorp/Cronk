@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
 
 /** The id of the User named `name`, as `client` sees the Workspace's Users. */
 async function userId(client: { get: (path: string) => Promise<{ body: any }> }, name: string): Promise<string> {
@@ -75,15 +75,21 @@ describe("Ticket Delegate", () => {
 });
 
 describe("Ticket Delegate, further", () => {
-  it("is kept on unrelated edits even after its Agent is removed", async () => {
-    const { admin } = await startInstalledCronk();
-    await projectWithTickets(admin, "CRONK", 1);
-    const claude = await registerAgent(admin, "claude-laptop");
-    await admin.patch("/api/tickets/CRONK-1", { assigneeId: await userId(admin, "Ada"), delegateId: claude.agentId });
-    await admin.delete(`/api/agents/${claude.agentId}`);
+  it("is cleared when its Agent is removed, recorded as a change by whoever removed it", async () => {
+    const { admin, claude } = await delegatedSetup(2);
+    expect((await admin.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
 
-    const edited = await admin.patch("/api/tickets/CRONK-1", { title: "Renamed" });
-    expect(edited.body.ticket.delegate).toEqual({ id: claude.agentId, name: "claude-laptop" });
+    for (const key of ["CRONK-1", "CRONK-2"]) {
+      expect((await admin.get(`/api/tickets/${key}`)).body.ticket.delegate).toBeNull();
+      const { changes } = (await admin.get(`/api/tickets/${key}/history`)).body;
+      expect(changes.at(-1)).toMatchObject({
+        actor: { kind: "user", name: "Ada" },
+        change: "delegate",
+        from: { id: claude.agentId, name: "claude-laptop" },
+        to: null,
+      });
+      expect(changes.at(-2)).toMatchObject({ change: "delegate", to: { id: claude.agentId } });
+    }
   });
 
   it("refuses an Agent as Assignee", async () => {
