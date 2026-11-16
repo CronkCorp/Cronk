@@ -70,3 +70,69 @@ describe("Uploading a Transcript", () => {
     expect(byUser.body.error).toMatch(/Only an Agent/);
   });
 });
+
+describe("Uploading the same chat again", () => {
+  it("replaces the text when the new one continues it, and adds the Sessions it names", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(2);
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    await first.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "One" });
+    const hook = cronk.client(claude.secret);
+    const before = chat("Fix CRONK-1", first.sessionId);
+    const created = await upload(hook, "chat-1", before);
+    expect(created.status).toBe(201);
+
+    cronk.clock.advance(60_000);
+    const second = await session();
+    await second.post("/api/tickets/CRONK-2/claim");
+    await second.post("/api/tickets/CRONK-2/comments", { body: "On it" });
+    // The client converts the whole chat again; only the new turns name the second Session.
+    const after = `${before}\n## User\n\nNow CRONK-2\n\n## Assistant\n\nAgent Session ${second.sessionId}\n`;
+    const replaced = await upload(hook, "chat-1", after);
+    expect(replaced.status, JSON.stringify(replaced.body)).toBe(200);
+    expect(replaced.body.transcript.id).toBe(created.body.transcript.id);
+
+    const read = (await admin.get(`/api/transcripts/${created.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({ markdown: after, earlier: [], sessions: [{ id: first.sessionId }, { id: second.sessionId }] });
+    expect(read.tickets.map((t: { key: string }) => t.key)).toEqual(["CRONK-1", "CRONK-2"]);
+  });
+
+  it("keeps the old text as well when the new one doesn't continue it, and never shrinks to an older upload", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "One" });
+    const hook = cronk.client(claude.secret);
+    const long = chat("Fix CRONK-1", agent.sessionId) + "\n## User\n\nThanks\n";
+    const id = (await upload(hook, "chat-1", long)).body.transcript.id;
+
+    // An upload the stored text already continues, as a late retry of an older one, changes nothing.
+    expect((await upload(hook, "chat-1", chat("Fix CRONK-1", agent.sessionId))).status).toBe(200);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({ markdown: long, earlier: [] });
+
+    // A rewritten chat, as after the client compacted it, no longer starts with the stored text.
+    const compacted = `## User\n\nSummary of the chat so far\n\n## Assistant\n\nOK\n`;
+    const kept = await upload(hook, "chat-1", compacted);
+    expect(kept.status, JSON.stringify(kept.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({
+      markdown: compacted,
+      earlier: [long],
+      sessions: [{ id: agent.sessionId }],
+      tickets: [{ key: "CRONK-1" }],
+    });
+  });
+
+  it("keeps one Transcript per Agent and chat id", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "One" });
+    const hook = cronk.client(claude.secret);
+    const one = await upload(hook, "chat-1", chat("A", agent.sessionId));
+    const two = await upload(hook, "chat/2 with spaces", chat("B", agent.sessionId));
+    expect([one.status, two.status]).toEqual([201, 201]);
+    expect(two.body.transcript).toMatchObject({ chatId: "chat/2 with spaces" });
+    expect(two.body.transcript.id).not.toBe(one.body.transcript.id);
+    expect((await admin.get(`/api/transcripts/${one.body.transcript.id}`)).body.transcript.markdown).toBe(chat("A", agent.sessionId));
+  });
+});
