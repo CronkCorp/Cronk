@@ -152,7 +152,7 @@ async function isParentIn(db: Queryable, tree: Tree, parentId: string | null): P
  */
 export async function insertDocument(
   db: Queryable,
-  input: { tree: Tree; parentId: string | null; title: string; body: string; actor: Actor; now: Date },
+  input: { tree: Tree; parentId: string | null; title: string; body: string; actor: Actor | StoredActor; now: Date },
 ): Promise<Document | "no such parent"> {
   await lockTree(db, input.tree);
   if (!(await isParentIn(db, input.tree, input.parentId))) return "no such parent";

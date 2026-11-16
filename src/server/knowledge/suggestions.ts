@@ -7,7 +7,7 @@ import { findProjectById, findProjectByKey } from "../work/projects.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import { findDecisionById, findDecisionByKey, findDecisionVersion, saveDecision, contentOf as decisionContentOf } from "./decisions.js";
-import { findDocument, findVersion, saveVersion } from "./documents.js";
+import { findDocument, findVersion, insertDocument, saveVersion, type Document } from "./documents.js";
 import { getGuidance, guidanceAt, writeGuidance } from "./guidance.js";
 import { findTerm, listTermVersions, saveTermVersion, tidyFields } from "./terms.js";
 
@@ -37,9 +37,13 @@ export const CONTENT_FIELDS: Record<SuggestionKind, readonly string[]> = {
   guidance: ["markdown"],
 };
 
-/** An item as an Agent names it to suggest a change: a Document or Term by id, a Decision by key, Guidance by its Project's key (none for the Workspace's). */
+/**
+ * An item as an Agent names it to suggest a change: a Document or Term by id, a Decision by key, Guidance by its Project's
+ * key (none for the Workspace's); or, for a new Document, the Document it would go under as `parentId`.
+ */
 export type ItemRef =
   | { kind: "document"; id: string }
+  | { kind: "document"; parentId: string }
   | { kind: "term"; id: string }
   | { kind: "decision"; key: string }
   | { kind: "guidance"; project?: string | null };
@@ -72,6 +76,11 @@ export interface Suggestion {
   base: SuggestedContent;
   content: SuggestedContent;
   reasoning: string;
+  /**
+   * For a Suggestion of a new Document (`baseVersion` 0): the Document it goes under, as it stands now; once accepted, the one
+   * the new Document sits under, null at the top. Null for a Suggestion changing an existing item.
+   */
+  parent: { id: string; title: string } | null;
   proposedBy: RecordedActor;
   at: Date;
   /** The Ticket the Agent held the Claim on when suggesting it; null for none. */
@@ -98,20 +107,28 @@ interface Suggestable {
   openToAgents: boolean;
   current: SuggestedContent;
   contentAt(db: Queryable, version: number): Promise<SuggestedContent | undefined>;
-  /** Saves `content` as its next Version by `actor`; returns its number, or why it was refused. */
-  save(db: Queryable, content: SuggestedContent, actor: Actor | StoredActor, now: Date): Promise<number | string>;
+  /**
+   * Saves `content` as its next Version by `actor`; returns its number, and the id of the Document it created for a new one, or
+   * why it was refused.
+   */
+  save(db: Queryable, content: SuggestedContent, actor: Actor | StoredActor, now: Date): Promise<{ version: number; documentId?: string } | string>;
+  /** For a new Document, or one a Suggestion created: the Document it goes, or went, under (see `Suggestion.parent`). */
+  parent?: { id: string; title: string } | null;
 }
 
 /** Where a loaded item lives, and its row's ids, as a Suggestion's columns store it. */
 interface ItemColumns {
   documentId: string | null;
+  /** The parent of a new Document, which has no id yet. */
+  parentDocumentId: string | null;
   termId: string | null;
   decisionId: string | null;
   projectId: string | null;
 }
 
-const itemColumns = (kind: SuggestionKind, item: SuggestionItem): ItemColumns => ({
+const itemColumns = (kind: SuggestionKind, item: SuggestionItem, parent: Suggestable["parent"]): ItemColumns => ({
   documentId: kind === "document" ? item.id : null,
+  parentDocumentId: kind === "document" && item.id === null ? parent!.id : null,
   termId: kind === "term" ? item.id : null,
   decisionId: kind === "decision" ? item.id : null,
   projectId: item.projectId,
@@ -120,7 +137,11 @@ const itemColumns = (kind: SuggestionKind, item: SuggestionItem): ItemColumns =>
 /** A field of content `completeContent` has checked is text, as text. */
 const textOf = (v: unknown) => v as string;
 
-async function documentItem(db: Queryable, workspaceId: string, id: string): Promise<Suggestable | undefined> {
+/** What a Document held before its first Version: what a Suggestion of a new Document starts from, at Version 0. */
+const EMPTY_DOCUMENT: SuggestedContent = { title: "", body: "" };
+
+/** The Document `id`, with the Document it sits under when `created` by a Suggestion of a new Document. */
+async function documentItem(db: Queryable, workspaceId: string, id: string, created = false): Promise<Suggestable | undefined> {
   const d = await findDocument(db, workspaceId, id);
   if (!d) return undefined;
   return {
@@ -128,10 +149,36 @@ async function documentItem(db: Queryable, workspaceId: string, id: string): Pro
     openToAgents: !d.protected,
     current: { title: d.title, body: d.body },
     contentAt: async (q, n) => {
+      if (n === 0) return EMPTY_DOCUMENT;
       const v = await findVersion(q, d.id, n);
       return v && { title: v.title, body: v.body };
     },
-    save: async (q, c, actor, now) => (await saveVersion(q, d, { title: textOf(c.title), body: textOf(c.body), actor, now })).version,
+    save: async (q, c, actor, now) => ({ version: (await saveVersion(q, d, { title: textOf(c.title), body: textOf(c.body), actor, now })).version }),
+    ...(created && { parent: d.parentId === null ? null : named(await findDocument(db, workspaceId, d.parentId)) }),
+  };
+}
+
+const named = (d: Document | undefined) => d && { id: d.id, title: d.title };
+
+/**
+ * A new Document titled `title` under the Document `parentId`, which an Agent may not create itself while the branch there
+ * is Protected: Version 0 holds nothing, and saving it creates the Document last among its siblings, at Version 1.
+ */
+async function newDocumentItem(db: Queryable, workspaceId: string, parentId: string, title: string): Promise<Suggestable | undefined> {
+  const parent = await findDocument(db, workspaceId, parentId);
+  // A Report sits outside the page tree, so nothing goes under it.
+  if (!parent || parent.ticketKey !== null) return undefined;
+  return {
+    item: { kind: "document", id: null, key: null, title, status: null, projectId: parent.projectId, projectKey: parent.projectKey, protected: parent.protected, version: 0 },
+    openToAgents: !parent.protected,
+    current: EMPTY_DOCUMENT,
+    contentAt: async (_, n) => (n === 0 ? EMPTY_DOCUMENT : undefined),
+    save: async (q, c, actor, now) => {
+      const tree = { workspaceId, projectId: parent.projectId };
+      const created = await insertDocument(q, { tree, parentId, title: textOf(c.title), body: textOf(c.body), actor, now });
+      return created === "no such parent" ? `${parent.title} is gone` : { version: created.version, documentId: created.id };
+    },
+    parent: named(parent)!,
   };
 }
 
@@ -149,7 +196,7 @@ async function termItem(db: Queryable, workspaceId: string, id: string): Promise
     },
     save: async (q, c, actor, now) => {
       const saved = await saveTermVersion(q, workspaceId, t, { fields: c as unknown as Parameters<typeof tidyFields>[0], actor, now });
-      return saved === "name taken" ? `There is already a Term named ${textOf(c.name)} here; names are unique ignoring case` : saved.version;
+      return saved === "name taken" ? `There is already a Term named ${textOf(c.name)} here; names are unique ignoring case` : { version: saved.version };
     },
   };
 }
@@ -165,8 +212,9 @@ function decisionItem(d: Awaited<ReturnType<typeof findDecisionById>>): Suggesta
       const v = await findDecisionVersion(q, d, n);
       return v && { title: v.title, body: v.body, group: v.group };
     },
-    save: async (q, c, actor, now) =>
-      (await saveDecision(q, d, { ...decisionContentOf(d), title: textOf(c.title), body: textOf(c.body), group: c.group as string | null }, actor, now)).version,
+    save: async (q, c, actor, now) => ({
+      version: (await saveDecision(q, d, { ...decisionContentOf(d), title: textOf(c.title), body: textOf(c.body), group: c.group as string | null }, actor, now)).version,
+    }),
   };
 }
 
@@ -184,7 +232,7 @@ async function guidanceItem(db: Queryable, workspaceId: string, projectId: strin
     },
     save: async (q, c, actor, now) => {
       const saved = await writeGuidance(q, owner, { markdown: textOf(c.markdown), baseVersion: g.version, actor, now });
-      return saved ? saved.version : "The Guidance changed meanwhile; try again";
+      return saved ? { version: saved.version } : "The Guidance changed meanwhile; try again";
     },
   };
 }
@@ -206,7 +254,7 @@ async function requirePlace(db: Queryable, actor: Actor, item: SuggestionItem, n
 async function itemFor(db: Queryable, actor: Actor, ref: ItemRef, need: Access): Promise<Suggestable> {
   const workspaceId = actingUser(actor).workspaceId;
   let found: Suggestable | undefined;
-  if (ref.kind === "document") found = await documentItem(db, workspaceId, ref.id);
+  if (ref.kind === "document") found = "parentId" in ref ? await newDocumentItem(db, workspaceId, ref.parentId, "") : await documentItem(db, workspaceId, ref.id);
   else if (ref.kind === "term") found = await termItem(db, workspaceId, ref.id);
   else if (ref.kind === "decision") found = decisionItem(await findDecisionByKey(db, workspaceId, ref.key));
   else if (!ref.project) found = await guidanceItem(db, workspaceId, null, null);
@@ -232,7 +280,8 @@ const nameOf = (item: SuggestionItem) =>
 
 /** The stored item a Suggestion row is on, with no access check. */
 async function itemOf(db: Queryable, row: SuggestionRow): Promise<Suggestable> {
-  if (row.kind === "document") return (await documentItem(db, row.workspace_id, row.document_id!))!;
+  if (row.kind === "document" && row.document_id === null) return (await newDocumentItem(db, row.workspace_id, row.parent_document_id!, textOf(row.content.title)))!;
+  if (row.kind === "document") return (await documentItem(db, row.workspace_id, row.document_id!, row.base_version === 0))!;
   if (row.kind === "term") return (await termItem(db, row.workspace_id, row.term_id!))!;
   if (row.kind === "decision") return decisionItem(await findDecisionById(db, row.decision_id!))!;
   const project = row.project_id === null ? undefined : await findProjectById(db, row.project_id);
@@ -290,6 +339,7 @@ interface SuggestionRow {
   workspace_id: string;
   kind: SuggestionKind;
   document_id: string | null;
+  parent_document_id: string | null;
   term_id: string | null;
   decision_id: string | null;
   project_id: string | null;
@@ -334,7 +384,7 @@ const SELECT_SUGGESTIONS = `
     LEFT JOIN users r ON r.id = (${reviewerSql("s", "t")})`;
 
 async function toSuggestion(db: Queryable, row: SuggestionRow): Promise<Suggestion> {
-  const { item, contentAt } = await itemOf(db, row);
+  const { item, contentAt, parent } = await itemOf(db, row);
   return {
     id: row.id,
     item,
@@ -342,6 +392,7 @@ async function toSuggestion(db: Queryable, row: SuggestionRow): Promise<Suggesti
     base: (await contentAt(db, row.base_version)) ?? {},
     content: row.content,
     reasoning: row.reasoning,
+    parent: parent ?? null,
     proposedBy: {
       kind: "agent",
       id: row.actor_agent_id,
@@ -410,8 +461,17 @@ export interface NewSuggestion {
  */
 export async function createSuggestion(db: Queryable, actor: Actor, input: NewSuggestion, now: Date): Promise<Suggestion> {
   if (actor.kind === "user") throw new HttpError(403, "Only an Agent makes a Suggestion; a User with Write changes the item directly");
-  const { item, openToAgents, contentAt } = await itemFor(db, actor, input.item, "write");
-  if (openToAgents) throw new HttpError(409, `${capitalize(nameOf(item))} isn't Protected, so you may change it directly; Suggestions are for Protected items`);
+  const { item, openToAgents, contentAt, parent } = await itemFor(db, actor, input.item, "write");
+  const isNew = item.kind === "document" && item.id === null;
+  if (openToAgents) {
+    throw new HttpError(
+      409,
+      isNew
+        ? `${parent!.title} isn't Protected, so you may create Documents under it directly; Suggestions are for protected branches`
+        : `${capitalize(nameOf(item))} isn't Protected, so you may change it directly; Suggestions are for Protected items`,
+    );
+  }
+  if (isNew && input.baseVersion !== 0) throw new HttpError(400, "A new Document starts from nothing: suggest it with baseVersion 0");
   const base = await contentAt(db, input.baseVersion);
   if (!base) throw new HttpError(404, `${capitalize(nameOf(item))} has no Version ${input.baseVersion}`);
   const content = completeContent(item.kind, input.content, base);
@@ -419,11 +479,11 @@ export async function createSuggestion(db: Queryable, actor: Actor, input: NewSu
   const reasoning = input.reasoning.trim();
   if (!reasoning) throw new HttpError(400, "A Suggestion needs reasoning: why the change, so a User can judge it");
   const source = await sourceClaimOf(db, actor, item.projectId, input.ticket, now, "a Suggestion");
-  const where = itemColumns(item.kind, item);
+  const where = itemColumns(item.kind, item, parent);
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO suggestions (workspace_id, kind, document_id, term_id, decision_id, project_id, base_version, content, reasoning, at,
-       actor_user_id, actor_agent_id, actor_session_id, source_ticket_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+       actor_user_id, actor_agent_id, actor_session_id, source_ticket_id, parent_document_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
     [
       actingUser(actor).workspaceId,
       item.kind,
@@ -439,6 +499,7 @@ export async function createSuggestion(db: Queryable, actor: Actor, input: NewSu
       actor.agent.id,
       actor.session?.id ?? null,
       source?.ticketId ?? null,
+      where.parentDocumentId,
     ],
   );
   return (await findSuggestion(db, actingUser(actor).workspaceId, rows[0]!.id))!;
@@ -454,7 +515,8 @@ async function lockOpen(db: Queryable, user: User, id: string): Promise<{ sugges
   const suggestion = await suggestionFor(db, actor, id, "write");
   if (suggestion.state !== "open") throw new HttpError(409, `This Suggestion was ${suggestion.state} already`);
   const lock = { document: "documents", term: "terms", decision: "decisions" } as const;
-  if (suggestion.item.kind !== "guidance") await db.query(`SELECT 1 FROM ${lock[suggestion.item.kind]} WHERE id = $1 FOR UPDATE`, [suggestion.item.id]);
+  // A new Document has no row yet; creating it locks its page tree.
+  if (suggestion.item.kind !== "guidance" && suggestion.item.id !== null) await db.query(`SELECT 1 FROM ${lock[suggestion.item.kind]} WHERE id = $1 FOR UPDATE`, [suggestion.item.id]);
   const { rows: stored } = await db.query<SuggestionRow>(`${SELECT_SUGGESTIONS} WHERE s.id = $1`, [id]);
   return { suggestion, item: await itemOf(db, stored[0]!) };
 }
@@ -480,11 +542,14 @@ export async function acceptSuggestion(db: Queryable, user: User, id: string, ed
   // Only Agents make Suggestions, so it records an Agent, with the Owner it acted for.
   const proposedBy = suggestion.proposedBy as Extract<RecordedActor, { kind: "agent" }>;
   const agent: StoredActor = { kind: "agent", userId: proposedBy.owner.id, agentId: proposedBy.id, sessionId: proposedBy.session?.id ?? null };
-  const version = await item.save(db, content, withEdits ? userActor(user) : agent, now);
-  if (typeof version === "string") throw new HttpError(409, version);
+  const saved = await item.save(db, content, withEdits ? userActor(user) : agent, now);
+  if (typeof saved === "string") throw new HttpError(409, saved);
+  // Accepting a new Document's Suggestion created it, which the Suggestion now names in place of its parent.
   await db.query(
-    "UPDATE suggestions SET state = 'accepted', with_edits = $2, result_version = $3, decided_at = $4, decided_by_user_id = $5 WHERE id = $1",
-    [id, withEdits, version, now, user.id],
+    `UPDATE suggestions SET state = 'accepted', with_edits = $2, result_version = $3, decided_at = $4, decided_by_user_id = $5,
+       document_id = coalesce($6, document_id), parent_document_id = NULL
+     WHERE id = $1`,
+    [id, withEdits, saved.version, now, user.id, saved.documentId ?? null],
   );
   return (await findSuggestion(db, user.workspaceId, id))!;
 }

@@ -851,4 +851,22 @@ export const migrations: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
     `,
   },
+  {
+    id: "0032_suggested_new_documents",
+    sql: `
+      -- A Suggestion can propose a new Document under a protected branch (knowledge/suggestions.ts): until a User accepts it
+      -- there is no Document yet, so it names the parent instead, with base Version 0. Accepting it creates the Document,
+      -- which the Suggestion then names in document_id like any other, the parent cleared.
+      ALTER TABLE suggestions ADD COLUMN parent_document_id uuid REFERENCES documents(id) ON DELETE CASCADE;
+      ALTER TABLE suggestions DROP CONSTRAINT suggestions_check;
+      ALTER TABLE suggestions DROP CONSTRAINT suggestions_check1;
+      ALTER TABLE suggestions ADD CONSTRAINT suggestions_one_item
+        CHECK (num_nonnulls(document_id, parent_document_id, term_id, decision_id) = CASE WHEN kind = 'guidance' THEN 0 ELSE 1 END);
+      ALTER TABLE suggestions ADD CONSTRAINT suggestions_item_of_kind
+        CHECK ((kind = 'document') = (num_nonnulls(document_id, parent_document_id) = 1) AND (kind = 'term') = (term_id IS NOT NULL)
+          AND (kind = 'decision') = (decision_id IS NOT NULL));
+      ALTER TABLE suggestions ADD CONSTRAINT suggestions_new_document CHECK (parent_document_id IS NULL OR (base_version = 0 AND state <> 'accepted'));
+      CREATE INDEX suggestions_parent_document ON suggestions (parent_document_id) WHERE parent_document_id IS NOT NULL;
+    `,
+  },
 ];
