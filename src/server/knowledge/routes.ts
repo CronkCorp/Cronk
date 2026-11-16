@@ -23,7 +23,7 @@ import {
 import { findTicketByKey } from "../work/tickets.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { documentFor } from "./document-reads.js";
-import { deleteDocument, findDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
+import { deleteDocument, findDocument, findProtectedUnder, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
 import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
@@ -407,6 +407,9 @@ export function knowledgeRoutes(ctx: AppContext) {
         const document = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
           requireUnprotected(actor, document, document.title, "move it");
+          // Moving it would move a protected branch under it along with it.
+          const protectedUnder = actor.kind === "agent" ? await findProtectedUnder(tx, document.id) : undefined;
+          if (protectedUnder) requireUnprotected(actor, { protected: true }, protectedUnder.title, "move it, or a Document above it");
           await requireOpenToAgentsUnder(tx, actor, parentId, "move Documents under it");
           const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
           if (moved === "a report") throw new HttpError(400, "A Report lives with its Ticket, outside the page tree, so it can't be moved");

@@ -335,6 +335,19 @@ export async function moveDocument(
   return (await findDocument(db, tree.workspaceId, document.id))!;
 }
 
+/** The first Document marked Protected anywhere under `documentId` in its page tree, if any. */
+export async function findProtectedUnder(db: Queryable, documentId: string): Promise<{ id: string; title: string } | undefined> {
+  const { rows } = await db.query<{ id: string; title: string }>(
+    `WITH RECURSIVE below(id, title, protected) AS (
+       SELECT id, title, protected FROM documents WHERE parent_id = $1
+       UNION ALL SELECT d.id, d.title, d.protected FROM documents d JOIN below b ON d.parent_id = b.id
+     )
+     SELECT id, title FROM below WHERE protected LIMIT 1`,
+    [documentId],
+  );
+  return rows[0];
+}
+
 /** Deletes a Document and its Versions, or returns false if any Document sits under it. Run inside a transaction. */
 export async function deleteDocument(db: Queryable, tree: Tree, document: Document): Promise<boolean> {
   await lockTree(db, tree);

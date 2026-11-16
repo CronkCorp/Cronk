@@ -10,6 +10,7 @@ import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
 import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
 import {
   deleteTerm,
+  findProtectedWorkspaceTerm,
   findTerm,
   insertTerm,
   listApplicableTerms,
@@ -96,7 +97,18 @@ export function termRoutes(ctx: AppContext) {
       withOverrides(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
     const answerTerm = async (actor: Actor, term: StoredTerm): Promise<Term> => (await answerTerms(actor, [term]))[0]!;
 
+    /**
+     * Refuses an Agent's naming a Project Term after a Protected Workspace Term, which would replace
+     * that Term within the Project and so change what it says there.
+     */
+    const requireNotReplacingProtected = async (db: Queryable, actor: Actor, projectId: string | null, termName: string) => {
+      if (actor.kind !== "agent" || projectId === null) return;
+      const replaced = await findProtectedWorkspaceTerm(db, actingUser(actor).workspaceId, termName);
+      if (replaced) requireUnprotected(actor, replaced, replaced.name, "replace it with a Project Term of the same name");
+    };
+
     const create = async (actor: Actor, place: TermPlace, input: NewTerm) => {
+      await requireNotReplacingProtected(ctx.db, actor, place.projectId, input.name);
       const fields: TermFields = { name: input.name, definition: input.definition, avoid: input.avoid ?? [], group: input.group ?? null };
       const created = await transaction(ctx.db, (tx) => insertTerm(tx, { place, fields, actor, now: ctx.clock.now() }));
       if (created === "name taken") throw nameTaken(input.name);
@@ -257,6 +269,7 @@ export function termRoutes(ctx: AppContext) {
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, current, current.name);
+          if (edit.name !== undefined) await requireNotReplacingProtected(tx, actor, current.projectId, edit.name);
           await requireCurrent(tx, current, base, "save");
           const fields: TermFields = {
             name: edit.name ?? current.name,

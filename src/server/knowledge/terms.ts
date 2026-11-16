@@ -243,6 +243,15 @@ export async function saveTermVersion(
   return { ...term, ...fields, version: number, updatedAt: save.now };
 }
 
+/** The Protected Workspace Term named `name`, ignoring case, if there is one: a Project Term of that name would replace it. */
+export async function findProtectedWorkspaceTerm(db: Queryable, workspaceId: string, name: string): Promise<StoredTerm | undefined> {
+  const { rows } = await db.query<TermRow>(`${SELECT_TERMS} WHERE t.workspace_id = $1 AND t.project_id IS NULL AND t.protected AND lower(t.name) = lower($2)`, [
+    workspaceId,
+    name.trim(),
+  ]);
+  return rows[0] && toTerm(rows[0]);
+}
+
 /** Deletes a Term and its Versions. */
 export async function deleteTerm(db: Queryable, id: string): Promise<void> {
   await db.query("DELETE FROM terms WHERE id = $1", [id]);

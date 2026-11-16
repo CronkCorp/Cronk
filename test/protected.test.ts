@@ -270,3 +270,33 @@ describe("upgrading an installation with accepted Decisions", () => {
     expect((await admin.get("/api/decisions/CRONK-D2/protection")).body.changes).toEqual([]);
   });
 });
+
+describe("getting around a protection", () => {
+  it("is refused to an Agent moving a Document that has a Protected Document under it", async () => {
+    const { cronk, admin, architecture, storage, handbook } = await pageTree();
+    const agent = await agentOf(cronk, admin, "claude");
+    await admin.post(`/api/documents/${storage.id}/protection`, { protected: true });
+
+    const moved = await agent.post(`/api/documents/${architecture.id}/move`, { parentId: handbook.id });
+    expect(moved.status).toBe(403);
+    expect(moved.body.error).toMatch(/^Storage is Protected.*Suggestion/);
+    expect((await admin.get(`/api/documents/${architecture.id}`)).body.document.parentId).toBeNull();
+  });
+
+  it("is refused to an Agent naming a Project Term after a Protected Workspace Term, which would replace it there", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { term } = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." })).body;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    const agent = await agentOf(cronk, admin, "claude");
+
+    const created = await agent.post("/api/projects/CRONK/terms", { name: "claim", definition: "A lock." });
+    expect(created.status).toBe(403);
+    expect(created.body.error).toMatch(/^Claim is Protected.*Suggestion/);
+    const other = (await agent.post("/api/projects/CRONK/terms", { name: "Hold", definition: "A lock." })).body.term;
+    const renamed = await agent.patch(`/api/terms/${other.id}`, { baseVersion: 1, name: "CLAIM" });
+    expect(renamed.status).toBe(403);
+    // A User may still override it.
+    expect((await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "Ours." })).status).toBe(201);
+  });
+});
