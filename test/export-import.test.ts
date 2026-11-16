@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
-import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, tarGz, untarGz, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type Client } from "./harness.js";
 
 /** A Markdown file's frontmatter and body. */
 function markdown(text: string | undefined): { data: any; body: string } {
@@ -78,6 +78,7 @@ describe("exporting a Project", () => {
 
     expect((await member.download("/api/projects/CRONK/export")).status).toBe(403);
     expect((await member.download("/api/export")).status).toBe(403);
+    expect((await member.get("/api/import/renamed-ids")).status).toBe(403);
     expect((await admin.download("/api/projects/NOPE/export")).status).toBe(404);
   });
 });
@@ -239,7 +240,10 @@ describe("importing an export", () => {
     const { admin } = await startInstalledCronk("Elsewhere");
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
-    expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"] });
+    expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"], renamedIds: [] });
+    // Agents keep their ids, which the snapshot below can't tell apart.
+    const agentIds = async (client: Client) => (await client.get("/api/agents?all=true")).body.agents.map((a: { id: string }) => a.id);
+    expect(await agentIds(admin)).toEqual(await agentIds(before.admin));
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
     expect(comments.filter((c: { sendBack: boolean }) => c.sendBack).map((c: { body: string }) => c.body)).toEqual(["Add a test."]);
     const moves = (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { sentBack?: boolean }) => c.sentBack);
@@ -257,6 +261,7 @@ describe("importing a Project export", () => {
   it("adds the Project, matching Users by email and Agents by Owner and name", async () => {
     const before = await busyWorkspace();
     const exported = await before.admin.download("/api/projects/CRONK/export");
+    const [exportedLaptop] = (await before.admin.get("/api/agents?all=true")).body.agents;
 
     const { cronk, admin } = await startInstalledCronk("Elsewhere");
     const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
@@ -265,7 +270,12 @@ describe("importing a Project export", () => {
 
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
-    expect(imported.body).toEqual({ scope: "project", projects: ["CRONK"] });
+    // The claude-laptop found here has another id than the export's, so the import keeps which became which.
+    expect(imported.body).toEqual({
+      scope: "project",
+      projects: ["CRONK"],
+      renamedIds: [{ kind: "agent", from: exportedLaptop.id, to: laptop.id, at: "2026-01-01T09:00:00.000Z" }],
+    });
     expect((await admin.get("/api/users")).body.users.map((u: { email: string; active: boolean }) => [u.email, u.active])).toEqual([
       ["ada@example.com", true],
       ["grace@example.com", true],
@@ -345,6 +355,80 @@ describe("importing a Project export", () => {
     const plain = await admin.upload("/api/import", await tarGz({ "notes/a.md": "# A" }));
     expect(plain.status).toBe(400);
     expect(plain.body.error).toMatch(/isn't a Cronk export/);
+  });
+});
+
+describe("Agent and Agent Session ids across an import", () => {
+  /** A Project where the since removed old-bot commented on CRONK-1, then claude-laptop retitled it, each in an Agent Session. */
+  async function agentWork() {
+    const { cronk, admin, claude, session } = await delegatedSetup(1);
+    const old = await registerAgent(admin, "old-bot");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: old.agentId });
+    const oldSession = await startSession(cronk, old.secret);
+    expect((await oldSession.post("/api/tickets/CRONK-1/comments", { body: "Looking." })).status).toBe(201);
+    await oldSession.delete("/api/agent-sessions/current");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId });
+    await admin.delete(`/api/agents/${old.agentId}`);
+    cronk.clock.advance(60_000);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    expect((await agent.patch("/api/tickets/CRONK-1", { title: "Built" })).status).toBe(200);
+    return { cronk, admin, claudeId: claude.agentId, oldId: old.agentId, oldSessionId: oldSession.sessionId, sessionId: agent.sessionId };
+  }
+
+  /** Who made the last change to `key`: the Agent's id and its Agent Session's. */
+  async function lastChangeBy(admin: Client, key: string): Promise<{ agent: string; session: string }> {
+    const { actor } = (await admin.get(`/api/tickets/${key}/changes`)).body.changes.at(-1);
+    return { agent: actor.id, session: actor.session?.id };
+  }
+
+  it("are kept when the installation has none of them", async () => {
+    const { admin: before, claudeId, sessionId } = await agentWork();
+    const exported = await before.download("/api/projects/CRONK/export");
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    const imported = await admin.upload("/api/import", exported.body);
+    expect(imported.status).toBe(201);
+    expect(await lastChangeBy(admin, "CRONK-1")).toEqual({ agent: claudeId, session: sessionId });
+    expect(imported.body.renamedIds).toEqual([]);
+    expect((await admin.get("/api/import/renamed-ids")).body.renamedIds).toEqual([]);
+  });
+
+  it("are new when taken, as importing the same export twice finds them, and the import keeps which became which", async () => {
+    const { admin: before, claudeId, oldId, oldSessionId, sessionId } = await agentWork();
+    const files = await untarGz((await before.download("/api/projects/CRONK/export")).body);
+    // The same export again, under a key the Workspace doesn't have yet.
+    const copy = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", "COPY"), text.replaceAll("CRONK", "COPY")])));
+
+    const { cronk, admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", await tarGz(files))).status).toBe(201);
+    cronk.clock.advance(60_000);
+    const again = await admin.upload("/api/import", copy);
+    expect(again.status).toBe(201);
+
+    // claude-laptop is found by Owner and name, so it is the same Agent; the removed old-bot and both Agent Sessions come in again under new ids.
+    const copied = await lastChangeBy(admin, "COPY-1");
+    expect(copied.agent).toBe(claudeId);
+    expect(copied.session).not.toBe(sessionId);
+    const { renamedIds } = again.body;
+    expect(renamedIds).toEqual([
+      { kind: "agent", from: oldId, to: expect.any(String), at: "2026-01-01T09:01:00.000Z" },
+      { kind: "agentSession", from: oldSessionId, to: expect.any(String), at: "2026-01-01T09:01:00.000Z" },
+      { kind: "agentSession", from: sessionId, to: copied.session, at: "2026-01-01T09:01:00.000Z" },
+    ]);
+    expect(renamedIds[0].to).not.toBe(oldId);
+    expect(renamedIds[1].to).not.toBe(oldSessionId);
+    // The copied Comment is old-bot's under its new ids.
+    const [looking] = (await admin.get("/api/tickets/COPY-1/comments")).body.comments;
+    expect(looking.actor).toMatchObject({ id: renamedIds[0].to, session: { id: renamedIds[1].to } });
+    expect((await admin.get("/api/import/renamed-ids")).body.renamedIds).toEqual(renamedIds);
+    // An export edited by hand may name an Agent Session by an id Cronk can't hold; it gets a new one, kept as well.
+    const edited = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", "HAND"), text.replaceAll("CRONK", "HAND").replaceAll(sessionId, "my-session")])));
+    const byHand = await admin.upload("/api/import", edited);
+    expect(byHand.status).toBe(201);
+    expect(byHand.body.renamedIds).toContainEqual(expect.objectContaining({ kind: "agentSession", from: "my-session", to: (await lastChangeBy(admin, "HAND-1")).session }));
+    // The first import's Project still names the ids it kept.
+    expect(await lastChangeBy(admin, "CRONK-1")).toEqual({ agent: claudeId, session: sessionId });
   });
 });
 

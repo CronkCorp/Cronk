@@ -61,7 +61,8 @@ export type SharedSchemaName =
   | "AgentRecordEntry"
   | "Term"
   | "TermVersion"
-  | "StaleTermVersion";
+  | "StaleTermVersion"
+  | "RenamedId";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -507,6 +508,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A save or delete of a Term refused because the Version it is based on is no longer current, with the current Version.",
     ...object({ error: { type: "string" }, current: ref("TermVersion") }),
   },
+  RenamedId: {
+    description: "An Agent or Agent Session an import gave a new id, because the id it had in the export was taken.",
+    ...object({
+      kind: { type: "string", enum: ["agent", "agentSession"], description: "Whether it is an Agent or an Agent Session." },
+      from: { type: "string", description: "Its id in the export, usually a UUID; an export edited by hand may hold anything." },
+      to: { ...id, description: "Its id here." },
+      at: { ...timestamp, description: "When it was imported." },
+    }),
+  },
   AgentRecordEntry: {
     description: "One entry in an Agent's record: one thing it did. `kind` says which; the field named after it holds what, and the other three are null.",
     ...object({
@@ -564,7 +574,7 @@ const ERROR_MEANINGS = {
   401: "Not signed in, or the Agent token is unknown or revoked",
   403:
     "The caller may not do this: an Admin-only change, Read access where Write is needed, an Agent where only a User may act, " +
-    "or an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions)",
+    "an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions), or a signed-in write sent from another site",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",

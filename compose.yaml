@@ -9,6 +9,8 @@ services:
       PORT: "3000"
       # Set to "true" when Cronk is served over HTTPS (e.g. behind a reverse proxy).
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # The address Users reach Cronk at, e.g. https://cronk.example; set it when a reverse proxy rewrites the Host header.
+      PUBLIC_URL: ${PUBLIC_URL:-}
     ports:
       - "${CRONK_PORT:-3000}:3000"
     depends_on:

@@ -92,6 +92,8 @@ describe("the OpenAPI description", () => {
       if (op.security === undefined) expect(errors, label).toEqual(expect.arrayContaining(["401", "410"]));
       // Every operation refuses query parameters it doesn't take.
       expect(errors, label).toContain("400");
+      // Every write can be refused for coming from another site.
+      if (!label.startsWith("GET ")) expect(errors, label).toContain("403");
       for (const code of errors) {
         expect(op.responses[code].description, `${label} ${code}`).toBeTruthy();
         // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance or a Term);
@@ -119,6 +121,7 @@ describe("the OpenAPI description", () => {
     expect(errorsOf("/api/projects", "post")).toEqual(["400", "401", "403", "409", "410"]);
     expect(errorsOf("/api/sign-in", "post")).toEqual(["400", "401", "403"]);
     expect(errorsOf("/api/invitations/by-token/{token}", "get")).toEqual(["400", "404"]);
+    expect(errorsOf("/api/invitations/by-token/{token}/accept", "post")).toEqual(["400", "403", "404", "409"]);
     // A save is refused as stale, or because an Agent changes a Report without its Ticket's Claim.
     expect(doc.paths["/api/documents/{id}"].patch.responses["409"].content["application/json"].schema).toMatchObject({
       anyOf: [staleBody, errorBody],
