@@ -125,6 +125,84 @@ describe("exporting a Project", () => {
   });
 });
 
+describe("exporting a scope's Decisions as docs/adr", () => {
+  it("downloads a Project's Decisions as the same docs/adr files the Project export writes, and nothing else", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Other", key: "OTHER" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", body: "Limit sign-ins.", group: "Security" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits!", body: "Per email.", supersedes: ["CRONK-D1"] });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+    await admin.post("/api/projects/OTHER/decisions", { title: "Elsewhere" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+
+    const res = await admin.download("/api/projects/CRONK/decisions/export");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/gzip");
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="cronk-CRONK-adr-2026-01-01T09-00-00.tar.gz"');
+    const files = await untarGz(res.body);
+
+    expect(Object.keys(files).sort()).toEqual(["docs/adr/0001-limits-in-the-api.md", "docs/adr/0002-per-email-limits.md"]);
+    expect(markdown(files["docs/adr/0001-limits-in-the-api.md"])).toMatchObject({
+      data: { key: "CRONK-D1", title: "Limits in the API", status: "superseded", group: "Security", supersededBy: "CRONK-D2" },
+      body: "Limit sign-ins.",
+    });
+    const full = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    for (const path of Object.keys(files)) expect(files[path]).toBe(full[`projects/CRONK/${path}`]);
+  });
+
+  it("downloads the Workspace's own Decisions, none from any Project", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs", body: "v1" });
+    await admin.patch("/api/decisions/D1", { baseVersion: 1, body: "Use Compose." });
+
+    const res = await admin.download("/api/workspace/decisions/export");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="cronk-workspace-adr-2026-01-01T09-00-00.tar.gz"');
+    const files = await untarGz(res.body);
+
+    // Two Versions, but only the current file.
+    expect(Object.keys(files)).toEqual(["docs/adr/0001-compose-for-installs.md"]);
+    expect(markdown(files["docs/adr/0001-compose-for-installs.md"])).toMatchObject({ data: { key: "D1", version: 2 }, body: "Use Compose." });
+    const full = await untarGz((await admin.download("/api/export")).body);
+    expect(files["docs/adr/0001-compose-for-installs.md"]).toBe(full["docs/adr/0001-compose-for-installs.md"]);
+  });
+
+  it("answers an empty archive for a scope with no Decisions", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+
+    for (const path of ["/api/workspace/decisions/export", "/api/projects/CRONK/decisions/export"]) {
+      const res = await admin.download(path);
+      expect(res.status).toBe(200);
+      expect(await untarGz(res.body)).toEqual({});
+    }
+  });
+
+  it("is for anyone who can read the Decisions, hiding a Project they can't see", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API" });
+    await admin.post("/api/projects/SECRET/decisions", { title: "Hush" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+    const grace = await joinAs(cronk, admin, "grace@example.com");
+    const claude = cronk.client((await registerAgent(grace, "claude-laptop")).secret);
+
+    expect(Object.keys(await untarGz((await grace.download("/api/projects/CRONK/decisions/export")).body))).toEqual(["docs/adr/0001-limits-in-the-api.md"]);
+    expect(Object.keys(await untarGz((await grace.download("/api/workspace/decisions/export")).body))).toEqual(["docs/adr/0001-compose-for-installs.md"]);
+    expect((await claude.download("/api/workspace/decisions/export")).status).toBe(200);
+    expect((await grace.download("/api/projects/SECRET/decisions/export")).status).toBe(404);
+    const stranger = cronk.client();
+    expect((await stranger.download("/api/workspace/decisions/export")).status).toBe(401);
+    expect((await stranger.download("/api/projects/CRONK/decisions/export")).status).toBe(401);
+  });
+});
+
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 /**
