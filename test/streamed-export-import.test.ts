@@ -342,3 +342,24 @@ describe("an import whose connection drops partway", () => {
     expect(await elsewhere.stored()).toHaveLength(2);
   });
 });
+
+describe("an export whose download drops partway", () => {
+  it("stops reading the files, and the server goes on answering, exports included", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Recordings" });
+    await attach(admin, "/api/tickets/CRONK-1/attachments?name=long.bin", 1, 64 * MB);
+
+    const res = await admin.send("/api/export");
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => res.once("data", resolve));
+    res.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const again = await admin.send("/api/export");
+    expect(again.statusCode).toBe(200);
+    let size = 0;
+    for await (const chunk of again) size += (chunk as Buffer).length;
+    expect(size).toBeGreaterThan(64 * MB);
+  });
+});

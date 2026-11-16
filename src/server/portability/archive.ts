@@ -253,25 +253,39 @@ export function unwrapFolder<F extends Map<string, unknown>>(folder: F): F {
 export function packFolderStream(folder: StoredFolder, store: FileStore): Readable {
   const pack = tar.pack();
   const out = createGzip();
-  const packed = pipeline(pack as unknown as Readable, out);
+  // Its failures show on `out`, which the response reads; a download that stops early closes `out`, which stops the packing.
+  pipeline(pack as unknown as Readable, out).catch(() => {});
+  const closed = new Promise<void>((resolve) => out.once("close", resolve));
+  /** Waits until `written` is, or the download has stopped, after which what it does is no longer anyone's concern. */
+  const untilWritten = (written: Promise<void>) => {
+    written.catch(() => {});
+    return Promise.race([written, closed]);
+  };
   void (async () => {
     for (const [name, contents] of folder) {
+      if (out.destroyed) return;
       if (!isStored(contents)) {
-        await new Promise<void>((resolve, reject) => pack.entry({ name, mode: 0o644 }, contents, (err?: Error | null) => (err ? reject(err) : resolve())));
+        const written = new Promise<void>((resolve, reject) => pack.entry({ name, mode: 0o644 }, contents, (err?: Error | null) => (err ? reject(err) : resolve())));
+        await untilWritten(written);
         continue;
       }
-      await new Promise<void>((resolve, reject) => {
+      const file = store.get(contents.key);
+      const written = new Promise<void>((resolve, reject) => {
         const entry = pack.entry({ name, mode: 0o644, size: contents.size }, (err) => (err ? reject(err) : resolve()));
-        const file = store.get(contents.key);
+        entry.on("error", reject);
         file.once("error", (err) => {
           entry.destroy(err);
           reject(err);
         });
         file.pipe(entry as unknown as NodeJS.WritableStream);
       });
+      try {
+        await untilWritten(written);
+      } finally {
+        file.destroy();
+      }
     }
-    pack.finalize();
-    await packed;
+    if (!out.destroyed) pack.finalize();
   })().catch((err: unknown) => out.destroy(err as Error));
   return out;
 }
