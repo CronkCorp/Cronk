@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { attachmentKey, insertAttachment } from "../files/attachments.js";
+import { attachmentKey, insertAttachment, type AttachmentTarget } from "../files/attachments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { bytesOf } from "./archive.js";
 import { date, list, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
 
 /**
- * A Ticket's Attachments: their files in `<KEY>.attachments/`, each named `<n>-<name>` in the order they were
- * attached, and `index.md` there, whose frontmatter lists what each file is, by whom and when.
+ * The Attachments on a Ticket, Document or Comment: their files in `<name>.attachments/` beside its file, each named
+ * `<n>-<name>` in the order they were attached, and `index.md` there, whose frontmatter lists what each file is, by
+ * whom and when.
  */
 
 interface AttachmentRow extends ActorColumns {
@@ -30,9 +31,14 @@ async function freeId(ctx: ImportContext, exported: unknown): Promise<string> {
   return rows.length === 0 ? exported.toLowerCase() : randomUUID();
 }
 
-/** Writes the Attachments of the Ticket `ticketId` into `${base}.attachments/`. */
-export async function exportAttachments(ctx: ExportContext, base: string, ticketId: string): Promise<void> {
-  const { rows } = await ctx.db.query<AttachmentRow>("SELECT * FROM attachments WHERE ticket_id = $1 ORDER BY seq", [ticketId]);
+/** The column naming what an Attachment is on, and its id. */
+const targetColumn = (target: AttachmentTarget): [column: string, id: string] =>
+  "ticketId" in target ? ["ticket_id", target.ticketId] : "documentId" in target ? ["document_id", target.documentId] : ["comment_id", target.commentId];
+
+/** Writes the Attachments on `target` (only its own, not those in its Comments) into `${base}.attachments/`. */
+export async function exportAttachments(ctx: ExportContext, base: string, target: AttachmentTarget): Promise<void> {
+  const [column, id] = targetColumn(target);
+  const { rows } = await ctx.db.query<AttachmentRow>(`SELECT * FROM attachments WHERE ${column} = $1 ORDER BY seq`, [id]);
   if (rows.length === 0) return;
   const index = [];
   for (const [i, a] of rows.entries()) {
@@ -44,8 +50,8 @@ export async function exportAttachments(ctx: ExportContext, base: string, ticket
   ctx.add(`${base}.attachments/index.md`, { attachments: index });
 }
 
-/** Imports the Attachments listed in `${base}.attachments/index.md`, if there is one, onto the Ticket `ticketId`. */
-export async function importAttachments(ctx: ImportContext, base: string, ticketId: string): Promise<void> {
+/** Imports the Attachments listed in `${base}.attachments/index.md`, if there is one, onto `target`. */
+export async function importAttachments(ctx: ImportContext, base: string, target: AttachmentTarget): Promise<void> {
   const index = ctx.read(`${base}.attachments/index.md`);
   if (!index) return;
   for (const [i, entry] of list(index, "attachments").entries()) {
@@ -58,7 +64,7 @@ export async function importAttachments(ctx: ImportContext, base: string, ticket
     await insertAttachment(ctx.db, {
       id,
       workspaceId: ctx.workspaceId,
-      ticketId,
+      target,
       name: text(entry.name, `${where} name`),
       contentType: text(entry.contentType, `${where} contentType`),
       size: bytes.length,

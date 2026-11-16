@@ -720,4 +720,17 @@ export const migrations: Migration[] = [
       UPDATE decisions SET protected = true WHERE status = 'accepted';
     `,
   },
+  {
+    id: "0029_attachments_on_documents_and_comments",
+    sql: `
+      -- An Attachment is on exactly one Ticket, Document (a Report too) or Comment, which decides who can read it.
+      -- One on a Document belongs to the Document, not to a Version, so every Version still shows it.
+      ALTER TABLE attachments ALTER COLUMN ticket_id DROP NOT NULL;
+      ALTER TABLE attachments ADD COLUMN document_id uuid REFERENCES documents(id) ON DELETE CASCADE;
+      ALTER TABLE attachments ADD COLUMN comment_id uuid REFERENCES comments(id) ON DELETE CASCADE;
+      ALTER TABLE attachments ADD CONSTRAINT attachments_on_one CHECK (num_nonnulls(ticket_id, document_id, comment_id) = 1);
+      CREATE INDEX attachments_document ON attachments (document_id, seq) WHERE document_id IS NOT NULL;
+      CREATE INDEX attachments_comment ON attachments (comment_id, seq) WHERE comment_id IS NOT NULL;
+    `,
+  },
 ];

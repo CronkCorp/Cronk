@@ -738,11 +738,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Attachment: {
     description:
-      "A plain file, such as an image, video, PDF or log, attached to a Ticket. Whoever can read the Ticket can read it; " +
-      "download it from GET /api/attachments/{id}/file.",
+      "A plain file, such as an image, video, PDF or log, attached to a Ticket, a Document or Report, or a Comment. Whoever can read " +
+      "that item can read it; download it from GET /api/attachments/{id}/file. One on a Document belongs to the Document, not to a Version.",
     ...object({
       id,
-      ticketKey: { type: "string", description: "The Ticket it is attached to." },
+      on: { type: "string", enum: ["ticket", "document", "comment"], description: "What it is attached to." },
+      ticketKey: {
+        ...nullable({ type: "string" }),
+        description: "The Ticket it is on: attached to it, or in one of its Comments or Reports, or in a Comment on one of its Reports.",
+      },
+      documentId: { ...nullable({ type: "string", format: "uuid" }), description: "The Document or Report it is on: attached to it, or in one of its Comments." },
+      commentId: { ...nullable({ type: "string", format: "uuid" }), description: "The Comment it is attached to." },
       name: { type: "string", description: "Its file name, as attached." },
       contentType: { type: "string", description: "Its media type, such as `image/png`, as attached." },
       size: { type: "integer", description: "Its size in bytes." },
@@ -836,6 +842,8 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
+/** A Comment's id. */
+export const commentIdParam = { type: "string", format: "uuid", description: "The Comment's id." } as const;
 
 /** An Attachment's id. */
 export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;

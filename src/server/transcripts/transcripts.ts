@@ -144,7 +144,8 @@ const SESSION_RECORDS = `
   UNION ALL SELECT ticket_id, NULL, NULL, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT ticket_id, document_id, NULL, NULL FROM comments WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT NULL, document_id, NULL, NULL FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, NULL, NULL, NULL FROM attachments WHERE actor_session_id = ANY($1::uuid[])
+  UNION ALL SELECT coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL FROM attachments x
+    LEFT JOIN comments c ON c.id = x.comment_id WHERE x.actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT NULL, NULL, term_id, NULL FROM term_versions WHERE actor_session_id = ANY($1::uuid[])
   UNION ALL SELECT NULL, NULL, NULL, decision_id FROM decision_versions WHERE actor_session_id = ANY($1::uuid[])`;
 
