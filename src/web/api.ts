@@ -8,7 +8,7 @@ import type {
   AgentAccess,
   AgentSession,
   AgentToken,
-  AgentWork,
+  AgentRecordEntry,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -58,7 +58,7 @@ export type {
   AgentAccess,
   AgentSession,
   AgentToken,
-  AgentWork,
+  AgentRecordEntry,
   Comment,
   Document,
   DocumentTreeEntry,
@@ -208,7 +208,8 @@ export const api = {
   issueAgentToken: (id: string, readOnly: boolean) =>
     request<IssuedAgentToken>("POST", `/api/agents/${encodeURIComponent(id)}/tokens`, { readOnly }),
   /** What the Agent did, newest first, as far as the signed-in User may read. */
-  agentWork: (id: string) => request<{ work: AgentWork[] }>("GET", `/api/agents/${encodeURIComponent(id)}/work`).then((r) => r.work),
+  agentRecord: (id: string) =>
+    request<{ record: AgentRecordEntry[] }>("GET", `/api/agents/${encodeURIComponent(id)}/record`).then((r) => r.record),
   revokeAgentToken: (id: string, tokenId: string) =>
     request<void>("DELETE", `/api/agents/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`),
 
