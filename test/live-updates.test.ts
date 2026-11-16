@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
 
 describe("A Project's live updates", () => {
   it("tell its watchers which Ticket changed when one is edited", async () => {
@@ -95,6 +95,27 @@ describe("A Project's live updates", () => {
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
     await admin.delete(`/api/agents/${claude.agentId}`);
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-2" } });
+  });
+
+  it("tell which Tickets changed when their Claims end because the Agents' Owner is deactivated", async () => {
+    const { cronk, admin } = await delegatedSetup(3);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await admin.get("/api/users")).body.users.find((u: any) => u.email === "bob@example.com").id;
+    const first = await registerAgent(bob, "bob-laptop");
+    const second = await registerAgent(bob, "bob-desktop");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: first.agentId });
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: bobId, delegateId: second.agentId });
+    expect((await (await startSession(cronk, first.secret)).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    expect((await (await startSession(cronk, second.secret)).post("/api/tickets/CRONK-2/claim")).status).toBe(200);
+    const project = await admin.events("/api/projects/CRONK/events");
+    const ticket = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await project.next())?.event).toBe("ready");
+    expect((await ticket.next())?.event).toBe("ready");
+
+    expect((await admin.patch(`/api/users/${bobId}`, { active: false })).status).toBe(200);
+    const changed = [await project.next(), await project.next()].map((e) => e?.data.ticket).sort();
+    expect(changed).toEqual(["CRONK-1", "CRONK-2"]);
+    expect(await ticket.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
   });
 
   it("tell which Ticket changed when its Claim lapses", async () => {
