@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, startInstalledCronk } from "./harness.js";
+import { S3Store } from "../src/server/files/s3-store.js";
+import { delegatedSetup, disposableBucket, joinAs, s3Server, startInstalledCronk, untarGz } from "./harness.js";
 
 /** Ada, the Admin, with the Project CRONK holding CRONK-1. */
 async function setup() {
@@ -217,5 +218,29 @@ describe("Attachment access", () => {
     expect(attached.status).toBe(201);
     expect(attached.body.attachment.actor).toMatchObject({ kind: "agent", id: claude.agentId, owner: { name: "Ada" }, session: { id: agent.sessionId } });
     expect((await admin.get("/api/tickets/CRONK-1/attachments")).body.attachments.map((a: { name: string }) => a.name)).toEqual(["log.txt"]);
+  });
+});
+
+describe.skipIf(!s3Server())("Attachments in S3-compatible storage", () => {
+  it("are kept in the configured bucket and behave as on local disk: downloads, ranges, exports and deletes", async () => {
+    const storage = await disposableBucket();
+    const { admin } = await startInstalledCronk("Acme", { storage });
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 1" });
+    const bucket = new S3Store(storage);
+
+    const id = (await admin.upload("/api/tickets/CRONK-1/attachments?name=repro.mp4", Buffer.from("0123456789"), "video/mp4")).body.attachment.id;
+    expect(await bucket.list("attachments")).toHaveLength(1);
+
+    expect((await admin.download(`/api/attachments/${id}/file`)).body.toString()).toBe("0123456789");
+    const middle = await admin.download(`/api/attachments/${id}/file`, { range: "bytes=2-5" });
+    expect(middle.status).toBe(206);
+    expect(middle.headers["content-range"]).toBe("bytes 2-5/10");
+    expect(middle.body.toString()).toBe("2345");
+    const exported = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(exported["projects/CRONK/tickets/CRONK-1.attachments/1-repro.mp4"]).toBe("0123456789");
+
+    expect((await admin.delete(`/api/attachments/${id}`)).status).toBe(204);
+    expect(await bucket.list("attachments")).toEqual([]);
   });
 });
