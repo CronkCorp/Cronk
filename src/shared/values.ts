@@ -67,7 +67,7 @@ export const SHOWN_MEDIA_TYPES = {
   text: ["text/plain"],
 } as const;
 
-export const SEARCH_KINDS = ["ticket", "document", "report", "comment"] as const;
+export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
