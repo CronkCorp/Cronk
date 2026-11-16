@@ -170,6 +170,13 @@ const suggestedContent = {
   },
 } as const;
 
+/** The accepted Suggestion a Version came from (ADR 0014). */
+const versionSuggestion = {
+  ...nullable(object({ id, acceptedWithEdits: { type: "boolean" }, acceptedBy: named })),
+  description:
+    "The Suggestion a User accepted to make it: unchanged, when the Version is credited to the Agent; or edited first, when it is the User's. Null for a Version saved otherwise.",
+};
+
 /** A Version's fields, all but its body. */
 const versionFields = {
   number: { type: "integer", description: "Counts from 1 per Document." },
@@ -177,6 +184,7 @@ const versionFields = {
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
   restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+  suggestion: versionSuggestion,
 };
 
 const decisionStatus = { type: "string", enum: DECISION_STATUSES } as const;
@@ -224,6 +232,7 @@ const decisionVersionFields = {
   supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
+  suggestion: versionSuggestion,
 };
 
 /** What a Term says, as each of its Versions records it. */
@@ -297,6 +306,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       markdown: { type: "string" },
       at: timestamp,
       actor: { ...recordedActor, description: "Who saved it." },
+      suggestion: versionSuggestion,
     }),
   },
   Agent: object(
@@ -702,6 +712,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ...termFields,
       at: timestamp,
       actor: { ...recordedActor, description: "Who saved it." },
+      suggestion: versionSuggestion,
     }),
   },
   StaleTermVersion: {

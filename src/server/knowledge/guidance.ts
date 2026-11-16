@@ -1,5 +1,6 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
+import { versionSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
 /**
  * Guidance: standing instructions Users write for Agents, for the Workspace or one Project.
@@ -57,6 +58,8 @@ export async function writeGuidance(
 export interface GuidanceVersion extends Guidance {
   at: Date;
   actor: RecordedActor;
+  /** The Suggestion a User accepted to make it, unchanged or edited; null for a Version saved otherwise. */
+  suggestion: VersionSuggestion | null;
 }
 
 /** The Markdown `owner`'s Guidance had at `version`: empty at 0, undefined for a Version not saved yet. */
@@ -77,7 +80,8 @@ export async function listGuidanceVersions(db: Queryable, owner: GuidanceOwner):
      WHERE g.workspace_id = $1 AND g.project_id IS NOT DISTINCT FROM $2 ORDER BY g.version`,
     [owner.workspaceId, owner.projectId],
   );
-  return rows.map((r) => ({ version: r.version, markdown: r.markdown, at: r.at, actor: toRecordedActor(r) }));
+  const suggestions = await versionSuggestions(db, { kind: "guidance", ...owner });
+  return rows.map((r) => ({ version: r.version, markdown: r.markdown, at: r.at, actor: toRecordedActor(r), suggestion: suggestions.get(r.version) ?? null }));
 }
 
 /** The current Markdown of each of these Projects' Guidance, empty for one nobody has written. */

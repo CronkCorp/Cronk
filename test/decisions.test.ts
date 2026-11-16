@@ -102,6 +102,7 @@ describe("editing a Decision", () => {
       supersedes: [],
       at: "2026-01-01T09:00:00.000Z",
       actor: { kind: "user", id: ada.id, name: "Ada" },
+      suggestion: null,
     });
     expect((await admin.get("/api/decisions/CRONK-D1/versions/4")).status).toBe(404);
   });
