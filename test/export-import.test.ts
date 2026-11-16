@@ -1149,4 +1149,19 @@ describe("the Workspace's settings in an export", () => {
 
     expect((await admin.get("/api/workspace")).body.silenceThresholdSeconds).toBe(300);
   });
+
+  it("left out of workspace.md, as in an export from before them, keep the Workspace's own values", async () => {
+    const { admin } = await startInstalledCronk("Elsewhere");
+    await admin.patch("/api/workspace", { silenceThresholdSeconds: 120, artifactMaxFiles: 50 });
+
+    const imported = await admin.upload("/api/import", await exportWith((d) => {
+      delete d.silenceThresholdSeconds;
+      delete d.artifactMaxFiles;
+      d.attachmentMaxBytes = 2 * 1024 * 1024;
+    }));
+    expect(imported.status).toBe(201);
+
+    const workspace = (await admin.get("/api/workspace")).body;
+    expect(workspace).toMatchObject({ name: "Acme", silenceThresholdSeconds: 120, artifactMaxFiles: 50, attachmentMaxBytes: 2 * 1024 * 1024 });
+  });
 });
