@@ -234,6 +234,8 @@ export interface Cronk {
   undoMigration(id: string, undo: string): Promise<void>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
+  /** The connection string of this test's database, for running server commands against it as an operator would. */
+  databaseUrl: string;
 }
 
 /** Live updates held by `Cronk.holdPushes`, until released. */
@@ -349,6 +351,7 @@ export async function startCronk(): Promise<Cronk> {
       }
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
+    databaseUrl,
   };
   /** Takes a lock with `sql` in a transaction it keeps open until released. */
   async function hold(sql: string, params: unknown[]): Promise<HeldLock> {

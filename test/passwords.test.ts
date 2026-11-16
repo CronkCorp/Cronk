@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { ada, joinAs, memberPassword, registerAgent, startInstalledCronk, startSession, type Client, type Cronk } from "./harness.js";
 
@@ -131,5 +132,46 @@ describe("changing your own password", () => {
     expect((await cronk.client().put("/api/me/password", body)).status).toBe(401);
     expect((await claude.put("/api/me/password", body)).status).toBe(403);
     expect(await signInStatus(cronk, ada.email, ada.password)).toBe(200);
+  });
+});
+
+/** Runs the server command that issues a reset link, as an operator would on the server, against this test's database. */
+function resetPasswordCommand(cronk: Cronk, ...args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      ["--import", "tsx", "src/server/reset-password.ts", ...args],
+      { env: { ...process.env, DATABASE_URL: cronk.databaseUrl } },
+      (err, stdout, stderr) => {
+        if (err && typeof err.code !== "number") reject(err);
+        else resolve({ code: err ? (err.code as number) : 0, stdout, stderr });
+      },
+    );
+  });
+}
+
+describe("the server command for a reset link", () => {
+  it("prints a link for any User, which works through the API and ends their sign-ins", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+
+    const run = await resetPasswordCommand(cronk, "ADA@example.com", "--url", "https://cronk.example.com/");
+    expect(run.code).toBe(0);
+    const link = /https:\/\/cronk\.example\.com\/reset-password\/(\S+)/.exec(run.stdout);
+    expect(link).not.toBeNull();
+    expect((await admin.get("/api/me")).status).toBe(401);
+
+    const browser = cronk.client();
+    const used = await browser.post(`/api/password-resets/by-token/${link![1]}`, { password: "back in at last" });
+    expect(used.status).toBe(200);
+    expect(used.body.user).toMatchObject({ email: ada.email, role: "admin" });
+    expect(await signInStatus(cronk, ada.email, "back in at last")).toBe(200);
+  });
+
+  it("fails without printing a link for an unknown email", async () => {
+    const { cronk } = await startInstalledCronk();
+    const run = await resetPasswordCommand(cronk, "nobody@example.com");
+    expect(run.code).not.toBe(0);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/No User has the email nobody@example.com/);
   });
 });
