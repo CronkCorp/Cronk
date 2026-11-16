@@ -9,14 +9,14 @@ import { exportComments, importComments } from "./comments.js";
 import { exportDocument, importDocument, type DocumentRow } from "./documents.js";
 import { exportHistory, importHistory } from "./history.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
-import { date, natural, oneOf, refuse, text, type File } from "./fields.js";
+import { date, isUuid, natural, oneOf, refuse, text, type File } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
 import type { ImportedProject, ProjectRow } from "./projects.js";
 
 /**
  * Tickets: `tickets/<KEY>.md` with the description as its body, relations naming other
- * Tickets by key and linked Documents naming their files by path; beside it `<KEY>.activities/`,
- * `<KEY>.comments/` and `<KEY>.reports/`.
+ * Tickets by key and linked Documents naming their files by path, and a Discovered Ticket's marker
+ * as `discovered`; beside it `<KEY>.activities/`, `<KEY>.comments/` and `<KEY>.reports/`.
  */
 
 interface TicketRow {
@@ -32,6 +32,12 @@ interface TicketRow {
   parent_number: number | null;
   autonomous: boolean;
   verification: string | null;
+  discovered_by_agent_id: string | null;
+  discovered_by_owner_id: string | null;
+  discovered_session_id: string | null;
+  source_number: number | null;
+  discovered_source_claim_id: string | null;
+  discovery_kept: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -47,8 +53,9 @@ interface RelationRow {
 /** Writes the Tickets of the Project `p` into `${dir}/tickets/`; `statusNow` names its Statuses by id. */
 export async function exportTickets(ctx: ExportContext, dir: string, p: ProjectRow, statusNow: Map<string, string>): Promise<void> {
   const { rows: tickets } = await ctx.db.query<TicketRow>(
-    `SELECT t.*, s.name AS status, pt.number AS parent_number
+    `SELECT t.*, s.name AS status, pt.number AS parent_number, da.owner_id AS discovered_by_owner_id, st.number AS source_number
      FROM tickets t JOIN statuses s ON s.id = t.status_id LEFT JOIN tickets pt ON pt.id = t.parent_id
+       LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id
      WHERE t.project_id = $1 ORDER BY t.number`,
     [p.id],
   );
@@ -93,6 +100,7 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
         // Written only when set, as a Ticket from before Autonomous Delegation has neither.
         autonomous: t.autonomous || undefined,
         verification: t.verification ?? undefined,
+        discovered: discoveryOf(ctx, projectKey, t),
         blocks: sorted(related("blocks", "from")),
         blockedBy: sorted(related("blocks", "to")),
         relatesTo: sorted([...related("relates_to", "from"), ...related("relates_to", "to")]),
@@ -108,6 +116,23 @@ async function exportTicket(ctx: ExportContext, dir: string, projectKey: string,
   await exportHistory(ctx, base, t.id, statusNow);
   const { rows: reports } = await ctx.db.query<DocumentRow>("SELECT * FROM documents WHERE ticket_id = $1 ORDER BY created_at, id", [t.id]);
   for (const [i, r] of reports.entries()) await exportDocument(ctx, `${base}.reports/${i + 1}`, r);
+}
+
+/**
+ * A Discovered Ticket's marker as its file writes it: the Agent and Agent Session that filed it, the Ticket it came from with
+ * that Claim's id, so the Reports of the Claim still list it, and whether a User kept it in Backlog; each written only when set.
+ */
+function discoveryOf(ctx: ExportContext, projectKey: string, t: TicketRow) {
+  if (t.discovered_by_agent_id === null) return undefined;
+  const by = ctx.agentActor({ actor_user_id: t.discovered_by_owner_id!, actor_agent_id: t.discovered_by_agent_id, actor_session_id: t.discovered_session_id });
+  const sourced = t.source_number !== null;
+  return {
+    agent: by.agent,
+    session: by.session ?? undefined,
+    sourceTicket: sourced ? `${projectKey}-${t.source_number}` : undefined,
+    sourceClaim: sourced ? (t.discovered_source_claim_id ?? undefined) : undefined,
+    kept: t.discovery_kept || undefined,
+  };
 }
 
 /** Writes a Ticket's Activities and Comments beside `${base}.md`, numbered so replies and answers can name each other. */
@@ -161,6 +186,8 @@ export class ImportedTickets {
   readonly histories: { ticketId: string; statusIds: Map<string, string>; file: File }[] = [];
   /** Agents' proposed Decisions, by the key of the Ticket each came from, to link once the Tickets are in. */
   readonly decisionSources: { decisionId: string; ticketKey: string; claimId: string | null }[] = [];
+  /** Discovered Tickets, by the key of the Ticket each came from, to link once the Tickets are in. */
+  readonly discoverySources: { ticketId: string; sourceKey: string; claimId: string | null; where: string }[] = [];
   /** Delegated Tickets the export left without an Assignee, which this import assigned to the Delegate's Owner. */
   readonly assignedToOwner: { ticketId: string; ownerId: string }[] = [];
 
@@ -179,6 +206,19 @@ export class ImportedTickets {
     for (const { decisionId, ticketKey, claimId } of this.decisionSources) {
       const ticketId = this.ids.get(ticketKey.toUpperCase());
       if (ticketId) await ctx.db.query("UPDATE decisions SET source_ticket_id = $2, source_claim_id = $3 WHERE id = $1", [decisionId, ticketId, claimId]);
+    }
+  }
+
+  /** Links each Discovered Ticket to the Ticket of its Project it came from, which must be in the export too. */
+  async storeDiscoverySources(ctx: ImportContext): Promise<void> {
+    for (const { ticketId, sourceKey, claimId, where } of this.discoverySources) {
+      const sourceId = this.ids.get(sourceKey.toUpperCase()) ?? refuse(`${where} names ${sourceKey}, which isn't a Ticket in the export`);
+      const { rowCount } = await ctx.db.query(
+        `UPDATE tickets t SET discovered_source_ticket_id = $2, discovered_source_claim_id = $3
+         FROM tickets s WHERE t.id = $1 AND s.id = $2 AND s.project_id = t.project_id`,
+        [ticketId, sourceId, claimId],
+      );
+      if (rowCount === 0) refuse(`${where} must name a Ticket of the same Project`);
     }
   }
 
@@ -208,7 +248,8 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
   const parents: { ticketId: string; parent: string; path: string }[] = [];
   for (const path of ctx.filesIn(`projects/${dirKey}/tickets`).filter((p) => !p.endsWith(".history.md"))) {
     const t = ctx.need(path);
-    const { key, id, assignedToOwner } = await importTicket(ctx, t, project);
+    const { key, id, assignedToOwner, discoverySource } = await importTicket(ctx, t, project);
+    if (discoverySource) tickets.discoverySources.push({ ticketId: id, ...discoverySource });
     if (assignedToOwner) tickets.assignedToOwner.push({ ticketId: id, ownerId: assignedToOwner });
     if (tickets.ids.has(key)) refuse(`Two Tickets have the key ${key}`);
     tickets.ids.set(key, id);
@@ -236,7 +277,11 @@ export async function importTickets(ctx: ImportContext, dirKey: string, project:
  * Assignee, as an export from before delegating always assigned someone may, is assigned to its Delegate's Owner,
  * whose id it returns as `assignedToOwner`.
  */
-async function importTicket(ctx: ImportContext, t: File, project: ImportedProject): Promise<{ key: string; id: string; assignedToOwner?: string }> {
+async function importTicket(
+  ctx: ImportContext,
+  t: File,
+  project: ImportedProject,
+): Promise<{ key: string; id: string; assignedToOwner?: string; discoverySource?: { sourceKey: string; claimId: string | null; where: string } }> {
   const key = text(t.data.key, `${t.path} key`).toUpperCase();
   const number = Number(new RegExp(`^${project.key}-([1-9][0-9]{0,8})$`).exec(key)?.[1]);
   if (!number) refuse(`${t.path} key must be a key of ${project.key}, such as ${project.key}-1`);
@@ -248,9 +293,11 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
   if (!Array.isArray(labels) || !labels.every((l) => typeof l === "string")) refuse(`${t.path} labels must be a list of text`);
   if (t.data.autonomous !== undefined && typeof t.data.autonomous !== "boolean") refuse(`${t.path} autonomous must be true or false`);
   const verification = t.data.verification === undefined || t.data.verification === null ? null : oneOf(t.data.verification, VERIFICATIONS, `${t.path} verification`);
+  const discovered = await discoveryIn(ctx, t);
   const { rows } = await ctx.db.query<{ id: string }>(
-    `INSERT INTO tickets (project_id, number, title, description, status_id, priority, labels, assignee_id, delegate_id, autonomous, verification, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+    `INSERT INTO tickets (project_id, number, title, description, status_id, priority, labels, assignee_id, delegate_id, autonomous, verification, created_at, updated_at,
+       discovered_by_agent_id, discovered_session_id, discovery_kept)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
     [
       project.id,
       number,
@@ -265,9 +312,26 @@ async function importTicket(ctx: ImportContext, t: File, project: ImportedProjec
       verification,
       date(t.data.createdAt, `${t.path} createdAt`),
       date(t.data.updatedAt, `${t.path} updatedAt`),
+      discovered?.agentId ?? null,
+      discovered?.sessionId ?? null,
+      discovered?.kept ?? false,
     ],
   );
-  return { key, id: rows[0]!.id, assignedToOwner };
+  return { key, id: rows[0]!.id, assignedToOwner, discoverySource: discovered?.source };
+}
+
+/** The Discovered marker the Ticket file `t` holds, if any, with the key of its source Ticket to link once every Ticket is in. */
+async function discoveryIn(ctx: ImportContext, t: File) {
+  const d = t.data.discovered;
+  if (d === undefined || d === null) return undefined;
+  const where = `${t.path} discovered`;
+  if (typeof d !== "object" || Array.isArray(d)) refuse(`${where} must name the Agent that filed it`);
+  const { agent, session, sourceTicket, sourceClaim, kept } = d as Record<string, unknown>;
+  const by = await ctx.actor({ agent, session }, where);
+  if (kept !== undefined && typeof kept !== "boolean") refuse(`${where} kept must be true or false`);
+  if (sourceTicket !== undefined && sourceTicket !== null && typeof sourceTicket !== "string") refuse(`${where} sourceTicket must be a Ticket key`);
+  const source = typeof sourceTicket === "string" ? { sourceKey: sourceTicket, claimId: isUuid(sourceClaim) ? sourceClaim : null, where: `${where} sourceTicket` } : undefined;
+  return { agentId: by.agentId!, sessionId: by.sessionId, kept: kept === true, source };
 }
 
 /** The relations the Ticket file `t`, keyed `key`, names. */

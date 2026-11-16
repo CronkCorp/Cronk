@@ -370,6 +370,11 @@ async function busyWorkspace() {
   await admin.post(`/api/suggestions/${suggestions[0]}/accept`);
   await admin.post(`/api/suggestions/${suggestions[1]}/accept`, { content: { avoid: ["Issue", "job"] } });
   await grace.post(`/api/suggestions/${suggestions[2]}/reject`, { reason: "Keep the title." });
+  // Discovered Tickets it files from CRONK-4, which its Report lists: CRONK-5 waits in Ada's Inbox, CRONK-6 she keeps in Backlog.
+  await suggester.post("/api/projects/CRONK/tickets", { title: "Dead links in the docs" });
+  await suggester.post("/api/projects/CRONK/tickets", { title: "Docs build is slow" });
+  await suggester.post("/api/tickets/CRONK-4/reports", { title: "Tidied", body: "Found two more." });
+  await admin.post("/api/tickets/CRONK-6/keep");
   await suggester.delete("/api/agent-sessions/current");
 
   // A second, archived Project; a removed Agent.
@@ -651,6 +656,30 @@ describe("an export without Versions", () => {
       anchor: { passage: "Start here", version: 1, inCurrentVersion: true },
     });
     expect((await admin.get("/api/workspace/guidance")).body.guidance).toEqual({ markdown: "Be kind. Be brief.", version: 1 });
+  });
+});
+
+describe("Discovered Tickets in an export", () => {
+  it("carry their Discovered marker in their frontmatter: the Agent and Agent Session that filed them, their source and whether kept", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+    await admin.post("/api/tickets/CRONK-2/keep");
+    const elsewhere = await startSession(cronk, claude.secret);
+    await elsewhere.post("/api/projects/CRONK/tickets", { title: "Found later" });
+
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+
+    expect(markdown(files["projects/CRONK/tickets/CRONK-2.md"]).data.discovered).toEqual({
+      agent: claude.agentId,
+      session: agent.sessionId,
+      sourceTicket: "CRONK-1",
+      sourceClaim: expect.any(String),
+      kept: true,
+    });
+    expect(markdown(files["projects/CRONK/tickets/CRONK-3.md"]).data.discovered).toEqual({ agent: claude.agentId, session: elsewhere.sessionId });
+    expect(markdown(files["projects/CRONK/tickets/CRONK-1.md"]).data.discovered).toBeUndefined();
   });
 });
 
