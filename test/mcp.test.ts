@@ -366,6 +366,25 @@ describe("working a delegated Ticket over MCP", () => {
     expect(mcp.client.getInstructions()).toMatch(/Ready Tickets[\s\S]*CRONK-1: Ticket 1[\s\S]*CRONK-2: Ticket 2/);
   });
 
+  it("welcomes the Agent saying which Ready Tickets are autonomous, and completes one with a Report", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 2);
+    const claude = await registerAgent(admin, "claude-laptop");
+    await admin.patch("/api/tickets/CRONK-1", { delegateId: claude.agentId, autonomous: true });
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId });
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    const instructions = mcp.client.getInstructions()!;
+    expect(instructions).toMatch(/Autonomous Delegation/);
+    expect(instructions).toContain("- CRONK-1: Ticket 1 (Backlog, autonomous: complete it yourself with a Report)");
+    expect(instructions).toContain("- CRONK-2: Ticket 2 (Backlog)\n");
+
+    expect((await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" })).body.ticket.autonomous).toBe(true);
+    await callTool(mcp, "documents", { action: "write_report", key: "CRONK-1", title: "Done", body: "Fixed the cache." });
+    const done = await callTool(mcp, "tickets", { action: "move", key: "CRONK-1", to: "Done" });
+    expect(done).toMatchObject({ isError: false, body: { ticket: { status: { category: "completed" }, verification: "unverified" } } });
+  });
+
   it("Claims the next Ready Ticket, moves it, splits it and releases it", async () => {
     const { admin, mcp } = await delegatedOverMcp(1);
 

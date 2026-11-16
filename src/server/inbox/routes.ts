@@ -19,6 +19,19 @@ const reviewItem = {
   },
 } as const;
 
+const unverifiedItem = {
+  type: "object",
+  required: ["kind", "at", "ticket", "reports"],
+  description:
+    "An Agent's completion under Autonomous Delegation of a Ticket the User is Assignee of, Unverified until a User Accepts it, with its Reports.",
+  properties: {
+    kind: { type: "string", const: "unverified" },
+    at: { ...timestamp, description: "When the Agent completed it." },
+    ticket: ref("Ticket"),
+    reports: { type: "array", items: ref("Report") },
+  },
+} as const;
+
 const questionItem = {
   type: "object",
   required: ["kind", "at", "question", "ticket"],
@@ -51,7 +64,7 @@ export function inboxRoutes(ctx: AppContext) {
             },
           },
           response: {
-            200: answer("The signed-in User's Inbox: blocking questions first, then the other items, each oldest first", { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [questionItem, reviewItem] } } } }),
+            200: answer("The signed-in User's Inbox: blocking questions first, then the other items, each oldest first", { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [questionItem, reviewItem, unverifiedItem] } } } }),
             ...errors(400, 401, 403, 410),
           },
         },

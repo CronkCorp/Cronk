@@ -570,7 +570,18 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0023_attachments",
+    id: "0023_autonomous_delegation",
+    sql: `
+      -- Autonomous Delegation (work/routes.ts): whether the Delegate may complete the Ticket itself. Only Users set it.
+      ALTER TABLE tickets ADD COLUMN autonomous boolean NOT NULL DEFAULT false;
+      -- What delegating one of the Project's Tickets sets Autonomous Delegation to, unless the User says otherwise.
+      ALTER TABLE projects ADD COLUMN autonomous_by_default boolean NOT NULL DEFAULT false;
+      -- Verification of an Agent's completion: Unverified until a User Accepts it (Verified). Null for any other Ticket.
+      ALTER TABLE tickets ADD COLUMN verification text CHECK (verification IN ('unverified', 'verified'));
+    `,
+  },
+  {
+    id: "0024_attachments",
     sql: `
       -- A file attached to a Ticket (files/attachments.ts). Its bytes live in the file store under
       -- attachments/<id>; the row is what Cronk knows of it. It is readable by whoever can read its Ticket.

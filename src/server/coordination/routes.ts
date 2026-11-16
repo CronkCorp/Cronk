@@ -79,8 +79,14 @@ const welcomeSchema = {
       description: `The Agent's Ready Tickets in the order \`next\` offers them, at most ${WELCOME_READY_LIMIT}.`,
       items: {
         type: "object",
-        required: ["key", "title", "priority", "status"],
-        properties: { key: { type: "string" }, title: { type: "string" }, priority: { type: "string", enum: PRIORITIES }, status: ref("Status") },
+        required: ["key", "title", "priority", "status", "autonomous"],
+        properties: {
+          key: { type: "string" },
+          title: { type: "string" },
+          priority: { type: "string", enum: PRIORITIES },
+          status: ref("Status"),
+          autonomous: { type: "boolean", description: "Under Autonomous Delegation: the Agent completes it itself, with a Report, rather than stopping at In Review." },
+        },
       },
     },
     waitingWork: {
@@ -233,7 +239,11 @@ export function coordinationRoutes(ctx: AppContext) {
             properties: {
               kind: { type: "string", enum: ACTIVITY_KINDS },
               body: { type: "string", minLength: 1, maxLength: 100_000, pattern: "\\S", description: "Markdown." },
-              blocking: { type: "boolean", description: "Only for a question: the Agent waits for the answer. False if left out." },
+              blocking: {
+                type: "boolean",
+                description:
+                  "Only for a question: the Agent waits for the answer. False if left out, and always false under Autonomous Delegation, where the Agent records its best guess and carries on.",
+              },
             },
           },
           response: {
@@ -251,7 +261,8 @@ export function coordinationRoutes(ctx: AppContext) {
         const activity = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           await requireClaimHolder(tx, actor, ticket, now, "logging Activities on it");
-          return insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
+          // Under Autonomous Delegation the Agent never waits: it records its best guess and carries on.
+          return insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking: blocking && !ticket.autonomous }, now);
         });
         ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
         if (kind === "question") inboxesChanged(ctx.live, [actor.owner.id]);

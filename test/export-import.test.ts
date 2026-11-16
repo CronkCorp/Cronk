@@ -248,6 +248,16 @@ async function busyWorkspace() {
   await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
   await admin.patch("/api/tickets/CRONK-1", { statusId: inReview.id });
 
+  // Autonomous Delegation: a Project default, and CRONK-2 completed by claude-laptop on its own, still Unverified.
+  await admin.patch("/api/projects/CRONK", { autonomousByDefault: true });
+  await admin.patch("/api/tickets/CRONK-2", { autonomous: true });
+  const autonomous = await session();
+  await autonomous.post("/api/tickets/CRONK-2/claim");
+  await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done", body: "Shipped the API." });
+  const done = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed");
+  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
+  await autonomous.delete("/api/agent-sessions/current");
+
   // Documents with Versions and Comments, in both page trees.
   cronk.clock.advance(60_000);
   const guide = (await admin.post("/api/projects/CRONK/documents", { title: "Guide", body: "# Guide\n\nStart here." })).body.document;
