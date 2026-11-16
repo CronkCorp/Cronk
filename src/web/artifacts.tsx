@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { api, type Artifact, type ArtifactVersion } from "./api.js";
+import { api, ApiError, type Artifact, type ArtifactVersion } from "./api.js";
 import { Actor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { formatBytes } from "./components/files.js";
 import { Dialog, Menu, Popover } from "./components/overlays.js";
 import { ProtectionHistory } from "./components/protection.js";
-import { ProtectedMark } from "./components/tags.js";
+import { Chip, ProtectedMark } from "./components/tags.js";
+import { ProjectCrumbs } from "./components/crumbs.js";
+import { CopyLink } from "./components/copy-link.js";
 import { RelativeTime } from "./components/time.js";
-import { ProjectCrumbs } from "./documents.js";
 import { packFolder } from "./folder-archive.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, useAction, useCanWrite, useLoad } from "./ui.js";
@@ -53,7 +54,7 @@ export function ArtifactsPage(props: { projectKey?: string }) {
           list.length === 0 ? (
             <div className="empty">
               <h2>No Artifacts yet</h2>
-              <p className="muted">Agents publish prototypes, dashboards and other pages here as they work, and so can you.</p>
+              <p className="muted">Agents publish what they build to be seen, such as dashboards and reports, as they work, and so can you.</p>
             </div>
           ) : (
             <ul className="rows" aria-label="Artifacts">
@@ -63,7 +64,7 @@ export function ArtifactsPage(props: { projectKey?: string }) {
                     <span className="grow">
                       {a.title} {a.protected && <ProtectedMark compact />}
                     </span>
-                    <span className="chip">Version {a.version}</span>
+                    <Chip>{`Version ${a.version}`}</Chip>
                     {a.sourceTicket && <span className="key">{a.sourceTicket.key}</span>}
                     <Actor actor={a.publishedBy} />
                     <RelativeTime at={a.updatedAt} className="muted" />
@@ -109,15 +110,16 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
   const protect = useAction((value: boolean) => api.protectArtifact(a.id, value), (changed) => props.onChanged({ ...a, protected: changed.protected }));
   return (
     <section className="artifact-page">
-      <div className="crumbs muted">
-        {a.projectKey ? (
-          <>
-            <Link to={`/projects/${a.projectKey}`} className="link">{a.projectKey}</Link> / <Link to={listAddress(a.projectKey)} className="link">Artifacts</Link>
-          </>
-        ) : (
+      {a.projectKey ? (
+        <ProjectCrumbs projectKey={a.projectKey}>
+          {" / "}
+          <Link to={listAddress(a.projectKey)} className="link">Artifacts</Link>
+        </ProjectCrumbs>
+      ) : (
+        <div className="muted">
           <Link to="/artifacts" className="link">Workspace Artifacts</Link>
-        )}
-      </div>
+        </div>
+      )}
       <div className="artifact-shell">
         <div className="artifact-bar">
           <h1 className="artifact-title">{shown?.title ?? a.title}</h1>
@@ -151,7 +153,8 @@ function ArtifactView(props: { artifact: Artifact; version: ArtifactVersion | un
         <iframe key={frameUrl} className="artifact-frame" title={`${a.title}, Version ${number}`} src={frameUrl} sandbox={FRAME_SANDBOX} />
       </div>
       <p className="muted hint artifact-note">
-        Served from the Artifact hostname in a sandboxed frame. It loads scripts only from itself and a few CDNs, and network requests are blocked.
+        {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame. It loads
+        scripts only from itself and a few CDNs, and network requests are blocked.
       </p>
       <PublishDialog
         open={publishing}
@@ -201,24 +204,9 @@ function VersionMenu(props: { artifact: Artifact; shown: number }) {
         </ul>
         <CopyLink url={a.url} label="Copy link to latest" />
         <div className="menu-label">Embedded in</div>
-        <p className="muted version-empty">Not embedded anywhere yet. A link to it on its own line in a Document or Report embeds it.</p>
+        <p className="muted version-empty">Not embedded anywhere yet.</p>
       </div>
     </Popover>
-  );
-}
-
-/** A button copying `url`, saying so once it has. */
-function CopyLink(props: { url: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    await navigator.clipboard.writeText(props.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-  return (
-    <Button variant="secondary" onClick={() => void copy()} title={props.url}>
-      {copied ? "Copied" : props.label}
-    </Button>
   );
 }
 
@@ -233,11 +221,16 @@ function PublishDialog(props: {
 }) {
   const [title, setTitle] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [staleError, setStaleError] = useState<unknown>();
   const { run, error, busy } = useAction(
     async () => {
+      setStaleError(undefined);
       const archive = await packFolder(files);
       if (!archive) throw new Error("Pick a folder holding index.html first");
-      return props.publish(title.trim(), archive);
+      return props.publish(title.trim(), archive).catch((err: unknown) => {
+        setStaleError(err);
+        throw err;
+      });
     },
     (artifact) => {
       props.onOpenChange(false);
@@ -247,7 +240,7 @@ function PublishDialog(props: {
     },
   );
   const folderName = files[0]?.webkitRelativePath.split("/")[0];
-  const stale = error && /merge with it/.test(error);
+  const stale = staleError instanceof ApiError && staleError.status === 409 && typeof staleError.body.version === "number";
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.title} description="The whole folder becomes the Version; it must hold index.html at its top.">
       <form

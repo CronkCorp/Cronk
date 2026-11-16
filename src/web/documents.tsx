@@ -6,6 +6,7 @@ import { Banner } from "./components/banner.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
+import { ProjectCrumbs } from "./components/crumbs.js";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   api,
@@ -38,16 +39,6 @@ export const explainStale = (reload: () => void, doing: string) => (err: unknown
   reload();
   throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
-
-/** The way back to a Project, optionally followed by more crumbs. */
-export function ProjectCrumbs(props: { projectKey: string; children?: ReactNode }) {
-  return (
-    <div className="muted">
-      <Link to="/" className="link">Projects</Link> / <Link to={`/projects/${props.projectKey}`} className="link">{props.projectKey}</Link>
-      {props.children}
-    </div>
-  );
-}
 
 /** The way back to the page tree a Document sits in, or to the Ticket a Report is on. */
 function Breadcrumb(props: { projectKey: string | null; ticketKey: string | null }) {
