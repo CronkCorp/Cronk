@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { userActor, type Actor } from "./actor.js";
+import { userActor, type Actor, type AgentActor } from "./actor.js";
 import type { Clock } from "./clock.js";
 import { findLiveAgentSession, touchAgentSession } from "./coordination/agent-sessions.js";
 import type { Database } from "./db/database.js";
@@ -65,8 +65,13 @@ export async function requireActor(ctx: AppContext, request: FastifyRequest, opt
 /** The signed-in User making the request; a 401 if nobody is, a 403 for an Agent. */
 export async function requireUser(ctx: AppContext, request: FastifyRequest): Promise<User> {
   const actor = await requireActor(ctx, request);
-  if (actor.kind === "agent") throw new HttpError(403, "Only a User can do this, not an Agent");
+  requireUserActor(actor, "do this");
   return actor.user;
+}
+
+/** A 403 for an Agent: `what` completes "Only a User can …", as "manage Statuses". */
+export function requireUserActor(actor: Actor, what: string): asserts actor is Exclude<Actor, AgentActor> {
+  if (actor.kind === "agent") throw new HttpError(403, `Only a User can ${what}, not an Agent`);
 }
 
 /** Sets the sign-in cookie. Its lifetime is relative (Max-Age) so it doesn't depend on the browser's clock agreeing with ours. */

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { HttpError, requireActor, type AppContext } from "../context.js";
+import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction } from "../db/database.js";
 import {
   accessSchema,
@@ -20,7 +20,7 @@ import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js"
 import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
-import { projectFor, requireAdmin, requireProjectAccess, requireUserActor, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
+import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
 import { findUserById, publicUser } from "../identity/users.js";
 import {
