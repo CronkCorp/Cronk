@@ -56,4 +56,23 @@ describe("Blocks from a Discovered Ticket", () => {
     // A reason is for those blocks only.
     expect((await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1", reason })).status).toBe(400);
   });
+
+  it("may be given when the Agent files its Discovered Ticket, which isn't filed if any of them can't be added", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+
+    const filed = await agent.post("/api/projects/CRONK/tickets", {
+      title: "Migration leaves orphans",
+      blocks: [{ ticketKey: "CRONK-1", reason }, { ticketKey: "cronk-2", reason: "Same migration." }],
+    });
+
+    expect(filed.status).toBe(201);
+    const { relations } = (await admin.get("/api/tickets/CRONK-3")).body;
+    expect(relations.blocks).toMatchObject([{ key: "CRONK-1", block: { reason } }, { key: "CRONK-2", block: { reason: "Same migration." } }]);
+
+    expect((await agent.post("/api/projects/CRONK/tickets", { title: "Also found", blocks: [{ ticketKey: "CRONK-1", reason }, { ticketKey: "CRONK-99", reason }] })).status).toBe(400);
+    expect((await admin.get("/api/projects/CRONK/tickets")).body.tickets).toHaveLength(3);
+    // Only an Agent's Discovered Ticket is filed with blocks.
+    expect((await admin.post("/api/projects/CRONK/tickets", { title: "Mine", blocks: [{ ticketKey: "CRONK-1", reason }] })).status).toBe(400);
+  });
 });

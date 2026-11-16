@@ -517,7 +517,7 @@ export function workRoutes(ctx: AppContext) {
       },
     );
 
-    app.post<{ Params: { key: string }; Body: { title: string; description?: string; ticket?: string } }>(
+    app.post<{ Params: { key: string }; Body: { title: string; description?: string; ticket?: string; blocks?: { ticketKey: string; reason: string }[] } }>(
       "/api/projects/:key/tickets",
       {
         schema: {
@@ -537,6 +537,19 @@ export function workRoutes(ctx: AppContext) {
                   "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It must be of the same Project. " +
                   "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
               },
+              blocks: {
+                type: "array",
+                maxItems: 50,
+                description:
+                  "For an Agent: Tickets of any Project it can read that its Discovered Ticket blocks from the start, each with why, which the blocked Ticket shows. " +
+                  "Nothing is filed if any can't be blocked.",
+                items: {
+                  type: "object",
+                  required: ["ticketKey", "reason"],
+                  additionalProperties: false,
+                  properties: { ticketKey: { type: "string", maxLength: 30 }, reason: blockReason },
+                },
+              },
             },
           },
           response: {
@@ -552,13 +565,14 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const now = ctx.clock.now();
-        const { ticket, avoidedWords } = await transaction(ctx.db, async (tx) => {
+        const { ticket, blocked, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           // New Tickets start in the Project's first Status; the lock keeps it from being removed meanwhile.
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
           const input = { project, title: request.body.title.trim(), description: request.body.description ?? "", actor, now };
           let ticket: Ticket;
+          const blocked: Ticket[] = [];
           if (actor.kind === "agent") {
             const source = await sourceClaimOf(tx, actor, project.id, request.body.ticket, now, "a Discovered Ticket");
             const sourceTicket = source && (await findTicketsByIds(tx, [source.ticketId]))[0]!;
@@ -570,13 +584,15 @@ export function workRoutes(ctx: AppContext) {
             // Cronk routes it, not the Agent, which may not assign Tickets.
             const assignee = await discoveryAssignee(tx, actor, sourceTicket?.assignee ?? actingUser(actor), project.id);
             ticket = assignee ? await updateTicket(tx, created, { assignee }, { kind: "system" }, now) : created;
+            for (const { ticketKey, reason } of request.body.blocks ?? []) blocked.push(await addDiscoveredBlock(tx, actor, ticket, ticketKey, reason, now));
           } else {
             if (request.body.ticket !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Discovered Ticket came from, as the one it holds the Claim on");
+            if (request.body.blocks !== undefined) throw new HttpError(400, "Only an Agent files a Ticket with blocks, as its Discovered Ticket");
             ticket = await insertTicket(tx, { ...input, status: statuses[0]! });
           }
-          return { ticket, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
+          return { ticket, blocked, avoidedWords: await avoidedWordsIn(tx, actor, project.id, titleAndDescription(request.body)) };
         });
-        ticketsChanged(ctx.live, [ticket]);
+        ticketsChanged(ctx.live, [ticket, ...blocked]);
         if (ticket.discovered) waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
         return reply.code(201).send({ ticket, avoidedWords });
       },
@@ -1040,6 +1056,19 @@ async function relationEnds(
   });
   if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
   return { ticket, other, discoveredBlock };
+}
+
+/**
+ * Has the Agent's new Discovered Ticket `ticket` block the Ticket `otherKey`, which the Agent need only read, recording why.
+ * A missing or hidden `otherKey` answers 400. Returns the blocked Ticket.
+ */
+async function addDiscoveredBlock(tx: Queryable, agent: AgentActor, ticket: Ticket, otherKey: string, reason: string, now: Date): Promise<Ticket> {
+  const other = await ticketFor(tx, agent, otherKey, "read").catch((err: unknown) => {
+    throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
+  });
+  // A new Ticket blocks nothing yet, so this can't close a cycle.
+  await addRelation(tx, agent.owner.workspaceId, { ticket, kind: "blocks", other, actor: agent, now, block: { agentId: agent.agent.id, reason: reason.trim() } });
+  return other;
 }
 
 /** The Status with this id among a Project's Statuses. */
