@@ -107,7 +107,7 @@ export function coordinationRoutes(ctx: AppContext) {
         },
       },
       async (request, reply) => {
-        const agent = requireAgent(await requireActor(ctx, request));
+        const agent = requireAgent(await requireActor(ctx, request, { outsideSession: true }));
         const session = await startAgentSession(ctx.db, { agentId: agent.agent.id, tokenId: agent.tokenId, now: ctx.clock.now() });
         return reply.code(201).send({ session: publicAgentSession(session), welcome: await welcome(ctx, { ...agent, session }) });
       },

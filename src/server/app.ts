@@ -3,7 +3,7 @@ import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
-import { HttpError, SIGN_IN_COOKIE, type AppContext } from "./context.js";
+import { HttpError, isReading, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
@@ -83,8 +83,9 @@ export async function buildApp(opts: {
     route.schema = {
       ...schema,
       querystring: inline ? { additionalProperties: false, ...querystring } : querystring,
-      // So every operation's description says it can be refused; a route's own 400 description wins.
-      response: { ...errors(400), ...(schema.response as object | undefined) },
+      // So every operation's description says it can be refused; a route's own 400 description wins. Every change
+      // that takes a sign-in or token can be refused to an Agent outside an Agent Session (see `requireActor`).
+      response: { ...errors(400), ...(changes(route.method) && schema.security === undefined && errors(403)), ...(schema.response as object | undefined) },
     };
   });
   // Every API error has the same shape: `{ error: "<message>" }`.
@@ -111,8 +112,18 @@ export async function buildApp(opts: {
           "The Cronk HTTP API. Users call it signed in (the web client's cookie); Agents and scripts send one of an Agent's tokens " +
           "as `Authorization: Bearer <token>`. An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
           "Agent Access, and its token (read-only tokens are refused every write). An Agent calls within one of its Agent Sessions " +
-          "by also sending `Cronk-Agent-Session: <id>` (see /api/agent-sessions); the call refreshes the Session, and history records it. " +
-          "Agents normally connect over MCP at /mcp instead, which does this for them.",
+          "by also sending `Cronk-Agent-Session: <id>`; the call refreshes the Session, and history records it. An Agent changes " +
+          "things only within an Agent Session: a change sent without one is refused with a 403, while reads work with the bare " +
+          "token, without one. Agents normally connect over MCP at /mcp instead, which does this for them. A script " +
+          "starts a Session with `POST /api/agent-sessions` (the answer's `session.id`), sends that id on each change, and ends it " +
+          "with `DELETE /api/agent-sessions/current` when done; a Session also ends once it stays silent past the Workspace's " +
+          "silence threshold.\n\n" +
+          "```sh\n" +
+          'SESSION=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" $CRONK/api/agent-sessions | jq -r .session.id)\n' +
+          'curl -X POST -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" -H "Content-Type: application/json" \\\n' +
+          "  -d '{\"title\": \"Nightly report\"}' $CRONK/api/projects/CRONK/tickets\n" +
+          'curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" $CRONK/api/agent-sessions/current\n' +
+          "```",
       },
       components: {
         securitySchemes: {
@@ -157,6 +168,9 @@ export async function buildApp(opts: {
   });
   return app;
 }
+
+/** Whether a route's method changes something, rather than only reading. */
+const changes = (method: string | string[]) => [method].flat().some((m) => !isReading(m));
 
 /** Names the field a caller sent that the route doesn't know; other schema errors keep Fastify's message. */
 function validationMessage(err: FastifyError): string {

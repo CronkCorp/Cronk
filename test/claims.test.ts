@@ -299,7 +299,7 @@ describe("The Claim holder", () => {
     expect((await holder.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(409);
     await holder.post("/api/tickets/CRONK-1/claim");
     expect((await other.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(409);
-    expect((await cronk.client(claude.secret).patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(409);
+    expect((await cronk.client(claude.secret).patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(403);
     expect((await holder.patch("/api/tickets/CRONK-1", { statusId: started })).status).toBe(200);
   });
 });

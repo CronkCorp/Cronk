@@ -92,13 +92,14 @@ describe("Versions", () => {
 
     const inSession = cronk.client(claude.secret, { "cronk-agent-session": session.id });
     expect((await inSession.patch(`/api/documents/${id}`, { baseVersion: 1, body: "v2" })).status).toBe(200);
-    await cronk.client(claude.secret).patch(`/api/documents/${id}`, { baseVersion: 2, body: "v3" });
+    expect((await cronk.client(claude.secret).patch(`/api/documents/${id}`, { baseVersion: 2, body: "v3" })).status).toBe(403);
+    expect((await admin.patch(`/api/documents/${id}`, { baseVersion: 2, body: "v3" })).status).toBe(200);
 
     const res = await admin.get(`/api/documents/${id}/versions`);
     expect(res.status).toBe(200);
     const agent = { kind: "agent", id: claude.agentId, name: "claude-laptop", owner: { id: ada.id, name: "Ada" } };
     expect(res.body.versions).toEqual([
-      { number: 3, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { ...agent, session: null }, restoredFrom: null },
+      { number: 3, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null },
       { number: 2, title: "Plan", at: "2026-01-01T09:01:00.000Z", actor: { ...agent, session: { id: session.id } }, restoredFrom: null },
       { number: 1, title: "Plan", at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" }, restoredFrom: null },
     ]);
