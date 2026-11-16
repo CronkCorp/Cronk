@@ -31,17 +31,24 @@ const SOURCE_COLUMN: Record<MentionKind, string> = {
 
 /**
  * Every source's text with where it lies, as `s`: its kind, id, Workspace, Project (null for the
- * Workspace), a title read as plain text (empty for none) and a Markdown body.
+ * Workspace), a title read as plain text (empty for none) and a Markdown body. Without `artifacts`,
+ * Comments are read as before Comments on Artifacts existed, as a migration from then must.
  */
-const SOURCES = `(
+const sources = (artifacts = true) => `(
   SELECT 'ticket' AS kind, t.id, p.workspace_id, t.project_id, t.title, t.description AS body
   FROM tickets t JOIN projects p ON p.id = t.project_id
   UNION ALL
   SELECT 'document', d.id, d.workspace_id, d.project_id, d.title, d.body FROM documents d
   UNION ALL
-  SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id), coalesce(t.project_id, d.project_id), '', c.body
+  ${
+    artifacts
+      ? `SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id, x.workspace_id), coalesce(t.project_id, d.project_id, x.project_id), '', c.body
   FROM comments c LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
-    LEFT JOIN documents d ON d.id = c.document_id
+    LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN artifacts x ON x.id = c.artifact_id`
+      : `SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id), coalesce(t.project_id, d.project_id), '', c.body
+  FROM comments c LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
+    LEFT JOIN documents d ON d.id = c.document_id`
+  }
   UNION ALL
   SELECT 'term', id, workspace_id, project_id, '', definition FROM terms
   UNION ALL
@@ -117,7 +124,7 @@ async function record(db: Queryable, source: SourceRow): Promise<void> {
  * Run in the transaction that creates or changes it.
  */
 export async function recordMentions(db: Queryable, source: MentionSource): Promise<void> {
-  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${SOURCES} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
+  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${sources()} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
   if (rows[0]) await record(db, rows[0]);
 }
 
@@ -131,7 +138,7 @@ export async function recordMentionsOfNames(db: Queryable, place: { workspaceId:
   // where Markdown escapes the punctuation around it.
   const words = names.map((name) => (name.match(/[\p{L}\p{N}]+/gu) ?? [name]).reduce((a, b) => (b.length > a.length ? b : a)).toLowerCase());
   const { rows } = await db.query<SourceRow>(
-    `SELECT * FROM ${SOURCES}
+    `SELECT * FROM ${sources()}
      WHERE s.workspace_id = $1 AND ($2::uuid IS NULL OR s.project_id = $2)
        AND EXISTS (SELECT 1 FROM unnest($3::text[]) w WHERE strpos(lower(s.title || ' ' || s.body), w) > 0)
      ORDER BY s.kind, s.id`,
@@ -146,12 +153,13 @@ const BATCH = 200;
 /**
  * Records what every source mentions, in the Workspace `workspaceId` (all Workspaces when null), as
  * for a database or an import that didn't record them yet. It parses as `recordMentions` does now: if
- * what counts as a mention changes, add a migration that runs it again.
+ * what counts as a mention changes, add a migration that runs it again. A migration from before Comments
+ * on Artifacts existed passes `artifacts` false.
  */
-export async function recordAllMentions(db: Queryable, workspaceId: string | null = null): Promise<void> {
+export async function recordAllMentions(db: Queryable, workspaceId: string | null = null, opts: { artifacts?: boolean } = {}): Promise<void> {
   for (let after = { kind: "", id: "00000000-0000-0000-0000-000000000000" }; ; ) {
     const { rows } = await db.query<SourceRow>(
-      `SELECT * FROM ${SOURCES} WHERE ($1::uuid IS NULL OR s.workspace_id = $1) AND (s.kind, s.id) > ($2, $3::uuid)
+      `SELECT * FROM ${sources(opts.artifacts)} WHERE ($1::uuid IS NULL OR s.workspace_id = $1) AND (s.kind, s.id) > ($2, $3::uuid)
        ORDER BY s.kind, s.id LIMIT $4`,
       [workspaceId, after.kind, after.id, BATCH],
     );
@@ -167,7 +175,7 @@ export interface Mention {
   id: string;
   /** A Ticket's or Decision's key; null for the others. */
   key: string | null;
-  /** Its title; a Term's name; for a Comment, the title of the Ticket or Document it is on. */
+  /** Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on. */
   title: string;
   /** Null when it lies in the Workspace outside any Project. */
   projectKey: string | null;
@@ -175,6 +183,8 @@ export interface Mention {
   ticketKey: string | null;
   /** For a Comment on a Document: the Document's id. */
   documentId: string | null;
+  /** For a Comment on an Artifact: the Artifact's id. */
+  artifactId: string | null;
   /** When it last changed; for a Comment, when it was posted. */
   at: Date;
 }
@@ -192,26 +202,27 @@ export async function listMentions(db: Queryable, target: { decisionKey: string 
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
        SELECT 'ticket' AS kind, t.id, ${ticketKeySql("p", "t")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
-              t.updated_at AS at, t.project_id, p.workspace_id
+              NULL::uuid AS artifact_id, t.updated_at AS at, t.project_id, p.workspace_id
        FROM m JOIN tickets t ON t.id = m.ticket_id JOIN projects p ON p.id = t.project_id
        UNION ALL
-       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, d.updated_at, d.project_id, d.workspace_id
+       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, d.project_id, d.workspace_id
        FROM m JOIN documents d ON d.id = m.document_id LEFT JOIN projects p ON p.id = d.project_id
          LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
        UNION ALL
-       SELECT 'comment', c.id, NULL, coalesce(t.title, d.title), coalesce(tp.key, dp.key), ${ticketKeySql("tp", "t")}, c.document_id, c.at,
-              coalesce(t.project_id, d.project_id), coalesce(tp.workspace_id, d.workspace_id)
+       SELECT 'comment', c.id, NULL, coalesce(t.title, d.title, x.title), coalesce(tp.key, dp.key, xp.key), ${ticketKeySql("tp", "t")}, c.document_id,
+              c.artifact_id, c.at, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
        FROM m JOIN comments c ON c.id = m.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
          LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
+         LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
        UNION ALL
-       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, tm.updated_at, tm.project_id, tm.workspace_id
+       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.project_id, tm.workspace_id
        FROM m JOIN terms tm ON tm.id = m.term_id LEFT JOIN projects p ON p.id = tm.project_id
        UNION ALL
-       SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL,
+       SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL, NULL,
               dc.updated_at, dc.project_id, dc.workspace_id
        FROM m JOIN decisions dc ON dc.id = m.decision_id LEFT JOIN projects p ON p.id = dc.project_id
      )
-     SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", at
+     SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at
      FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
     [value, readable.projectIds, readable.workspaceId],

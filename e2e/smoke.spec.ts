@@ -2,6 +2,8 @@ import { expect, test, type Locator } from "@playwright/test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
+import tar from "tar-stream";
 
 const ada = { email: "ada@example.com", password: "correct horse battery" };
 
@@ -1509,3 +1511,44 @@ test("open Terms from a Project, override a Workspace Term there and edit it", a
   await page.getByLabel("Filter Terms and words to avoid").fill("client");
   await expect(page.getByRole("main")).toContainText("A billing account: who pays.");
 });
+
+test("comment on an Artifact's Version from the drawer beside it, and see a reply arrive live", async ({ page, request }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Artifact comments", key: "ARC" } });
+  const { agentCall } = await delegatedTicket(page, request, "artifact-bot", "Show the limits", "ARC");
+  const published = await request.post("/api/projects/ARC/artifacts?title=Limits", {
+    headers: { ...agentCall, "content-type": "application/gzip" },
+    data: await tarGz({ "index.html": "<h1>Limits</h1>" }),
+  });
+  expect(published.status()).toBe(201);
+  const { artifact } = await published.json();
+
+  await page.goto(`/artifacts/${artifact.id}`);
+  const drawer = page.getByRole("complementary", { name: "Comments on this Artifact" });
+  await expect(drawer.getByText("Live")).toBeVisible();
+  await drawer.getByRole("textbox", { name: "Comment on Version 1" }).fill("Can it show the limit as a line?");
+  await drawer.getByRole("button", { name: "Comment", exact: true }).click();
+  const posted = drawer.getByRole("listitem").filter({ hasText: "Can it show the limit as a line?" });
+  await expect(posted).toContainText("on Version 1");
+  await expect(page.getByRole("button", { name: "Comments 1" })).toBeVisible();
+
+  // The Agent that published it answers from elsewhere; the drawer shows it without a reload.
+  const { comments } = await (await page.request.get(`/api/artifacts/${artifact.id}/comments`)).json();
+  await request.post(`/api/artifacts/${artifact.id}/comments`, { headers: agentCall, data: { body: "Added the line.", replyToCommentId: comments[0].id } });
+  await expect(drawer.getByText("Added the line.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Comments 2" })).toBeVisible();
+
+  // The button closes the drawer.
+  await page.getByRole("button", { name: "Comments 2" }).click();
+  await expect(drawer).toBeHidden();
+});
+
+/** A gzipped tar archive holding `files`, path to text, as publishing an Artifact takes. */
+async function tarGz(files: Record<string, string>): Promise<Buffer> {
+  const pack = tar.pack();
+  for (const [name, text] of Object.entries(files)) pack.entry({ name }, text);
+  pack.finalize();
+  const chunks: Buffer[] = [];
+  for await (const chunk of pack) chunks.push(Buffer.from(chunk as Uint8Array));
+  return gzipSync(Buffer.concat(chunks));
+}

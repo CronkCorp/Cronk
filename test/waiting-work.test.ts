@@ -8,7 +8,7 @@ describe("Work waiting for an Agent", () => {
 
     const welcomed = await cronk.client(claude.secret).post("/api/agent-sessions");
     expect(welcomed.body.welcome.waitingWork).toEqual([
-      { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null },
+      { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null, artifact: null },
     ]);
     expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);
     await session();
@@ -34,7 +34,7 @@ describe("An @mention of an Agent", () => {
 
     const posted = (await admin.post(`/api/documents/${doc.id}/comments`, { body: "@codex, can you check this? cc @nobody, mail@codex.dev" })).body.comment;
 
-    expect(await waitingWork(cronk, codex)).toEqual([{ reason: "mention", comment: posted, ticket: null, document: { id: doc.id, title: "Design" } }]);
+    expect(await waitingWork(cronk, codex)).toEqual([{ reason: "mention", comment: posted, ticket: null, document: { id: doc.id, title: "Design" }, artifact: null }]);
     expect(await waitingWork(cronk, bobsCodex)).toEqual([]);
   });
 
@@ -150,7 +150,7 @@ describe("An answer to an Agent's question", () => {
     const answer = (await admin.post("/api/tickets/CRONK-1/comments", { body: "The first.", replyToActivityId: question.id })).body.comment;
 
     expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([
-      { reason: "answer", comment: answer, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null },
+      { reason: "answer", comment: answer, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null, artifact: null },
     ]);
   });
 
@@ -219,7 +219,7 @@ describe("An Agent Session's live updates", () => {
 
     const posted = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Please also update the docs." })).body.comment;
 
-    const pushed = { event: "waiting", id: expect.stringMatching(/^\d+$/), data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null } } };
+    const pushed = { event: "waiting", id: expect.stringMatching(/^\d+$/), data: { waiting: { reason: "comment", comment: posted, ticket: { key: "CRONK-1", title: "Ticket 1" }, document: null, artifact: null } } };
     expect(await first.next()).toEqual(pushed);
     expect(await second.next()).toEqual(pushed);
     await admin.post("/api/tickets/CRONK-1/comments", { body: "@codex too" });

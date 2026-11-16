@@ -5,9 +5,9 @@ import { embedsSql, recordEmbeds } from "../files/artifact-embeds.js";
 import type { ArtifactAt } from "../../shared/artifact-embeds.js";
 
 /**
- * Comments: conversation any Actor posts on a Ticket or a Document, as opposed to an Agent's
- * own Activities. A Comment may reply to another Comment on the same Ticket or Document, or
- * to an Activity on the same Ticket. The body is Markdown.
+ * Comments: conversation any Actor posts on a Ticket, a Document or an Artifact, as opposed to an
+ * Agent's own Activities. A Comment may reply to another Comment on the same Ticket, Document or
+ * Artifact, or to an Activity on the same Ticket. The body is Markdown.
  */
 export interface Comment {
   id: string;
@@ -16,6 +16,10 @@ export interface Comment {
   ticketKey: string | null;
   /** Set on a Comment on a Document. */
   documentId: string | null;
+  /** Set on a Comment on an Artifact. */
+  artifactId: string | null;
+  /** On an Artifact: the Version whoever posted it was viewing. */
+  artifactVersion: number | null;
   replyToCommentId: string | null;
   replyToActivityId: string | null;
   /** The passage of its Document it is anchored to; null when it isn't anchored. */
@@ -37,14 +41,19 @@ export interface Anchor {
   inCurrentVersion: boolean;
 }
 
-/** What a Comment is posted on: a Ticket or a Document. */
-export type CommentTarget = { ticketId: string } | { documentId: string };
+/**
+ * What a Comment is posted on: a Ticket, a Document, or an Artifact. A Comment posted on an Artifact
+ * records `version`, the Version being viewed; listing and looking up Comments ignore it.
+ */
+export type CommentTarget = { ticketId: string } | { documentId: string } | { artifactId: string; version?: number };
 
 interface CommentRow extends RecordedActorRow {
   id: string;
   ticket_id: string | null;
   ticket_key: string | null;
   document_id: string | null;
+  artifact_id: string | null;
+  artifact_version: number | null;
   reply_to_comment_id: string | null;
   reply_to_activity_id: string | null;
   anchor_passage: string | null;
@@ -56,25 +65,30 @@ interface CommentRow extends RecordedActorRow {
   at: Date;
   ticket_title: string | null;
   document_title: string | null;
+  artifact_title: string | null;
   project_id: string | null;
 }
 
 /**
- * Selects Comments, with their Ticket's key, Actor and whether their anchor is still in the
- * Document, from `source` (the table, or a CTE of new rows) as `c`.
+ * Selects Comments, with their Ticket's key, Actor, whether their anchor is still in the Document,
+ * and the Project and title of the Ticket, Document or Artifact they are on, from `source` (the table, or a CTE of new rows) as `c`.
  */
 const selectFrom = (source: string) => `
-  SELECT c.id, c.ticket_id, p.key || '-' || t.number AS ticket_key, c.document_id, c.reply_to_comment_id, c.reply_to_activity_id,
+  SELECT c.id, c.ticket_id, p.key || '-' || t.number AS ticket_key, c.document_id, c.artifact_id, c.artifact_version, c.reply_to_comment_id, c.reply_to_activity_id,
     c.anchor_passage, c.anchor_version, strpos(d.body, c.anchor_passage) > 0 AS anchor_in_current_version,
-    c.body, ${embedsSql("comment", "c")} AS embeds, c.send_back, c.at, t.title AS ticket_title, d.title AS document_title, coalesce(t.project_id, d.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
+    c.body, ${embedsSql("comment", "c")} AS embeds, c.send_back, c.at, t.title AS ticket_title, d.title AS document_title, x.title AS artifact_title,
+    coalesce(t.project_id, d.project_id, x.project_id) AS project_id, u.id AS user_id, u.name AS user_name, a.id AS agent_id, a.name AS agent_name, c.actor_session_id AS session_id
   FROM ${source} c JOIN users u ON u.id = c.actor_user_id LEFT JOIN agents a ON a.id = c.actor_agent_id
-    LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN documents d ON d.id = c.document_id`;
+    LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN documents d ON d.id = c.document_id
+    LEFT JOIN artifacts x ON x.id = c.artifact_id`;
 
 const toComment = (row: CommentRow): Comment => ({
   id: row.id,
   ticketId: row.ticket_id,
   ticketKey: row.ticket_key,
   documentId: row.document_id,
+  artifactId: row.artifact_id,
+  artifactVersion: row.artifact_version,
   replyToCommentId: row.reply_to_comment_id,
   replyToActivityId: row.reply_to_activity_id,
   anchor:
@@ -88,12 +102,20 @@ const toComment = (row: CommentRow): Comment => ({
   actor: toRecordedActor(row),
 });
 
-const targetColumns = (target: CommentTarget): [ticketId: string | null, documentId: string | null] =>
-  "ticketId" in target ? [target.ticketId, null] : [null, target.documentId];
+/** The `ticket_id`, `document_id`, `artifact_id` and `artifact_version` a Comment on `target` is stored with. */
+function targetColumns(target: CommentTarget): [ticketId: string | null, documentId: string | null, artifactId: string | null, artifactVersion: number | null] {
+  if ("ticketId" in target) return [target.ticketId, null, null, null];
+  if ("documentId" in target) return [null, target.documentId, null, null];
+  if (target.version === undefined) throw new Error("A Comment on an Artifact records the Version being viewed");
+  return [null, null, target.artifactId, target.version];
+}
 
 /** SQL condition: the Comment `c` is on `target`, whose id is the parameter `param`, such as `$1`; with that id. */
-const onTarget = (target: CommentTarget, param: string): [condition: string, id: string] =>
-  "ticketId" in target ? [`c.ticket_id = ${param}`, target.ticketId] : [`c.document_id = ${param}`, target.documentId];
+function onTarget(target: CommentTarget, param: string): [condition: string, id: string] {
+  if ("ticketId" in target) return [`c.ticket_id = ${param}`, target.ticketId];
+  if ("documentId" in target) return [`c.document_id = ${param}`, target.documentId];
+  return [`c.artifact_id = ${param}`, target.artifactId];
+}
 
 /**
  * Records a Comment by `actor` on `target`. Callers check what it replies to is on the same
@@ -115,9 +137,9 @@ export async function insertComment(
 ): Promise<Comment> {
   const { rows } = await db.query<CommentRow>(
     `WITH inserted AS (
-       INSERT INTO comments (ticket_id, document_id, reply_to_comment_id, reply_to_activity_id, anchor_passage, anchor_version,
-         body, send_back, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *)
+       INSERT INTO comments (ticket_id, document_id, artifact_id, artifact_version, reply_to_comment_id, reply_to_activity_id,
+         anchor_passage, anchor_version, body, send_back, at, actor_kind, actor_user_id, actor_agent_id, actor_session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *)
      ${selectFrom("inserted")}`,
     [
       ...targetColumns(target),
@@ -149,11 +171,13 @@ export async function findComment(db: Queryable, target: CommentTarget, id: stri
   return rows[0] && toComment(rows[0]);
 }
 
-/** Where a Comment is: its Project (null for a Workspace Document) and its Ticket or Document. */
+/** Where a Comment is: its Project (null for a Workspace Document or Artifact) and its Ticket, Document or Artifact. */
 export interface CommentOn {
   projectId: string | null;
   ticket: { key: string; title: string } | null;
   document: { id: string; title: string } | null;
+  /** On an Artifact: which, with the Version the Comment was on. */
+  artifact: { id: string; title: string; version: number } | null;
 }
 
 /** The Comments with these ids, in the order they were posted, each with where it is. */
@@ -165,6 +189,7 @@ export async function findCommentsByIds(db: Queryable, ids: string[]): Promise<{
       projectId: row.project_id,
       ticket: row.ticket_key === null ? null : { key: row.ticket_key, title: row.ticket_title! },
       document: row.document_id === null ? null : { id: row.document_id, title: row.document_title! },
+      artifact: row.artifact_id === null ? null : { id: row.artifact_id, title: row.artifact_title!, version: row.artifact_version! },
     },
   }));
 }
