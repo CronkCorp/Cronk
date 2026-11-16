@@ -27,7 +27,7 @@ describe("Claiming a Ticket", () => {
 
     const refused = await second.post("/api/tickets/CRONK-1/claim");
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toMatch(/Claimed/);
+    expect(refused.body.error).toBe("CRONK-1 is Claimed by another Agent Session");
     expect((await first.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
 
     expect((await second.delete("/api/tickets/CRONK-1/claim")).status).toBe(409);
@@ -40,16 +40,52 @@ describe("Claiming a Ticket", () => {
     const { cronk, admin, claude, session } = await delegatedSetup(2);
     const inSession = await session();
     await admin.patch("/api/tickets/CRONK-2", { delegateId: null });
-    expect((await inSession.post("/api/tickets/CRONK-2/claim")).status).toBe(409);
+    const undelegated = await inSession.post("/api/tickets/CRONK-2/claim");
+    expect(undelegated.status).toBe(409);
+    expect(undelegated.body.error).toBe("CRONK-2 isn't delegated to claude-laptop");
 
     const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
     for (const category of ["completed", "canceled"]) {
       await admin.patch("/api/tickets/CRONK-1", { statusId: statuses.find((s) => s.category === category)!.id });
-      expect((await inSession.post("/api/tickets/CRONK-1/claim")).status).toBe(409);
+      const finished = await inSession.post("/api/tickets/CRONK-1/claim");
+      expect(finished.status).toBe(409);
+      expect(finished.body.error).toMatch(/^CRONK-1 is (Done|Canceled), so there is nothing left to work on$/);
     }
 
     expect((await cronk.client(claude.secret).post("/api/tickets/CRONK-1/claim")).status).toBe(400);
     expect((await admin.post("/api/tickets/CRONK-1/claim")).status).toBe(400);
+  });
+
+  it("is refused, saying why, for a Ticket that isn't Ready: In Review, blocked by unfinished Tickets, or in an archived Project", async () => {
+    const { admin, session } = await delegatedSetup(5);
+    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
+    const inCategory = (category: string) => statuses.find((s) => s.category === category)!.id;
+    await admin.patch("/api/tickets/CRONK-1", { statusId: inCategory("in_review") });
+    await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocked_by", ticketKey: "CRONK-3" });
+    await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocked_by", ticketKey: "CRONK-4" });
+    await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocked_by", ticketKey: "CRONK-5" });
+    await admin.patch("/api/tickets/CRONK-5", { statusId: inCategory("completed") });
+    const agent = await session();
+
+    const inReview = await agent.post("/api/tickets/CRONK-1/claim");
+    expect(inReview.status).toBe(409);
+    expect(inReview.body.error).toBe("CRONK-1 is In Review, waiting on a User to send it back");
+    const blocked = await agent.post("/api/tickets/CRONK-2/claim");
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("CRONK-2 is blocked by CRONK-3 and CRONK-4, which aren't finished");
+
+    await admin.patch("/api/projects/CRONK", { archived: true });
+    const archived = await agent.post("/api/tickets/CRONK-3/claim");
+    expect(archived.status).toBe(409);
+    expect(archived.body.error).toBe("CRONK-3 is in the archived Project CRONK");
+    await admin.patch("/api/projects/CRONK", { archived: false });
+
+    await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Needs tests" });
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    // Claiming again from the Agent Session holding the Claim keeps it.
+    const again = await agent.post("/api/tickets/CRONK-1/claim");
+    expect(again.status).toBe(200);
+    expect(again.body.claim.session.id).toBe(agent.sessionId);
   });
 });
 

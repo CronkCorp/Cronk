@@ -210,6 +210,17 @@ export async function findDelegatedTicketsInTheClear(
   return rows.map((r) => ({ ticketId: r.id, delegateId: r.delegate_id, projectId: r.project_id, workspaceId: r.workspace_id }));
 }
 
+/** Whether the Ticket `ticketId` is Ready for the Agent at `now`. */
+export async function isTicketReady(db: Queryable, scope: ReadyScope, ticketId: string, now: Date): Promise<boolean> {
+  const { rowCount } = await db.query(`SELECT 1 FROM tickets t JOIN statuses s ON s.id = t.status_id WHERE t.id = $4 AND ${isReady("$1", "$2", "$3")}`, [
+    scope.agentId,
+    scope.projectIds,
+    now,
+    ticketId,
+  ]);
+  return rowCount !== 0;
+}
+
 /**
  * Claims the Agent's first Ready Ticket for the Session `sessionId` and returns its id;
  * undefined if none is Ready. Run inside a transaction.
@@ -223,11 +234,7 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
   for (const id of await listReadyTicketIds(db, scope, now)) {
     const locked = await db.query("SELECT 1 FROM tickets WHERE id = $1 FOR UPDATE SKIP LOCKED", [id]);
     if (locked.rowCount === 0) continue;
-    const ready = await db.query(
-      `SELECT 1 FROM tickets t JOIN statuses s ON s.id = t.status_id WHERE t.id = $4 AND ${isReady("$1", "$2", "$3")}`,
-      [scope.agentId, scope.projectIds, now, id],
-    );
-    if (ready.rowCount === 0) continue;
+    if (!(await isTicketReady(db, scope, id, now))) continue;
     await setClaim(db, id, sessionId, now);
     return id;
   }
