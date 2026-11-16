@@ -202,6 +202,27 @@ describe("Discovered Tickets in Triage", () => {
   });
 });
 
+describe("A Discovered Ticket whose Assignee can no longer act on it", () => {
+  it("goes to Triage while its Assignee is deactivated or can't see its Project, keeping its Assignee", async () => {
+    const { cronk, admin } = await delegatedSetup(0);
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const bobs = await startSession(cronk, (await registerAgent(bob, "bob-bot")).secret);
+    await bobs.post("/api/projects/CRONK/tickets", { title: "Found" });
+    expect(await waiting(bob)).toEqual(["discovered CRONK-1"]);
+
+    await admin.patch(`/api/users/${bobId}`, { active: false });
+    expect(await waiting(admin, "/api/triage")).toEqual(["discovered CRONK-1"]);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.assignee).toMatchObject({ id: bobId });
+
+    await admin.patch(`/api/users/${bobId}`, { active: true });
+    expect(await waiting(admin, "/api/triage")).toEqual([]);
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await waiting(admin, "/api/triage")).toEqual(["discovered CRONK-1"]);
+  });
+});
+
 describe("A Report", () => {
   it("lists the Discovered Tickets filed from its Ticket during the Claim it was written in", async () => {
     const { admin, session } = await delegatedSetup();

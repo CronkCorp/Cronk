@@ -55,7 +55,8 @@ const discoveredItem = {
   type: "object",
   required: ["kind", "at", "ticket", "reports"],
   description:
-    "A Discovered Ticket with no Assignee, in Backlog and undelegated. A User with Write in its Project takes it by assigning it to themselves, " +
+    "A Discovered Ticket in Backlog and undelegated, with no Assignee or one who is deactivated or has no access to its Project. " +
+    "A User with Write in its Project takes it by assigning it to themselves, " +
     "which moves it to their Inbox. `reports` is empty.",
   properties: {
     kind: { type: "string", const: "discovered" },

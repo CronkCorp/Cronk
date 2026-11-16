@@ -68,8 +68,8 @@ export function TriagePage(props: { address: TriageAddress; me: User }) {
             empty={{
               heading: "Nothing in Triage",
               hint:
-                "Agents' Unverified completions and Discovered Tickets with no Assignee, delegated or In Review Tickets whose Assignee is deactivated or " +
-                "can't see their Project, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
+                "Agents' Unverified completions with no Assignee, Discovered Tickets and delegated or In Review Tickets whose Assignee is missing, " +
+                "deactivated or can't see their Project, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
             }}
             keysHint="J / K moves through the list, C Accepts or takes it, S reopens or rejects."
             me={props.me}

@@ -886,13 +886,14 @@ function foundBy(ticket: DiscoveredItem["ticket"]): string {
 /**
  * A Ticket an Agent discovered (docs/ui.md § Inbox and Triage in Phase 2): who found it and while working on which Ticket, its
  * description, and what to do with it. In the Inbox: Delegate to the Agent that found it, when it is one of the User's own, Delegate
- * to… another of their Agents, Keep in Backlog, and Cancel. In Triage, where it has no Assignee: Take it, which assigns it to the
+ * to… another of their Agents, Keep in Backlog, and Cancel. In Triage, where nobody who can act on it is Assignee: Take it, which assigns it to the
  * User and moves it to their Inbox, and Cancel.
  */
 function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
   const { ticket } = props.item;
   const { agent, session, sourceTicket } = ticket.discovered!;
-  const inTriage = ticket.assignee === null;
+  // An Inbox holds only the User's own; Triage, those with no Assignee or one who can't act on them.
+  const inTriage = ticket.assignee?.id !== props.me.id;
   const [agents] = useLoad(() => api.agents(), []);
   // Delegating needs one of the Assignee's own Agents, and the Inbox shows the User only their own Tickets.
   const own = agents.kind === "loaded" ? agents.value.filter((a) => a.owner.id === props.me.id) : [];

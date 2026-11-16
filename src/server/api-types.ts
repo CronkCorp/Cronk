@@ -194,7 +194,7 @@ export type InboxKind = InboxItem["kind"];
 
 /**
  * One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, a delegated or In Review Ticket
- * whose Assignee is deactivated or can't see its Project, a Suggestion nobody reviews, or a Discovered Ticket with no Assignee.
+ * whose Assignee is deactivated or can't see its Project, a Suggestion nobody reviews, or a Discovered Ticket with no Assignee who can act on it.
  */
 export type TriageItem = Serialized<UnverifiedItem> | Serialized<UnattendedItem> | Serialized<SuggestionInboxItem> | Serialized<DiscoveredItem>;
 export type TriageKind = TriageItem["kind"];

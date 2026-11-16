@@ -2,6 +2,7 @@ import type { Queryable } from "../db/database.js";
 import { noAccessSql, visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
+import { isWaitingDiscoverySql } from "../work/tickets.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
 import { asTicketItems, ENTERED_STATUS_AT, ticketItems, type DiscoveredItem, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
@@ -54,9 +55,20 @@ function unverified(db: Queryable, projectIds: string[]): Promise<UnverifiedItem
   return ticketItems(db, "unverified", { assigneeId: null, projectIds });
 }
 
-/** The Discovered Tickets with no Assignee waiting in the Projects `projectIds`, which any User with Write there may take. */
-function discovered(db: Queryable, projectIds: string[]): Promise<DiscoveredItem[]> {
-  return ticketItems(db, "discovered", { assigneeId: null, projectIds });
+/**
+ * The Discovered Tickets waiting in the Projects `projectIds` with no Assignee who can act on them: none, or one who is deactivated or
+ * has no access to the Project (see `noAccessSql`). Any User with Write there may take one.
+ */
+async function discovered(db: Queryable, projectIds: string[]): Promise<DiscoveredItem[]> {
+  const { rows } = await db.query<{ id: string; at: Date }>(
+    `SELECT t.id, ${ENTERED_STATUS_AT} AS at
+     FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id LEFT JOIN users u ON u.id = t.assignee_id
+     WHERE t.project_id = ANY($1::uuid[]) AND ${isWaitingDiscoverySql("t", "s")}
+       AND (u.id IS NULL OR u.deactivated_at IS NOT NULL OR ${noAccessSql("u", "p")})
+     ORDER BY at, p.key, t.number`,
+    [projectIds],
+  );
+  return asTicketItems(db, "discovered", rows);
 }
 
 /**
