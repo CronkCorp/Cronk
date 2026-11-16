@@ -1,10 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
+import { getWorkspace } from "../workspace/workspaces.js";
+import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
 import {
   deleteTerm,
   findTerm,
@@ -175,6 +177,41 @@ export function termRoutes(ctx: AppContext) {
         const { project } = await projectFor(ctx.db, actor, request.params.key, "write");
         const term = await create(actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
         return reply.code(201).send({ term });
+      },
+    );
+
+    const glossaryAnswer = {
+      200: {
+        description: "The place's own Terms as a GLOSSARY.md, grouped and by name, as an export writes it",
+        content: { "text/markdown": { schema: { type: "string" } } },
+      },
+    };
+    const sendGlossary = (reply: FastifyReply, title: string, intro: string | null, terms: StoredTerm[]) =>
+      reply
+        .header("content-type", "text/markdown; charset=utf-8")
+        .header("content-disposition", 'attachment; filename="GLOSSARY.md"')
+        .send(glossaryMarkdown(title, intro, terms));
+
+    app.get(
+      "/api/workspace/terms/glossary",
+      { schema: { response: { ...glossaryAnswer, ...errors(401, 403, 410) } } },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "read");
+        const workspaceId = actingUser(actor).workspaceId;
+        const { title, intro } = glossaryHeading({ workspaceName: (await getWorkspace(ctx.db, workspaceId)).name });
+        return sendGlossary(reply, title, intro, await listTerms(ctx.db, { workspaceId, projectId: null }));
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/terms/glossary",
+      { schema: { params: projectParams, response: { ...glossaryAnswer, ...errors(401, 404, 410) } } },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        const { title, intro } = glossaryHeading({ projectKey: project.key });
+        return sendGlossary(reply, title, intro, await listTerms(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }));
       },
     );
 

@@ -198,7 +198,7 @@ const EXPORT_FORMAT =
 const versionsQuery = {
   type: "object",
   properties: {
-    versions: { type: "boolean", default: true, description: "Include every Version of Documents, Reports and Guidance; false exports only the current one, which imports as Version 1." },
+    versions: { type: "boolean", default: true, description: "Include every Version of Documents, Reports, Guidance and Terms; false exports only the current one, which imports as Version 1." },
   },
 } as const;
 

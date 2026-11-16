@@ -7,7 +7,7 @@ export interface ExportScope {
   workspaceId: string;
   /** The one Project to export; the whole Workspace when null. */
   projectId: string | null;
-  /** Whether to include every Version of Documents, Reports and Guidance, not only the current one. */
+  /** Whether to include every Version of Documents, Reports, Guidance and Terms, not only the current one. */
   versions: boolean;
   now: Date;
 }
