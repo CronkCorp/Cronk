@@ -188,16 +188,19 @@ describe("A Ticket's live updates", () => {
 });
 
 describe("Deleting a Report", () => {
-  it("is refused to Agents, even the Claim holder, and allowed to Users", async () => {
+  it("is refused to Agents, even the Claim holder, leaving the Ticket untouched, and allowed to Users", async () => {
     const { admin, session } = await delegatedSetup();
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
     const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." })).body.report;
+    const ticket = (await admin.get("/api/tickets/CRONK-1")).body;
 
     const refused = await agent.delete(`/api/documents/${report.id}?baseVersion=1`);
     expect(refused.status).toBe(403);
-    expect(refused.body.error).toMatch(/Report/);
+    expect(refused.body.error).toBe("Only a User can delete a Document, not an Agent");
     expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toHaveLength(1);
+    expect((await admin.get("/api/tickets/CRONK-1")).body).toEqual(ticket);
+    expect((await agent.patch("/api/tickets/CRONK-1", { title: "Still editable" })).status).toBe(200);
 
     expect((await admin.delete(`/api/documents/${report.id}?baseVersion=1`)).status).toBe(204);
     expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports).toEqual([]);
