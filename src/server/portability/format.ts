@@ -73,6 +73,8 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   in the order they were written; replies and answers name them by that number. \`<KEY>.history.md\` holds its history, oldest
   first, with the names recorded at the time; a User in it also has their \`email\`, a Status its \`current\` name if it is
   still in the Project, an Agent its id from \`people.md\`, and a Document the \`path\` of its file if the export holds it.
+  A Ticket under Autonomous Delegation has \`autonomous: true\`, and an Agent's completion its \`verification\` (\`unverified\`
+  or \`verified\`); a Project's \`autonomousByDefault\` is written when on.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
 already in the installation an export is imported into come in deactivated, since they have no password there; an Admin
