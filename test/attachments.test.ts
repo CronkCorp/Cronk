@@ -388,3 +388,19 @@ describe("A Ticket's Files", () => {
     ]);
   });
 });
+
+describe("Deleting a Document", () => {
+  it("deletes its Attachments and those in its Comments, and frees their storage", async () => {
+    const { admin } = await setup();
+    const doc = (await admin.post("/api/projects/CRONK/documents", { title: "Scratch" })).body.document;
+    const own = (await admin.upload(`/api/documents/${doc.id}/attachments?name=a.txt`, Buffer.from("12345"), "text/plain")).body.attachment.id;
+    const comment = (await admin.post(`/api/documents/${doc.id}/comments`, { body: "Note." })).body.comment;
+    const inComment = (await admin.upload(`/api/comments/${comment.id}/attachments?name=b.txt`, Buffer.from("123"), "text/plain")).body.attachment.id;
+    await admin.upload("/api/tickets/CRONK-1/attachments?name=kept.txt", Buffer.from("12"), "text/plain");
+
+    expect((await admin.delete(`/api/documents/${doc.id}?baseVersion=1`)).status).toBe(204);
+    expect((await admin.download(`/api/attachments/${own}/file`)).status).toBe(404);
+    expect((await admin.download(`/api/attachments/${inComment}/file`)).status).toBe(404);
+    expect((await admin.get("/api/workspace/storage")).body.attachments).toEqual({ files: 1, bytes: 2 });
+  });
+});
