@@ -6,6 +6,7 @@ import { agentAccessSchema, answer, errors, nameSchema, ref } from "../schemas.j
 import { MAX_TRANSCRIPT_BYTES, MIN_TRANSCRIPT_BYTES } from "../transcripts/transcripts.js";
 import { getWorkspace, publicWorkspace, updateWorkspace } from "./workspaces.js";
 import { attachmentStorage } from "../files/attachments.js";
+import { artifactStorage } from "../files/artifacts.js";
 
 const MB = 1024 * 1024;
 
@@ -102,7 +103,7 @@ export function workspaceRoutes(ctx: AppContext) {
           response: {
             200: answer("The storage used, by kind of file", {
               type: "object",
-              required: ["attachments"],
+              required: ["attachments", "artifacts"],
               properties: {
                 attachments: {
                   type: "object",
@@ -110,6 +111,14 @@ export function workspaceRoutes(ctx: AppContext) {
                   properties: {
                     files: { type: "integer", description: "How many Attachments there are." },
                     bytes: { type: "integer", description: "How many bytes their files take." },
+                  },
+                },
+                artifacts: {
+                  type: "object",
+                  required: ["files", "bytes"],
+                  properties: {
+                    files: { type: "integer", description: "How many files the Versions of Artifacts hold, every Version counted." },
+                    bytes: { type: "integer", description: "How many bytes those files take." },
                   },
                 },
               },
@@ -121,7 +130,7 @@ export function workspaceRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         requireAdmin(user, "see the storage used");
-        return { attachments: await attachmentStorage(ctx.db, user.workspaceId) };
+        return { attachments: await attachmentStorage(ctx.db, user.workspaceId), artifacts: await artifactStorage(ctx.db, user.workspaceId) };
       },
     );
   };

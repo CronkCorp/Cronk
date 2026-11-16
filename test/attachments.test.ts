@@ -131,14 +131,14 @@ describe("The Attachment size limit", () => {
 describe("Storage used", () => {
   it("shows Admins how many Attachments the Workspace holds and how much space their files take", async () => {
     const { cronk, admin } = await setup();
-    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 0, bytes: 0 } });
+    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 0, bytes: 0 }, artifacts: { files: 0, bytes: 0 } });
 
     await admin.upload("/api/tickets/CRONK-1/attachments?name=a.txt", Buffer.from("12345"), "text/plain");
     const b = (await admin.upload("/api/tickets/CRONK-1/attachments?name=b.txt", Buffer.from("123"), "text/plain")).body.attachment.id;
-    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 2, bytes: 8 } });
+    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 2, bytes: 8 }, artifacts: { files: 0, bytes: 0 } });
 
     await admin.delete(`/api/attachments/${b}`);
-    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 1, bytes: 5 } });
+    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 1, bytes: 5 }, artifacts: { files: 0, bytes: 0 } });
 
     const member = await joinAs(cronk, admin, "bob@example.com");
     expect((await member.get("/api/workspace/storage")).status).toBe(403);

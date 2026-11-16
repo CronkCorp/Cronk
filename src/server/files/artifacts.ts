@@ -241,3 +241,13 @@ export async function findArtifactAnywhere(db: Queryable, id: string): Promise<{
   const row = await findArtifactRow(db, id);
   return row && { workspaceId: row.workspaceId, version: row.version };
 }
+
+/** How many files every Version of the Workspace's Artifacts holds, and how many bytes they take. */
+export async function artifactStorage(db: Queryable, workspaceId: string): Promise<{ files: number; bytes: number }> {
+  const { rows } = await db.query<{ files: number; bytes: string }>(
+    `SELECT count(*)::int AS files, coalesce(sum(f.size), 0)::bigint AS bytes
+     FROM artifact_files f JOIN artifacts x ON x.id = f.artifact_id WHERE x.workspace_id = $1`,
+    [workspaceId],
+  );
+  return { files: rows[0]!.files, bytes: Number(rows[0]!.bytes) };
+}

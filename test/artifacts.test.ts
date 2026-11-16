@@ -242,3 +242,12 @@ describe("A Protected Artifact", () => {
     expect((await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz(site))).status).toBe(201);
   });
 });
+
+describe("Storage Artifacts take", () => {
+  it("is shown to Admins beside Attachments' storage, counting every Version's files", async () => {
+    const { admin, artifact } = await published();
+    await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await tarGz({ "index.html": "12345" }));
+    const bytes = Buffer.byteLength(site["index.html"]) + Buffer.byteLength(site["style.css"]) + 5;
+    expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 0, bytes: 0 }, artifacts: { files: 3, bytes } });
+  });
+});
