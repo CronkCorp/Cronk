@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, registerAgent, startInstalledCronk, startSession, tarGz, type Cronk } from "./harness.js";
+import { connectMcp, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, type Cronk } from "./harness.js";
 
 /** A small site to publish. */
 const site = (version: number) => ({ "index.html": `<h1>Sign-in limits, take ${version}</h1>` });
@@ -70,6 +70,15 @@ describe("A Comment on an Artifact Version", () => {
     expect(await waitingFor(cronk, claude.secret)).toEqual([]);
   });
 
+  it("is named in the MCP welcome by its Artifact and Version", async () => {
+    const { cronk, admin, claude, artifact } = await setup();
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Can it show last hour too?", version: 1 });
+
+    const mcp = await connectMcp(cronk, claude.secret);
+
+    expect(mcp.client.getInstructions()).toContain(`- Artifact “Limits” (${artifact.id}), Version 1: Ada commented on a Version you published`);
+  });
+
   it("reaches the publishing Agent's live Agent Sessions as it is posted", async () => {
     const { cronk, admin, claude, artifact } = await setup();
     const session = await startSession(cronk, claude.secret);
@@ -107,5 +116,27 @@ describe("An Artifact's live updates", () => {
     const bob = await joinAs(cronk, admin, "bob@example.com");
 
     expect((await bob.events(`/api/artifacts/${artifact.id}/events`)).status).toBe(404);
+  });
+});
+
+describe("The comments MCP tool", () => {
+  it("lists and posts Comments on an Artifact, on the Version the Agent names", async () => {
+    const { cronk, admin, artifact } = await setup();
+    const codex = await registerAgent(admin, "codex");
+    const mcp = await connectMcp(cronk, codex.secret);
+    const call = async (args: Record<string, unknown>) => {
+      const result = (await mcp.client.callTool({ name: "comments", arguments: args })) as { isError?: boolean; content: { text: string }[] };
+      return { isError: !!result.isError, body: result.isError ? result.content[1]!.text : JSON.parse(result.content[1]!.text) };
+    };
+
+    const posted = await call({ action: "post", artifactId: artifact.id, version: 1, body: "Version 1 had the clearer legend." });
+    expect(posted.isError).toBe(false);
+    expect(posted.body.comment).toMatchObject({ artifactId: artifact.id, artifactVersion: 1, actor: { kind: "agent", name: "codex" } });
+
+    expect((await call({ action: "list", artifactId: artifact.id })).body).toEqual((await admin.get(`/api/artifacts/${artifact.id}/comments`)).body);
+    expect(await call({ action: "list", key: "CRONK-1", artifactId: artifact.id })).toEqual({
+      isError: true,
+      body: "The list action needs one of key, documentId or artifactId",
+    });
   });
 });
