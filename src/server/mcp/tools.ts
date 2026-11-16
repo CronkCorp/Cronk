@@ -30,15 +30,35 @@ function registerGroupedTool<Shape extends z.ZodRawShape>(
   const names = offered.map(([name]) => name) as [string, ...string[]];
   const actionList = offered.map(([name, a]) => `- \`${name}\`: ${a.description}`).join("\n");
   const inputSchema: z.ZodObject<z.ZodRawShape> = z.object({ action: z.enum(names).describe("What to do"), ...tool.parameters });
-  server.registerTool(tool.name, { description: `${tool.description}\n\nActions:\n${actionList}`, inputSchema }, async (input, extra) => {
+  registerCronkTool(server, ctx, tool.name, `${tool.description}\n\nActions:\n${actionList}`, inputSchema, (api, input) => {
     const { action, ...args } = input as { action: string };
+    return tool.actions[action]!.run(api, args as z.infer<z.ZodObject<Shape>>);
+  });
+}
+
+/**
+ * Registers one of Cronk's tools: `run` maps its input onto the API, called as the Agent within its
+ * Agent Session. Every result, errors included, starts with that Session's id, which is how a
+ * Transcript is linked to the Session (ADR 0013).
+ */
+function registerCronkTool<Schema extends z.ZodObject<z.ZodRawShape>>(
+  server: McpServer,
+  ctx: ToolContext,
+  name: string,
+  description: string,
+  inputSchema: Schema,
+  run: (api: ApiCall, input: z.infer<Schema>) => Promise<ApiResponse> | ApiResponse,
+): void {
+  server.registerTool(name, { description, inputSchema: inputSchema as z.ZodObject<z.ZodRawShape> }, async (input, extra) => {
     const api = ctx.api({ token: extra.authInfo!.token, sessionId: extra.sessionId });
+    let result: CallToolResult;
     try {
-      return toResult(await tool.actions[action]!.run(api, args as z.infer<z.ZodObject<Shape>>));
+      result = toResult(await run(api, input as z.infer<Schema>));
     } catch (err) {
-      if (err instanceof ToolError) return error(err.message);
-      throw err;
+      // A ToolError, or a fault in the tool itself: either way an error result, so it names the Session too.
+      result = error(err instanceof Error ? err.message : String(err));
     }
+    return { ...result, content: [{ type: "text", text: `Agent Session ${extra.sessionId}` }, ...result.content] };
   });
 }
 
@@ -335,19 +355,15 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
     project: z.array(z.string()).optional().describe("Only in these Projects, by key such as CRONK; leaves out the Workspace outside any Project"),
     limit: z.number().int().optional().describe("At most this many results, up to 100; 20 if left out"),
   });
-  server.registerTool(
+  registerCronkTool(
+    server,
+    ctx,
     "search",
-    {
-      description:
-        "Full-text search across the Tickets, Documents, Reports and Comments you may read, best match first, each result with an " +
-        "excerpt around the match. Get a result with the tickets or documents tool by its ticketKey or documentId.",
-      inputSchema,
-    },
-    async (input, extra) => {
-      const { query: q, kind, project, limit } = input as z.infer<typeof inputSchema>;
-      const api = ctx.api({ token: extra.authInfo!.token, sessionId: extra.sessionId });
-      return toResult(await api("GET", `/api/search${query({ q: [q], kind, project, limit: limit === undefined ? undefined : [String(limit)] })}`));
-    },
+    "Full-text search across the Tickets, Documents, Reports and Comments you may read, best match first, each result with an " +
+      "excerpt around the match. Get a result with the tickets or documents tool by its ticketKey or documentId.",
+    inputSchema,
+    (api, { query: q, kind, project, limit }) =>
+      api("GET", `/api/search${query({ q: [q], kind, project, limit: limit === undefined ? undefined : [String(limit)] })}`),
   );
 }
 
