@@ -4,6 +4,9 @@ import { Chip } from "./components/tags.js";
 import { Link } from "./router.js";
 import { Show, useLoad } from "./ui.js";
 
+/** How many mentions the API lists at most; a full list may hold more. */
+const LISTED_AT_MOST = 50;
+
 /** What each kind of mention is called, as its chip says. */
 const KIND_NAMES: Record<Mention["kind"], string> = {
   ticket: "Ticket",
@@ -73,7 +76,7 @@ export function MentionedIn(props: { load: () => Promise<Mention[]>; deps: unkno
           </div>
         ) : (
           <section className="panel wide">
-            <h2>Mentioned in · {list.length}</h2>
+            <h2>Mentioned in · {list.length >= LISTED_AT_MOST ? `${LISTED_AT_MOST} most recent` : list.length}</h2>
             {body(list)}
           </section>
         )

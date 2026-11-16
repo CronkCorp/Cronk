@@ -76,6 +76,10 @@ export function parseDecisionKey(key: string): { projectKey: string | null; numb
 }
 
 /** A Decision's key from its Project key (null for the Workspace) and number. */
+/** SQL for the key of the Decision aliased `decision`, whose Project, if any, is aliased `project`. */
+export const decisionKeySql = (project: string, decision: string) =>
+  `CASE WHEN ${project}.key IS NULL THEN 'D' || ${decision}.number ELSE ${project}.key || '-D' || ${decision}.number END`;
+
 export const decisionKey = (projectKey: string | null, number: number) => (projectKey === null ? `D${number}` : `${projectKey}-D${number}`);
 
 interface DecisionRow {

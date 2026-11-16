@@ -437,7 +437,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK, for the Terms that apply in it; leave out for the Workspace's (list, get by name)"),
       name: z.string().optional().describe("The Term's name, ignoring case (get)"),
-      id: z.string().optional().describe("The Term's id, instead of a name (get); the Term's id (mentions)"),
+      id: z.string().optional().describe("The Term's id (mentions; or get, instead of a name)"),
     },
     actions: {
       list: {
