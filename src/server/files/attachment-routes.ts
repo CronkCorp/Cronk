@@ -9,8 +9,9 @@ import { transaction, type Queryable } from "../db/database.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import type { Document } from "../knowledge/documents.js";
 import { requireUnprotected } from "../knowledge/protection.js";
-import { documentTopic } from "../live/topics.js";
-import { answer, attachmentIdParam, commentIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { artifactTopic, documentTopic } from "../live/topics.js";
+import { artifactFor } from "./artifact-routes.js";
+import { answer, artifactIdParam, attachmentIdParam, commentIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findTicketByKey, type Ticket } from "../work/tickets.js";
@@ -23,6 +24,7 @@ import {
   deleteAttachment,
   findAttachment,
   insertAttachment,
+  listArtifactAttachments,
   listDocumentAttachments,
   listTicketAttachments,
   publicAttachment,
@@ -124,7 +126,7 @@ export function attachmentRoutes(ctx: AppContext) {
       "/api/comments/:id/attachments",
       {
         schema: uploadSchema(
-          "Attaches a file to a Comment, to show with it. Only whoever posted the Comment may, with Write on its Ticket or Document.",
+          "Attaches a file to a Comment, to show with it. Only whoever posted the Comment may, with Write on its Ticket, Document or Artifact.",
           pathParams({ id: commentIdParam }),
         ),
       },
@@ -167,6 +169,23 @@ export function attachmentRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const document = await documentFor(ctx.db, actor, request.params.id, "read");
         return { attachments: (await listDocumentAttachments(ctx.db, document.id)).map(publicAttachment) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/artifacts/:id/attachments",
+      {
+        schema: {
+          params: pathParams({ id: artifactIdParam }),
+          response: {
+            200: answer("Every Attachment in the Artifact's Comments, in the order they were attached", listing("attachments", ref("Attachment"))),
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const artifact = await artifactFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        return { attachments: (await listArtifactAttachments(ctx.db, artifact.id)).map(publicAttachment) };
       },
     );
 
@@ -245,12 +264,13 @@ const UPLOAD_BODY =
   "The request body is the file itself, sent with its media type as `Content-Type` (`application/octet-stream` when unknown), and `name` is its file name.";
 
 /**
- * Tells the watchers of the Ticket and Document the Attachment is on or in that their Attachments changed: the
- * Ticket's a `changed` event, the Document's an `attachments` one. Call once the change is committed.
+ * Tells the watchers of the Ticket, Document or Artifact the Attachment is on or in that their Attachments changed: the
+ * Ticket's a `changed` event, the Document's and Artifact's an `attachments` one. Call once the change is committed.
  */
 function attachmentsChanged(ctx: AppContext, attachment: Attachment): void {
   if (attachment.ticketId) ticketsChanged(ctx.live, [{ id: attachment.ticketId, key: attachment.ticketKey!, projectId: attachment.projectId! }]);
   if (attachment.documentId) ctx.live.publish(documentTopic(attachment.documentId), { event: "attachments", data: {} });
+  if (attachment.artifactId) ctx.live.publish(artifactTopic(attachment.artifactId), { event: "attachments", data: {} });
 }
 
 /** The Ticket with this key, if `actor` may attach files to it: Write in its Project and, for an Agent, its Claim. Run inside a transaction. */
@@ -276,7 +296,7 @@ async function documentToAttachTo(tx: Queryable, actor: Actor, id: string, now: 
 
 /**
  * The Comment with this id, if `actor` may attach files to it: they posted it (the same User, or the same Agent),
- * and have Write on its Ticket or Document. With `orUserWithWrite`, as for removing a file, any User with that
+ * and have Write on its Ticket, Document or Artifact. With `orUserWithWrite`, as for removing a file, any User with that
  * Write may too, so a file posted by mistake can be taken down. Run inside a transaction.
  */
 async function commentToAttachTo(tx: Queryable, actor: Actor, id: string, opts: { orUserWithWrite?: boolean } = {}): Promise<Comment> {
@@ -284,6 +304,7 @@ async function commentToAttachTo(tx: Queryable, actor: Actor, id: string, opts: 
   if (!found) throw new HttpError(404, "No such Comment");
   const { comment } = found;
   if (comment.ticketKey !== null) await ticketFor(tx, actor, comment.ticketKey, "write");
+  else if (comment.artifactId !== null) await artifactFor(tx, actor, comment.artifactId, "write");
   else await documentFor(tx, actor, comment.documentId!, "write");
   const moderating = opts.orUserWithWrite && actor.kind === "user";
   if (!moderating && (comment.actor.kind !== actor.kind || comment.actor.id !== actorId(actor))) {
@@ -299,7 +320,11 @@ const actorId = (actor: Actor) => (actor.kind === "agent" ? actor.agent.id : act
 async function readableAttachment(db: Queryable, actor: Actor, id: string): Promise<Attachment> {
   const attachment = await findAttachment(db, actingUser(actor).workspaceId, id);
   if (!attachment) throw new HttpError(404, "No such Attachment");
-  const readable = attachment.documentId ? documentFor(db, actor, attachment.documentId, "read") : ticketFor(db, actor, attachment.ticketKey!, "read");
+  const readable = attachment.documentId
+    ? documentFor(db, actor, attachment.documentId, "read")
+    : attachment.artifactId
+      ? artifactFor(db, actor, attachment.artifactId, "read")
+      : ticketFor(db, actor, attachment.ticketKey!, "read");
   await readable.catch((err: unknown) => {
     throw err instanceof HttpError && (err.statusCode === 404 || err.statusCode === 403) ? new HttpError(404, "No such Attachment") : err;
   });

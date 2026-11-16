@@ -7,7 +7,7 @@ import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "../knowledge/protection.js";
 import { ARCHIVE_TYPES, archiveBody, unpackFolder, unwrapFolder, bytesOf, type Folder } from "../portability/archive.js";
-import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
+import { answer, artifactIdParam, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
@@ -38,7 +38,6 @@ const ticketParam = {
     "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds; the Version records it as where it came from. " +
     "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
 } as const;
-const artifactIdParam = { type: "string", format: "uuid", description: "The Artifact's id." } as const;
 const artifactParams = pathParams({ id: artifactIdParam });
 const versionParams = pathParams({ id: artifactIdParam, number: { type: "string", pattern: "^[1-9][0-9]{0,8}$", description: "The Version's number, counting from 1." } });
 const projectParams = pathParams({ key: projectKeyParam });

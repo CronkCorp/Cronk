@@ -85,17 +85,20 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   or \`verified\`); a Project's \`autonomousByDefault\` is written when on.
   \`<KEY>.attachments/\` holds its Attachments as the files themselves, each named \`<n>-<name>\` in the order they were
   attached, and \`index.md\`, whose frontmatter lists each file's id, name, media type, size, when and by whom it was attached;
-  an import keeps the id unless it is taken. A Report's Attachments are beside it the same way, and a Comment's, of a Ticket or
-  a Document, in \`<n>.attachments/\` beside its \`<n>.md\`.
+  an import keeps the id unless it is taken. A Report's Attachments are beside it the same way, and a Comment's, of a Ticket,
+  a Document or an Artifact, in \`<n>.attachments/\` beside its \`<n>.md\`.
 - \`artifacts/<n>-<title>.md\`: an Artifact, numbered in the order they were created (the Workspace's at the top, a Project's in
   \`projects/<KEY>/artifacts/\`). Its frontmatter holds its id, title, latest Version and Protected mark, and each Version
   exported with who published it, when, the Ticket it came from (by key) and its files; \`<n>-<title>/<version>/\` holds those
   files as they were published. Every Version is exported when the export includes Versions, else only the latest.
-  An import keeps the id unless it is taken.
+  \`<n>-<title>.comments/\` holds its Comments as a Ticket's are, each naming the \`version\` it is on; one on a Version the export
+  left out is imported onto the oldest Version it holds after that one. An import keeps the id unless it is taken.
 - \`transcripts/<n>.md\`: the chats that led Agents to change things (Workspace exports only), numbered in the order they were
   first uploaded. The frontmatter names the Agent and its Agent Sessions by their ids in \`people.md\`, the client's \`chatId\`,
   the Tickets (by key), Documents (by path) and Terms (by name, after their Project's key) those Sessions changed; the body is the latest text. \`<n>.earlier/\` holds, as
-  they are and oldest first, earlier texts a later upload didn't continue.
+  they are and oldest first, earlier texts a later upload didn't continue. Every text is as stored, with known secrets scrubbed and
+  the Owner's hand redactions applied; \`redactions\` lists those by length and digests, never the passages, so an import keeps
+  redacting later uploads, and an import scrubs whatever secrets a text still holds.
 
 Not included: Claims, work waiting for Agents, sign-ins, invitations and Agent tokens. Users who aren't
 already in the installation an export is imported into come in deactivated, since they have no password there; an Admin

@@ -472,6 +472,13 @@ export const api = {
   /** Posts a Comment on a Document, optionally anchored to a passage its current Version holds. */
   postDocumentComment: (id: string, input: NewComment & { anchor?: { passage: string } }) =>
     request<{ comment: Comment }>("POST", `${documentPath(id)}/comments`, input).then((r) => r.comment),
+  /** The Comments on an Artifact, on all its Versions, oldest first. */
+  artifactComments: (id: string) => request<{ comments: Comment[] }>("GET", `${artifactPath(id)}/comments`).then((r) => r.comments),
+  /** Posts a Comment on an Artifact, on the Version being viewed. */
+  postArtifactComment: (id: string, version: number, input: NewComment) =>
+    request<{ comment: Comment }>("POST", `${artifactPath(id)}/comments`, { ...input, version }).then((r) => r.comment),
+  /** The files in an Artifact's Comments. */
+  artifactAttachments: (id: string) => request<{ attachments: Attachment[] }>("GET", `${artifactPath(id)}/attachments`).then((r) => r.attachments),
 
   /** The signed-in User's Inbox, narrowed by any of the filters given. */
   inbox: (filter: InboxFilter = {}) => {
@@ -555,6 +562,13 @@ export interface DocumentEvents {
   attachments: Record<string, never>;
 }
 
+/** The events an Artifact's live-update stream pushes, by name, with their data. */
+export interface ArtifactEvents {
+  comment: { comment: Comment };
+  /** A file was attached to one of its Comments, or one was deleted. */
+  attachments: Record<string, never>;
+}
+
 /** Where a live-update stream is: in place, away and reconnecting, or closed for good. */
 export type StreamState = "live" | "away" | "closed";
 
@@ -605,3 +619,7 @@ export const watchProject = (key: string, handlers: Parameters<typeof watch<Proj
 /** Watches one Document's new Comments and Versions as they happen (see `watch`). */
 export const watchDocument = (id: string, handlers: Parameters<typeof watch<DocumentEvents>>[1]) =>
   watch<DocumentEvents>(`${documentPath(id)}/events`, handlers);
+
+/** Watches one Artifact's new Comments as they happen (see `watch`). */
+export const watchArtifact = (id: string, handlers: Parameters<typeof watch<ArtifactEvents>>[1]) =>
+  watch<ArtifactEvents>(`${artifactPath(id)}/events`, handlers);

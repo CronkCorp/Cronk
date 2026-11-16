@@ -16,7 +16,7 @@ const KIND_NAMES: Record<Mention["kind"], string> = {
   decision: "Decision",
 };
 
-/** Where a mention leads: the thing itself, or for a Comment the Ticket or Document it is on. */
+/** Where a mention leads: the thing itself, or for a Comment the Ticket, Document or Artifact it is on. */
 function addressOf(m: Mention): string {
   switch (m.kind) {
     case "ticket":
@@ -24,7 +24,8 @@ function addressOf(m: Mention): string {
     case "document":
       return `/documents/${m.id}`;
     case "comment":
-      return m.ticketKey ? `/tickets/${m.ticketKey}` : `/documents/${m.documentId}`;
+      if (m.ticketKey) return `/tickets/${m.ticketKey}`;
+      return m.artifactId ? `/artifacts/${m.artifactId}` : `/documents/${m.documentId}`;
     case "term":
       return `/terms/${m.id}`;
     case "decision":
@@ -36,7 +37,8 @@ function addressOf(m: Mention): string {
 function whereItIs(m: Mention): string {
   if (m.kind === "ticket" || m.kind === "decision") return m.projectKey ?? "Workspace";
   if (m.ticketKey) return m.kind === "comment" ? `on ${m.ticketKey}` : `Report on ${m.ticketKey}`;
-  return m.kind === "comment" ? `on a Document in ${m.projectKey ?? "the Workspace"}` : (m.projectKey ?? "Workspace");
+  if (m.kind === "comment") return `on ${m.artifactId ? "an Artifact" : "a Document"} in ${m.projectKey ?? "the Workspace"}`;
+  return m.projectKey ?? "Workspace";
 }
 
 function MentionRow(props: { mention: Mention }) {
