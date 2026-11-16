@@ -42,8 +42,15 @@ describe("the OpenAPI description", () => {
       expect(success, label).toHaveLength(1);
       const response = op.responses[success[0]!];
       expect(response.description, label).toBeTruthy();
-      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive; every other success answers JSON with a schema.
-      const type = label.endsWith("/events") ? "text/event-stream" : label.endsWith("/export") ? "application/gzip" : "application/json";
+      // A 204 has no body; a live-update stream answers server-sent events; an export answers an archive; an Attachment's file
+      // answers its bytes; every other success answers JSON with a schema.
+      const type = label.endsWith("/events")
+        ? "text/event-stream"
+        : label.endsWith("/export")
+          ? "application/gzip"
+          : label.endsWith("/file")
+            ? "application/octet-stream"
+            : "application/json";
       if (success[0] !== "204") expect(response.content?.[type]?.schema, label).toBeDefined();
     }
   });
