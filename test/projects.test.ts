@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { startInstalledCronk } from "./harness.js";
+import { registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("Projects", () => {
   it("are created with a name and a key, and come with the default Statuses", async () => {
@@ -107,5 +107,29 @@ describe("Projects", () => {
     ]) {
       expect(res.status).toBe(401);
     }
+  });
+});
+
+describe("Projects, managed by an Agent", () => {
+  it("can't be renamed, archived or unarchived by an Agent, one change at a time or several at once", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Old site", key: "OLD" });
+    await admin.patch("/api/projects/OLD", { archived: true });
+    const claude = await startSession(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const cronkBefore = (await admin.get("/api/projects/CRONK")).body.project;
+    const oldBefore = (await admin.get("/api/projects/OLD")).body.project;
+
+    for (const res of [
+      await claude.patch("/api/projects/CRONK", { name: "Renamed" }),
+      await claude.patch("/api/projects/CRONK", { archived: true }),
+      await claude.patch("/api/projects/OLD", { archived: false }),
+      await claude.patch("/api/projects/OLD", { name: "Old site", archived: false }),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/Only a User can rename or archive a Project/);
+    }
+    expect((await admin.get("/api/projects/CRONK")).body.project).toEqual(cronkBefore);
+    expect((await admin.get("/api/projects/OLD")).body.project).toEqual(oldBefore);
   });
 });
