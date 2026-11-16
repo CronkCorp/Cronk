@@ -30,6 +30,7 @@ import type {
   Conflict,
   Priority,
   Project,
+  ProtectionChange,
   RecordedActor,
   RecordedChange,
   RelationKind,
@@ -86,6 +87,7 @@ export type {
   Conflict,
   Priority,
   Project,
+  ProtectionChange,
   RecordedActor,
   RecordedChange,
   RelationKind,
@@ -200,6 +202,8 @@ export const api = {
     request<{ term: Term }>("POST", `${scopePath(projectKey)}/terms`, input).then((r) => r.term),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   saveTerm: (id: string, baseVersion: number, input: TermInput) => request<{ term: Term }>("PATCH", termPath(id), { baseVersion, ...input }).then((r) => r.term),
+  protectTerm: (id: string, value: boolean) => request<{ term: Term }>("POST", `${termPath(id)}/protection`, { protected: value }).then((r) => r.term),
+  termProtection: (id: string) => request<{ changes: ProtectionChange[] }>("GET", `${termPath(id)}/protection`).then((r) => r.changes),
   deleteTerm: (id: string, baseVersion: number) => request<void>("DELETE", `${termPath(id)}?baseVersion=${baseVersion}`),
   /** Imports an export of the Workspace or a Project; Admins only. */
   importExport: (file: File) => upload<{ scope: "workspace" | "project"; projects: string[] }>("/api/import", file),
@@ -232,6 +236,9 @@ export const api = {
     request<{ decision: Decision }>("PATCH", decisionPath(key), input).then((r) => r.decision),
   setDecisionStatus: (key: string, status: DecisionStatus) =>
     request<{ decision: Decision }>("POST", `${decisionPath(key)}/status`, { status }).then((r) => r.decision),
+  protectDecision: (key: string, value: boolean) =>
+    request<{ decision: Decision }>("POST", `${decisionPath(key)}/protection`, { protected: value }).then((r) => r.decision),
+  decisionProtection: (key: string) => request<{ changes: ProtectionChange[] }>("GET", `${decisionPath(key)}/protection`).then((r) => r.changes),
   decisionVersions: (key: string) =>
     request<{ versions: Omit<DecisionVersion, "body">[] }>("GET", `${decisionPath(key)}/versions`).then((r) => r.versions),
 
@@ -357,6 +364,9 @@ export const api = {
     request<{ document: Document }>("POST", `${documentPath(id)}/move`, { parentId }).then((r) => r.document),
   /** Refused with a 409 whose body holds the `current` Version if someone saved since `baseVersion`. */
   deleteDocument: (id: string, baseVersion: number) => request<void>("DELETE", `${documentPath(id)}?baseVersion=${baseVersion}`),
+  protectDocument: (id: string, value: boolean) =>
+    request<{ document: Document }>("POST", `${documentPath(id)}/protection`, { protected: value }).then((r) => r.document),
+  documentProtection: (id: string) => request<{ changes: ProtectionChange[] }>("GET", `${documentPath(id)}/protection`).then((r) => r.changes),
   versions: (id: string) => request<{ versions: VersionSummary[] }>("GET", `${documentPath(id)}/versions`).then((r) => r.versions),
   version: (id: string, number: number) =>
     request<{ version: Version }>("GET", `${documentPath(id)}/versions/${number}`).then((r) => r.version),

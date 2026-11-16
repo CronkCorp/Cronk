@@ -1,6 +1,7 @@
 import { ConfirmDialog, Popover } from "./components/overlays.js";
 import { Button, buttonClass } from "./components/button.js";
-import { Chip } from "./components/tags.js";
+import { Chip, ProtectedMark } from "./components/tags.js";
+import { ProtectionHistory } from "./components/protection.js";
 import { Banner } from "./components/banner.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
@@ -136,6 +137,7 @@ export function DocumentsPage(props: { projectKey?: string }) {
                 <li key={entry.id}>
                   <Link to={`/documents/${entry.id}`} className={`row depth-${Math.min(entry.depth, 6)}`}>
                     <span className="grow">{entry.title}</span>
+                    {entry.protected && <ProtectedMark compact />}
                   </Link>
                 </li>
               ))}
@@ -248,6 +250,9 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
     () => navigate(d.ticketKey ? `/tickets/${d.ticketKey}` : treeAddress(d.projectKey)),
   );
   const toggle = (p: Panel) => setPanel(panel === p ? "none" : p);
+  // Marked itself, as opposed to covered by a marked Document above it.
+  const marked = d.protectedBy?.id === d.id;
+  const protect = useAction((value: boolean) => api.protectDocument(d.id, value), props.onChanged);
   const bodyAt = useRef<HTMLDivElement>(null);
   const commentAt = useRef<HTMLTextAreaElement>(null);
   const selected = useSelectedPassage(bodyAt, d.body);
@@ -305,7 +310,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
         <>
           <div className="page-head">
             <h1>
-              {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>}
+              {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>} {d.protected && <ProtectedMark covers={marked ? d.covers : 0} />}
             </h1>
             <div className="actions">
               <LiveIndicator state={live} />
@@ -319,6 +324,14 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                       <Button variant="secondary" onClick={() => toggle("new")}>New Document under this one</Button>
                     </>
                   )}
+                  <Button
+                    variant="secondary"
+                    onClick={() => void protect.run(!marked)}
+                    disabled={protect.busy}
+                    title={marked ? "Let Agents edit it again" : "Let Agents read but not edit it, and every Document under it"}
+                  >
+                    {marked ? "Unprotect" : "Protect"}
+                  </Button>
                   <Button variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={remove.busy}>Delete</Button>
                   <ConfirmDialog
                     open={confirmingDelete}
@@ -334,7 +347,13 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               )}
             </div>
           </div>
+          {d.protectedBy && !marked && (
+            <p className="muted small">
+              Protected as part of <Link to={`/documents/${d.protectedBy.id}`} className="link">{d.protectedBy.title}</Link>, which covers the Documents under it.
+            </p>
+          )}
           {remove.error && <p className="error" role="alert">{remove.error}</p>}
+          {protect.error && <p className="error" role="alert">{protect.error}</p>}
           {panel === "new" && <NewDocument projectKey={d.projectKey ?? undefined} parentId={d.id} onCancel={() => setPanel("none")} />}
           {panel === "move" && (
             <MoveDocument
@@ -596,6 +615,7 @@ function Versions(props: { document: Document; canWrite: boolean; onRestored: (d
           </ol>
         )}
       </Show>
+      <ProtectionHistory load={() => api.documentProtection(d.id)} reloadOn={[d.id, d.protectedBy?.id]} />
       {d.version > 1 && <CompareVersions current={d.version} busy={compare.busy} onCompare={(from, to) => void compare.run(from, to)} />}
       {error && <p className="error" role="alert">{error}</p>}
       {comparing && (
