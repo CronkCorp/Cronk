@@ -11,6 +11,9 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       # The address Users reach Cronk at, e.g. https://cronk.example; set it when a reverse proxy rewrites the Host header.
       PUBLIC_URL: ${PUBLIC_URL:-}
+      # The address of the hostname Artifacts are served from, e.g. https://artifacts.cronk.example, pointed at this same
+      # service (see README, "The Artifact hostname"). Left empty, Artifacts are served from Cronk's own hostname, less safely.
+      ARTIFACTS_URL: ${ARTIFACTS_URL:-}
       FILES_DIR: /app/data/files
     volumes:
       - files-data:/app/data

@@ -60,9 +60,22 @@ Cronk is a plain Node.js process configured only through environment variables, 
 | `COOKIE_SECURE` | `false`               | Mark the sign-in cookie Secure (use behind HTTPS)              |
 | `PUBLIC_URL`    | (the request's host)  | Address Users reach Cronk at, e.g. `https://cronk.example`; set it behind a proxy that rewrites the `Host` header |
 | `WEB_ROOT`      | `dist/web` if present | Directory of the built web client                              |
-| `FILES_DIR`     | `data/files`          | Directory the files of Attachments are stored in, relative to the working directory |
+| `FILES_DIR`     | `data/files`          | Directory the files of Attachments and Artifacts are stored in, relative to the working directory |
+| `ARTIFACTS_URL` | (none; recommended)   | Address of a hostname of its own that serves Artifacts, e.g. `https://artifacts.cronk.example` |
 
 Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files.
+
+### The Artifact hostname
+
+Artifacts are pages Agents and Users publish, and their code may be buggy or steered by hostile content an Agent read. Cronk serves them from a second hostname, so the browser keeps them away from the signed-in User's session (ADR 0007):
+
+1. Pick a hostname for them, such as `artifacts.cronk.example`. A separate domain is safest; a subdomain of Cronk's own is fine too.
+2. Point it at the same Cronk server, with its own TLS certificate if Cronk is served over HTTPS. Behind a reverse proxy, route both hostnames to Cronk and pass the `Host` header through.
+3. Set `ARTIFACTS_URL` to its address, such as `https://artifacts.cronk.example`, and `PUBLIC_URL` to Cronk's.
+
+That hostname serves Artifacts' files and nothing else, never reads the sign-in cookie, and opens a Version only at a signed address Cronk hands out to whoever may read the Artifact, valid for 12 hours. Every file is served under a strict content policy: the page may load scripts, styles and fonts only from itself, cdnjs, jsDelivr, unpkg and Google Fonts, and may make no network requests. Without `ARTIFACTS_URL`, Cronk serves Artifacts from its own hostname in the same sandbox, which still gives them an origin of their own but is less safe; set it before Agents publish anything you haven't read.
+
+Each Version of an Artifact may hold 500 files and 25 MB unless an Admin changes the limits in Workspace settings. Artifact files live under `FILES_DIR` beside Attachments, and exports include them.
 
 Signed-in writes are only accepted from Cronk's own site: a browser request whose `Origin` (or `Referer`) is another site is refused, and the sign-in cookie is `SameSite=Strict`. Cronk's own site is `PUBLIC_URL`, or without it, the host a request was sent to. Agents' token requests aren't affected.
 
