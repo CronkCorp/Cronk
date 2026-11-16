@@ -20,7 +20,7 @@ import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js"
 import { addRelation, listRelations, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
-import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
+import { projectFor, refuseAgent, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
 import { listMemberships, removeMembership, setMembership } from "../identity/memberships.js";
 import { findUserById, publicUser } from "../identity/users.js";
 import {
@@ -191,6 +191,7 @@ export function workRoutes(ctx: AppContext) {
         const { name, archived, visibility, agentAccess } = request.body;
         if (visibility !== undefined) requireAdmin(actor, "make a Project open or private");
         if (agentAccess !== undefined && actor.kind === "agent") throw new HttpError(403, "Only a User can change Agent Access");
+        if (name !== undefined || archived !== undefined) refuseAgent(actor, "rename or archive a Project");
         const changes = {
           ...(name !== undefined && { name: name.trim() }),
           ...(archived !== undefined && { archived }),
@@ -305,6 +306,7 @@ export function workRoutes(ctx: AppContext) {
         const name = request.body.name.trim();
         const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          refuseAgent(actor, "manage Statuses");
           await lockProject(tx, project.id);
           return { projectId: project.id, status: await insertStatus(tx, project.id, { name, category: request.body.category }) };
         });
@@ -333,6 +335,7 @@ export function workRoutes(ctx: AppContext) {
         const name = request.body.name?.trim();
         const { projectId, status } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          refuseAgent(actor, "manage Statuses");
           await lockProject(tx, project.id);
           let status = statusOr404(await listStatuses(tx, project.id), request.params.statusId);
           if (name !== undefined) {
@@ -367,6 +370,7 @@ export function workRoutes(ctx: AppContext) {
         const { moveTo } = request.query;
         const { projectId, moved, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
+          refuseAgent(actor, "manage Statuses");
           await lockProject(tx, project.id);
           const statuses = await listStatuses(tx, project.id);
           const status = statusOr404(statuses, request.params.statusId);
