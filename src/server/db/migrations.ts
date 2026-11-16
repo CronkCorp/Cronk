@@ -1,6 +1,7 @@
 import type { Queryable } from "./database.js";
 import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
+import { recordAllEmbeds } from "../files/artifact-embeds.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -881,5 +882,25 @@ export const migrations: Migration[] = [
       -- [{"origin": "https://cdn.plot.ly", "uses": ["scripts"], "reason": "..."}]. Never carried over to the next Version.
       ALTER TABLE artifact_versions ADD COLUMN extra_origins jsonb NOT NULL DEFAULT '[]';
     `,
+  },
+  {
+    id: "0034_artifact_embeds",
+    sql: `
+      -- Where each Artifact is embedded (files/artifact-embeds.ts): the Document (a Report too) or Comment whose current
+      -- text holds its address alone on a line, with the Version the address names (null for the latest) and where it
+      -- comes in the text. Rewritten on every change to the text.
+      CREATE TABLE artifact_embeds (
+        artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        version integer,
+        document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
+        comment_id uuid REFERENCES comments(id) ON DELETE CASCADE,
+        position integer NOT NULL,
+        CHECK (num_nonnulls(document_id, comment_id) = 1)
+      );
+      CREATE INDEX artifact_embeds_artifact ON artifact_embeds (artifact_id);
+      CREATE INDEX artifact_embeds_document ON artifact_embeds (document_id);
+      CREATE INDEX artifact_embeds_comment ON artifact_embeds (comment_id);
+    `,
+    backfill: (db) => recordAllEmbeds(db),
   },
 ];

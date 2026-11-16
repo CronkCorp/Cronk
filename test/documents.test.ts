@@ -55,6 +55,7 @@ describe("saving a Document", () => {
       actor: { kind: "user", id: ada.id, name: "Ada" },
       restoredFrom: null,
       suggestion: null,
+      embeds: [],
     });
     expect((await admin.get(`/api/documents/${id}`)).body.document).toMatchObject({ body: "theirs", version: 2 });
   });

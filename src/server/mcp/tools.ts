@@ -650,7 +650,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "`index.html` at its top. Each belongs to a Project or, without a project, the Workspace, and records the Ticket whose Claim you held. " +
       "Every publish is the whole folder again, as a new Version; publishing a new Version names the Version you based it on (`baseVersion`, " +
       "the Artifact's `version`) and is refused if a later one was published meanwhile, so merge with it first. `url` always shows the latest " +
-      "Version and `versionUrl` the one just published: link that one where your words describe it, such as in a Report. " +
+      "Version and `versionUrl` the one just published. An address alone on a line of a Report, Document or Comment embeds the Artifact there; " +
+      "in a Report, embed `versionUrl`, so the evidence stays as reviewed (the publish answer says so in `embedding`). " +
       artifactRules(ctx.artifacts) +
       " You can't publish a new Version of an Artifact a User marked `protected`.",
     parameters: {

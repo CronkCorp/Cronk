@@ -18,6 +18,7 @@ import { ImportedTickets, importTickets } from "./tickets.js";
 import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
+import { recordAllEmbeds } from "../files/artifact-embeds.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -85,6 +86,8 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await tickets.importHistories(ctx);
   // Imported text may name Decisions and Terms imported after it, so what mentions them is recorded once all is in.
   await recordAllMentions(db, workspaceId);
+  // Likewise text may embed Artifacts imported after it.
+  await recordAllEmbeds(db, workspaceId);
   // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
   if (scope === "workspace") await importTranscripts(ctx);
   return { scope, projects: created, renamedIds: ctx.renamedIds };
