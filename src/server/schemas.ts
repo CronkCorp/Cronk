@@ -143,6 +143,10 @@ const decisionFields = {
   ...decisionSummaryFields,
   body: { type: "string", description: "Markdown." },
   supersedes: { type: "array", items: decisionRef, description: "The Decisions it replaces once accepted, of the same Project or Workspace." },
+  sourceTicket: {
+    ...nullable(object({ key: { type: "string" }, title: { type: "string" } })),
+    description: "The Ticket an Agent was working on when it proposed it, holding its Claim; null otherwise.",
+  },
   proposedBy: { ...recordedActor, description: "Who recorded it." },
   statusReason: { ...nullable({ type: "string" }), description: "Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given." },
   statusChangedAt: { ...timestamp, description: "When it took its current status." },

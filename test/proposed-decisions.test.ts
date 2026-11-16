@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, startInstalledCronk } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, startInstalledCronk, type Client } from "./harness.js";
+
+/** The Inbox of `client`, as `kind key` lines, in order: a Decision's key, or a Ticket's. */
+const inboxLines = async (client: Client) =>
+  ((await client.get("/api/inbox")).body.items as { kind: string; decision?: { key: string }; ticket: { key: string } | null }[]).map(
+    (i) => `${i.kind} ${i.decision?.key ?? i.ticket?.key}`,
+  );
 
 describe("an Agent proposing a Decision", () => {
   it("records it as proposed, by the Agent in its Agent Session", async () => {
@@ -59,5 +65,91 @@ describe("rejecting a Decision", () => {
     // Taken up again, it no longer carries the reason it was rejected for; its history does.
     expect((await admin.post("/api/decisions/CRONK-D1/status", { status: "proposed" })).body.decision.statusReason).toBeNull();
     expect((await admin.get("/api/decisions/CRONK-D1/versions/1")).body.version.statusReason).toBeNull();
+  });
+});
+
+describe("a proposed Decision in the Inbox", () => {
+  it("goes to the Agent's Owner when proposed outside any Claim, until a User accepts it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await admin.post("/api/projects/CRONK/decisions", { title: "A User's own proposal" });
+    cronk.clock.advance(60_000);
+    await claude.post("/api/projects/CRONK/decisions", { title: "Markdown for Decisions", body: "We keep them as Markdown." });
+    cronk.clock.advance(60_000);
+    await claude.post("/api/workspace/decisions", { title: "Compose for installs" });
+
+    const inbox = (await admin.get("/api/inbox")).body.items;
+    expect(inbox).toMatchObject([
+      {
+        kind: "decision",
+        at: "2026-01-01T09:01:00.000Z",
+        decision: { key: "CRONK-D2", title: "Markdown for Decisions", body: "We keep them as Markdown.", status: "proposed", proposedBy: { name: "claude-laptop" }, sourceTicket: null },
+        ticket: null,
+      },
+      { kind: "decision", decision: { key: "D1" }, ticket: null },
+    ]);
+    expect(await inboxLines(bob)).toEqual([]);
+    expect((await admin.get("/api/inbox?kind=review")).body.items).toEqual([]);
+    expect((await admin.get("/api/inbox?kind=decision")).body.items).toHaveLength(2);
+    expect((await admin.get("/api/inbox?project=CRONK")).body.items.map((i: { decision: { key: string } }) => i.decision.key)).toEqual(["CRONK-D2"]);
+
+    await bob.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+    expect(await inboxLines(admin)).toEqual(["decision D1"]);
+  });
+
+  it("goes to the Assignee of the Ticket the Agent held the Claim on, even once reassigned, until a User rejects it", async () => {
+    const { cronk, admin, session } = await delegatedSetup(2);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const proposed = await agent.post("/api/projects/CRONK/decisions", { title: "Markdown for Decisions" });
+
+    expect(proposed.body.decision.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+    expect((await admin.get("/api/inbox")).body.items).toMatchObject([
+      { kind: "decision", decision: { key: "CRONK-D1" }, ticket: { key: "CRONK-1", title: "Ticket 1", status: { name: expect.any(String) } } },
+    ]);
+    // The Ticket's new Assignee reviews it now, not the Agent's Owner.
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId });
+    expect(await inboxLines(admin)).toEqual([]);
+    expect(await inboxLines(bob)).toEqual(["decision CRONK-D1"]);
+
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "rejected", reason: "We keep them in Postgres." });
+    expect(await inboxLines(bob)).toEqual([]);
+  });
+
+  it("names a source Ticket only if the Agent Session holds its Claim", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-2/claim");
+
+    // Holding two Claims, the Agent names the one the Decision came from.
+    const named = await agent.post("/api/projects/CRONK/decisions", { title: "From the second", ticket: "cronk-2" });
+    expect(named.body.decision.sourceTicket).toMatchObject({ key: "CRONK-2" });
+    expect((await agent.post("/api/projects/CRONK/decisions", { title: "From either" })).body.decision.sourceTicket).toBeNull();
+    await admin.post("/api/projects/CRONK/tickets", { title: "Not claimed" });
+    const refused = await agent.post("/api/projects/CRONK/decisions", { title: "From elsewhere", ticket: "CRONK-3" });
+    expect(refused.status).toBe(409);
+    expect((await admin.post("/api/projects/CRONK/decisions", { title: "A User's", ticket: "CRONK-1" })).status).toBe(400);
+  });
+});
+
+describe("a proposed Decision's reviewer", () => {
+  it("hears on their open Inbox when one arrives, is refined, and is accepted", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const inbox = await admin.events("/api/inbox/events");
+    expect((await inbox.next())?.event).toBe("ready");
+
+    await claude.post("/api/workspace/decisions", { title: "Compose for installs" });
+    expect((await inbox.next())?.event).toBe("changed");
+    await claude.patch("/api/decisions/D1", { baseVersion: 1, body: "Use Compose." });
+    expect((await inbox.next())?.event).toBe("changed");
+    await admin.post("/api/decisions/D1/status", { status: "accepted" });
+    expect((await inbox.next())?.event).toBe("changed");
   });
 });

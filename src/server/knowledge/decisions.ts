@@ -1,6 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { PROJECT_KEY_PATTERN } from "../work/projects.js";
+import { ticketKeySql } from "../work/tickets.js";
 import type { DecisionStatus } from "../../shared/values.js";
 
 /**
@@ -42,6 +43,8 @@ export interface Decision {
   supersedes: DecisionRef[];
   /** The accepted Decision that replaced it, if it is superseded. */
   supersededBy: DecisionRef | null;
+  /** The Ticket an Agent was working on when it proposed it: the one its Agent Session held the Claim on. Null otherwise. */
+  sourceTicket: { key: string; title: string } | null;
   /** Who recorded it: the Actor of its first Version. */
   proposedBy: RecordedActor;
   /** Why it took its current status, as the User gave it: the reason it was rejected. Null when none was given. */
@@ -54,7 +57,7 @@ export interface Decision {
 }
 
 /** A Decision as its register lists it, without its body. */
-export type DecisionSummary = Omit<Decision, "body" | "supersedes" | "proposedBy" | "statusReason" | "statusChangedAt" | "statusChangedBy">;
+export type DecisionSummary = Omit<Decision, "body" | "supersedes" | "sourceTicket" | "proposedBy" | "statusReason" | "statusChangedAt" | "statusChangedBy">;
 
 /** The ADR sections a new Decision's body starts with when none is given. */
 export const DECISION_TEMPLATE = `What was decided, and why.
@@ -95,9 +98,14 @@ interface DecisionRow {
   version: number;
   created_at: Date;
   updated_at: Date;
+  source_ticket_key: string | null;
+  source_ticket_title: string | null;
 }
 
-const SELECT_DECISIONS = `SELECT d.*, p.key AS project_key FROM decisions d LEFT JOIN projects p ON p.id = d.project_id`;
+const SELECT_DECISIONS = `
+  SELECT d.*, p.key AS project_key, ${ticketKeySql("sp", "st")} AS source_ticket_key, st.title AS source_ticket_title
+  FROM decisions d LEFT JOIN projects p ON p.id = d.project_id
+    LEFT JOIN tickets st ON st.id = d.source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id`;
 const IN_SCOPE = "d.workspace_id = $1 AND d.project_id IS NOT DISTINCT FROM $2";
 
 const summarize = (row: DecisionRow, refs: Map<number, DecisionRef>): DecisionSummary => ({
@@ -140,6 +148,7 @@ async function toDecision(db: Queryable, row: DecisionRow): Promise<Decision> {
     body: row.body,
     supersedes: [...row.supersedes].sort((a, b) => a - b).flatMap((n) => refs.get(n) ?? []),
     supersededBy,
+    sourceTicket: row.source_ticket_key === null ? null : { key: row.source_ticket_key, title: row.source_ticket_title! },
     proposedBy: toRecordedActor(actors[0]!),
     statusReason: row.status_reason,
     statusChangedAt: statusChange.at,
@@ -195,13 +204,26 @@ async function nextNumber(db: Queryable, scope: DecisionScope): Promise<number> 
   return rows[0]!.number;
 }
 
-/** Creates a Decision with the next number of its scope, at Version 1. Run inside a transaction. */
-export async function insertDecision(db: Queryable, scope: DecisionScope, content: DecisionContent, actor: Actor, now: Date): Promise<Decision> {
+/** The Claim an Agent proposed a Decision in, and its Ticket. */
+export interface DecisionSource {
+  ticketId: string;
+  claimId: string;
+}
+
+/** Creates a Decision with the next number of its scope, at Version 1, proposed in `source` if an Agent proposed it during a Claim. Run inside a transaction. */
+export async function insertDecision(
+  db: Queryable,
+  scope: DecisionScope,
+  content: DecisionContent,
+  actor: Actor,
+  now: Date,
+  source: DecisionSource | null = null,
+): Promise<Decision> {
   const number = await nextNumber(db, scope);
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, status_reason, group_name, supersedes, version, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $10) RETURNING id`,
-    [scope.workspaceId, scope.projectId, number, content.title, content.body, content.status, content.statusReason, content.group, content.supersedes, now],
+    `INSERT INTO decisions (workspace_id, project_id, number, title, body, status, status_reason, group_name, supersedes, version, created_at, updated_at, source_ticket_id, source_claim_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $10, $11, $12) RETURNING id`,
+    [scope.workspaceId, scope.projectId, number, content.title, content.body, content.status, content.statusReason, content.group, content.supersedes, now, source?.ticketId ?? null, source?.claimId ?? null],
   );
   const id = rows[0]!.id;
   await insertDecisionVersion(db, id, { ...content, number: 1, actor, now });

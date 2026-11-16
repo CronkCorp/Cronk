@@ -6,6 +6,9 @@ import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
+import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
+import { ticketFor } from "../work/ticket-reads.js";
+import { listSessionClaims, requireClaimHolder } from "../coordination/claims.js";
 import {
   contentOf,
   DECISION_TEMPLATE,
@@ -20,6 +23,7 @@ import {
   type Decision,
   type DecisionContent,
   type DecisionScope,
+  type DecisionSource,
   type DecisionVersion,
 } from "./decisions.js";
 
@@ -66,6 +70,7 @@ interface NewDecision {
   body?: string;
   group?: string | null;
   supersedes?: string[];
+  ticket?: string;
 }
 
 const newDecisionBody = {
@@ -77,6 +82,13 @@ const newDecisionBody = {
     body: { ...body, description: "Markdown; if left out, the sections of a decision record to fill in: the decision and its reasons, Consequences, and Considered Options." },
     group,
     supersedes,
+    ticket: {
+      type: "string",
+      maxLength: 30,
+      description:
+        "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds; its Assignee reviews the Decision, " +
+        "and the Reports of that Claim list it. Left out, the Ticket of the one Claim the Agent Session holds, if it holds exactly one.",
+    },
   },
 } as const;
 
@@ -97,6 +109,9 @@ export async function decisionFor(db: Queryable, actor: Actor, key: string, need
 
 export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
+    /** Tells the Inbox of whoever reviews `decision`, if an Agent proposed it, that it may have changed. Call once committed. */
+    const reviewerHears = async (decision: Decision) => inboxesChanged(ctx.live, [await decisionReviewer(ctx.db, decision.id)]);
+
     /** Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step. */
     const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent) => {
       const now = ctx.clock.now();
@@ -115,7 +130,24 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      return insertDecision(tx, scope, content, actor, ctx.clock.now());
+      return insertDecision(tx, scope, content, actor, ctx.clock.now(), await sourceOf(tx, actor, input.ticket));
+    };
+
+    /**
+     * The Claim an Agent proposes a Decision in: that of the Ticket `key` names, which its Agent
+     * Session must hold, or else the one Claim it holds, if it holds exactly one. None for a User.
+     */
+    const sourceOf = async (tx: Queryable, actor: Actor, key: string | undefined): Promise<DecisionSource | null> => {
+      if (actor.kind === "user") {
+        if (key !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Decision came from, as the one it holds the Claim on");
+        return null;
+      }
+      if (key === undefined) {
+        const held = actor.session ? await listSessionClaims(tx, actor.session.id) : [];
+        return held.length === 1 ? held[0]! : null;
+      }
+      const ticket = await ticketFor(tx, actor, key, "read");
+      return { ticketId: ticket.id, claimId: await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "proposing a Decision from it") };
     };
 
     interface RegisterQuery {
@@ -168,6 +200,7 @@ export function decisionRoutes(ctx: AppContext) {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           return create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.body);
         });
+        await reviewerHears(decision);
         return reply.code(201).send({ decision });
       },
     );
@@ -184,6 +217,7 @@ export function decisionRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
         const decision = await transaction(ctx.db, (tx) => create(tx, actor, { workspaceId: actingUser(actor).workspaceId, projectId: null }, request.body));
+        await reviewerHears(decision);
         return reply.code(201).send({ decision });
       },
     );
@@ -238,6 +272,7 @@ export function decisionRoutes(ctx: AppContext) {
           };
           return save(tx, actor, current, content);
         });
+        await reviewerHears(decision);
         return { decision };
       },
     );
@@ -283,6 +318,7 @@ export function decisionRoutes(ctx: AppContext) {
           }
           return save(tx, actor, current, { ...contentOf(current), status, statusReason: reason });
         });
+        await reviewerHears(decision);
         return { decision };
       },
     );

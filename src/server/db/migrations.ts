@@ -586,6 +586,11 @@ export const migrations: Migration[] = [
       -- Why a Decision took its status, as the User gave it; required when rejecting one. Null otherwise.
       ALTER TABLE decisions ADD COLUMN status_reason text;
       ALTER TABLE decision_versions ADD COLUMN status_reason text;
+      -- An Agent's proposed Decision: the Ticket whose Claim its Agent Session held when proposing it, and that
+      -- Claim's id (see tickets.claim_id), which a Report written in the same Claim lists it by. Null otherwise.
+      ALTER TABLE decisions ADD COLUMN source_ticket_id uuid REFERENCES tickets(id) ON DELETE SET NULL;
+      ALTER TABLE decisions ADD COLUMN source_claim_id uuid;
+      CREATE INDEX decisions_source_claim ON decisions (source_claim_id) WHERE source_claim_id IS NOT NULL;
     `,
   },
 ];

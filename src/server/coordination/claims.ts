@@ -82,6 +82,12 @@ export async function listLiveClaims(db: Queryable, now: Date): Promise<Map<stri
   return new Map(rows.map((r) => [r.id, r.session_id]));
 }
 
+/** The Claims the Agent Session `sessionId` holds, with their Tickets. Pass a live Session: a Claim is live exactly while its Session is. */
+export async function listSessionClaims(db: Queryable, sessionId: string): Promise<{ ticketId: string; claimId: string }[]> {
+  const { rows } = await db.query<{ id: string; claim_id: string }>("SELECT id, claim_id FROM tickets WHERE claim_session_id = $1", [sessionId]);
+  return rows.map((r) => ({ ticketId: r.id, claimId: r.claim_id }));
+}
+
 /** A Ticket an Agent Session holds the Claim on, as the Agents list shows it. */
 export interface ClaimedTicket {
   ticketKey: string;
