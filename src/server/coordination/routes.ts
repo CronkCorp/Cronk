@@ -9,16 +9,16 @@ import { getWorkspace } from "../workspace/workspaces.js";
 import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
-import { claimNextReady, clearClaim, findLiveClaim, listReadyTicketIds, requireClaimHolder, setClaim } from "./claims.js";
+import { claimNextReady, clearClaim, findLiveClaim, isTicketReady, listReadyTicketIds, requireClaimHolder, setClaim } from "./claims.js";
 import { findReport, insertReport, listTicketReports } from "../knowledge/reports.js";
 import { insertActivity, listActivities, publicActivity } from "./activities.js";
 import { findTicketById, findTicketsByIds } from "../work/tickets.js";
-import { ACTIVITY_KINDS, FINISHED_CATEGORIES, PRIORITIES, type ActivityKind } from "../../shared/values.js";
+import { ACTIVITY_KINDS, PRIORITIES, type ActivityKind } from "../../shared/values.js";
 import { latestWaitingSeq, missedWaitingWork, takeWaitingWork, waitingEvent } from "./waiting-work.js";
 import { agentTopic, ticketTopic } from "../live/topics.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
-import { claimsEnded, readyScope, readyTicket } from "./ready.js";
+import { claimsEnded, readyScope, readyTicket, whyNotReady } from "./ready.js";
 import { endAgentSession, publicAgentSession, startAgentSession, type AgentSession } from "./agent-sessions.js";
 
 const ticketParams = pathParams({ key: ticketKeyParam });
@@ -172,13 +172,13 @@ export function coordinationRoutes(ctx: AppContext) {
         const now = ctx.clock.now();
         const claimed = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          if (ticket.delegate?.id !== actor.agent.id) throw new HttpError(409, `${ticket.key} isn't delegated to ${actor.agent.name}`);
-          if (FINISHED_CATEGORIES.includes(ticket.status.category)) {
-            throw new HttpError(409, `${ticket.key} is ${ticket.status.name}, so there is nothing left to work on`);
-          }
+          // Claiming again from the Agent Session holding the Claim keeps it; otherwise the Ticket must be Ready.
           const held = await findLiveClaim(tx, ticket.id, now);
-          if (held && held.session.id !== session.id) throw new HttpError(409, `${ticket.key} is Claimed by another Agent Session`);
-          await setClaim(tx, ticket.id, session.id, now);
+          if (held?.session.id !== session.id) {
+            const scope = await readyScope(tx, actor);
+            if (!(await isTicketReady(tx, scope, ticket.id, now))) throw new HttpError(409, await whyNotReady(tx, actor, scope, ticket, now));
+            await setClaim(tx, ticket.id, session.id, now);
+          }
           return { ticket, detail: await ticketDetail(tx, actor, ticket, now) };
         });
         ticketsChanged(ctx.live, [claimed.ticket]);

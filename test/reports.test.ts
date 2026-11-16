@@ -91,6 +91,28 @@ describe("An Agent's move into In Review", () => {
     expect((await admin.get("/api/tickets/CRONK-1/reports")).body.reports.map((r: { title: string }) => r.title)).toEqual(["First go", "Second go"]);
   });
 
+  it("ends the Claim, so neither the Ticket nor its Report can change under the reviewer, and tells the Agent nothing", async () => {
+    const { admin, claude, session } = await delegatedSetup(2);
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: null });
+    const agent = await session();
+    const stream = await agent.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Fixed the cache." })).body.report;
+
+    expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") })).status).toBe(200);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
+    const edited = await agent.patch(`/api/documents/${report.id}`, { baseVersion: report.version, body: "Actually, not fixed." });
+    expect(edited.status).toBe(409);
+    expect(edited.body.error).toMatch(/Claim CRONK-1/);
+    expect((await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body: "One more thing" })).status).toBe(409);
+    expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "started") })).status).toBe(409);
+
+    // CRONK-1 went to review, so the next thing the Agent hears of is CRONK-2.
+    await admin.patch("/api/tickets/CRONK-2", { delegateId: claude.agentId });
+    expect((await stream.next())?.data.ticket.key).toBe("CRONK-2");
+  });
+
   it("is the only hand-over that needs a Report: moving into Started and releasing the Claim don't, nor does a User's move", async () => {
     const { admin, session } = await delegatedSetup();
     const agent = await session();
