@@ -582,6 +582,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Term." },
       ...termFields,
       version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when saving." },
+      protected: { type: "boolean", description: protectedDescription("a User marked it Protected") },
       createdAt: timestamp,
       updatedAt: timestamp,
       overrides: {

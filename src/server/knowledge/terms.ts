@@ -32,6 +32,8 @@ export interface Term extends TermFields {
   projectId: string | null;
   projectKey: string | null;
   version: number;
+  /** Whether Agents may read but not change it. */
+  protected: boolean;
   createdAt: Date;
   updatedAt: Date;
   /** For a Project Term: the Workspace Term of the same name it replaces in its Project, if the reader can see the Workspace's Terms. */
@@ -50,6 +52,7 @@ interface TermRow {
   avoid: string[];
   group_name: string | null;
   version: number;
+  protected: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -66,6 +69,7 @@ const toTerm = (row: TermRow): StoredTerm => ({
   avoid: row.avoid,
   group: row.group_name,
   version: row.version,
+  protected: row.protected,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });

@@ -163,3 +163,43 @@ describe("an Agent and a Protected Document", () => {
     expect((await agent.patch(`/api/documents/${architecture.id}`, { baseVersion: 1, body: "Still open to Agents." })).status).toBe(200);
   });
 });
+
+describe("a Protected Term", () => {
+  it("is marked and unmarked by a User with Write, recorded in its protection history, and listed as Protected", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ada = (await admin.get("/api/me")).body.user;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { term } = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold on a Ticket." })).body;
+    expect(term.protected).toBe(false);
+    const agent = await agentOf(cronk, admin, "claude");
+
+    const marked = await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    expect(marked.status).toBe(200);
+    expect(marked.body.term).toMatchObject({ protected: true, version: 1 });
+    expect((await admin.get("/api/projects/CRONK/terms")).body.terms[0].protected).toBe(true);
+    expect((await agent.post(`/api/terms/${term.id}/protection`, { protected: false })).status).toBe(403);
+    expect((await admin.get(`/api/terms/${term.id}/protection`)).body.changes).toEqual([
+      { protected: true, at: "2026-01-01T09:00:00.000Z", actor: { kind: "user", id: ada.id, name: "Ada" } },
+    ]);
+  });
+
+  it("refuses Agents' edits and deletes, pointing to Suggestions, while a User still edits it", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const { term } = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." })).body;
+    const agent = await agentOf(cronk, admin, "claude");
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+
+    for (const res of [
+      await agent.patch(`/api/terms/${term.id}`, { baseVersion: 1, definition: "A lock." }),
+      await agent.delete(`/api/terms/${term.id}?baseVersion=1`),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/^Claim is Protected.*Suggestion/);
+    }
+    expect((await admin.get(`/api/terms/${term.id}`)).body.term).toMatchObject({ definition: "A hold on a Ticket.", version: 1 });
+    expect((await admin.patch(`/api/terms/${term.id}`, { baseVersion: 1, definition: "An exclusive hold." })).status).toBe(200);
+
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: false });
+    expect((await agent.patch(`/api/terms/${term.id}`, { baseVersion: 2, definition: "An Agent's words." })).status).toBe(200);
+  });
+});

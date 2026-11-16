@@ -3,10 +3,11 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
-import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, ref, termIdParam } from "../schemas.js";
+import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
+import { listProtectionChanges, requireUnprotected, setProtected } from "./protection.js";
 import {
   deleteTerm,
   findTerm,
@@ -255,6 +256,7 @@ export function termRoutes(ctx: AppContext) {
         const { baseVersion: base, ...edit } = request.body;
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, current, current.name);
           await requireCurrent(tx, current, base, "save");
           const fields: TermFields = {
             name: edit.name ?? current.name,
@@ -287,11 +289,42 @@ export function termRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         await transaction(ctx.db, async (tx) => {
           const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUnprotected(actor, term, term.name, "delete it");
           requireUserActor(actor, "delete a Term");
           await requireCurrent(tx, term, request.query.baseVersion, "delete");
           await deleteTerm(tx, term.id);
         });
         return reply.code(204).send();
+      },
+    );
+
+    app.post<{ Params: { id: string }; Body: { protected: boolean } }>(
+      "/api/terms/:id/protection",
+      {
+        schema: {
+          params: termParams,
+          body: protectionBody,
+          response: { 200: answer("The Term marked Protected or unmarked, at the same Version", holding("term", "Term")), ...errors(400, 401, 403, 404, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const term = await transaction(ctx.db, async (tx) => {
+          const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
+          requireUserActor(actor, "mark a Term Protected or unmark it");
+          await setProtected(tx, { kind: "term", id: term.id }, request.body.protected, actor.user.id, ctx.clock.now());
+          return { ...term, protected: request.body.protected };
+        });
+        return { term: await answerTerm(actor, term) };
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      "/api/terms/:id/protection",
+      { schema: { params: termParams, response: { 200: protectionHistoryAnswer, ...errors(401, 403, 404, 410) } } },
+      async (request) => {
+        const term = await termFor(ctx.db, await requireActor(ctx, request), request.params.id, "read");
+        return { changes: await listProtectionChanges(ctx.db, { kind: "term", id: term.id }) };
       },
     );
 
