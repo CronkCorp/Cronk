@@ -392,7 +392,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     description:
       "Attachments: plain files on a Ticket, such as screenshots, recordings, logs or PDFs, kept as evidence with the work. " +
       "Whoever can read the Ticket can read them. Attach one to a Ticket you hold the Claim on, as text (`content`) or as base64 " +
-      "(`contentBase64`) for anything else; each may be as large as the Workspace allows, 100 MB unless an Admin changed it.",
+      "(`contentBase64`) for anything else; each may be as large as the Workspace allows (100 MB unless an Admin changed it), " +
+      "and at most 100 MB through this tool. For a larger file, POST it to /api/tickets/{key}/attachments?name=<name> with the HTTP API.",
     parameters: {
       key: z.string().optional().describe("Ticket key, such as CRONK-12 (attach, list)"),
       name: z.string().optional().describe("The file's name, such as sign-in-flood.log or proxy-ip.png (attach)"),

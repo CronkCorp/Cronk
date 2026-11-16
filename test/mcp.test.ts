@@ -676,6 +676,16 @@ describe("the attachments tool", () => {
     expect(listed.body).toEqual((await admin.get("/api/tickets/CRONK-1/attachments")).body);
   });
 
+  it("takes files of several MB, not only what fits a small JSON request", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const recording = Buffer.alloc(3 * 1024 * 1024, 7);
+    const attached = await callTool(mcp, "attachments", { action: "attach", key: "CRONK-1", name: "repro.mp4", contentBase64: recording.toString("base64"), contentType: "video/mp4" });
+    expect(attached.body.attachment).toMatchObject({ name: "repro.mp4", size: recording.length });
+  });
+
   it("offers a read-only token only list", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
