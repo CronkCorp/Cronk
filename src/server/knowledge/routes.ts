@@ -6,8 +6,9 @@ import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireWorkspaceAccess } from "../identity/access.js";
 import { inboxesChanged } from "../inbox/inbox.js";
 import { documentTopic } from "../live/topics.js";
-import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref } from "../schemas.js";
+import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, projectKeyParam, ref, savedHolding } from "../schemas.js";
 import { findTicketByKey } from "../work/tickets.js";
+import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { documentFor } from "./document-reads.js";
 import { deleteDocument, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
@@ -67,7 +68,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       const parentId = input.parentId ?? null;
       const created = await insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
       if (created === "no such parent") throw notInTree();
-      return created;
+      return { document: created, avoidedWords: await avoidedWordsIn(tx, actor, tree.projectId, titleAndBody(input)) };
     };
 
     /**
@@ -147,7 +148,7 @@ export function knowledgeRoutes(ctx: AppContext) {
         schema: {
           body: newDocumentBody,
           response: {
-            201: answer("The new Workspace Document at Version 1, last among its siblings", holding("document", "Document")),
+            201: answer("The new Workspace Document at Version 1, last among its siblings", savedHolding("document", "Document")),
             ...errors(400, 401, 403, 410),
           },
         },
@@ -155,8 +156,8 @@ export function knowledgeRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         await requireWorkspaceAccess(ctx.db, actor, "write");
-        const document = await transaction(ctx.db, (tx) => create(tx, actor, treeFor(actor, null), request.body));
-        return reply.code(201).send({ document });
+        const saved = await transaction(ctx.db, (tx) => create(tx, actor, treeFor(actor, null), request.body));
+        return reply.code(201).send(saved);
       },
     );
 
@@ -167,18 +168,18 @@ export function knowledgeRoutes(ctx: AppContext) {
           params: projectParams,
           body: newDocumentBody,
           response: {
-            201: answer("The new Document at Version 1, last among its siblings", holding("document", "Document")),
+            201: answer("The new Document at Version 1, last among its siblings", savedHolding("document", "Document")),
             ...errors(400, 401, 403, 404, 410),
           },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const document = await transaction(ctx.db, async (tx) => {
+        const saved = await transaction(ctx.db, async (tx) => {
           const { project } = await projectFor(tx, actor, request.params.key, "write");
           return create(tx, actor, treeFor(actor, project.id), request.body);
         });
-        return reply.code(201).send({ document });
+        return reply.code(201).send(saved);
       },
     );
 
@@ -236,7 +237,7 @@ export function knowledgeRoutes(ctx: AppContext) {
             properties: { baseVersion, title, body },
           },
           response: {
-            200: answer("The Document at its new Version; unchanged if the save changed nothing", holding("document", "Document")),
+            200: answer("The Document at its new Version; unchanged if the save changed nothing", savedHolding("document", "Document")),
             ...errors(400, 401, 403, 404, 410),
             409: saveConflictAnswer,
           },
@@ -244,7 +245,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { document, assignee } = await transaction(ctx.db, async (tx) => {
+        const { document, assignee, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
@@ -254,11 +255,12 @@ export function knowledgeRoutes(ctx: AppContext) {
             actor,
             now: ctx.clock.now(),
           });
-          return { document: saved, assignee: await reportAssignee(tx, actor, current) };
+          const avoidedWords = await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body));
+          return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
         inboxesChanged(ctx.live, [assignee]);
         if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
-        return { document };
+        return { document, avoidedWords };
       },
     );
 
@@ -289,7 +291,7 @@ export function knowledgeRoutes(ctx: AppContext) {
             },
           },
           response: {
-            200: answer("The Document at its new Version; unchanged if the replacement changed nothing", holding("document", "Document")),
+            200: answer("The Document at its new Version; unchanged if the replacement changed nothing", savedHolding("document", "Document")),
             ...errors(401, 403, 410),
             400: {
               description:
@@ -303,18 +305,19 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { document, assignee } = await transaction(ctx.db, async (tx) => {
+        const { document, assignee, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           await requireClaimToChangeReport(tx, actor, current);
           await requireCurrent(tx, current, request.body.baseVersion, "save");
           const replaced = replaceSection(current.body, request.body.heading, request.body.body);
           if (typeof replaced !== "string") throw sectionRefused(current, request.body.heading, replaced);
           const saved = await saveVersion(tx, current, { title: current.title, body: replaced, actor, now: ctx.clock.now() });
-          return { document: saved, assignee: await reportAssignee(tx, actor, current) };
+          const avoidedWords = await avoidedWordsIn(tx, actor, current.projectId, [{ field: "body", text: request.body.body, markdown: true }]);
+          return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
         inboxesChanged(ctx.live, [assignee]);
         if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
-        return { document };
+        return { document, avoidedWords };
       },
     );
 

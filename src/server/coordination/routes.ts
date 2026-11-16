@@ -7,7 +7,8 @@ import { getGuidance, projectGuidanceMarkdown } from "../knowledge/guidance.js";
 import { listTerms, termNamesByProject } from "../knowledge/terms.js";
 import { listProjects } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
-import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { accessSchema, answer, errors, holding, listing, noContent, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
+import { avoidedWordsIn, titleAndBody } from "../knowledge/avoided-words.js";
 import { transaction } from "../db/database.js";
 import { ticketDetail, ticketDetailSchema, ticketFor } from "../work/ticket-reads.js";
 import { claimNextReady, clearClaim, findLiveClaim, isTicketReady, listReadyTicketIds, requireClaimHolder, setClaim } from "./claims.js";
@@ -237,7 +238,7 @@ export function coordinationRoutes(ctx: AppContext) {
             },
           },
           response: {
-            201: answer("The Activity, logged on the Ticket; the call refreshes the Agent Session and so its Claim", holding("activity", "Activity")),
+            201: answer("The Activity, logged on the Ticket; the call refreshes the Agent Session and so its Claim", savedHolding("activity", "Activity")),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -248,14 +249,15 @@ export function coordinationRoutes(ctx: AppContext) {
         const { kind, body, blocking = false } = request.body;
         if (blocking && kind !== "question") throw new HttpError(400, "Only a question can be blocking");
         const now = ctx.clock.now();
-        const activity = await transaction(ctx.db, async (tx) => {
+        const { activity, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           await requireClaimHolder(tx, actor, ticket, now, "logging Activities on it");
-          return insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
+          const activity = await insertActivity(tx, ticket.id, { ...actor, session }, { kind, body, blocking }, now);
+          return { activity, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, [{ field: "body", text: body, markdown: true }]) };
         });
         ctx.live.publish(ticketTopic(activity.ticketId), { event: "activity", data: { activity: publicActivity(activity) } });
         if (kind === "question") inboxesChanged(ctx.live, [actor.owner.id]);
-        return reply.code(201).send({ activity: publicActivity(activity) });
+        return reply.code(201).send({ activity: publicActivity(activity), avoidedWords });
       },
     );
 
@@ -291,7 +293,7 @@ export function coordinationRoutes(ctx: AppContext) {
           response: {
             201: answer(
               "The Report, a Document of the Ticket's Project at Version 1, kept out of the page tree; it counts as the Report of the current Claim",
-              holding("report", "Document"),
+              savedHolding("report", "Document"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
           },
@@ -301,14 +303,15 @@ export function coordinationRoutes(ctx: AppContext) {
         const actor = requireAgent(await requireActor(ctx, request));
         requireSession(actor);
         const now = ctx.clock.now();
-        const { ticket, report } = await transaction(ctx.db, async (tx) => {
+        const { ticket, report, avoidedWords } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const claimId = await requireClaimHolder(tx, actor, ticket, now, "writing a Report on it");
-          return { ticket, report: await insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now }) };
+          const report = await insertReport(tx, { ticket, claimId, agent: actor, title: request.body.title.trim(), body: request.body.body, now });
+          return { ticket, report, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, titleAndBody(request.body)) };
         });
         ctx.live.publish(ticketTopic(ticket.id), { event: "report", data: { report: (await findReport(ctx.db, report.id))! } });
         inboxesChanged(ctx.live, [ticket.assignee?.id]);
-        return reply.code(201).send({ report });
+        return reply.code(201).send({ report, avoidedWords });
       },
     );
 

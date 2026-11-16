@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import type { AvoidedWord } from "../knowledge/avoided-words.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 
@@ -80,7 +81,15 @@ function toResult(res: ApiResponse): CallToolResult {
     const text = message ?? `The API answered ${res.status}`;
     return error(Object.keys(details).length > 0 ? `${text}\n\n${JSON.stringify(details)}` : text);
   }
-  return { content: [{ type: "text", text: JSON.stringify(res.body ?? {}) }] };
+  const hint = avoidedWordsHint(res.body?.avoidedWords);
+  return { content: [{ type: "text", text: JSON.stringify(res.body ?? {}) }, ...(hint ? [{ type: "text" as const, text: hint }] : [])] };
+}
+
+/** A save's words a Term says to avoid, one per line with where it is and the Term to use; none for a save without any. */
+function avoidedWordsHint(words: AvoidedWord[] | undefined): string | null {
+  if (!words || words.length === 0) return null;
+  const lines = words.map((w) => `- "${w.word}" (${w.field}, line ${w.line}, column ${w.column}): use ${w.term.name}`);
+  return ["Saved, but it uses words a Term says to avoid:", ...lines].join("\n");
 }
 
 /** A query string repeating each key once per value, as the API's list filters take them. */
@@ -391,7 +400,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     name: "terms",
     description:
       "Terms: the glossary. Each names one concept with its definition and the words to avoid for it; use the name and avoid those words. " +
-      "The Workspace's apply everywhere; within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case.",
+      "The Workspace's apply everywhere; within a Project, a Project Term replaces the Workspace Term of the same name, ignoring case. " +
+      "Saving text that uses a word to avoid, outside code and quotes, still goes through: the result lists each such word with the Term to use, as `avoidedWords`.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK, for the Terms that apply in it; leave out for the Workspace's (list, get by name)"),
       name: z.string().optional().describe("The Term's name, ignoring case (get)"),

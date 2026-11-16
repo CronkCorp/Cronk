@@ -5,8 +5,9 @@ import { userActor } from "../actor.js";
 import { findStatusToMoveInto, listStatuses } from "../work/projects.js";
 import { updateTicket } from "../work/tickets.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { answer, documentIdParam, errors, holding, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { answer, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";
 import { documentFor } from "../knowledge/document-reads.js";
+import { avoidedWordsIn, type SavedText } from "../knowledge/avoided-words.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { findActivity, markAnswered, publicActivity, type Activity } from "../coordination/activities.js";
 import { agentTopic, documentTopic, ticketTopic } from "../live/topics.js";
@@ -143,16 +144,17 @@ export function conversationRoutes(ctx: AppContext) {
         schema: {
           params: ticketParams,
           body: newCommentBody,
-          response: { 201: answer("The Comment, posted on the Ticket", holding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
+          response: { 201: answer("The Comment, posted on the Ticket", savedHolding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { ticket, posted } = await posting(
+        const { ticket, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const ticket = await ticketFor(tx, actor, request.params.key, "write");
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null };
-            return { ticket, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body) };
+            const posted = await post(tx, positioned, actor, { ticketId: ticket.id }, place, request.body);
+            return { ticket, posted, avoidedWords: await avoidedWordsIn(tx, actor, ticket.projectId, commentText(request.body)) };
           },
           ({ ticket, posted }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
@@ -163,7 +165,7 @@ export function conversationRoutes(ctx: AppContext) {
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null });
           },
         );
-        return reply.code(201).send({ comment: publicComment(posted.comment) });
+        return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
       },
     );
 
@@ -240,23 +242,24 @@ export function conversationRoutes(ctx: AppContext) {
         schema: {
           params: documentParams,
           body: newCommentBody,
-          response: { 201: answer("The Comment, posted on the Document", holding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
+          response: { 201: answer("The Comment, posted on the Document", savedHolding("comment", "Comment")), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { document, posted } = await posting(
+        const { document, posted, avoidedWords } = await posting(
           async (tx, positioned) => {
             const document = await documentFor(tx, actor, request.params.id, "write");
             const place = { projectId: document.projectId, delegateId: null };
-            return { document, posted: await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document) };
+            const posted = await post(tx, positioned, actor, { documentId: document.id }, place, request.body, document);
+            return { document, posted, avoidedWords: await avoidedWordsIn(tx, actor, document.projectId, commentText(request.body)) };
           },
           ({ document, posted }) => {
             ctx.live.publish(documentTopic(document.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: null, document: { id: document.id, title: document.title } });
           },
         );
-        return reply.code(201).send({ comment: publicComment(posted.comment) });
+        return reply.code(201).send({ comment: publicComment(posted.comment), avoidedWords });
       },
     );
 
@@ -275,3 +278,6 @@ export function conversationRoutes(ctx: AppContext) {
     );
   };
 }
+
+/** The text a Comment's post wrote. */
+const commentText = (input: { body: string }): SavedText[] => [{ field: "body", text: input.body, markdown: true }];
