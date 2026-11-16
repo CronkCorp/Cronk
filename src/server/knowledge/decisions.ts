@@ -79,6 +79,9 @@ export function parseDecisionKey(key: string): { projectKey: string | null; numb
   return match ? { projectKey: match[1]?.toUpperCase() ?? null, number: Number(match[2]) } : undefined;
 }
 
+/** SQL for the key of Decision `decision`, with its Project `project` left-joined: `CRONK-D7`, or `D7` in the Workspace. */
+export const decisionKeySql = (project: string, decision: string) => `coalesce(${project}.key || '-', '') || 'D' || ${decision}.number`;
+
 /** A Decision's key from its Project key (null for the Workspace) and number. */
 export const decisionKey = (projectKey: string | null, number: number) => (projectKey === null ? `D${number}` : `${projectKey}-D${number}`);
 
