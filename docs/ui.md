@@ -218,9 +218,9 @@ The Project page is shown in `docs/ui/frame.png`.
 |---|---|---|
 | ![Terms](ui/phase-2-terms.png) | ![Term](ui/phase-2-term.png) | ![Terms, dark](ui/phase-2-terms-dark.png) |
 
-- **Terms page** (`/terms`): reads like a glossary. The page head holds a Workspace / Project scope switch, preselecting the Project the User came from (the sidebar's Terms link carries it from a Project's pages and Tickets), then Export and **New Term**. Export downloads the scope's own Terms as `GLOSSARY.md`. A filter box matches names and words to avoid. Terms without a group come first, then each group by name.
+- **Terms page** (`/terms`): reads like a glossary. The page head holds the Live indicator, a Workspace / Project scope switch, preselecting the Project the User came from (the sidebar's Terms link carries it from a Project's pages and Tickets), then Export and **New Term**. Export downloads the scope's own Terms as `GLOSSARY.md`. A filter box matches names and words to avoid. Terms without a group come first, then each group by name. The list updates in place as Terms change, including a Project Term overriding a Workspace one.
 - **Each Term**, under its group: the name, the Protected mark, "Overrides the Workspace Term" in `--info` where it does (on a Workspace Term, "Replaced in CRONK"), its scope, a Suggestion count in `--agent`, and "used in n · Version n". Then the definition, and "Avoid:" with the words struck through.
-- **A Term's page**: the name, Protected mark and actions, an `--info` banner for an override linking the other Term, the definition, words to avoid and group, then Mentioned in, Decisions and History.
+- **A Term's page**: the name, Protected mark, Live indicator and actions, an `--info` banner for an override linking the other Term, the definition, words to avoid and group, then Mentioned in, Decisions and History. Changes saved elsewhere show in place, but not while the User is editing. If the Term is deleted elsewhere, the page keeps showing it, and any edit in progress, under a `--warn` banner saying so, with a link back to its place's Terms, and drops its actions.
 
 ### Decisions
 

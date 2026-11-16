@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
+import { projectTermsTopic, termsTopic } from "../live/topics.js";
+import type { LiveEvent, LiveUpdates } from "../live/live-updates.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
@@ -113,6 +115,7 @@ export function termRoutes(ctx: AppContext) {
       const fields: TermFields = { name: input.name, definition: input.definition, avoid: input.avoid ?? [], group: input.group ?? null };
       const created = await transaction(ctx.db, (tx) => insertTerm(tx, { place, fields, actor, now: ctx.clock.now() }));
       if (created === "name taken") throw nameTaken(input.name);
+      termsChanged(ctx.live, place);
       return answerTerm(actor, created);
     };
 
@@ -157,6 +160,64 @@ export function termRoutes(ctx: AppContext) {
         const place = placeOf(actor, project.id);
         const terms = await listApplicableTerms(ctx.db, place, await canRead(ctx.db, actor, null));
         return { terms: await answerTerms(actor, byName(terms, request.query.name)) };
+      },
+    );
+
+    const changesStream = (what: string) => ({
+      200: {
+        description:
+          `A server-sent event stream of changes to ${what} as they happen, for as long as the caller can read there. It opens with a ` +
+          "`ready` event; whenever a Term there is created, saved, deleted, or marked Protected or unmarked, a `changed` event arrives " +
+          "whose data is `{}`, so the caller reads the Terms again.",
+        content: { "text/event-stream": { schema: { type: "string" } } },
+      },
+    });
+
+    app.get(
+      "/api/workspace/terms/events",
+      {
+        schema: {
+          response: {
+            ...changesStream("the Workspace's Terms, and to the Terms of each Project the caller can see, which may override them"),
+            ...errors(401, 403, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "read");
+        const workspaceId = actingUser(actor).workspaceId;
+        const now = () => requireActor(ctx, request, { refreshSession: false });
+        const canSee = async () => canRead(ctx.db, await now(), null);
+        // A Project's Term changes reach only those who can see that Project.
+        const admits = async (event: LiveEvent) => event.projectId === undefined || canRead(ctx.db, await now(), event.projectId);
+        ctx.live.stream(reply, [termsTopic(workspaceId, null), projectTermsTopic(workspaceId)], canSee, undefined, admits);
+      },
+    );
+
+    app.get<{ Params: { key: string } }>(
+      "/api/projects/:key/terms/events",
+      {
+        schema: {
+          params: projectParams,
+          response: {
+            ...changesStream("the Project's Terms, and to the Workspace's if the caller can read the Workspace, as the Project lists those it doesn't override"),
+            ...errors(401, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        const workspaceId = actingUser(actor).workspaceId;
+        // Whether the stream also carries the Workspace's Terms; it ends once the caller can no longer read the Workspace, so a reopened one leaves them out.
+        const readsWorkspace = await canRead(ctx.db, actor, null);
+        const canSee = async () => {
+          const now = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await projectFor(ctx.db, now, project.key, "read")) && (!readsWorkspace || (await canRead(ctx.db, now, null)));
+        };
+        const topics = [termsTopic(workspaceId, project.id), ...(readsWorkspace ? [termsTopic(workspaceId, null)] : [])];
+        ctx.live.stream(reply, topics, canSee);
       },
     );
 
@@ -282,6 +343,7 @@ export function termRoutes(ctx: AppContext) {
           if (saved === "name taken") throw nameTaken(fields.name);
           return saved;
         });
+        termsChanged(ctx.live, placeOf(actor, saved.projectId));
         return { term: await answerTerm(actor, saved) };
       },
     );
@@ -301,13 +363,15 @@ export function termRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        await transaction(ctx.db, async (tx) => {
+        const deleted = await transaction(ctx.db, async (tx) => {
           const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, term, term.name, "delete it");
           requireUserActor(actor, "delete a Term");
           await requireCurrent(tx, term, request.query.baseVersion, "delete");
           await deleteTerm(tx, actingUser(actor).workspaceId, term);
+          return term;
         });
+        termsChanged(ctx.live, placeOf(actor, deleted.projectId));
         return reply.code(204).send();
       },
     );
@@ -329,6 +393,7 @@ export function termRoutes(ctx: AppContext) {
           await setProtected(tx, { kind: "term", id: term.id }, request.body.protected, actor.user.id, ctx.clock.now());
           return { ...term, protected: request.body.protected };
         });
+        termsChanged(ctx.live, placeOf(actor, term.projectId));
         return { term: await answerTerm(actor, term) };
       },
     );
@@ -389,6 +454,16 @@ async function requireCurrent(db: Queryable, term: StoredTerm, base: number, wri
   if (base === term.version) return;
   const current = (await listTermVersions(db, term.id))[0]!;
   throw new HttpError(409, `This ${write} is based on Version ${base}, but the Term is at Version ${term.version}; ${AFTER_STALE[write]}`, { current });
+}
+
+/**
+ * Tells whoever watches Terms that one in `place` was created or changed: that place's watchers and, for a Project
+ * Term, the Workspace's, whose Terms are answered with their overrides. Call it only once the change is committed.
+ */
+export function termsChanged(live: LiveUpdates, place: TermPlace): void {
+  const event = { event: "changed", data: {} };
+  live.publish(termsTopic(place.workspaceId, place.projectId), event);
+  if (place.projectId !== null) live.publish(projectTermsTopic(place.workspaceId), { ...event, projectId: place.projectId });
 }
 
 /** Where Terms belong for `actor`: a Project of their Workspace, or the Workspace itself when `projectId` is null. */
