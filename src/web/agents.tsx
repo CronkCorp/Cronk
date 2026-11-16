@@ -158,7 +158,7 @@ function AgentCard(props: { agent: Agent; onChanged: () => void }) {
         open={removing}
         onOpenChange={setRemoving}
         title={`Remove ${a.name}?`}
-        description="Its tokens are revoked and its live Agent Sessions end. What it did stays on its record."
+        description="Its tokens are revoked and its live Agent Sessions end. What it did stays on the Tickets and Documents it was on, but its Agent Record goes with it."
         confirmLabel="Remove Agent"
         busy={remove.busy}
         onConfirm={() => void remove.run().then(() => setRemoving(false))}
@@ -354,7 +354,7 @@ function RecordLog(props: { agent: Agent }) {
   );
 }
 
-/** The entries of an Agent's record, loaded when shown. */
+/** The entries of an Agent Record, loaded when shown. */
 function RecordEntries(props: { agent: Agent }) {
   const [record] = useLoad(() => api.agentRecord(props.agent.id), [props.agent.id]);
   return (
@@ -377,7 +377,7 @@ function RecordEntries(props: { agent: Agent }) {
   );
 }
 
-/** What one entry of an Agent's record was, as a phrase like "logged a Plan". */
+/** What one entry of an Agent Record was, as a phrase like "logged a Plan". */
 function describeRecordEntry(entry: AgentRecordEntry): ReactNode {
   if (entry.change) return describeChange(entry.change);
   if (entry.activity) return `logged ${entry.activity.blocking ? "a blocking question" : `a ${ACTIVITY_NAMES[entry.activity.kind]}`}`;
@@ -385,7 +385,7 @@ function describeRecordEntry(entry: AgentRecordEntry): ReactNode {
   return entry.version!.number === 1 ? "wrote" : `saved Version ${entry.version!.number} of`;
 }
 
-/** Where an entry of an Agent's record happened: its Ticket, or the Document it was on. */
+/** Where an entry of an Agent Record happened: its Ticket, or the Document it was on. */
 function RecordEntryPlace(props: { entry: AgentRecordEntry }) {
   const { ticket, document, version } = props.entry;
   // A saved Version is of its Document, even a Report, which also names its Ticket.

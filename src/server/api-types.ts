@@ -133,7 +133,7 @@ export type Activity = Serialized<ReturnType<typeof publicActivity>>;
 /** A message an Actor posted on a Ticket or a Document. */
 export type Comment = Serialized<ReturnType<typeof publicComment>>;
 
-/** One entry in an Agent's record: a Change, an Activity, a Comment or a saved Version. */
+/** One entry in an Agent Record: a Change, an Activity, a Comment or a saved Version. */
 export type AgentRecordEntry = Serialized<StoredAgentRecordEntry>;
 
 /** A Comment waiting for an Agent, with why and what it is on. */
