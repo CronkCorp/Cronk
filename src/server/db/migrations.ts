@@ -851,4 +851,17 @@ export const migrations: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN artifact_signing_key text NOT NULL DEFAULT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
     `,
   },
+  {
+    id: "0032_artifact_origins",
+    sql: `
+      -- The origins every Artifact of the Workspace may load scripts, styles and fonts from, which an Admin may change,
+      -- and whether a publish may declare extra origins for its Version.
+      ALTER TABLE workspaces ADD COLUMN artifact_allowed_origins text[] NOT NULL
+        DEFAULT ARRAY['https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://unpkg.com', 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'];
+      ALTER TABLE workspaces ADD COLUMN artifact_extra_origins_allowed boolean NOT NULL DEFAULT true;
+      -- The extra origins a publish declared for its Version, each with what it may load from there and why:
+      -- [{"origin": "https://cdn.plot.ly", "uses": ["scripts"], "reason": "..."}]. Never carried over to the next Version.
+      ALTER TABLE artifact_versions ADD COLUMN extra_origins jsonb NOT NULL DEFAULT '[]';
+    `,
+  },
 ];

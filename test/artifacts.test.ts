@@ -254,3 +254,60 @@ describe("Storage Artifacts take", () => {
     expect((await admin.get("/api/workspace/storage")).body).toEqual({ attachments: { files: 0, bytes: 0 }, artifacts: { files: 3, bytes } });
   });
 });
+
+/** The sources one directive of `policy` names, such as `script-src`'s. */
+function sourcesOf(policy: string, directive: string): string[] {
+  const found = policy.split(";").map((d) => d.trim().split(/\s+/)).find(([name]) => name === directive);
+  expect(found, `${directive} in ${policy}`).toBeDefined();
+  return found!.slice(1);
+}
+
+/** The content policy the latest Version of `artifactId` is served with on the Artifact hostname, or Version `version`. */
+async function servedPolicy(client: Client, artifactId: string, version?: number): Promise<string> {
+  const { frameUrl } = version === undefined ? (await client.get(`/api/artifacts/${artifactId}`)).body.artifact : (await client.get(`/api/artifacts/${artifactId}/versions/${version}`)).body.version;
+  const page = await fromArtifactHost(client, frameUrl);
+  expect(page.status).toBe(200);
+  return String(page.headers["content-security-policy"]);
+}
+
+describe("The Workspace's allow-list", () => {
+  it("starts with cdnjs, jsDelivr, unpkg and Google Fonts, and an Admin's changes decide what every Artifact may load from", async () => {
+    const { cronk, admin, artifact } = await published();
+    expect((await admin.get("/api/workspace")).body).toMatchObject({
+      artifactAllowedOrigins: ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
+      artifactExtraOriginsAllowed: true,
+    });
+
+    const changed = await admin.patch("/api/workspace", { artifactAllowedOrigins: ["https://cdn.jsdelivr.net", "https://esm.sh"] });
+    expect(changed.status).toBe(200);
+    expect(changed.body.artifactAllowedOrigins).toEqual(["https://cdn.jsdelivr.net", "https://esm.sh"]);
+
+    const policy = await servedPolicy(admin, artifact.id);
+    for (const directive of ["script-src", "style-src", "font-src"]) {
+      expect(sourcesOf(policy, directive)).toEqual(expect.arrayContaining(["https://cdn.jsdelivr.net", "https://esm.sh"]));
+      expect(sourcesOf(policy, directive)).not.toContain("https://cdnjs.cloudflare.com");
+      expect(sourcesOf(policy, directive)).not.toContain("https://fonts.googleapis.com");
+    }
+    expect(sourcesOf(policy, "connect-src")).toEqual(["'none'"]);
+
+    // An empty list leaves the Artifact its own files alone.
+    await admin.patch("/api/workspace", { artifactAllowedOrigins: [] });
+    expect(sourcesOf(await servedPolicy(admin, artifact.id), "script-src").filter((s) => s.startsWith("https://"))).toEqual([]);
+
+    // Only Admins change it.
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.patch("/api/workspace", { artifactAllowedOrigins: ["https://evil.example"] })).status).toBe(403);
+  });
+
+  it("takes only bare http or https origins, each once", async () => {
+    const { admin } = await setup();
+    for (const bad of [["https://cdn.example/path"], ["cdn.example"], ["https://*.example"], ["javascript:alert(1)"], ["https://a.example; script-src *"], ["https://a.example", "https://a.example"], ["'unsafe-inline'"]]) {
+      const res = await admin.patch("/api/workspace", { artifactAllowedOrigins: bad });
+      expect(res.status, JSON.stringify(bad)).toBe(400);
+    }
+    // Written with a trailing slash or capitals, an origin is kept as browsers write it.
+    const res = await admin.patch("/api/workspace", { artifactAllowedOrigins: ["HTTPS://CDN.Example/", "http://localhost:8080"] });
+    expect(res.status).toBe(200);
+    expect(res.body.artifactAllowedOrigins).toEqual(["https://cdn.example", "http://localhost:8080"]);
+  });
+});

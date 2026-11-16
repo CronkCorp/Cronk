@@ -296,6 +296,15 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
     artifactMaxBytes: { type: "integer", description: "The most bytes one Version of an Artifact may hold, all its files together." },
     artifactMaxFiles: { type: "integer", description: "The most files one Version of an Artifact may hold." },
+    artifactAllowedOrigins: {
+      type: "array",
+      items: { type: "string" },
+      description: "The origins every Artifact may load scripts, styles and fonts from, besides its own files.",
+    },
+    artifactExtraOriginsAllowed: {
+      type: "boolean",
+      description: "Whether a publish may declare extra origins for its Version; turned off, Versions are served without those they declared.",
+    },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
