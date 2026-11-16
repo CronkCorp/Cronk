@@ -490,6 +490,15 @@ describe("an export edited by hand", () => {
     expect(twice.status).toBe(400);
     expect(twice.body.error).toMatch(/project\.md lists .* as a member twice/);
 
+    const cronkTerms = "projects/CRONK/terms.md";
+    const sameName = await admin.upload("/api/import", await edited(cronkTerms, (d) => d.terms.push({ ...d.terms[0], name: "CUSTOMER" })));
+    expect(sameName.status).toBe(400);
+    expect(sameName.body.error).toMatch(/CRONK\/terms\.md terms\[1\] has the name CUSTOMER, which another Term there has/);
+
+    const missingVersion = await admin.upload("/api/import", await edited(cronkTerms, (d) => d.terms[0].versions.shift()));
+    expect(missingVersion.status).toBe(400);
+    expect(missingVersion.body.error).toMatch(/CRONK\/terms\.md terms\[0\] versions must be numbered 1, 2, 3/);
+
     expect((await admin.get("/api/projects")).body.projects).toEqual([]);
   });
 });
