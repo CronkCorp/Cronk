@@ -4,6 +4,7 @@ import { Button } from "./components/button.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { FieldPicker, type PickerOption } from "./components/picker.js";
 import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
+import { ReopenDialog } from "./components/reopen-dialog.js";
 import { RelativeTime, useNow } from "./components/time.js";
 import {
   api,
@@ -338,16 +339,27 @@ function TicketFields(props: { ticket: Ticket; canWrite: boolean; statuses: Tick
   );
 }
 
-/** An Agent's completion's Verification: Unverified, with Accept, until a User Accepts it, then Verified. */
+/** An Agent's completion's Verification: Unverified, with Accept and Reopen…, until a User Accepts or Reopens it, then Verified. */
 function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
   const accept = useAction(() => api.accept(props.ticket.key), () => {});
+  const [reopening, setReopening] = useState(false);
   const unverified = props.ticket.verification === "unverified";
   return (
     <div className="side-field">
       <span className="side-field-label">Verification</span>
       <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
       {unverified && props.canWrite && (
-        <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+        <>
+          <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+          <Button variant="secondary" onClick={() => setReopening(true)}>Reopen…</Button>
+          <ReopenDialog
+            ticket={props.ticket}
+            open={reopening}
+            onOpenChange={setReopening}
+            reopen={(input) => api.reopen(props.ticket.key, input)}
+            onDone={() => {}}
+          />
+        </>
       )}
       {accept.error && <p className="error" role="alert">{accept.error}</p>}
     </div>

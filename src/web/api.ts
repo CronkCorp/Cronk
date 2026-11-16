@@ -428,12 +428,22 @@ export const api = {
   sendBack: (key: string, input: { comment: string; statusId?: string }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/send-back`, input),
 
+  /**
+   * Reopens an Agent's Unverified completion back to its Delegate in a Started Status, with a Comment saying why, and a choice
+   * for each Ticket it blocks that already continued on the work.
+   */
+  reopen: (key: string, input: { comment: string; dependents: Record<string, ReopenChoice> }) =>
+    request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/reopen`, input),
+
   /** Accepts an Agent's Unverified completion, recording the User's Verification. */
   accept: (key: string) => request<{ ticket: Ticket }>("POST", `/api/tickets/${encodeURIComponent(key)}/accept`).then((r) => r.ticket),
 
   ticketChanges: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/changes`).then((r) => r.changes),
 };
+
+/** What a Reopen does to a Ticket it blocks that already continued: keep it, pause Started work, or Reopen an Unverified completion too. */
+export type ReopenChoice = "keep" | "pause" | "reopen";
 
 /** Narrows the Inbox: an item kind, a Project key, an Agent id. */
 export interface InboxFilter {
