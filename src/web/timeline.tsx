@@ -1,12 +1,13 @@
 import { Fragment, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Actor, agentActor, Avatar, type ActorLike } from "./components/actor.js";
-import { Button } from "./components/button.js";
+import { Button, buttonClass } from "./components/button.js";
 import { Chip, DecisionStatusPill, KindLabel, PRIORITY_NAMES } from "./components/tags.js";
 import { formatDay, RelativeTime, sameDay, useNow } from "./components/time.js";
 import { api, type Activity, type ActivityKind, type Comment, type NewComment, type RecordedChange, type RelationKind, type Report } from "./api.js";
+import { InlineAttachments } from "./attachments.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
-import { Show, TextArea, useLoad, useSubmit } from "./ui.js";
+import { messageOf, Show, TextArea, useLoad, useSubmit } from "./ui.js";
 
 /**
  * A Ticket's timeline and a Document's Comments. A Ticket has one chronology (docs/ui.md § Ticket): its
@@ -105,6 +106,7 @@ export function TicketTimeline(props: {
       {props.canWrite && (
         <CommentForm
           label="Comment"
+          attachable
           submitLabel="Post Comment"
           placeholder='Comment… @name, @owner/name or @"name with spaces" mentions an Agent'
           post={thread.post}
@@ -197,6 +199,7 @@ export function ReportCard(props: { report: Report }) {
       </div>
       <div className="tl-report-body">
         <Show state={document}>{(d) => <CronkMarkdown>{d.body}</CronkMarkdown>}</Show>
+        <InlineAttachments documentId={r.id} />
       </div>
       {r.decisions.length > 0 && (
         <div className="tl-report-decisions">
@@ -228,6 +231,7 @@ function CommentEntry(props: { comment: Comment; className: string } & Thread) {
       <div className="tl-bubble">
         <div className="tl-body">
           <CronkMarkdown>{c.body}</CronkMarkdown>
+          <InlineAttachments commentId={c.id} />
         </div>
         {replies.length > 0 && <ReplyList replies={replies} thread={props} />}
       </div>
@@ -248,6 +252,7 @@ function ReplyList(props: { replies: Comment[]; thread: Thread }) {
           </div>
           <div className="tl-body">
             <CronkMarkdown>{r.body}</CronkMarkdown>
+            <InlineAttachments commentId={r.id} />
           </div>
           {props.thread.comments.some((c) => c.replyToCommentId === r.id) && (
             <ReplyList replies={props.thread.comments.filter((c) => c.replyToCommentId === r.id)} thread={props.thread} />
@@ -264,6 +269,7 @@ function ReplyButton(props: { thread: Thread; replyTo: Omit<NewComment, "body"> 
   return replying ? (
     <CommentForm
       label="Reply"
+      attachable
       submitLabel="Post reply"
       post={(input) => props.thread.post({ ...input, ...props.replyTo })}
       onPosted={(comment) => {
@@ -391,6 +397,7 @@ function CommentItem(props: { comment: Comment; card?: Card } & Thread) {
       </div>
       <div className="comment-body">
         <CronkMarkdown>{c.body}</CronkMarkdown>
+        <InlineAttachments commentId={c.id} />
       </div>
       <Replies comments={props.comments} canWrite={props.canWrite} post={props.post} onPosted={props.onPosted} replies={replies} replyTo={{ replyToCommentId: c.id }} replyLabel="Reply" />
     </li>
@@ -413,6 +420,7 @@ function Replies(props: Thread & { replies: Comment[]; replyTo: Omit<NewComment,
         (replying ? (
           <CommentForm
             label={props.replyLabel}
+            attachable
             submitLabel={`Post ${props.replyLabel.toLowerCase()}`}
             post={(input) => props.post({ ...input, ...props.replyTo })}
             onPosted={(comment) => {
@@ -430,7 +438,11 @@ function Replies(props: Thread & { replies: Comment[]; replyTo: Omit<NewComment,
   );
 }
 
-/** A Comment box: a Markdown field, its submit button and an optional hint beside it. `disabled` holds it closed, as for an item resolved elsewhere. */
+/**
+ * A Comment box: a Markdown field, its submit button and an optional hint beside it. `disabled` holds it closed, as for
+ * an item resolved elsewhere. With `attachable`, files can be picked to go with the Comment: they are attached to it
+ * once it is posted, and show in it where it was posted.
+ */
 export function CommentForm(props: {
   label: string;
   submitLabel: string;
@@ -442,21 +454,63 @@ export function CommentForm(props: {
   /** A line beside the submit button saying where the Comment goes. */
   hint?: string;
   disabled?: boolean;
+  attachable?: boolean;
 }) {
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [refused, setRefused] = useState<string[]>([]);
   const send = useSubmit(
-    () => props.post({ body }),
-    (comment) => {
+    async () => {
+      const comment = await props.post({ body });
+      const failed: string[] = [];
+      for (const file of files) {
+        await api.attachToComment(comment.id, file).catch((err: unknown) => failed.push(`${file.name || "The pasted file"}: ${messageOf(err)}`));
+      }
+      return { comment, failed };
+    },
+    ({ comment, failed }) => {
       setBody("");
+      setFiles([]);
+      setRefused(failed);
       props.onPosted(comment);
     },
   );
   return (
     <form className="comment-form" onSubmit={send.submit}>
       <TextArea inputRef={props.inputRef} label={props.label} value={body} onChange={setBody} rows={3} disabled={props.disabled} placeholder={props.placeholder ?? 'Markdown; @name, @owner/name or @"name with spaces" mentions an Agent'} />
+      {files.length > 0 && (
+        <ul className="comment-files" aria-label="Files to attach">
+          {files.map((file, i) => (
+            <li key={`${i}-${file.name}`}>
+              <span>{file.name || "pasted file"}</span>
+              <Button type="button" variant="ghost" onClick={() => setFiles((f) => f.filter((_, j) => j !== i))} aria-label={`Remove ${file.name}`}>Remove</Button>
+            </li>
+          ))}
+        </ul>
+      )}
       {send.error && <p className="error" role="alert">{send.error}</p>}
+      {refused.map((error) => (
+        <p key={error} className="error" role="alert">{error}</p>
+      ))}
       <div className="actions">
         <Button type="submit" disabled={props.disabled || send.busy || !body.trim()}>{props.submitLabel}</Button>
+        {props.attachable && (
+          <label className={buttonClass("ghost")} aria-disabled={props.disabled || send.busy}>
+            Attach files…
+            <input
+              type="file"
+              multiple
+              hidden
+              aria-label={`Attach files to the ${props.label.toLowerCase()}`}
+              disabled={props.disabled || send.busy}
+              onChange={(e) => {
+                const picked = [...(e.target.files ?? [])];
+                e.target.value = "";
+                setFiles((f) => [...f, ...picked]);
+              }}
+            />
+          </label>
+        )}
         {props.onCancel && <Button type="button" variant="secondary" onClick={props.onCancel}>Cancel</Button>}
         {props.hint && <span className="muted form-hint">{props.hint}</span>}
       </div>
@@ -548,6 +602,7 @@ export function DocumentMargin(props: {
           <div className="margin-form">
             <CommentForm
               label="Comment on the whole Document"
+              attachable
               submitLabel="Post Comment"
               post={post}
               onPosted={() => {
@@ -580,7 +635,7 @@ export function PassageCommentForm(props: {
   return (
     <div className="passage-comment">
       <TextArea label="About the passage (optional)" value={props.passage} onChange={props.onPassageChange} rows={2} placeholder="Quote the text exactly" />
-      <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={props.onPosted} inputRef={props.commentRef} />
+      <CommentForm label="Comment" submitLabel="Post Comment" post={post} onPosted={props.onPosted} inputRef={props.commentRef} attachable />
     </div>
   );
 }

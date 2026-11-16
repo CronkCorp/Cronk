@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Actor, agentActor, userActor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { fileKind, formatBytes, typeLabel } from "./components/files.js";
@@ -7,13 +7,13 @@ import { api, attachmentFileUrl, type Attachment, type RecordedActor } from "./a
 import { messageOf } from "./ui.js";
 
 /**
- * A Ticket's Attachments (docs/ui.md § Ticket Attachments): thumbnails under the description, a Files list in the
- * side panel, and attaching by picking, dropping anywhere on the page or pasting. Opening one shows it in a dialog,
- * where video and audio play with seeking.
+ * Attachments (docs/ui.md § Ticket Attachments): thumbnails under a Ticket's description or a Document's body, a Files
+ * list in a Ticket's side panel, images and video shown where they were posted in a Comment or Report, and attaching by
+ * picking, dropping anywhere on the page or pasting. Opening one shows it in a dialog, where video and audio play with seeking.
  */
 
-/** Uploads files to a Ticket one after another, saying how far it got and what was refused. */
-export function useAttach(ticketKey: string, onAttached: () => void) {
+/** Uploads files one after another with `upload`, saying how far it got and what was refused. */
+export function useAttach(upload: (file: File) => Promise<unknown>, onAttached: () => void) {
   const [uploading, setUploading] = useState<string>();
   const [errors, setErrors] = useState<string[]>([]);
   const attach = async (files: File[]) => {
@@ -22,7 +22,7 @@ export function useAttach(ticketKey: string, onAttached: () => void) {
     for (const file of files) {
       setUploading(file.name || "pasted file");
       try {
-        await api.attach(ticketKey, file);
+        await upload(file);
       } catch (err) {
         setErrors((e) => [...e, `${file.name || "The pasted file"}: ${messageOf(err)}`]);
       }
@@ -132,8 +132,8 @@ export interface AttachmentsView {
   onOpen: (attachment: Attachment) => void;
 }
 
-/** The Ticket's own Attachments as thumbnails under its description, with where to drop more. */
-export function TicketAttachments(props: AttachmentsView) {
+/** An item's own Attachments as thumbnails, under a Ticket's description or a Document's body, with where to drop more. */
+export function AttachmentThumbnails(props: AttachmentsView) {
   if (!props.canWrite && props.attachments.length === 0) return null;
   return (
     <section className="attachments" aria-label="Attachments">
@@ -278,11 +278,55 @@ export function AttachmentViewer(props: { attachment: Attachment | undefined; ca
         open={confirming}
         onOpenChange={setConfirming}
         title={`Delete ${a.name}?`}
-        description="It is removed from the Ticket for everyone, and its file is deleted."
+        description="It is removed for everyone, from wherever it was attached, and its file is deleted."
         confirmLabel="Delete"
         busy={busy}
         onConfirm={() => void remove()}
       />
     </>
+  );
+}
+
+/** The Attachments a page has loaded, for Comments and Reports on it to show their own where they were posted. */
+export const PageAttachments = createContext<{ attachments: Attachment[]; onOpen: (attachment: Attachment) => void } | undefined>(undefined);
+
+/**
+ * The Attachments on one Comment, or on one Document or Report itself, shown where they were posted: images and video in
+ * the page, audio playing, other files by name. Opening one shows it in the page's dialog. Nothing outside a page that
+ * provides `PageAttachments`.
+ */
+export function InlineAttachments(props: { commentId: string } | { documentId: string }) {
+  const page = useContext(PageAttachments);
+  const shown = (page?.attachments ?? []).filter((a) =>
+    "commentId" in props ? a.commentId === props.commentId : a.on === "document" && a.documentId === props.documentId,
+  );
+  if (!page || shown.length === 0) return null;
+  return (
+    <ul className="inline-attachments" aria-label="Attached files">
+      {shown.map((a) => {
+        const url = attachmentFileUrl(a.id);
+        const kind = fileKind(a.contentType);
+        return (
+          <li key={a.id} className={`inline-attachment inline-${kind}`}>
+            {kind === "image" ? (
+              <button type="button" className="inline-media-button" onClick={() => page.onOpen(a)} aria-label={`Open ${a.name}`}>
+                <img className="inline-media" src={url} alt={a.name} loading="lazy" />
+              </button>
+            ) : kind === "video" ? (
+              <video className="inline-media" src={url} controls preload="metadata" playsInline aria-label={a.name} />
+            ) : kind === "audio" ? (
+              <audio className="inline-audio" src={url} controls preload="metadata" aria-label={a.name} />
+            ) : null}
+            <span className="inline-caption">
+              <button type="button" className="link-button inline-name" onClick={() => page.onOpen(a)}>
+                {kind === "other" ? <span className="file-type">{typeLabel(a.name, a.contentType).slice(0, 4)}</span> : null}
+                {a.name}
+              </button>
+              <span className="muted">{formatBytes(a.size)}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

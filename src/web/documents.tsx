@@ -10,6 +10,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type React
 import {
   api,
   staleVersionOf,
+  type Attachment,
   type Comment,
   type Document,
   type DocumentTreeEntry,
@@ -18,6 +19,7 @@ import {
 } from "./api.js";
 import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
+import { AttachmentThumbnails, AttachmentViewer, PageAttachments, useAttach, usePageDrop, type AttachmentsView } from "./attachments.js";
 import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown, highlightIds, MarkdownPlace, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
@@ -220,6 +222,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   // The newest Version anyone saved, as the Document's stream tells it, and how often its Comments changed.
   const [latest, setLatest] = useState(d.version);
   const [commentsGeneration, setCommentsGeneration] = useState(0);
+  const [attachments, reloadAttachments] = useLoad(() => api.documentAttachments(d.id), [d.id]);
   const [live, onLive] = useLiveState();
   useEffect(
     () =>
@@ -228,11 +231,13 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
         // On (re)connecting, catch up on what was saved and posted meanwhile.
         ready: () => {
           setCommentsGeneration((g) => g + 1);
+          reloadAttachments();
           api.document(d.id).then((current) => setLatest((v) => Math.max(v, current.version)), () => {});
         },
         on: {
           comment: () => setCommentsGeneration((g) => g + 1),
           version: ({ version }) => setLatest((v) => Math.max(v, version)),
+          attachments: () => reloadAttachments(),
         },
       }),
     [d.id],
@@ -296,6 +301,20 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   }, []);
   useEffect(() => setComposing(undefined), [d.version]);
   const offer = composing ?? selected;
+  // Its Attachments, and those in its Comments; files dropped or pasted on the page, outside the editor, attach to it.
+  const [workspace] = useLoad(api.workspace, []);
+  const [opened, setOpened] = useState<Attachment>();
+  const attaching = useAttach((file) => api.attachToDocument(d.id, file), reloadAttachments);
+  const dragging = usePageDrop(canWrite && panel !== "edit", (files) => void attaching.attach(files));
+  const loadedAttachments = attachments.kind === "loaded" ? attachments.value : [];
+  const files: AttachmentsView = {
+    attachments: loadedAttachments.filter((a) => a.on === "document"),
+    canWrite,
+    attaching,
+    maxBytes: workspace.kind === "loaded" ? workspace.value.attachmentMaxBytes : undefined,
+    dragging,
+    onOpen: setOpened,
+  };
 
   return (
     <article className="document">
@@ -381,6 +400,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
               <div className="markdown" data-testid="document-body" ref={bodyAt}>
                 <DocumentBody body={d.body} highlights={highlights} />
               </div>
+              <AttachmentThumbnails {...files} />
               {canWrite && offer && (
                 <Popover
                   open={composing !== undefined}
@@ -421,6 +441,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                 </Popover>
               )}
             </div>
+            <PageAttachments.Provider value={{ attachments: loadedAttachments, onOpen: setOpened }}>
             <Show state={comments}>
               {(all) => (
                 <DocumentMargin
@@ -436,9 +457,19 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                 />
               )}
             </Show>
+            </PageAttachments.Provider>
           </div>
         </>
       )}
+      <AttachmentViewer
+        attachment={opened}
+        canWrite={canWrite}
+        onClose={() => setOpened(undefined)}
+        onDeleted={() => {
+          setOpened(undefined);
+          reloadAttachments();
+        }}
+      />
     </article>
   );
 }
