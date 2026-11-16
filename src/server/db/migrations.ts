@@ -430,4 +430,52 @@ export const migrations: Migration[] = [
       ALTER TABLE comments ADD COLUMN send_back boolean NOT NULL DEFAULT false CHECK (NOT send_back OR ticket_id IS NOT NULL);
     `,
   },
+  {
+    id: "0018_decisions",
+    sql: `
+      -- The number the next Decision of a Project, or of the Workspace outside any Project, gets;
+      -- taken and bumped in one UPDATE so numbers never repeat.
+      ALTER TABLE projects ADD COLUMN next_decision_number integer NOT NULL DEFAULT 1;
+      ALTER TABLE workspaces ADD COLUMN next_decision_number integer NOT NULL DEFAULT 1;
+
+      -- A Decision belongs to a Project, or to the Workspace when project_id is null, and is numbered in
+      -- order within it. title, body, status, group_name and supersedes repeat its current Version.
+      -- supersedes and superseded_by name other Decisions of the same Project (or the Workspace) by number.
+      CREATE TABLE decisions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id),
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        number integer NOT NULL CHECK (number > 0),
+        title text NOT NULL,
+        body text NOT NULL,
+        status text NOT NULL CHECK (status IN ('proposed', 'accepted', 'rejected', 'deprecated', 'superseded')),
+        group_name text,
+        supersedes integer[] NOT NULL DEFAULT '{}',
+        superseded_by integer,
+        version integer NOT NULL,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+      CREATE UNIQUE INDEX decisions_number_unique ON decisions (workspace_id, project_id, number) NULLS NOT DISTINCT;
+
+      -- Every saved state of a Decision, numbered from 1 and never changed, with the Actor who saved it:
+      -- an edit, or a change of status.
+      CREATE TABLE decision_versions (
+        decision_id uuid NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+        number integer NOT NULL,
+        title text NOT NULL,
+        body text NOT NULL,
+        status text NOT NULL,
+        group_name text,
+        supersedes integer[] NOT NULL,
+        at timestamptz NOT NULL,
+        actor_kind text NOT NULL CHECK (actor_kind IN ('user', 'agent')),
+        actor_user_id uuid NOT NULL REFERENCES users(id),
+        actor_agent_id uuid REFERENCES agents(id),
+        actor_session_id uuid REFERENCES agent_sessions(id),
+        PRIMARY KEY (decision_id, number),
+        CHECK ((actor_kind = 'agent') = (actor_agent_id IS NOT NULL))
+      );
+    `,
+  },
 ];

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ACTIVITY_KINDS, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -58,7 +58,12 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
-  | "AgentRecordEntry";
+  | "AgentRecordEntry"
+  | "Decision"
+  | "DecisionSummary"
+  | "DecisionVersion"
+  | "DecisionVersionSummary"
+  | "StaleDecision";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -107,6 +112,46 @@ const versionFields = {
   at: timestamp,
   actor: { ...recordedActor, description: "Who saved it." },
   restoredFrom: { ...nullable({ type: "integer" }), description: "The Version it restored, if it was a restore." },
+};
+
+const decisionStatus = { type: "string", enum: DECISION_STATUSES } as const;
+/** Another Decision of the same Project or Workspace, as a Decision names it. */
+const decisionRef = object({ key: { type: "string" }, title: { type: "string" }, status: decisionStatus });
+
+/** A Decision's fields as its register lists them. */
+const decisionSummaryFields = {
+  id,
+  key: { type: "string", description: "Such as `CRONK-D7`, or `D7` for a Workspace Decision." },
+  number: { type: "integer", description: "Counts from 1 per Project, and in the Workspace." },
+  projectId: { ...nullable(id), description: "Null for a Workspace Decision." },
+  projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Decision." },
+  title: { type: "string" },
+  status: decisionStatus,
+  group: { ...nullable({ type: "string" }), description: "The group it is filed under; null for none." },
+  version: { type: "integer", description: "The number of its current Version; name it as `baseVersion` when editing." },
+  supersededBy: { ...nullable(decisionRef), description: "The accepted Decision that replaced it, if it is superseded." },
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+
+const decisionFields = {
+  ...decisionSummaryFields,
+  body: { type: "string", description: "Markdown." },
+  supersedes: { type: "array", items: decisionRef, description: "The Decisions it replaces once accepted, of the same Project or Workspace." },
+  proposedBy: { ...recordedActor, description: "Who recorded it." },
+  statusChangedAt: { ...timestamp, description: "When it took its current status." },
+  statusChangedBy: { ...recordedActor, description: "Who gave it its current status." },
+};
+
+/** A Decision Version's fields, all but its body. */
+const decisionVersionFields = {
+  number: { type: "integer", description: "Counts from 1 per Decision." },
+  title: { type: "string" },
+  status: decisionStatus,
+  group: nullable({ type: "string" }),
+  supersedes: { type: "array", items: { type: "string" }, description: "The keys of the Decisions it superseded at that Version." },
+  at: timestamp,
+  actor: { ...recordedActor, description: "Who saved it." },
 };
 
 /** Each side's text of a part both sides of a merge changed differently. */
@@ -376,6 +421,25 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       createdAt: timestamp,
       updatedAt: timestamp,
     }),
+  },
+  Decision: {
+    description:
+      "A recorded choice with its reasoning and a status, belonging to a Project or the Workspace, kept as Markdown. Only Users change its status; " +
+      "accepting a Decision that supersedes others marks them superseded.",
+    ...object(decisionFields),
+  },
+  DecisionSummary: {
+    description: "A Decision as its register lists it, without its body; read it by its key.",
+    ...object(decisionSummaryFields),
+  },
+  DecisionVersion: {
+    description: "One saved state of a Decision, an edit or a change of status, recording which Actor produced it. Never changes.",
+    ...object({ ...decisionVersionFields, body: { type: "string", description: "Markdown." } }),
+  },
+  DecisionVersionSummary: { description: "A Decision's Version without its body, as its Version list shows it.", ...object(decisionVersionFields) },
+  StaleDecision: {
+    description: "An edit of a Decision refused because the Version it is based on is no longer current, with the current Version to merge with.",
+    ...object({ error: { type: "string" }, current: ref("DecisionVersion") }),
   },
   Report: {
     description:
