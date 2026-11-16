@@ -415,6 +415,26 @@ export async function listDecisions(db: Queryable, scope: DecisionScope, filters
   return rows.map((row) => summarize(row, refs));
 }
 
+/**
+ * The Decisions Agents proposed during each of these Claims, oldest first, each with its Project (null for
+ * the Workspace), by Claim id.
+ */
+export async function listDecisionsProposedIn(db: Queryable, claimIds: string[]): Promise<Map<string, (DecisionRef & { projectId: string | null })[]>> {
+  const { rows } = await db.query<{ claim_id: string; project_id: string | null; project_key: string | null; number: number; title: string; status: DecisionStatus }>(
+    `SELECT d.source_claim_id AS claim_id, d.project_id, p.key AS project_key, d.number, d.title, d.status
+     FROM decisions d LEFT JOIN projects p ON p.id = d.project_id
+     WHERE d.source_claim_id = ANY($1::uuid[]) ORDER BY d.created_at, d.project_id IS NULL, d.number`,
+    [claimIds],
+  );
+  const byClaim = new Map<string, (DecisionRef & { projectId: string | null })[]>();
+  for (const r of rows) {
+    const list = byClaim.get(r.claim_id) ?? [];
+    byClaim.set(r.claim_id, list);
+    list.push({ key: decisionKey(r.project_key, r.number), title: r.title, status: r.status, projectId: r.project_id });
+  }
+  return byClaim;
+}
+
 /** A Decision's row as an import writes it, keeping its number and times; the caller records its Versions. */
 export async function insertDecisionRow(
   db: Queryable,

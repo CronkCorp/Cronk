@@ -1,9 +1,10 @@
 import type { Nodes } from "mdast";
-import type { LiveEvent } from "../live/live-updates.js";
+import type { LiveEvent, LiveUpdates } from "../live/live-updates.js";
+import { agentTopic } from "../live/topics.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor, RecordedActor } from "../actor.js";
 import { actingUser } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, transaction, type Database, type Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
 import { listAgents, type Agent } from "../identity/agents.js";
 import type { User } from "../identity/users.js";
@@ -146,8 +147,30 @@ function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, 
   });
 }
 
-/** Told each position `markWaiting` takes for an Agent, before the transaction taking it commits. */
+/** Told each position `markWaiting` or `markRejected` takes for an Agent, before the transaction taking it commits. */
 export type Positioned = (agentId: string, seq: string) => void;
+
+/**
+ * Runs `fn` in a transaction, passing it what to tell `markWaiting` or `markRejected` about the positions
+ * it takes, then `committed` with its result. Each position is expected on its Agent's stream
+ * (`LiveUpdates.expect`) before it commits, until `committed` pushes it. If the transaction rolls back
+ * or `committed` throws, they are forgotten, so they never hold a stream's `ready` back for good.
+ */
+export async function withWaitingWork<T>(
+  ctx: { db: Database; live: LiveUpdates },
+  fn: (tx: Queryable, positioned: Positioned) => Promise<T>,
+  committed: (result: T) => void,
+): Promise<T> {
+  const forget: (() => void)[] = [];
+  try {
+    const result = await transaction(ctx.db, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
+    committed(result);
+    return result;
+  } catch (err) {
+    for (const f of forget) f();
+    throw err;
+  }
+}
 
 /**
  * Marks `comment`, posted by `actor` at `place`, as waiting for each Agent it concerns: the

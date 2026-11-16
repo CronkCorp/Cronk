@@ -8,7 +8,7 @@ import { answer, errors, holding, listing, pathParams, projectKeyParam, ref, sav
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
-import { markRejected, rejectionOf, waitingEvent, type RejectionWork } from "../coordination/waiting-work.js";
+import { markRejected, rejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { agentTopic } from "../live/topics.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { listSessionClaims, requireClaimHolder, type SessionClaim } from "../coordination/claims.js";
@@ -339,15 +339,11 @@ export function decisionRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { status } = request.body;
         const reason = request.body.reason?.trim() || null;
-        // A rejection waits for the Agent that proposed the Decision: its position is expected on the Agent's
-        // stream before it commits, and pushed once it has (as for a Comment; see conversation/routes.ts).
-        const forget: (() => void)[] = [];
-        const positioned = (agentId: string, seq: string) => forget.push(ctx.live.expect(agentTopic(agentId), seq));
-        let told: { agentId: string; seq: string; work: RejectionWork } | undefined;
+        // A rejection waits for the Agent that proposed the Decision, pushed to it once committed.
         const changed: Decision[] = [];
-        let decision: Decision;
-        try {
-          decision = await transaction(ctx.db, async (tx) => {
+        const { decision } = await withWaitingWork(
+          ctx,
+          async (tx, positioned) => {
             const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
             requireUserActor(actor, "change a Decision's status");
             if (status === "superseded") {
@@ -356,17 +352,15 @@ export function decisionRoutes(ctx: AppContext) {
             if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
             const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason }, changed);
             const proposer = saved.proposedBy;
-            if (status === "rejected" && saved.version !== current.version && proposer.kind === "agent") {
-              const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
-              if (seq) told = { agentId: proposer.id, seq, work: rejectionOf(saved, (await findDecisionVersion(tx, saved, saved.version))!) };
-            }
-            return saved;
-          });
-        } catch (err) {
-          for (const f of forget) f();
-          throw err;
-        }
-        if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
+            if (status !== "rejected" || saved.version === current.version || proposer.kind !== "agent") return { decision: saved };
+            const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
+            const work = rejectionOf(saved, (await findDecisionVersion(tx, saved, saved.version))!);
+            return { decision: saved, told: seq === undefined ? undefined : { agentId: proposer.id, seq, work } };
+          },
+          ({ told }) => {
+            if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
+          },
+        );
         await reviewersHear([decision, ...changed]);
         return { decision };
       },

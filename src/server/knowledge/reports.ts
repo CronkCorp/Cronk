@@ -2,7 +2,7 @@ import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { ticketKeySql, type Ticket } from "../work/tickets.js";
 import { findDocument, insertDocumentRow, insertVersion, type Document } from "./documents.js";
-import { decisionKey, type DecisionRef } from "./decisions.js";
+import { listDecisionsProposedIn, type DecisionRef } from "./decisions.js";
 
 /**
  * Reports: Documents of findings an Agent Session writes on a Ticket while holding its Claim.
@@ -62,20 +62,13 @@ const toReport = (row: ReportRow, decisions: DecisionRef[]): Report => ({
   decisions,
 });
 
-/** The rows as Reports, each with the Decisions proposed during its Claim. */
+/** The rows as Reports, each with the Decisions proposed during its Claim, of its Ticket's Project or the Workspace. */
 async function toReports(db: Queryable, rows: ReportRow[]): Promise<Report[]> {
-  const { rows: proposed } = await db.query<{ claim_id: string; project_id: string | null; project_key: string | null; number: number; title: string; status: DecisionRef["status"] }>(
-    `SELECT d.source_claim_id AS claim_id, d.project_id, p.key AS project_key, d.number, d.title, d.status
-     FROM decisions d LEFT JOIN projects p ON p.id = d.project_id
-     WHERE d.source_claim_id = ANY($1::uuid[]) ORDER BY d.created_at, d.project_id IS NULL, d.number`,
-    [rows.map((r) => r.claim_id)],
-  );
+  const proposed = await listDecisionsProposedIn(db, rows.map((r) => r.claim_id));
   return rows.map((row) =>
     toReport(
       row,
-      proposed
-        .filter((d) => d.claim_id === row.claim_id && (d.project_id === null || d.project_id === row.project_id))
-        .map((d) => ({ key: decisionKey(d.project_key, d.number), title: d.title, status: d.status })),
+      (proposed.get(row.claim_id) ?? []).filter((d) => d.projectId === null || d.projectId === row.project_id).map(({ projectId: _, ...ref }) => ref),
     ),
   );
 }
