@@ -7,6 +7,8 @@ import { projectFor, requireProjectAccess, requireWorkspaceAccess, type Access }
 import { answer, errors, holding, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, inboxesChanged } from "../inbox/inbox.js";
+import { markRejected, rejectionOf, waitingEvent } from "../coordination/waiting-work.js";
+import { agentTopic } from "../live/topics.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { listSessionClaims, requireClaimHolder } from "../coordination/claims.js";
 import {
@@ -310,14 +312,32 @@ export function decisionRoutes(ctx: AppContext) {
         const { status } = request.body;
         const reason = request.body.reason?.trim() || null;
         if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
-        const decision = await transaction(ctx.db, async (tx) => {
-          const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
-          requireUserActor(actor, "change a Decision's status");
-          if (status === "superseded") {
-            throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
-          }
-          return save(tx, actor, current, { ...contentOf(current), status, statusReason: reason });
-        });
+        // A rejection waits for the Agent that proposed the Decision: its position is expected on the Agent's
+        // stream before it commits, and pushed once it has (as for a Comment; see conversation/routes.ts).
+        const forget: (() => void)[] = [];
+        const positioned = (agentId: string, seq: string) => forget.push(ctx.live.expect(agentTopic(agentId), seq));
+        let told: { agentId: string; seq: string } | undefined;
+        let decision: Decision;
+        try {
+          decision = await transaction(ctx.db, async (tx) => {
+            const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
+            requireUserActor(actor, "change a Decision's status");
+            if (status === "superseded") {
+              throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
+            }
+            const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason });
+            const proposer = saved.proposedBy;
+            if (status === "rejected" && saved.version !== current.version && proposer.kind === "agent") {
+              const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
+              if (seq) told = { agentId: proposer.id, seq };
+            }
+            return saved;
+          });
+        } catch (err) {
+          for (const f of forget) f();
+          throw err;
+        }
+        if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, rejectionOf(decision)));
         await reviewerHears(decision);
         return { decision };
       },

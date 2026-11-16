@@ -434,17 +434,33 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   WaitingWork: {
-    description: "A Comment waiting for an Agent (ADR 0005), with why and what it is on.",
-    ...object({
-      reason: {
-        type: "string",
-        enum: WAITING_REASONS,
-        description: "`answer`: it answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent.",
+    description:
+      "Work waiting for an Agent (ADR 0005), with why: a Comment, with what it is on, or a User's rejection of a Decision the Agent proposed, with their reason.",
+    ...object(
+      {
+        reason: {
+          type: "string",
+          enum: WAITING_REASONS,
+          description:
+            "`answer`: the Comment answers the Agent's question. `mention`: it @mentions the Agent. `comment`: it is on a Ticket delegated to the Agent. " +
+            "`rejected`: a User rejected a Decision the Agent proposed; `decision` says which and why.",
+        },
+        comment: { ...nullable(ref("Comment")), description: "The Comment; null for a rejection." },
+        decision: {
+          ...object({
+            key: { type: "string" },
+            title: { type: "string" },
+            reason: { type: "string", description: "Why the User rejected it, in Markdown." },
+            rejectedBy: recordedActor,
+            at: timestamp,
+          }),
+          description: "For a rejection only: the Decision, as the Version that rejected it holds it.",
+        },
+        ticket: { ...nullable(ticketName), description: "The Ticket the Comment is on, or the rejected Decision came from; null otherwise." },
+        document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document the Comment is on; null otherwise." },
       },
-      comment: ref("Comment"),
-      ticket: { ...nullable(ticketName), description: "The Ticket it is on; null on a Document." },
-      document: { ...nullable(object({ id, title: { type: "string" } })), description: "The Document it is on; null on a Ticket." },
-    }),
+      ["decision"],
+    ),
   },
   Document: {
     description: "A piece of written knowledge, kept as Markdown, belonging to a Project or the Workspace.",

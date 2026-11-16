@@ -153,3 +153,50 @@ describe("a proposed Decision's reviewer", () => {
     expect((await inbox.next())?.event).toBe("changed");
   });
 });
+
+describe("rejecting an Agent's proposed Decision", () => {
+  it("tells the Agent why, as Waiting Work in the welcome of its next Agent Session", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/CRONK/decisions", { title: "Markdown for Decisions" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "A User's own" });
+    cronk.clock.advance(60_000);
+
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "rejected", reason: "We keep them in Postgres." });
+    await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected", reason: "Nobody to tell." });
+
+    const welcomed = await cronk.client(claude.secret).post("/api/agent-sessions");
+    expect(welcomed.body.welcome.waitingWork).toEqual([
+      {
+        reason: "rejected",
+        comment: null,
+        decision: {
+          key: "CRONK-D1",
+          title: "Markdown for Decisions",
+          reason: "We keep them in Postgres.",
+          rejectedBy: { kind: "user", id: expect.any(String), name: "Ada" },
+          at: "2026-01-01T09:01:00.000Z",
+        },
+        ticket: { key: "CRONK-1", title: "Ticket 1" },
+        document: null,
+      },
+    ]);
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).body.welcome.waitingWork).toEqual([]);
+  });
+
+  it("pushes the reason to the Agent's live Agent Sessions", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/workspace/decisions", { title: "Compose for installs" });
+    const stream = await claude.events("/api/agent-sessions/current/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.post("/api/decisions/D1/status", { status: "rejected", reason: "We ship a binary." });
+
+    expect(await stream.next()).toMatchObject({
+      event: "waiting",
+      data: { waiting: { reason: "rejected", comment: null, decision: { key: "D1", reason: "We ship a binary." }, ticket: null, document: null } },
+    });
+  });
+});
