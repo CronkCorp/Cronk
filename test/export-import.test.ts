@@ -117,7 +117,7 @@ async function snapshot(admin: Client): Promise<unknown> {
             ticket: await get(`/api/tickets/${t.key}`),
             activities: await get(`/api/tickets/${t.key}/activities`),
             comments: await get(`/api/tickets/${t.key}/comments`),
-            history: await get(`/api/tickets/${t.key}/changes`),
+            changes: await get(`/api/tickets/${t.key}/changes`),
             reports,
             reportContents: await Promise.all(reports.map((r: { id: string }) => document(r.id))),
           };

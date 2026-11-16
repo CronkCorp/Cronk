@@ -8,7 +8,7 @@ async function userId(client: { get: (path: string) => Promise<{ body: any }> },
 }
 
 describe("Ticket Delegate", () => {
-  it("can be one of the Assignee's own Agents, and is recorded in the history", async () => {
+  it("can be one of the Assignee's own Agents, and is recorded as a Change", async () => {
     const { admin } = await startInstalledCronk();
     await projectWithTickets(admin, "CRONK", 1);
     const claude = await registerAgent(admin, "claude-laptop");
@@ -104,8 +104,8 @@ describe("Ticket Delegate, further", () => {
     await projectWithTickets(admin, "OLD", 1);
     await admin.patch("/api/tickets/OLD-1", { assigneeId: adaId, delegateId: claude.agentId });
     await admin.patch("/api/projects/OLD", { archived: true });
-    const historyLength = async (key: string) => (await admin.get(`/api/tickets/${key}/changes`)).body.changes.length;
-    const before = { "CRONK-2": await historyLength("CRONK-2"), "CRONK-3": await historyLength("CRONK-3") };
+    const changeCount = async (key: string) => (await admin.get(`/api/tickets/${key}/changes`)).body.changes.length;
+    const before = { "CRONK-2": await changeCount("CRONK-2"), "CRONK-3": await changeCount("CRONK-3") };
 
     await admin.delete(`/api/agents/${claude.agentId}`);
 
@@ -115,7 +115,7 @@ describe("Ticket Delegate, further", () => {
     }
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.delegate).toEqual({ id: otherOfAdas.agentId, name: "claude-desktop" });
     expect((await admin.get("/api/tickets/CRONK-3")).body.ticket.delegate).toEqual({ id: bobsAgent.agentId, name: "bob-bot" });
-    for (const [key, length] of Object.entries(before)) expect(await historyLength(key)).toBe(length);
+    for (const [key, length] of Object.entries(before)) expect(await changeCount(key)).toBe(length);
   });
 
   it("stays, with the Agent, when clearing it fails partway through the removal", async () => {

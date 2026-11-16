@@ -192,7 +192,7 @@ describe("Ticket fields and Relations under Project access", () => {
     expect((await bob.delete("/api/tickets/CRONK-1/relations/blocks/SECRET-1")).status).toBe(400);
   });
 
-  it("leaves Tickets of Projects the User can't see out of Relations and history", async () => {
+  it("leaves Tickets of Projects the User can't see out of Relations and Changes", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const bob = await joinAs(cronk, admin, "bob@example.com");
     await projectWithTickets(admin, "CRONK", 2);
@@ -203,8 +203,8 @@ describe("Ticket fields and Relations under Project access", () => {
 
     const relations = (await bob.get("/api/tickets/CRONK-1")).body.relations;
     expect(relations.blockedBy.map((r: { key: string }) => r.key)).toEqual(["CRONK-2"]);
-    const history = (await bob.get("/api/tickets/CRONK-1/changes")).body.changes;
-    expect(history.map((c: { ticket?: { key: string } }) => c.ticket?.key)).toEqual([undefined, "CRONK-2"]);
+    const changes = (await bob.get("/api/tickets/CRONK-1/changes")).body.changes;
+    expect(changes.map((c: { ticket?: { key: string } }) => c.ticket?.key)).toEqual([undefined, "CRONK-2"]);
     expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toHaveLength(2);
   });
 

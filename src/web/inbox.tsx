@@ -262,7 +262,7 @@ function InboxSplit(props: { items: InboxItem[]; kind: InboxKind | undefined; ad
   }
 
   return (
-    <div className="inbox-split-view">
+    <div className="inbox-view">
       <div className={`inbox-split${props.address.item ? " picked" : ""}`}>
         <section className="inbox-list" aria-label="Inbox items">
           {ordered.length === 0 && <p className="muted inbox-none">Nothing else is waiting.</p>}
