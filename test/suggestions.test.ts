@@ -234,3 +234,51 @@ describe("where a Suggestion waits", () => {
     expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`)).body.suggestion.state).toBe("accepted");
   });
 });
+
+describe("making a Suggestion", () => {
+  it("is refused for an item an Agent may change directly, and to Users, who change Protected items directly", async () => {
+    const { admin, agent, documentId } = await protectedDocument();
+    const { document: open } = (await admin.post("/api/projects/CRONK/documents", { title: "Notes", body: "v1" })).body;
+    const suggest = (client: Client, id: string) =>
+      client.post("/api/suggestions", { item: { kind: "document", id }, baseVersion: 1, content: { body: "v2" }, reasoning: "Better." });
+
+    const unprotected = await suggest(agent, open.id);
+    expect(unprotected.status).toBe(409);
+    expect(unprotected.body.error).toMatch(/isn't Protected/);
+    expect((await suggest(admin, documentId)).status).toBe(403);
+  });
+
+  it("needs a Version the item has, a change, reasoning, and only the fields its kind holds", async () => {
+    const { agent, documentId } = await protectedDocument();
+    const suggest = (body: object) => agent.post("/api/suggestions", { item: { kind: "document", id: documentId }, baseVersion: 1, content: { body: "v2" }, reasoning: "Better.", ...body });
+
+    expect((await suggest({ baseVersion: 2 })).status).toBe(404);
+    const unchanged = await suggest({ content: { body: "Five per minute.\n", title: " Sign-in limits " } });
+    expect(unchanged.status).toBe(400);
+    expect(unchanged.body.error).toMatch(/changes nothing/);
+    expect((await suggest({ reasoning: "   " })).status).toBe(400);
+    const stray = await suggest({ content: { definition: "A Term's" } });
+    expect(stray.status).toBe(400);
+    expect(stray.body.error).toMatch(/title, body/);
+    expect((await suggest({ content: { title: "  " } })).status).toBe(400);
+    expect((await suggest({})).status).toBe(201);
+  });
+
+  it("is refused to an Agent that may only read where the item lives, or can't see it", async () => {
+    const { cronk, admin, documentId } = await protectedDocument();
+    const reader = await startSession(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
+    const suggest = (client: Client) =>
+      client.post("/api/suggestions", { item: { kind: "document", id: documentId }, baseVersion: 1, content: { body: "v2" }, reasoning: "Better." });
+
+    expect((await suggest(reader)).status).toBe(403);
+    const { secret } = await registerAgent(admin, "outsider");
+    expect((await suggest(cronk.client(secret))).status).toBe(403);
+    await admin.patch("/api/projects/CRONK", { agentAccess: "read" });
+    const agent = await startSession(cronk, secret);
+    const refused = await suggest(agent);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Agent Access is Read/);
+    await admin.patch("/api/projects/CRONK", { agentAccess: "none" });
+    expect((await suggest(agent)).status).toBe(404);
+  });
+});
