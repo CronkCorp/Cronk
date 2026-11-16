@@ -48,7 +48,7 @@ describe("exporting a Project", () => {
     });
     // Attachments are their files, with an index saying what each is.
     expect(markdown(files["projects/CRONK/tickets/CRONK-1.attachments/index.md"]).data.attachments).toEqual([
-      { file: "1-sign-in-flood.log", name: "sign-in-flood.log", contentType: "text/plain", size: 9, at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" },
+      { id: expect.any(String), file: "1-sign-in-flood.log", name: "sign-in-flood.log", contentType: "text/plain", size: 9, at: "2026-01-01T09:00:00.000Z", by: "ada@example.com" },
     ]);
     expect(files["projects/CRONK/tickets/CRONK-1.attachments/1-sign-in-flood.log"]).toBe("429 x 50\n");
     expect(markdown(files["projects/CRONK/documents/1-plan.md"])).toMatchObject({ data: { title: "Plan", version: 1 }, body: "# Plan\n\nShip." });
@@ -617,5 +617,21 @@ describe("a delegated Ticket without an Assignee in an export", () => {
     expect(ticket.delegate).toMatchObject({ name: "claude-laptop" });
     const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
     expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "assignee", from: null, to: ada });
+  });
+});
+
+describe("Attachments in an export", () => {
+  it("keep their ids, so links to their files still work after the move", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const id = (await admin.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50]), "image/png")).body.attachment.id;
+    const exported = await admin.download("/api/export");
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    expect((await elsewhere.upload("/api/import", exported.body)).status).toBe(201);
+    const file = await elsewhere.download(`/api/attachments/${id}/file`);
+    expect(file.status).toBe(200);
+    expect([...file.body]).toEqual([0x89, 0x50]);
   });
 });
