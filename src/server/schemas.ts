@@ -515,7 +515,9 @@ export const noContent = (description: string) => ({ description, type: "null" }
 const ERROR_MEANINGS = {
   400: "The request is invalid: a field, parameter or value the operation refuses",
   401: "Not signed in, or the Agent token is unknown or revoked",
-  403: "The caller may not do this: an Admin-only change, Read access where Write is needed, or an Agent where only a User may act",
+  403:
+    "The caller may not do this: an Admin-only change, Read access where Write is needed, an Agent where only a User may act, " +
+    "or an Agent changing something outside an Agent Session (start one with POST /api/agent-sessions)",
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",

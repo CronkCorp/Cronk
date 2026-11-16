@@ -97,7 +97,7 @@ A Comment that concerns an Agent: it answers the Agent's Question, @mentions it,
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
-An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
+An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. An Agent changes a Ticket's fields, Status and Relations only from the Agent Session holding its Claim; Comments need none. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:

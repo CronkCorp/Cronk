@@ -623,7 +623,7 @@ export function workRoutes(ctx: AppContext) {
             properties: { kind: { type: "string", enum: RELATION_KINDS }, ticketKey: { type: "string", maxLength: 30 } },
           },
           response: {
-            201: answer("The Ticket's relations, with the new one", holding("relations", "Relations")),
+            201: answer("The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -631,7 +631,7 @@ export function workRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const { ends, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey);
+          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, ctx.clock.now());
           const added = await addRelation(tx, actingUser(actor).workspaceId, {
             ticket,
             kind: request.body.kind,
@@ -663,15 +663,15 @@ export function workRoutes(ctx: AppContext) {
             otherKey: { type: "string", description: "The other Ticket's key, such as `CRONK-7`; any case." },
           }),
           response: {
-            200: answer("The Ticket's remaining relations", holding("relations", "Relations")),
-            ...errors(400, 401, 403, 404, 410),
+            200: answer("The Ticket's remaining relations. An Agent must hold the Ticket's Claim.", holding("relations", "Relations")),
+            ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey);
+          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, ctx.clock.now());
           // Removing a blocking relation may unblock either end.
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
@@ -703,7 +703,10 @@ export function workRoutes(ctx: AppContext) {
               parentKey: { type: ["string", "null"], maxLength: 30 },
             },
           },
-          response: { 200: answer("The changed Ticket", holding("ticket", "Ticket")), ...errors(400, 401, 403, 404, 409, 410) },
+          response: {
+            200: answer("The changed Ticket. An Agent must hold its Claim to change its fields or move it, and can't assign or delegate it.", holding("ticket", "Ticket")),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
         },
       },
       async (request) => {
@@ -714,6 +717,8 @@ export function workRoutes(ctx: AppContext) {
         }
         const { before, ticket, parents, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
+          const editsFields = [title, description, priority, labels, parentKey].some((v) => v !== undefined);
+          if (actor.kind === "agent" && editsFields) await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "editing it");
           const changes: TicketEdit = {
             ...(title !== undefined && { title: title.trim() }),
             ...(description !== undefined && { description }),
@@ -854,10 +859,12 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
 /**
  * The two Tickets of a Relation being changed, if `actor` has Write in both Projects,
  * since the change shows on both. A missing or hidden `key` answers 404; a missing or
- * hidden `otherKey`, 400.
+ * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409).
  */
-async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: string): Promise<{ ticket: Ticket; other: Ticket }> {
-  const ticket = await ticketFor(tx, actor, key, "write");
+async function relationEnds(tx: Queryable, actor: Actor, key: string, otherKey: string, now: Date): Promise<{ ticket: Ticket; other: Ticket }> {
+  // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
+  const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
+  if (actor.kind === "agent") await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
   const other = await ticketFor(tx, actor, otherKey, "write").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
   });

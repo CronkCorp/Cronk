@@ -92,7 +92,8 @@ describe("Agents and their Owner", () => {
     const { cronk, admin } = await startInstalledCronk();
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const bobId = (await bob.get("/api/me")).body.user.id;
-    const claude = await agentOf(cronk, bob, "claude-laptop");
+    // A bare token, so it reads without an Agent Session, which deactivating ends for good.
+    const claude = cronk.client((await registerAgent(bob, "claude-laptop")).secret);
     expect((await claude.get("/api/projects")).status).toBe(200);
 
     await admin.patch(`/api/users/${bobId}`, { active: false });

@@ -23,6 +23,19 @@ claude mcp add --transport http cronk http://localhost:3000/mcp --header "Author
 
 Each connection is an Agent Session, listed under its Agent until it disconnects or stays silent for 5 minutes.
 
+### From a script
+
+A script can call the HTTP API with the token alone to read, but an Agent changes things only within an Agent Session: a write sent without one is refused. Start a Session, send its id as the `Cronk-Agent-Session` header on every write, and end it when done:
+
+```sh
+SESSION=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/agent-sessions | jq -r .session.id)
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" -H "Content-Type: application/json" \
+  -d '{"title": "Nightly report"}' http://localhost:3000/api/projects/CRONK/tickets
+curl -X DELETE -H "Authorization: Bearer $TOKEN" -H "Cronk-Agent-Session: $SESSION" http://localhost:3000/api/agent-sessions/current
+```
+
+Everything the script changes then shows in history with the Session it was made in. The full API is described at `/api/openapi.json`.
+
 ## Configuration
 
 Cronk is a plain Node.js process configured only through environment variables, so it runs the same with or without Docker:

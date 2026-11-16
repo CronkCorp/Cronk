@@ -49,6 +49,63 @@ describe("Agent Sessions", () => {
     expect((await a.get("/api/agent-sessions/current")).status).toBe(200);
   });
 
+  it("are needed for every write an Agent makes, and a refused write says how to start one", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const bare = cronk.client((await registerAgent(admin, "claude-laptop")).secret);
+
+    const refused = await bare.post("/api/projects/CRONK/tickets", { title: "Outside a Session" });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/Agent Session/);
+    expect(refused.body.error).toContain("POST /api/agent-sessions");
+    expect(refused.body.error).toContain("Cronk-Agent-Session");
+    expect((await bare.patch("/api/tickets/CRONK-1", { title: "Renamed" })).status).toBe(403);
+    expect((await bare.post("/api/tickets/CRONK-1/comments", { body: "Hello" })).status).toBe(403);
+    expect((await bare.post("/api/workspace/documents", { title: "Notes", body: "x" })).status).toBe(403);
+    expect((await admin.get("/api/projects/CRONK/tickets")).body.tickets).toEqual([expect.objectContaining({ title: expect.not.stringMatching(/Renamed/) })]);
+    expect((await admin.get("/api/tickets/CRONK-1/comments")).body.comments).toEqual([]);
+  });
+
+  it("aren't what a read-only token is told to start: its writes are refused as read-only", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const reader = cronk.client((await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    const refused = await reader.post("/api/projects/CRONK/tickets", { title: "Outside a Session" });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/read-only/);
+    expect(refused.body.error).not.toMatch(/Agent Session/);
+  });
+
+  it("aren't needed to read with a bare token", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const bare = cronk.client((await registerAgent(admin, "claude-laptop")).secret);
+
+    expect((await bare.get("/api/projects")).status).toBe(200);
+    expect((await bare.get("/api/tickets/CRONK-1")).status).toBe(200);
+    expect((await bare.get("/api/projects/CRONK/tickets")).body.tickets).toHaveLength(1);
+    expect((await bare.get("/api/me")).status).toBe(200);
+  });
+
+  it("can be started, used and ended by a script with one call each", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const secret = (await registerAgent(admin, "nightly-script")).secret;
+
+    const started = await cronk.client(secret).post("/api/agent-sessions");
+    expect(started.status).toBe(201);
+    const script = cronk.client(secret, { "cronk-agent-session": started.body.session.id });
+    const created = await script.post("/api/projects/CRONK/tickets", { title: "Nightly report" });
+    expect(created.status).toBe(201);
+    const changes = (await admin.get(`/api/tickets/${created.body.ticket.key}/changes`)).body.changes;
+    expect(changes[0].actor).toMatchObject({ kind: "agent", name: "nightly-script", session: { id: started.body.session.id } });
+
+    expect((await script.delete("/api/agent-sessions/current")).status).toBe(204);
+    expect((await script.post("/api/projects/CRONK/tickets", { title: "After the end" })).status).toBe(410);
+    expect((await cronk.client(secret).get("/api/tickets/CRONK-1")).status).toBe(200);
+  });
+
   it("can't be acted in by a read-only token of the same Agent", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const claude = await registerAgent(admin, "claude-laptop");
