@@ -6,6 +6,12 @@ import { natural, refuse, type File } from "./fields.js";
 import { readFrontmatter } from "./frontmatter.js";
 import { recordRenamedId, type RenamedId } from "./renamed-ids.js";
 
+/** Where an import stores the files of Attachments, and the keys it stored so far. */
+export interface ImportedFiles {
+  store: FileStore;
+  stored: string[];
+}
+
 /**
  * What every part of an import shares: the export's files, and the ids the Users, Agents and
  * Agent Sessions of its `people.md` have here, so other files can name them.
@@ -21,8 +27,6 @@ export class ImportContext {
   readonly renamedIds: RenamedId[] = [];
   /** Documents and Reports imported so far, by the path of their file in the export. */
   readonly documentIds = new Map<string, string>();
-  /** The keys of the files this import stored, to remove again if it fails. */
-  readonly storedFiles: string[] = [];
 
   constructor(
     readonly db: Queryable,
@@ -31,7 +35,7 @@ export class ImportContext {
     readonly folder: Folder,
     readonly now: Date,
     /** Where the files of Attachments go. */
-    readonly files: FileStore,
+    readonly files: ImportedFiles,
   ) {}
 
   /** Records that the Agent or Agent Session with id `from` in the export has the id `to` here, if they differ. */
@@ -42,10 +46,10 @@ export class ImportContext {
     await recordRenamedId(this.db, this.workspaceId, renamed);
   }
 
-  /** Stores `bytes` under `key` in the file store, remembering it in `storedFiles`. */
+  /** Stores `bytes` under `key` in the file store, noting the key so a failed import can remove it again. */
   async storeFile(key: string, bytes: Buffer): Promise<void> {
-    this.storedFiles.push(key);
-    await this.files.put(key, bytes);
+    this.files.stored.push(key);
+    await this.files.store.put(key, bytes);
   }
 
   /** The file at `path`, read, if the export has it. */
