@@ -158,20 +158,25 @@ export function transcriptRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const workspaceId = actingUser(actor).workspaceId;
+        requireUserActor(actor, "redact a Transcript");
+        const workspaceId = actor.user.workspaceId;
         const found = await findTranscript(ctx.db, workspaceId, request.params.id);
         if (!found || !(await readTranscript(ctx.db, actor, found))) throw new HttpError(404, "No such Transcript");
-        requireUserActor(actor, "redact a Transcript");
         if (found.ownerId !== actor.user.id) throw new HttpError(403, "Only a Transcript's Owner can redact it");
         await transaction(ctx.db, async (tx) => {
           // Not while an upload of the chat is changing its texts.
           await lockUntilCommit(tx, `transcript:${found.agentId}:${found.chatId}`);
-          const stored = (await findForUpdate(tx, found.agentId, found.chatId))!;
+          const stored = await findForUpdate(tx, found.agentId, found.chatId);
+          // Deleted meanwhile.
+          if (stored?.id !== found.id) throw new HttpError(404, "No such Transcript");
           if (!(await redactTranscript(tx, stored, redactionOf(request.body.passage), ctx.clock.now()))) {
             throw new HttpError(422, "This Transcript doesn't hold that passage");
           }
         });
-        return { transcript: (await readTranscript(ctx.db, actor, (await findTranscript(ctx.db, workspaceId, found.id))!))! };
+        const redacted = await findTranscript(ctx.db, workspaceId, found.id);
+        const transcript = redacted && (await readTranscript(ctx.db, actor, redacted));
+        if (!transcript) throw new HttpError(404, "No such Transcript");
+        return { transcript };
       },
     );
 

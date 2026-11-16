@@ -8,3 +8,4 @@ Cronk only sees an Agent's tool calls, never the chat that led to them, and it n
 - The client's conversion to Markdown must be deterministic. Re-uploads are matched by (Agent, client chat id) and replace the stored text only when the new text continues it; otherwise the old text is kept as well.
 - Clients that cannot export a chat, such as claude.ai, produce no Transcripts.
 - Known secret patterns are scrubbed on upload, and the originals are never stored. This is best-effort.
+- A Transcript's Owner may redact passages by hand. Cronk keeps only each passage's length and digests, never the passage, and finds it again in every later upload, so redactions survive re-uploads and travel in exports. A passage spanning the end of an earlier upload can make the next one look like a rewrite.

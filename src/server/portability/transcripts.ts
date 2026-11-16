@@ -1,4 +1,4 @@
-import type { Redaction } from "../transcripts/redact.js";
+import { applyRedactions, sameRedaction, type Redaction } from "../transcripts/redact.js";
 import {
   afterUpload,
   changedItems,
@@ -68,20 +68,26 @@ export async function importTranscripts(ctx: ImportContext): Promise<void> {
     // the redactions of both applied, as an export made before scrubbing, or edited by hand, may still hold secrets.
     const existing = await findForUpdate(ctx.db, agent.id, chatId);
     const kept = existing ? await redactionsOf(ctx.db, existing.id) : [];
-    const added = redactionsIn(file).filter((r) => !kept.some((k) => k.digest === r.digest && k.length === r.length));
+    const added = redactionsIn(file).filter((r) => !kept.some((k) => sameRedaction(k, r)));
     const redactions = [...kept, ...added];
-    let upload: Upload | undefined = existing;
+    // What the Workspace holds gets the redactions the file adds too.
+    let upload: Upload | undefined = existing && {
+      ...existing,
+      markdown: applyRedactions(existing.markdown, added),
+      earlier: existing.earlier.map((t) => applyRedactions(t, added)),
+    };
     for (const t of texts) upload = afterUpload(upload, textToKeep(t, redactions), sessionIds);
+    const updatedAt = date(file.data.updatedAt, `${where} updatedAt`);
     const id = await storeTranscript(ctx.db, {
       workspaceId: ctx.workspaceId,
       agentId: agent.id,
       chatId,
       existing,
       upload: upload!,
-      at: date(file.data.updatedAt, `${where} updatedAt`),
+      at: updatedAt,
       createdAt: date(file.data.createdAt, `${where} createdAt`),
     });
-    await storeRedactions(ctx.db, id, added, date(file.data.updatedAt, `${where} updatedAt`));
+    await storeRedactions(ctx.db, id, added, updatedAt);
   }
 }
 
@@ -91,7 +97,7 @@ function redactionsIn(file: File): Redaction[] {
     const where = `${file.path} redactions ${i + 1}`;
     const length = integer(r.length, `${where} length`);
     if (length === 0) refuse(`${where} length must be more than 0`);
-    const digest = String(r.digest);
+    const digest = text(r.digest, `${where} digest`);
     if (!/^[0-9a-f]{64}$/.test(digest)) refuse(`${where} digest must be a SHA-256 digest in hex`);
     return { length, fingerprint: integer(r.fingerprint, `${where} fingerprint`), digest };
   });

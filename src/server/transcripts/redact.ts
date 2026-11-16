@@ -29,6 +29,9 @@ function fingerprintOf(text: string, from: number, length: number): number {
   return h;
 }
 
+/** The fingerprint `h` of a window moved one character on: `out` leaves it, weighing `lead`, and `incoming` joins it. */
+const roll = (h: number, out: number, incoming: number, lead: number) => ((((h - ((out * lead) % MOD) + MOD) % MOD) * BASE) + incoming) % MOD;
+
 const digestOf = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 /** The redaction of `passage`. */
@@ -37,6 +40,9 @@ export const redactionOf = (passage: string): Redaction => ({
   fingerprint: fingerprintOf(passage, 0, passage.length),
   digest: digestOf(passage),
 });
+
+/** Whether two redactions find the same passage. */
+export const sameRedaction = (a: Redaction, b: Redaction): boolean => a.length === b.length && a.digest === b.digest;
 
 /** `text` with every occurrence of the redaction's passage replaced, left to right and never overlapping, and whether there was one. */
 export function applyRedaction(text: string, r: Redaction): { text: string; found: boolean } {
@@ -53,7 +59,7 @@ export function applyRedaction(text: string, r: Redaction): { text: string; foun
       kept = at + n;
     }
     if (at + n >= text.length) break;
-    h = ((((h - ((text.charCodeAt(at) * lead) % MOD) + MOD) % MOD) * BASE) + text.charCodeAt(at + n)) % MOD;
+    h = roll(h, text.charCodeAt(at), text.charCodeAt(at + n), lead);
   }
   if (parts.length === 0) return { text, found: false };
   parts.push(text.slice(kept));
