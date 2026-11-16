@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { ACTIVITY_KINDS, MENTION_SYNTAX, PRIORITIES, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, MENTION_SYNTAX, PRIORITIES, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { ApiCall, ApiResponse, Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
 
@@ -345,6 +345,32 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
   });
 
+  registerGroupedTool(server, ctx, {
+    name: "decisions",
+    description:
+      "Decisions: recorded choices with their reasoning, belonging to a Project or, without a project, the Workspace, keyed like " +
+      "CRONK-D7 (D7 in the Workspace). Each has a status: proposed, accepted, rejected, deprecated, or superseded by a newer accepted " +
+      "Decision, which `supersededBy` names. Follow accepted Decisions; only Users change a Decision's status.",
+    parameters: {
+      project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace's Decisions (list)"),
+      key: z.string().optional().describe("Decision key, such as CRONK-D7 or D7 (get)"),
+      status: z.array(z.enum(DECISION_STATUSES)).optional().describe("Only Decisions with one of these statuses (list)"),
+      group: z.array(z.string()).optional().describe("Only Decisions in one of these groups, ignoring case (list)"),
+    },
+    actions: {
+      list: {
+        description: "a Project's (or the Workspace's) Decisions, newest first, without their bodies, optionally filtered",
+        writes: false,
+        run: (api, a) => api("GET", `${treePath(a.project)}/decisions${query({ status: a.status, group: a.group })}`),
+      },
+      get: {
+        description: "one Decision with its Markdown body, what it supersedes and what superseded it",
+        writes: false,
+        run: (api, a) => api("GET", `/api/decisions/${encodeURIComponent(required(a.key, "a key", "get"))}`),
+      },
+    },
+  });
+
   registerSearchTool(server, ctx);
 }
 
@@ -374,5 +400,5 @@ function commentsPath(a: { key?: string | undefined; documentId?: string | undef
   return a.key !== undefined ? `/api/tickets/${encodeURIComponent(a.key)}/comments` : `/api/documents/${encodeURIComponent(a.documentId!)}/comments`;
 }
 
-/** Where a page tree's API lives: a Project's, or the Workspace's when no Project is named. */
+/** Where a page tree's (or a Decision register's) API lives: a Project's, or the Workspace's when no Project is named. */
 const treePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);

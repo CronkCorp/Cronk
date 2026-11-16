@@ -341,3 +341,16 @@ export async function applySuperseding(db: Queryable, scope: DecisionScope, deci
     await db.query("UPDATE decisions SET superseded_by = $2 WHERE id = $1", [older.id, decision.number]);
   }
 }
+
+/** A scope's Decisions, newest first, with only those in one of `statuses` and, ignoring case, one of `groups` when given. */
+export async function listDecisions(db: Queryable, scope: DecisionScope, filters: { statuses?: DecisionStatus[]; groups?: string[] } = {}): Promise<DecisionSummary[]> {
+  const { rows } = await db.query<DecisionRow>(
+    `${SELECT_DECISIONS} WHERE ${IN_SCOPE}
+       AND ($3::text[] IS NULL OR d.status = ANY($3::text[]))
+       AND ($4::text[] IS NULL OR lower(d.group_name) = ANY($4::text[]))
+     ORDER BY d.number DESC`,
+    [scope.workspaceId, scope.projectId, filters.statuses ?? null, filters.groups?.map((g) => g.trim().toLowerCase()) ?? null],
+  );
+  const refs = await refsIn(db, scope, rows.flatMap((r) => (r.superseded_by === null ? [] : [r.superseded_by])));
+  return rows.map((row) => summarize(row, refs));
+}

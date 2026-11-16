@@ -12,6 +12,7 @@ import {
   findDecisionByKey,
   findDecisionVersion,
   insertDecision,
+  listDecisions,
   listDecisionVersions,
   saveDecision,
   supersededNumbers,
@@ -117,6 +118,41 @@ export function decisionRoutes(ctx: AppContext) {
       return insertDecision(tx, scope, content, actor, ctx.clock.now());
     };
 
+    interface RegisterQuery {
+      status?: DecisionStatus[];
+      group?: string[];
+    }
+    const registerSchema = (whose: string) => ({
+      querystring: {
+        type: "object",
+        properties: {
+          status: { type: "array", items: { type: "string", enum: DECISION_STATUSES }, description: "Only Decisions with one of these statuses." },
+          group: { type: "array", items: { type: "string", maxLength: 200 }, description: "Only Decisions in one of these groups, ignoring case." },
+        },
+      },
+      response: {
+        200: answer(`${whose} Decisions matching the filters, newest first, without their bodies`, listing("decisions", ref("DecisionSummary"))),
+        ...errors(400, 401, 403, 404, 410),
+      },
+    });
+    const register = (scope: DecisionScope, q: RegisterQuery) => listDecisions(ctx.db, scope, { statuses: q.status, groups: q.group });
+
+    app.get<{ Params: { key: string }; Querystring: RegisterQuery }>(
+      "/api/projects/:key/decisions",
+      { schema: { params: projectParams, ...registerSchema("The Project's") } },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const { project } = await projectFor(ctx.db, actor, request.params.key, "read");
+        return { decisions: await register({ workspaceId: actingUser(actor).workspaceId, projectId: project.id }, request.query) };
+      },
+    );
+
+    app.get<{ Querystring: RegisterQuery }>("/api/workspace/decisions", { schema: registerSchema("The Workspace's") }, async (request) => {
+      const actor = await requireActor(ctx, request);
+      await requireWorkspaceAccess(ctx.db, actor, "read");
+      return { decisions: await register({ workspaceId: actingUser(actor).workspaceId, projectId: null }, request.query) };
+    });
+
     app.post<{ Params: { key: string }; Body: NewDecision }>(
       "/api/projects/:key/decisions",
       {
@@ -157,7 +193,7 @@ export function decisionRoutes(ctx: AppContext) {
       {
         schema: {
           params: decisionParams,
-          response: { 200: answer("The Decision at its current Version", holding("decision", "Decision")), ...errors(401, 403, 404, 410) },
+          response: { 200: answer("The Decision at its current Version", holding("decision", "Decision")), ...errors(400, 401, 403, 404, 410) },
         },
       },
       async (request) => {
@@ -249,7 +285,7 @@ export function decisionRoutes(ctx: AppContext) {
           params: decisionParams,
           response: {
             200: answer("The Decision's Versions, newest first, without their bodies", listing("versions", ref("DecisionVersionSummary"))),
-            ...errors(401, 403, 404, 410),
+            ...errors(400, 401, 403, 404, 410),
           },
         },
       },

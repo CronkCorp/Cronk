@@ -236,3 +236,38 @@ describe("superseding a Decision", () => {
     expect((await admin.post("/api/projects/CRONK/decisions", { title: "Elsewhere", supersedes: ["D1"] })).status).toBe(400);
   });
 });
+
+describe("the Decision register", () => {
+  it("lists a Project's or the Workspace's Decisions newest first, filtered by status and group", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Limits in the API", group: "Security" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "One Customer per address", group: "Billing" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Per-email limits", group: "Security", supersedes: ["CRONK-D1"] });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/decisions/CRONK-D3/status", { status: "accepted" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+
+    const all = (await admin.get("/api/projects/CRONK/decisions")).body.decisions;
+    expect(all.map((d: { key: string }) => d.key)).toEqual(["CRONK-D3", "CRONK-D2", "CRONK-D1"]);
+    expect(all[2]).toMatchObject({ title: "Limits in the API", status: "superseded", group: "Security", supersededBy: { key: "CRONK-D3" } });
+    expect(all[2]).not.toHaveProperty("body");
+
+    const keys = async (path: string) => (await admin.get(path)).body.decisions.map((d: { key: string }) => d.key);
+    expect(await keys("/api/projects/CRONK/decisions?status=accepted&status=proposed")).toEqual(["CRONK-D3", "CRONK-D2"]);
+    expect(await keys("/api/projects/CRONK/decisions?group=security")).toEqual(["CRONK-D3", "CRONK-D1"]);
+    expect(await keys("/api/projects/CRONK/decisions?group=Security&status=superseded")).toEqual(["CRONK-D1"]);
+    expect(await keys("/api/workspace/decisions")).toEqual(["D1"]);
+  });
+
+  it("is hidden with a Project the caller can't see", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    expect((await admin.post("/api/projects/SECRET/decisions", { title: "Hush" })).status).toBe(201);
+    const grace = await joinAs(cronk, admin, "grace@example.com");
+
+    expect((await grace.get("/api/projects/SECRET/decisions")).status).toBe(404);
+    expect((await grace.get("/api/decisions/SECRET-D1")).status).toBe(404);
+  });
+});
