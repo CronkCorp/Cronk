@@ -284,3 +284,32 @@ describe("A question under Autonomous Delegation", () => {
     expect(waiting.body.activity.blocking).toBe(true);
   });
 });
+
+describe("Verification", () => {
+  it("can't be reset by an Agent sending a Ticket's current Completed Status again", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await completeAutonomously(admin, agent);
+    await admin.post("/api/tickets/CRONK-1/accept");
+    const done = await statusIn(admin, "completed");
+    await admin.patch("/api/tickets/CRONK-2", { statusId: done });
+
+    for (const key of ["CRONK-1", "CRONK-2"]) await agent.patch(`/api/tickets/${key}`, { statusId: done });
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.verification).toBe("verified");
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.verification).toBeNull();
+  });
+});
+
+describe("A Ticket moved under another", () => {
+  it("takes on its new parent's Autonomous Delegation, with its own Sub-Tickets", async () => {
+    const { admin } = await delegatedSetup(2);
+    await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+    const child = (await admin.post("/api/tickets/CRONK-2/sub-tickets", { title: "Child" })).body.ticket.key;
+
+    const moved = await admin.patch("/api/tickets/CRONK-2", { parentKey: "CRONK-1" });
+    expect(moved.body.ticket.autonomous).toBe(true);
+    expect((await admin.get(`/api/tickets/${child}`)).body.ticket.autonomous).toBe(true);
+    // Moved out again, it keeps what it had until a User changes it.
+    expect((await admin.patch("/api/tickets/CRONK-2", { parentKey: null })).body.ticket.autonomous).toBe(true);
+  });
+});

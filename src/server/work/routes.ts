@@ -727,7 +727,7 @@ export function workRoutes(ctx: AppContext) {
         if (actor.kind === "agent" && autonomous !== undefined) {
           throw new HttpError(403, "Only a User can turn Autonomous Delegation on or off, not an Agent");
         }
-        const { before, ticket, parents, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
+        const { before, ticket, alsoChanged, blockedIds, mayBecomeReady, readyBefore } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write", { forUpdate: true });
           const editsFields = [title, description, priority, labels, parentKey].some((v) => v !== undefined);
           if (actor.kind === "agent" && editsFields) await requireClaimHolder(tx, actor, ticket, ctx.clock.now(), "editing it");
@@ -744,8 +744,10 @@ export function workRoutes(ctx: AppContext) {
             if (actor.kind === "agent" && status.id !== ticket.status.id) await requireAgentMayMove(tx, actor, ticket, status, ctx.clock.now());
             changes.status = status;
             // An Agent's completion stays Unverified until a User Accepts it; leaving Completed ends its Verification.
-            if (actor.kind === "agent" && status.category === "completed") changes.verification = "unverified";
-            else if (status.category !== "completed") changes.verification = null;
+            if (status.id !== ticket.status.id) {
+              if (actor.kind === "agent" && status.category === "completed") changes.verification = "unverified";
+              else if (status.category !== "completed") changes.verification = null;
+            }
           }
           if (assigneeId !== undefined) changes.assignee = assigneeId === null ? null : await assignableUser(tx, actor, ticket, assigneeId);
           // Delegated work always has a clear User: delegating a Ticket without an Assignee assigns whoever delegates it,
@@ -766,6 +768,8 @@ export function workRoutes(ctx: AppContext) {
             changes.delegate = null;
           }
           if (parentKey !== undefined) changes.parent = parentKey === null ? null : await parentFor(tx, actingUser(actor).workspaceId, ticket, parentKey);
+          // A Ticket moved under another becomes one of its Sub-Tickets, so it takes on the parent's Autonomous Delegation.
+          if (changes.parent && autonomous === undefined) changes.autonomous = changes.parent.autonomous;
           // Both parents list their Sub-Tickets.
           const parents = changes.parent === undefined ? [] : [changes.parent, ticket.parent && (await findTicketByKey(tx, actingUser(actor).workspaceId, ticket.parent.key))];
           // A new Delegate starts afresh: whoever held the Claim was working for the old one.
@@ -776,15 +780,18 @@ export function workRoutes(ctx: AppContext) {
           const mayBecomeReady = [ticket.id, ...blockedIds];
           const readyBefore = await readyNow(tx, mayBecomeReady, ctx.clock.now());
           const updated = await updateTicket(tx, ticket, changes, actor, ctx.clock.now());
-          // Sub-Tickets follow their parent's Autonomous Delegation, so a User sets it once for a whole piece of work.
-          const below = updated.autonomous !== ticket.autonomous ? await setAutonomousBelow(tx, ticket.id, updated.autonomous, actor, ctx.clock.now()) : [];
-          return { before: ticket, ticket: updated, parents: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore };
+          // Sub-Tickets follow their parent's Autonomous Delegation, so a User sets it once for a whole piece of work. A Delegation's
+          // pre-fill from the Project default stays on the Ticket delegated, as its Sub-Tickets may have Delegates of their own.
+          const cascades = updated.autonomous !== ticket.autonomous && (autonomous !== undefined || changes.parent !== undefined);
+          const below = cascades ? await setAutonomousBelow(tx, ticket.id, updated.autonomous, actor, ctx.clock.now()) : [];
+          return { before: ticket, ticket: updated, alsoChanged: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee.
         if (ticket !== before) {
           inboxesChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
           // The Tickets it blocks show its Status, and may now be unblocked.
-          ticketsChanged(ctx.live, [ticket, ...parents, ...(await findTicketsByIds(ctx.db, blockedIds))]);
+          // Its parents list their Sub-Tickets, and Sub-Tickets may have followed its Autonomous Delegation.
+          ticketsChanged(ctx.live, [ticket, ...alsoChanged, ...(await findTicketsByIds(ctx.db, blockedIds))]);
           await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         }
         return { ticket };
@@ -850,7 +857,7 @@ async function assignableUser(db: Queryable, actor: Actor, ticket: Ticket, id: s
   return { id: assignee.id, name: assignee.name };
 }
 
-/** The Status Categories an Agent may move a Ticket into; only Users cancel or shelve work, and complete it unless it is autonomous. */
+/** The Status Categories an Agent may always move a Ticket into; `requireAgentMayMove` adds Completed under Autonomous Delegation. */
 const AGENT_CATEGORIES: StatusCategory[] = ["unstarted", "started", "in_review"];
 
 /**
