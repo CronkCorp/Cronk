@@ -14,6 +14,7 @@ import { sourceClaimOf } from "../coordination/sources.js";
 import {
   contentOf,
   DECISION_TEMPLATE,
+  decisionKey,
   findDecisionByKey,
   findDecisionVersion,
   insertDecision,
@@ -28,6 +29,7 @@ import {
   type DecisionVersion,
 } from "./decisions.js";
 import { listMentions } from "./mentions.js";
+import { mergeDecisionEdits } from "./sections.js";
 import { listProtectionMarkings, requireUnprotected, setProtected, SUGGEST_INSTEAD } from "./protection.js";
 
 /** A Decision title: non-blank, at most 500 characters. */
@@ -281,6 +283,52 @@ export function decisionRoutes(ctx: AppContext) {
         });
         await reviewersHear([saved.decision, ...changed]);
         return saved;
+      },
+    );
+
+    app.post<{ Params: { key: string }; Body: DecisionEdit }>(
+      "/api/decisions/:key/merge",
+      {
+        schema: {
+          params: decisionParams,
+          body: {
+            type: "object",
+            required: ["baseVersion"],
+            additionalProperties: false,
+            properties: {
+              baseVersion: { ...baseVersion, description: "The number of the Version the edit started from." },
+              title: { ...title, description: "The edited title; the base Version's if left out." },
+              body: { ...body, description: "The edited Markdown; the base Version's if left out." },
+              group: { ...group, description: "The edited group, null or blank for none; the base Version's if left out." },
+              supersedes: { ...supersedes, description: "The keys of the Decisions the edit supersedes; the base Version's if left out." },
+            },
+          },
+          response: {
+            200: answer(
+              "The edit merged with the current Version: the body section by section, the title, group and superseded Decisions field by field; nothing is saved",
+              holding("merge", "DecisionMerge"),
+            ),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        const decision = await decisionFor(ctx.db, actor, request.params.key, "read");
+        const base = await findDecisionVersion(ctx.db, decision, request.body.baseVersion);
+        if (!base) throw new HttpError(404, "No such Version");
+        const onto = (await findDecisionVersion(ctx.db, decision, decision.version))!;
+        const { title: newTitle, body: newBody, group: newGroup, supersedes: newSupersedes } = request.body;
+        const mine = {
+          title: newTitle?.trim() ?? base.title,
+          body: newBody ?? base.body,
+          group: newGroup === undefined ? base.group : groupOf(newGroup),
+          supersedes:
+            newSupersedes === undefined
+              ? base.supersedes
+              : (await requireSuperseded(ctx.db, scopeOf(actor, decision), decision.number, newSupersedes)).map((n) => decisionKey(decision.projectKey, n)),
+        };
+        return { merge: { onto, ...mergeDecisionEdits(base, mine, onto) } };
       },
     );
 
