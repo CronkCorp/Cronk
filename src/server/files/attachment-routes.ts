@@ -5,11 +5,13 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, type AppContext } from "../context.js";
 import { requireClaimHolder } from "../coordination/claims.js";
 import { transaction, type Queryable } from "../db/database.js";
-import { answer, attachmentIdParam, errors, holding, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { answer, attachmentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import type { Ticket } from "../work/tickets.js";
-import { attachmentKey, findAttachment, insertAttachment, listAttachments, publicAttachment, type Attachment } from "./attachments.js";
+import { getWorkspace } from "../workspace/workspaces.js";
+import { FileTooLarge, type ByteRange } from "./store.js";
+import { attachmentKey, deleteAttachment, findAttachment, insertAttachment, listAttachments, publicAttachment, type Attachment } from "./attachments.js";
 
 /** The longest file name an Attachment keeps. */
 const MAX_NAME_LENGTH = 255;
@@ -46,9 +48,14 @@ export function attachmentRoutes(ctx: AppContext) {
         const name = fileName(request.query.name);
         // Checked before the file is stored, so a refused upload stores nothing; checked again below against the locked row.
         await transaction(ctx.db, (tx) => ticketToAttachTo(tx, actor, request.params.key, ctx.clock.now()));
+        const maxBytes = (await getWorkspace(ctx.db, actingUser(actor).workspaceId)).attachmentMaxBytes;
+        const tooLarge = () => new HttpError(413, `This file is larger than ${formatBytes(maxBytes)}, the most an Attachment may be in this Workspace`);
+        if (Number(request.headers["content-length"]) > maxBytes) throw tooLarge();
         const id = randomUUID();
         const key = attachmentKey(id);
-        const size = await ctx.files.put(key, uploadedBytes(request));
+        const size = await ctx.files.put(key, uploadedBytes(request), { maxBytes }).catch((err: unknown) => {
+          throw err instanceof FileTooLarge ? tooLarge() : err;
+        });
         try {
           const { ticket, attachment } = await transaction(ctx.db, async (tx) => {
             const ticket = await ticketToAttachTo(tx, actor, request.params.key, ctx.clock.now());
@@ -105,10 +112,42 @@ export function attachmentRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const attachment = await readableAttachment(ctx.db, actor, request.params.id);
+        reply.header("accept-ranges", "bytes").header("content-type", attachment.contentType);
+        const range = byteRange(request.headers.range, attachment.size);
+        if (range === "unsatisfiable") {
+          reply.header("content-range", `bytes */${attachment.size}`);
+          throw new HttpError(416, `The file is ${attachment.size} bytes long`);
+        }
+        if (!range) return reply.header("content-length", attachment.size).send(ctx.files.get(attachmentKey(attachment.id)));
         return reply
-          .header("content-type", attachment.contentType)
-          .header("content-length", attachment.size)
-          .send(ctx.files.get(attachmentKey(attachment.id)));
+          .code(206)
+          .header("content-range", `bytes ${range.start}-${range.end}/${attachment.size}`)
+          .header("content-length", range.end - range.start + 1)
+          .send(ctx.files.get(attachmentKey(attachment.id), range));
+      },
+    );
+
+    app.delete<{ Params: { id: string } }>(
+      "/api/attachments/:id",
+      {
+        schema: {
+          description: "Deletes an Attachment and its file. Needs Write in its Ticket's Project; an Agent must also hold the Ticket's Claim.",
+          params: pathParams({ id: attachmentIdParam }),
+          response: { 204: noContent("The Attachment is deleted"), ...errors(401, 403, 404, 409, 410) },
+        },
+      },
+      async (request, reply) => {
+        const actor = await requireActor(ctx, request);
+        const { ticket, attachment } = await transaction(ctx.db, async (tx) => {
+          const attachment = await readableAttachment(tx, actor, request.params.id);
+          const ticket = await ticketToAttachTo(tx, actor, attachment.ticketKey, ctx.clock.now());
+          if (!(await deleteAttachment(tx, attachment.id))) throw new HttpError(404, "No such Attachment");
+          return { ticket, attachment };
+        });
+        // Only once the record is gone, so a failed delete never leaves a record without its file.
+        await ctx.files.delete(attachmentKey(attachment.id));
+        ticketsChanged(ctx.live, [ticket]);
+        return reply.code(204).send();
       },
     );
   };
@@ -129,6 +168,35 @@ async function readableAttachment(db: Queryable, actor: Actor, id: string): Prom
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(404, "No such Attachment") : err;
   });
   return attachment;
+}
+
+/**
+ * The one range of bytes a `Range` header asks for in a file of `size` bytes (RFC 9110 § 14): `bytes=a-b`, `bytes=a-`
+ * or the last n bytes, `bytes=-n`, with an end past the file cut to it. Undefined, for the whole file, when there is
+ * no header or one this doesn't read, such as several ranges; "unsatisfiable" when the range lies outside the file.
+ */
+function byteRange(header: string | undefined, size: number): ByteRange | "unsatisfiable" | undefined {
+  const match = header && /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (match[1] === "" && match[2] === "")) return undefined;
+  const [, from, to] = match;
+  if (from === "") {
+    const suffix = Number(to);
+    if (suffix === 0 || size === 0) return "unsatisfiable";
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(from);
+  const end = to === "" ? size - 1 : Math.min(Number(to), size - 1);
+  if (to !== "" && Number(to) < start) return undefined;
+  if (start >= size) return "unsatisfiable";
+  return { start, end };
+}
+
+/** A size as Users read it: whole MB or GB where it is one, otherwise bytes. */
+function formatBytes(bytes: number): string {
+  const MB = 1024 * 1024;
+  if (bytes % (1024 * MB) === 0) return `${bytes / (1024 * MB)} GB`;
+  if (bytes % MB === 0) return `${bytes / MB} MB`;
+  return `${bytes} bytes`;
 }
 
 /** The uploaded file as it streams in. */

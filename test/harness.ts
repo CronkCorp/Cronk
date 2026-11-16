@@ -132,9 +132,9 @@ export class Client {
     return new EventStream(res, () => abort.abort());
   }
 
-  /** Downloads `path` as raw bytes, as a browser saving a file does. */
-  async download(path: string): Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }> {
-    const res = await this.cronk.app.inject({ method: "GET", url: path, headers: this.authHeaders() });
+  /** Downloads `path` as raw bytes, as a browser saving a file does, sending any extra `headers` (such as `range`). */
+  async download(path: string, headers: Record<string, string> = {}): Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }> {
+    const res = await this.cronk.app.inject({ method: "GET", url: path, headers: { ...this.authHeaders(), ...headers } });
     return { status: res.statusCode, headers: res.headers, body: res.rawPayload };
   }
 

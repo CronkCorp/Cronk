@@ -156,6 +156,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     name: { type: "string" },
     agentAccess: agentAccessSchema,
     silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+    attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
