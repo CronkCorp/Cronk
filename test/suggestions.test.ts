@@ -363,3 +363,226 @@ describe("an Agent refused a change it may not make", () => {
     }
   });
 });
+
+/** Ada's Project CRONK with the Protected Document "Architecture" holding "Storage" under it, and her Agent claude-laptop. */
+async function protectedBranch() {
+  const { cronk, admin, agent, secret, documentId } = await protectedDocument();
+  await admin.post(`/api/documents/${documentId}/protection`, { protected: false });
+  const architecture = (await admin.post("/api/projects/CRONK/documents", { title: "Architecture", body: "How it fits.\n" })).body.document;
+  const storage = (await admin.post("/api/projects/CRONK/documents", { title: "Storage", body: "Postgres.\n", parentId: architecture.id })).body.document;
+  await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
+  return { cronk, admin, agent, secret, architectureId: architecture.id as string, storageId: storage.id as string };
+}
+
+/** Has `agent` suggest a new Document titled `title` under `parentId`; returns the Suggestion. */
+async function suggestNew(agent: Client, parentId: string, title = "Backups", body = "Nightly, kept a week.\n") {
+  const made = await agent.post("/api/suggestions", { item: { kind: "document", parentId }, baseVersion: 0, content: { title, body }, reasoning: "Nobody wrote down how." });
+  if (made.status !== 201) throw new Error(`Suggesting failed: ${JSON.stringify(made.body)}`);
+  return made.body.suggestion;
+}
+
+describe("an Agent suggesting a new Document under a protected branch", () => {
+  it("records its title, content, parent and reasoning as a change from empty, creating nothing yet", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+
+    const made = await agent.post("/api/suggestions", {
+      item: { kind: "document", parentId: storageId },
+      baseVersion: 0,
+      content: { title: " Backups ", body: "Nightly, kept a week.\n" },
+      reasoning: "Nobody wrote down how.",
+    });
+
+    expect(made.status).toBe(201);
+    const suggestion = made.body.suggestion;
+    expect(suggestion).toMatchObject({
+      item: { kind: "document", id: null, key: null, title: "Backups", status: null, projectKey: "CRONK", protected: true, version: 0 },
+      parent: { id: storageId, title: "Storage" },
+      baseVersion: 0,
+      base: { title: "", body: "" },
+      content: { title: "Backups", body: "Nightly, kept a week.\n" },
+      reasoning: "Nobody wrote down how.",
+      proposedBy: { kind: "agent", name: "claude-laptop", session: { id: agent.sessionId } },
+      reviewer: { name: "Ada" },
+      state: "open",
+      outdated: false,
+    });
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toEqual(suggestion);
+    expect((await agent.get("/api/suggestions")).body.suggestions).toEqual([suggestion]);
+    expect((await admin.get("/api/inbox")).body.items).toMatchObject([{ kind: "suggestion", suggestion: { id: suggestion.id } }]);
+    expect((await admin.get("/api/projects/CRONK/documents")).body.documents.map((d: { title: string }) => d.title)).toEqual(["Sign-in limits", "Architecture", "Storage"]);
+  });
+});
+
+describe("accepting a Suggestion of a new Document", () => {
+  it("unchanged, creates it in place, last under its parent, at Version 1 credited to the Agent and Protected by the branch", async () => {
+    const { cronk, admin, agent, architectureId, storageId } = await protectedBranch();
+    const ada = (await admin.get("/api/me")).body.user;
+    await admin.post("/api/projects/CRONK/documents", { title: "Indexes", parentId: storageId });
+    const suggestion = await suggestNew(agent, storageId);
+    cronk.clock.advance(60_000);
+
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+
+    expect(accepted.status).toBe(200);
+    const created = accepted.body.suggestion.item;
+    expect(accepted.body.suggestion).toMatchObject({
+      item: { kind: "document", id: expect.any(String), title: "Backups", protected: true, version: 1 },
+      parent: { id: storageId, title: "Storage" },
+      state: "accepted",
+      acceptedWithEdits: false,
+      resultVersion: 1,
+      decidedBy: { id: ada.id },
+      base: { title: "", body: "" },
+    });
+    expect((await admin.get(`/api/documents/${created.id}`)).body.document).toMatchObject({
+      title: "Backups",
+      body: "Nightly, kept a week.\n",
+      parentId: storageId,
+      version: 1,
+      protected: true,
+      protectedBy: { id: architectureId },
+    });
+    expect((await admin.get("/api/projects/CRONK/documents")).body.documents.map((d: { title: string }) => d.title)).toEqual([
+      "Sign-in limits",
+      "Architecture",
+      "Storage",
+      "Indexes",
+      "Backups",
+    ]);
+    expect((await admin.get(`/api/documents/${created.id}/versions/1`)).body.version).toMatchObject({
+      actor: { kind: "agent", name: "claude-laptop", session: { id: agent.sessionId } },
+      suggestion: { id: suggestion.id, acceptedWithEdits: false, acceptedBy: { id: ada.id } },
+    });
+    expect((await agent.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toEqual(accepted.body.suggestion);
+    expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`)).status).toBe(409);
+  });
+
+  it("edited first, creates it as the User changed it, credited to them and linked to the Suggestion", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+    const ada = (await admin.get("/api/me")).body.user;
+    const suggestion = await suggestNew(agent, storageId);
+
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { title: "Backups and restores" } });
+
+    expect(accepted.body.suggestion).toMatchObject({ acceptedWithEdits: true, resultVersion: 1, item: { title: "Backups and restores" }, content: { title: "Backups" } });
+    expect((await admin.get(`/api/documents/${accepted.body.suggestion.item.id}/versions/1`)).body.version).toMatchObject({
+      title: "Backups and restores",
+      body: "Nightly, kept a week.\n",
+      actor: { kind: "user", id: ada.id },
+      suggestion: { id: suggestion.id, acceptedWithEdits: true },
+    });
+  });
+
+  it("still creates it once the branch is no longer Protected, now open to Agents", async () => {
+    const { admin, agent, architectureId, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+    await admin.post(`/api/documents/${architectureId}/protection`, { protected: false });
+
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({ state: "open", item: { protected: false }, outdated: false });
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+
+    expect(accepted.body.suggestion).toMatchObject({ state: "accepted", item: { title: "Backups", version: 1, protected: false } });
+  });
+
+  it("names where the Document sits now, once moved", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+    const { id } = (await admin.post(`/api/suggestions/${suggestion.id}/accept`)).body.suggestion.item;
+
+    await admin.post(`/api/documents/${id}/move`, { parentId: null });
+
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({ item: { id }, parent: null });
+  });
+});
+
+describe("making a Suggestion of a new Document", () => {
+  it("is what an Agent refused a Document under a protected branch is pointed to", async () => {
+    const { agent, storageId } = await protectedBranch();
+
+    const refused = await agent.post("/api/projects/CRONK/documents", { title: "Backups", parentId: storageId });
+
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/^Storage is Protected: Agents may read it but not add Documents under it\. Make a Suggestion of the new Document instead/);
+    expect(refused.body.error).toContain(`POST /api/suggestions with item { kind: "document", parentId: "${storageId}" } and baseVersion 0`);
+    expect(refused.body.error).toContain("`suggestions` tool");
+  });
+
+  it("is refused under a branch an Agent may add to directly, and to Users, who add Documents directly", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+    const { document: notes } = (await admin.post("/api/projects/CRONK/documents", { title: "Notes" })).body;
+    const suggest = (client: Client, parentId: string) =>
+      client.post("/api/suggestions", { item: { kind: "document", parentId }, baseVersion: 0, content: { title: "Backups" }, reasoning: "Needed." });
+
+    const open = await suggest(agent, notes.id);
+    expect(open.status).toBe(409);
+    expect(open.body.error).toMatch(/^Notes isn't Protected, so you may create Documents under it directly/);
+    expect((await suggest(admin, storageId)).status).toBe(403);
+  });
+
+  it("needs a parent in the page tree, base Version 0, a title and reasoning; the body may be left out", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+    const suggest = (body: object) =>
+      agent.post("/api/suggestions", { item: { kind: "document", parentId: storageId }, baseVersion: 0, content: { title: "Backups" }, reasoning: "Needed.", ...body });
+
+    expect((await suggest({ item: { kind: "document", parentId: "00000000-0000-4000-8000-000000000000" } })).status).toBe(404);
+    const versioned = await suggest({ baseVersion: 1 });
+    expect(versioned.status).toBe(400);
+    expect(versioned.body.error).toMatch(/baseVersion 0/);
+    expect((await suggest({ content: { body: "No title." } })).status).toBe(400);
+    expect((await suggest({ content: { title: "   " } })).status).toBe(400);
+    expect((await suggest({ reasoning: "  " })).status).toBe(400);
+    expect((await suggest({ item: { kind: "document", parentId: storageId, id: storageId } })).status).toBe(400);
+    const made = await suggest({});
+    expect(made.status).toBe(201);
+    expect(made.body.suggestion.content).toEqual({ title: "Backups", body: "" });
+    const accepted = await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`);
+    expect((await admin.get(`/api/documents/${accepted.body.suggestion.item.id}`)).body.document).toMatchObject({ title: "Backups", body: "" });
+  });
+
+  it("is refused under a Report, which sits outside the page tree", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." })).body.report;
+    await admin.post(`/api/documents/${report.id}/protection`, { protected: true });
+
+    const refused = await agent.post("/api/suggestions", { item: { kind: "document", parentId: report.id }, baseVersion: 0, content: { title: "Notes" }, reasoning: "Needed." });
+    expect(refused.status).toBe(404);
+  });
+
+  it("is refused to an Agent that may only read where the branch is", async () => {
+    const { cronk, admin, storageId } = await protectedBranch();
+    const reader = await startSession(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
+    const refused = await reader.post("/api/suggestions", { item: { kind: "document", parentId: storageId }, baseVersion: 0, content: { title: "Backups" }, reasoning: "Needed." });
+    expect(refused.status).toBe(403);
+  });
+});
+
+describe("rejecting a Suggestion of a new Document", () => {
+  it("creates nothing and tells the Agent why in its next Agent Session", async () => {
+    const { cronk, admin, secret, agent, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+
+    const rejected = await admin.post(`/api/suggestions/${suggestion.id}/reject`, { reason: "Backups live in the runbook." });
+
+    expect(rejected.body.suggestion).toMatchObject({ state: "rejected", item: { id: null, title: "Backups", version: 0 }, parent: { id: storageId } });
+    expect((await admin.get("/api/projects/CRONK/documents")).body.documents).toHaveLength(3);
+    expect((await cronk.client(secret).post("/api/agent-sessions")).body.welcome.waitingWork).toMatchObject([
+      {
+        reason: "suggestion_rejected",
+        suggestion: { id: suggestion.id, item: { kind: "document", id: null, title: "Backups", projectKey: "CRONK" }, reason: "Backups live in the runbook." },
+      },
+    ]);
+  });
+
+  it("goes when the Document it would go under is deleted", async () => {
+    const { admin, agent, storageId } = await protectedBranch();
+    const suggestion = await suggestNew(agent, storageId);
+
+    expect((await admin.delete(`/api/documents/${storageId}?baseVersion=1`)).status).toBe(204);
+
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).status).toBe(404);
+    expect((await admin.get("/api/inbox")).body.items).toEqual([]);
+    expect((await agent.get("/api/suggestions")).body.suggestions).toEqual([]);
+  });
+});

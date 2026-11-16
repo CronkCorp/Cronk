@@ -68,7 +68,7 @@ export function waitingLines(work: WaitingWork): string[] {
     const { suggestion, ticket } = work;
     const from = ticket ? ` from ${ticket.key}` : "";
     return [
-      `- Your Suggestion ${suggestion.id} on ${suggestionItemName(suggestion.item)}${from}: ${suggestion.rejectedBy.name} rejected it, saying why:`,
+      `- Your Suggestion ${suggestion.id} ${suggestionOn(suggestion.item)}${from}: ${suggestion.rejectedBy.name} rejected it, saying why:`,
       ...quote(suggestion.reason),
     ];
   }
@@ -83,11 +83,13 @@ export function waitingLines(work: WaitingWork): string[] {
   return [`- ${where}: ${who} ${WHY[reason]} (Comment ${comment.id})`, ...quote(comment.body)];
 }
 
-/** How the welcome names a Suggestion's item: "the Document “Architecture”", "CRONK-D3", "CRONK's Guidance". */
-function suggestionItemName(item: { kind: string; key: string | null; title: string; projectKey: string | null }): string {
-  if (item.kind === "decision") return `${item.key}: ${item.title}`;
-  if (item.kind === "guidance") return `${item.projectKey ?? "the Workspace"}'s Guidance`;
-  return `the ${item.kind === "document" ? "Document" : "Term"} “${item.title}”`;
+/** What the welcome says a Suggestion was on: "on the Document “Architecture”", "on CRONK-D3: Postgres", "of a new Document “Backups”". */
+function suggestionOn(item: { kind: string; id: string | null; key: string | null; title: string; projectKey: string | null }): string {
+  if (item.kind === "decision") return `on ${item.key}: ${item.title}`;
+  // A rejected Suggestion of a new Document created none.
+  if (item.kind === "document" && item.id === null) return `of a new Document “${item.title}”`;
+  if (item.kind === "guidance") return `on ${item.projectKey ?? "the Workspace"}'s Guidance`;
+  return `on the ${item.kind === "document" ? "Document" : "Term"} “${item.title}”`;
 }
 
 /** One Ready Ticket as a welcome line: its key, title, Status, any Priority, and whether it is autonomous. */
