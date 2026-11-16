@@ -284,6 +284,33 @@ describe("the guidance tool", () => {
   });
 });
 
+describe("the decisions tool", () => {
+  it("lists and gets Decisions of the Workspace or a Project through the API's access rules", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 0);
+    await projectWithTickets(admin, "SECRET", 0);
+    await admin.patch("/api/projects/SECRET", { agentAccess: "none" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres", body: "We use Postgres.", group: "Storage" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "SQLite" });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/workspace/decisions", { title: "Compose for installs" });
+    await admin.post("/api/projects/SECRET/decisions", { title: "Hush" });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
+
+    const listed = await callTool(mcp, "decisions", { action: "list", project: "CRONK", status: ["accepted"] });
+    expect(listed.body.decisions.map((d: { key: string }) => d.key)).toEqual(["CRONK-D1"]);
+    expect((await callTool(mcp, "decisions", { action: "list" })).body.decisions.map((d: { key: string }) => d.key)).toEqual(["D1"]);
+    expect((await callTool(mcp, "decisions", { action: "list", project: "CRONK", group: ["storage"] })).body.decisions).toHaveLength(1);
+    expect((await callTool(mcp, "decisions", { action: "get", key: "cronk-d1" })).body.decision).toMatchObject({
+      key: "CRONK-D1",
+      status: "accepted",
+      body: "We use Postgres.",
+    });
+    expect(await callTool(mcp, "decisions", { action: "get", key: "SECRET-D1" })).toEqual({ isError: true, body: "No such Decision" });
+    expect(await callTool(mcp, "decisions", { action: "get" })).toEqual({ isError: true, body: "The get action needs a key" });
+  });
+});
+
 describe("the terms tool", () => {
   it("lists the Terms that apply in a Project or the Workspace, and gets one by name or id", async () => {
     const { cronk, admin } = await startInstalledCronk();

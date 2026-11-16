@@ -22,7 +22,7 @@ import { CronkMarkdown, highlightIds, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { useSelectedPassage, type SelectedPassage } from "./selected-passage.js";
 import { MarkdownEditor } from "./markdown-editor.js";
-import { Field, Show, messageOf, useAction, useLoad, useSubmit } from "./ui.js";
+import { Field, Show, messageOf, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
 
 /** The address of a page tree: a Project's, or the Workspace's without a Project key. */
 const treeAddress = (projectKey: string | null | undefined) => (projectKey ? `/projects/${projectKey}/documents` : "/documents");
@@ -37,13 +37,6 @@ export const explainStale = (reload: () => void, doing: string) => (err: unknown
   reload();
   throw new Error(`${current.actor.name} saved Version ${current.number} meanwhile; check it before ${doing}`);
 };
-
-/** Whether the signed-in User may change Documents or Terms in a Project, or the Workspace's (every User may). */
-export function useCanWrite(projectKey: string | null | undefined): boolean {
-  const [project] = useLoad(() => (projectKey ? api.project(projectKey) : Promise.resolve(undefined)), [projectKey]);
-  if (!projectKey) return true;
-  return project.kind === "loaded" && project.value?.project.access === "write";
-}
 
 /** The way back to a Project, optionally followed by more crumbs. */
 function ProjectCrumbs(props: { projectKey: string; children?: ReactNode }) {
