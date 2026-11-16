@@ -25,6 +25,7 @@ import type {
   UserRef,
 } from "./work/tickets.js";
 import type { publicWorkspace } from "./workspace/workspaces.js";
+import type { publicAttachment } from "./files/attachments.js";
 import type { Document as StoredDocument, LinkedDocument as StoredLinkedDocument, TreeEntry, Version as StoredVersion } from "./knowledge/documents.js";
 import type { MarkdownMerge, Merge as StoredMerge } from "./knowledge/sections.js";
 import type { Report as StoredReport } from "./knowledge/reports.js";
@@ -79,6 +80,12 @@ export type AgentToken = Serialized<StoredAgentToken>;
 export type IssuedAgentToken = Serialized<Awaited<ReturnType<typeof issueAgentToken>>>;
 export type Invitation = Serialized<ReturnType<typeof publicInvitation>>;
 export type Workspace = Serialized<ReturnType<typeof publicWorkspace>>;
+/** A file attached to a Ticket. */
+export type Attachment = Serialized<ReturnType<typeof publicAttachment>>;
+/** How much storage the Workspace's files take, by kind; Admins only. */
+export interface Storage {
+  attachments: { files: number; bytes: number };
+}
 /** Standing instructions Users write for Agents: its Markdown and current Version (0 before anyone writes it). */
 export type Guidance = Serialized<StoredGuidance>;
 /** One saved state of Guidance, with the User who saved it and when. */

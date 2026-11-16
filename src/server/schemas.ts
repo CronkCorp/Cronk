@@ -58,6 +58,8 @@ export type SharedSchemaName =
   | "GuidanceMerge"
   | "SearchResult"
   | "LinkedDocument"
+  | "Transcript"
+  | "TranscriptSummary"
   | "AgentRecordEntry"
   | "Decision"
   | "DecisionSummary"
@@ -68,6 +70,7 @@ export type SharedSchemaName =
   | "TermVersion"
   | "StaleTermVersion"
   | "RenamedId"
+  | "Attachment"
   | "AvoidedWord";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
@@ -84,6 +87,34 @@ const object = (properties: Record<string, object>, optional: string[] = []) => 
 /** A User or Agent as another record names it. */
 const named = object({ id, name: { type: "string" } });
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
+
+/** What a Transcript and its summary share. */
+const transcriptFields = {
+  id,
+  chatId: { type: "string", description: "The client's id for the chat, such as Claude Code's `session_id`; one Transcript per Agent and chat." },
+  agent: {
+    ...object({ id, name: { type: "string" }, owner: named }),
+    description: "The Agent that uploaded it, with its Owner.",
+  },
+  sessions: { type: "array", items: object({ id }), description: "The uploading Agent's Agent Sessions it names, in the order they started." },
+  tickets: {
+    type: "array",
+    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    description: "The Tickets its Sessions changed, wrote Activities or Comments on, or attached files to, that the caller can read.",
+  },
+  documents: {
+    type: "array",
+    items: object({ id, title: { type: "string" } }),
+    description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
+  },
+  terms: {
+    type: "array",
+    items: object({ id, name: { type: "string" } }),
+    description: "The Terms its Sessions saved, that the caller can read.",
+  },
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
 /** Another Ticket as a Ticket's parent and history name it. */
 /** Who wrote an Activity or a Report: the Agent with the Owner it acts for, and the Agent Session it was in. */
 const writtenBy = {
@@ -219,6 +250,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     name: { type: "string" },
     agentAccess: agentAccessSchema,
     silenceThresholdSeconds: { type: "integer", description: "How long an Agent Session may stay silent before it ends and its Claims lapse." },
+    attachmentMaxBytes: { type: "integer", description: "The largest file an Attachment may be, in bytes." },
+    transcriptMaxBytes: { type: "integer", description: "The most a Transcript may hold, all its texts together, in bytes of UTF-8." },
   }),
   Guidance: {
     description: "Standing instructions Users write for Agents, as Markdown.",
@@ -661,6 +694,38 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       version: { ...nullable(object({ number: { type: "integer" } })), description: "A Version of the Document it saved." },
     }),
   },
+  Attachment: {
+    description:
+      "A plain file, such as an image, video, PDF or log, attached to a Ticket. Whoever can read the Ticket can read it; " +
+      "download it from GET /api/attachments/{id}/file.",
+    ...object({
+      id,
+      ticketKey: { type: "string", description: "The Ticket it is attached to." },
+      name: { type: "string", description: "Its file name, as attached." },
+      contentType: { type: "string", description: "Its media type, such as `image/png`, as attached." },
+      size: { type: "integer", description: "Its size in bytes." },
+      at: timestamp,
+      actor: { ...recordedActor, description: "Who attached it." },
+    }),
+  },
+  Transcript: {
+    description:
+      "The verbatim chat that led an Agent to change things, uploaded from the client side and linked by the Agent's own Agent Session ids found in it, " +
+      "and so to everything those Sessions changed.",
+    ...object({
+      ...transcriptFields,
+      markdown: { type: "string", description: "The text of the latest upload, in the turn convention (Markdown)." },
+      earlier: {
+        type: "array",
+        items: { type: "string" },
+        description: "Texts of earlier uploads that a later one didn't continue, oldest first; kept beside the latest.",
+      },
+    }),
+  },
+  TranscriptSummary: {
+    description: "A Transcript without its text.",
+    ...object(transcriptFields),
+  },
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
     ...object({
@@ -708,6 +773,9 @@ const ERROR_MEANINGS = {
   404: "There is no such record, or the caller can't see it",
   409: "The change conflicts with the current state",
   410: "The Agent Session named in the Cronk-Agent-Session header has ended or wasn't started with this token",
+  413: "The upload is larger than the Workspace allows: an Attachment's file, or a Transcript with every text it keeps",
+  416: "The range asked for lies outside the file",
+  422: "The request is well formed but can't be kept as it is",
 } as const;
 
 /** The error answers of a route, each with the shared `Error` shape. */
@@ -726,6 +794,9 @@ export const userIdParam = { type: "string", format: "uuid", description: "The U
 
 /** A Document's id. */
 export const documentIdParam = { type: "string", format: "uuid", description: "The Document's id." } as const;
+
+/** An Attachment's id. */
+export const attachmentIdParam = { type: "string", format: "uuid", description: "The Attachment's id." } as const;
 
 /** A Term's id. */
 export const termIdParam = { type: "string", format: "uuid", description: "The Term's id." } as const;

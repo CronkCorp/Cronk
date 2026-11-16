@@ -11,6 +11,9 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       # The address Users reach Cronk at, e.g. https://cronk.example; set it when a reverse proxy rewrites the Host header.
       PUBLIC_URL: ${PUBLIC_URL:-}
+      FILES_DIR: /app/data/files
+    volumes:
+      - files-data:/app/data
     ports:
       - "${CRONK_PORT:-3000}:3000"
     depends_on:
@@ -39,3 +42,4 @@ services:
 
 volumes:
   db-data:
+  files-data:
