@@ -160,7 +160,7 @@ export function agentRoutes(ctx: AppContext) {
       },
     );
 
-    // An Agent's record: what it did across the Workspace, for its Owner or an Admin.
+    // The Agent Record: what an Agent did across the Workspace, for its Owner or an Admin.
     app.get<{ Params: { id: string }; Querystring: { since?: string; limit: number } }>(
       "/api/agents/:id/record",
       {
@@ -175,7 +175,7 @@ export function agentRoutes(ctx: AppContext) {
           },
           response: {
             200: answer(
-              "The Agent's record of what it did, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved, " +
+              "The Agent Record: what the Agent did, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved, " +
                 "leaving out what the caller can't read",
               listing("record", ref("AgentRecordEntry")),
             ),
