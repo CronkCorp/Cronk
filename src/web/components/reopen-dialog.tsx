@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, type ReopenChoice, type Ticket, type TicketDetail } from "../api.js";
+import { api, type ReopenChoice, type StatusCategory, type Ticket, type TicketDetail } from "../api.js";
 import { TextArea, useAction, useLoad } from "../ui.js";
 import { Button } from "./button.js";
 import { Dialog } from "./overlays.js";
 import { StatusPill } from "./tags.js";
+
+/** Started, In Review or finished: work that went on after its blocker was completed. */
+export const CONTINUED: readonly StatusCategory[] = ["started", "in_review", "completed"];
 
 /** The choices a dependent takes, with their labels, the first being its default; none for work that hasn't continued or can't be reopened. */
 function choicesFor(ticket: Ticket): [ReopenChoice, string][] {
@@ -52,7 +55,7 @@ export function ReopenDialog(props: {
     if (props.open) setChosen({});
   }, [props.open]);
   const listed = dependents.kind === "loaded" ? dependents.value : [];
-  const continued = listed.filter((d) => ["started", "in_review", "completed"].includes(d.ticket.status.category));
+  const continued = listed.filter((d) => CONTINUED.includes(d.ticket.status.category));
   const reopen = useAction(
     () => {
       const choices = Object.fromEntries(listed.filter((d) => choicesFor(d.ticket).length > 0).map((d) => [d.ticket.key, chosen[d.ticket.key] ?? "keep"]));
@@ -68,7 +71,7 @@ export function ReopenDialog(props: {
 
   return (
     <Dialog
-      medium
+      size="medium"
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={`Reopen ${ticket.key}`}
@@ -124,7 +127,7 @@ export function ReopenDialog(props: {
           </div>
         )}
         <p className="muted reopen-note">
-          {`${listed.some((d) => d.ticket.status.category === "started") ? "Pause releases the Claim and moves it back to Unstarted. " : ""}Every dependent's Agent is told ${ticket.key} was Reopened.`}
+          {`${listed.some((d) => d.ticket.status.category === "started") ? "Pause releases the Claim and moves it back to Unstarted. " : ""}The Agents of the dependents you can change are told ${ticket.key} was Reopened.`}
         </p>
         {reopen.error && <p className="error" role="alert">{reopen.error}</p>}
         <div className="actions dialog-actions">

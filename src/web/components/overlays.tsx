@@ -83,15 +83,15 @@ interface DialogFrame {
 }
 
 /**
- * A modal dialog named by `title`, with an optional line under it and its content; `wide` for showing a picture or video,
+ * A modal dialog named by `title`, with an optional line under it and its content; `size` `wide` for showing a picture or video,
  * `medium` for a form with a list in it.
  */
-export function Dialog(props: DialogFrame & { children: ReactNode; wide?: boolean; medium?: boolean }) {
+export function Dialog(props: DialogFrame & { children: ReactNode; size?: "medium" | "wide" }) {
   return (
     <RadixDialog.Root open={props.open} onOpenChange={props.onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="dialog-overlay" />
-        <RadixDialog.Content className={props.wide ? "dialog wide" : props.medium ? "dialog medium" : "dialog"} {...(props.description ? {} : { "aria-describedby": undefined })}>
+        <RadixDialog.Content className={props.size ? `dialog ${props.size}` : "dialog"} {...(props.description ? {} : { "aria-describedby": undefined })}>
           <RadixDialog.Title className="dialog-title">{props.title}</RadixDialog.Title>
           {props.description && <RadixDialog.Description className="dialog-description">{props.description}</RadixDialog.Description>}
           {props.children}

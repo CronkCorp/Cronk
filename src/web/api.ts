@@ -38,6 +38,7 @@ import type {
   RelationKind,
   Relations,
   Report,
+  ReopenChoice,
   Role,
   SearchKind,
   Storage,
@@ -98,6 +99,7 @@ export type {
   RelationKind,
   Relations,
   Report,
+  ReopenChoice,
   Role,
   SearchKind,
   Storage,
@@ -441,9 +443,6 @@ export const api = {
   ticketChanges: (key: string) =>
     request<{ changes: RecordedChange[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/changes`).then((r) => r.changes),
 };
-
-/** What a Reopen does to a Ticket it blocks that already continued: keep it, pause Started work, or Reopen an Unverified completion too. */
-export type ReopenChoice = "keep" | "pause" | "reopen";
 
 /** Narrows the Inbox: an item kind, a Project key, an Agent id. */
 export interface InboxFilter {

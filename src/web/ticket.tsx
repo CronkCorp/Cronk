@@ -351,7 +351,7 @@ function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
       {unverified && props.canWrite && (
         <>
           <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
-          <Button variant="secondary" onClick={() => setReopening(true)}>Reopen…</Button>
+          <Button variant="secondary" onClick={() => setReopening(true)} disabled={accept.busy}>Reopen…</Button>
           <ReopenDialog
             ticket={props.ticket}
             open={reopening}
