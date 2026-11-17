@@ -137,7 +137,7 @@ A Document an Actor linked to a Ticket from the Ticket's side, so it is one clic
 _Avoid_: Relation (reserved for Ticket to Ticket), attachment, reference
 
 **Version**:
-One saved state of a Document, Artifact or Guidance, recording which Actor produced it.
+One saved state of a Document, Decision, Term, Artifact or Guidance, recording which Actor produced it.
 _Avoid_: Revision, snapshot, history entry
 
 **Artifact**:
@@ -221,7 +221,7 @@ The most a Project (or the Workspace) lets Agents do in it: None, Read or Write.
 _Avoid_: AI permissions, bot role, agent scope
 
 **Token**:
-The secret an Agent calls the API with, full or read-only, shown once when issued and stored only as a hash. An Agent may hold several; revoking one refuses it at once. A Token starts with `cronk_at_`, so it is recognisable in logs and to secret scanners; Cronk's other secrets carry their own prefix: `cronk_si_` for a sign-in cookie, `cronk_inv_` for an Invitation and `cronk_pr_` for a Password reset link. Tokens issued before prefixes have none and still work.
+The secret an Agent calls the API with, full or read-only, shown once when issued and stored only as a hash. An Agent may hold several; revoking one refuses it at once. A Token starts with `cronk_at_`, so it is recognisable in logs and to secret scanners; Cronk's other secrets carry their own prefix: `cronk_si_` for a sign-in cookie, `cronk_inv_` for an Invitation and `cronk_pr_` for a Password reset link.
 _Avoid_: API key, password, credential (as the term)
 
 **Protected**:

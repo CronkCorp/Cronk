@@ -13,7 +13,7 @@ export const transcriptAddress = (id: string, turn: number | null) => `/transcri
 
 /** One item a Transcript led to, as its chips and list show it. */
 interface LedTo {
-  kind: "Ticket" | "Document" | "Term" | "Decision";
+  kind: "Ticket" | "Document" | "Term" | "Decision" | "Artifact";
   /** The key of a Ticket or Decision. */
   key?: string;
   name: string;
@@ -27,6 +27,7 @@ const ledToOf = (t: Transcript): LedTo[] => [
   ...t.decisions.map((i): LedTo => ({ kind: "Decision", key: i.key, name: i.title, address: `/decisions/${i.key}`, turn: i.turn })),
   ...t.documents.map((i): LedTo => ({ kind: "Document", name: i.title, address: `/documents/${i.id}`, turn: i.turn })),
   ...t.terms.map((i): LedTo => ({ kind: "Term", name: i.name, address: `/terms/${i.id}`, turn: i.turn })),
+  ...t.artifacts.map((i): LedTo => ({ kind: "Artifact", name: i.title, address: `/artifacts/${i.id}`, turn: i.turn })),
 ];
 
 /** A chip for an item a turn led to, opening the item. */
@@ -153,8 +154,8 @@ export function FromTranscripts(props: { links: TranscriptLink[]; heading: "h3" 
   );
 }
 
-/** FromTranscripts for an item the page doesn't already have the links of: a Document, Term or Decision. */
-export function LoadFromTranscripts(props: { kind: "documents" | "terms" | "decisions"; keyOrId: string; heading: "h3" | "h4"; reloadOn?: unknown }) {
+/** FromTranscripts for an item the page doesn't already have the links of: a Document, Term, Decision or Artifact. */
+export function LoadFromTranscripts(props: { kind: "documents" | "terms" | "decisions" | "artifacts"; keyOrId: string; heading: "h3" | "h4"; reloadOn?: unknown }) {
   const [links] = useLoad(() => api.transcriptsOf(props.kind, props.keyOrId), [props.kind, props.keyOrId, props.reloadOn]);
   return links.kind === "loaded" ? <FromTranscripts links={links.value} heading={props.heading} /> : null;
 }

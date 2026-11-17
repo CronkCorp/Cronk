@@ -1,8 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 /**
- * The prefix each kind of secret Cronk issues starts with, so people and secret scanners can tell one at a glance. Secrets
- * issued before prefixes are bare; they still work, as only a secret's hash is stored and looked up.
+ * The prefix each kind of secret Cronk issues starts with, so people and secret scanners can tell one at a glance.
  */
 export const TOKEN_PREFIXES = {
   agentToken: "cronk_at_",

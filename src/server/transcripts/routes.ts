@@ -2,11 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { lockUntilCommit, transaction } from "../db/database.js";
-import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, ref, termIdParam, ticketKeyParam } from "../schemas.js";
+import { answer, artifactIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, termIdParam, ticketKeyParam } from "../schemas.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { termFor } from "../knowledge/term-routes.js";
 import { decisionFor, decisionKeyParam } from "../knowledge/decision-routes.js";
+import { artifactFor } from "../files/artifact-routes.js";
 import { getWorkspace, MAX_TRANSCRIPT_BYTES } from "../workspace/workspaces.js";
 import {
   afterUpload,
@@ -75,6 +76,13 @@ const LINKED: { path: string; name: string; param: "key" | "id"; params: ReturnT
       const decision = await decisionFor(ctx.db, actor, key, "read");
       return { kind: "decision", id: decision.id, key: decision.key };
     },
+  },
+  {
+    path: "/api/artifacts/:id/transcripts",
+    param: "id",
+    name: "Artifact",
+    params: pathParams({ id: artifactIdParam }),
+    find: async (ctx, actor, id) => ({ kind: "artifact", id: (await artifactFor(ctx.db, actor, id, "read")).id }),
   },
 ];
 

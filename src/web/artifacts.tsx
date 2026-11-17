@@ -13,6 +13,7 @@ import { ProjectCrumbs } from "./components/crumbs.js";
 import { CopyLink } from "./components/copy-link.js";
 import { RelativeTime } from "./components/time.js";
 import { packFolder } from "./folder-archive.js";
+import { LoadFromTranscripts } from "./transcripts.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, useAction, useCanWrite, useLoad } from "./ui.js";
 import { EXTRA_ORIGIN_USES } from "../shared/values.js";
@@ -284,6 +285,7 @@ function ArtifactView(props: {
         {frameUrl.startsWith(location.origin) ? "Served from Cronk's own hostname" : "Served from the Artifact hostname"} in a sandboxed frame.{" "}
         {servingNote(props.workspace?.artifactAllowedOrigins, extrasApply ? extras : [])}
       </p>
+      <LoadFromTranscripts kind="artifacts" keyOrId={a.id} heading="h4" reloadOn={a.version} />
       <PublishDialog
         open={publishing}
         onOpenChange={setPublishing}

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { actingUser, type Actor } from "../actor.js";
 import { DECISION_STATUSES, type DecisionStatus } from "../../shared/values.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
-import { transaction, type Queryable } from "../db/database.js";
+import { transaction, type PublishingTransaction, type Queryable } from "../db/database.js";
 import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, savedHolding } from "../schemas.js";
 import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
@@ -113,32 +113,18 @@ export async function decisionFor(db: Queryable, actor: Actor, key: string, need
   return decision;
 }
 
-/**
- * Tells the Decision's watchers of its Version `number`, its current one unless given, and who saved it. Call once it
- * is committed, for every new Version of a Decision.
- */
-export async function decisionVersionSaved(ctx: AppContext, decision: Decision, number = decision.version): Promise<void> {
-  const version = await findDecisionVersion(ctx.db, decision, number);
-  if (version) ctx.live.publish(decisionTopic(decision.id), { event: "version", data: { version: version.number, by: version.actor } });
-}
-
 export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /** Tells the Inbox of whoever reviews each of `decisions`, if an Agent proposed it, that it may have changed. Call once committed. */
     const reviewersHear = async (decisions: Decision[]) =>
       waitingItemsChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
 
-    /** Tells of a save that gave `versioned` new Versions, `decision` among them unless it changed nothing: their watchers, and their reviewers' Inboxes. */
-    const announceSave = async (decision: Decision, versioned: Decision[]) => {
-      await reviewersHear([decision, ...versioned]);
-      for (const d of versioned) await decisionVersionSaved(ctx, d);
-    };
-
     /**
      * Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step, adding
-     * every Decision it gave a new Version to `versioned`, to tell of once committed (see `announceSave`).
+     * every Decision it gave a new Version to `versioned`, whose reviewers to tell once committed (see `reviewersHear`).
+     * `saveDecision` tells each one's watchers itself.
      */
-    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent, versioned: Decision[]) => {
+    const save = async (tx: PublishingTransaction, actor: Actor, current: Decision, content: DecisionContent, versioned: Decision[]) => {
       const now = ctx.clock.now();
       const saved = await saveDecision(tx, current, content, actor, now);
       if (saved.version !== current.version) versioned.push(saved);
@@ -300,7 +286,7 @@ export function decisionRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const versioned: Decision[] = [];
-        const saved = await transaction(ctx.db, async (tx) => {
+        const saved = await transaction(ctx, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (actor.kind === "agent" && current.status !== "proposed") {
             throw new HttpError(
@@ -325,7 +311,7 @@ export function decisionRoutes(ctx: AppContext) {
             avoidedWords: await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body)),
           };
         });
-        await announceSave(saved.decision, versioned);
+        await reviewersHear([saved.decision, ...versioned]);
         return saved;
       },
     );
@@ -430,7 +416,7 @@ export function decisionRoutes(ctx: AppContext) {
             if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
           },
         );
-        await announceSave(decision, versioned);
+        await reviewersHear([decision, ...versioned]);
         return { decision };
       },
     );

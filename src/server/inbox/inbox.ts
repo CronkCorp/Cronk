@@ -297,10 +297,20 @@ const ASSIGNEES_WAITING_ON = (ticketIds: string) =>
    WHERE r.kind = 'blocks' AND r.to_ticket_id IN (${ticketIds}) AND ${isWaitingDiscoverySql("d", "ds")} AND d.assignee_id IS NOT NULL`;
 
 /** Ids of the Assignees of the waiting Discovered Tickets that block any of these Tickets, whose items show them. */
-export async function assigneesWaitingOn(db: Queryable, ticketIds: string[]): Promise<string[]> {
+async function assigneesWaitingOn(db: Queryable, ticketIds: string[]): Promise<string[]> {
   if (ticketIds.length === 0) return [];
   const { rows } = await db.query<{ id: string }>(`SELECT DISTINCT w.assignee_id AS id FROM (${ASSIGNEES_WAITING_ON("SELECT unnest($1::uuid[])")}) w`, [ticketIds]);
   return rows.map((r) => r.id);
+}
+
+/**
+ * Ids of the Users whose Inbox shows these Tickets: their Assignees, and the Assignees of the waiting Discovered Tickets
+ * blocking any of them, whose items show their titles and Statuses. Pass the result to `waitingItemsChanged` once the
+ * change is committed; inside a transaction, look it up with the transaction so it sees the change.
+ */
+export async function usersShownTickets(db: Queryable, tickets: Pick<Ticket, "id" | "assignee">[]): Promise<string[]> {
+  const assignees = tickets.flatMap((t) => (t.assignee ? [t.assignee.id] : []));
+  return [...assignees, ...(await assigneesWaitingOn(db, tickets.map((t) => t.id)))];
 }
 
 /**

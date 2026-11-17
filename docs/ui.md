@@ -264,7 +264,7 @@ The Project page is shown in `docs/ui/frame.png`.
 
 - **A Transcript's page** (`/transcripts/:id`): "Transcript" as its crumb, its title (the first line of its first User turn) as the `h1`, then the Agent that uploaded it, its Owner, when it was last uploaded and how many turns it has. A **Led to** panel lists everything its Agent Sessions changed that the reader can read, each as a chip (key or kind, then name) opening the item, with a link to the turn where it first appears, or "not named in the chat".
 - **Turns** follow in order, each under a kind label (`USER` or `ASSISTANT`) and its number, which links to `#turn-n`. Chips for the items that first appear in a turn sit next to its label. A coloured 3px left border marks the turn the address points at. Texts of earlier uploads that a later one didn't continue fold away under "Earlier texts" at the end.
-- **From Transcript** is a side group on a Ticket's and a Decision's page, and sits under a Term's definition and a Document's head: each Transcript the item came from, opening at the turn where the item first appears (or the top), with its Agent.
+- **From Transcript** is a side group on a Ticket's and a Decision's page, and sits under a Term's definition, a Document's head and an Artifact's serving note: each Transcript the item came from, opening at the turn where the item first appears (or the top), with its Agent.
 - **Search** lists Transcripts after every other kind, with a `Transcript` chip and the turn that matched, opening at that turn.
 
 ## Live updates

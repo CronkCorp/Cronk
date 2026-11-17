@@ -1403,7 +1403,12 @@ test("open a Suggestion from the Inbox, switch to side by side, and accept it", 
   await expect(changes.locator(".diff-added")).toHaveText(/Fifty per IP\./);
 
   // Side by side shows the current Version beside the suggestion, and stays chosen for this User across a reload.
+  // The page shows no save status for this choice, so wait for its save to finish before the reload relies on it.
+  const diffViewSaved = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/me" && response.request().postDataJSON()?.diffView === "split",
+  );
   await detail.getByRole("button", { name: "Side by side" }).click();
+  expect((await diffViewSaved).ok()).toBe(true);
   await expect(detail.getByRole("list", { name: "Version 1, current" })).toContainText("No per-IP limits.");
   await expect(detail.getByRole("list", { name: "Suggested by suggest-bot" })).toContainText("Fifty per IP.");
   await page.reload();
@@ -1757,7 +1762,7 @@ test("paste an image into a Document's editor, and see it in the rendered body a
   await page.goto(`/documents/${id}`);
   await page.getByRole("button", { name: "Edit" }).click();
 
-  // Pasting a file uploads it and puts its Markdown where the cursor is; Ctrl+Z takes the Markdown out again.
+  // Pasting a file uploads it and puts its Markdown where the cursor is; undo (Ctrl/Cmd+Z) takes the Markdown out again.
   const editor = page.getByLabel("Body (Markdown)");
   await editor.evaluate((el: HTMLTextAreaElement) => {
     el.focus();
@@ -1768,9 +1773,9 @@ test("paste an image into a Document's editor, and see it in the rendered body a
   const embedded = (await editor.inputValue()).split("\n")[1]!;
   // Attached once, by the editor, not again by the page.
   await expect(page.getByRole("region", { name: "Attachments" }).getByRole("button", { name: "Open flow.png" })).toHaveCount(1);
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press("ControlOrMeta+z");
   await expect(editor).toHaveValue("Before.\n\nAfter.");
-  await page.keyboard.press("Control+Shift+z");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(editor).toHaveValue(`Before.\n${embedded}\nAfter.`);
   // A paste that carries text too, as a copy from a spreadsheet does, is the text's to paste: nothing is attached.
   await pasteFiles(editor, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1");

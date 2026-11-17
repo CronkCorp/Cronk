@@ -23,16 +23,6 @@ describe("password reset links", () => {
     expect(await signInStatus(cronk, "bob@example.com", "bob's new password")).toBe(200);
   });
 
-  it("still work when issued before links had a prefix", async () => {
-    const { cronk, admin } = await startInstalledCronk();
-    await joinAs(cronk, admin, "bob@example.com");
-    const issued = (await admin.post(`/api/users/${await userId(admin, "bob@example.com")}/password-reset`)).body.token;
-    const bare = await cronk.issuedBeforePrefixes(issued);
-    expect((await cronk.client().get(`/api/password-resets/by-token/${bare}`)).body.email).toBe("bob@example.com");
-    expect((await cronk.client().post(`/api/password-resets/by-token/${bare}`, { password: "bob's new password" })).status).toBe(200);
-    expect(await signInStatus(cronk, "bob@example.com", "bob's new password")).toBe(200);
-  });
-
   it("lets the User set a new password once, which signs them in", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await joinAs(cronk, admin, "bob@example.com");

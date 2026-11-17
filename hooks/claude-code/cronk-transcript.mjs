@@ -11,16 +11,18 @@ import { join } from "node:path";
 
 /**
  * @typedef {{ type: string, text?: string, content?: string | Block[], name?: string, id?: string, tool_use_id?: string, input?: unknown, is_error?: boolean }} Block
- * @typedef {{ type?: string, isSidechain?: boolean, isMeta?: boolean, isCompactSummary?: boolean, agentId?: string, toolUseResult?: unknown, attachment?: { type?: string, prompt?: unknown }, message?: { role?: string, content?: string | Block[] } }} Entry
+ * @typedef {{ type?: string, timestamp?: string, isSidechain?: boolean, isMeta?: boolean, isCompactSummary?: boolean, agentId?: string, toolUseResult?: unknown, attachment?: { type?: string, prompt?: unknown }, message?: { role?: string, content?: string | Block[] } }} Entry
  * @typedef {{ chat: string, toolUseId?: string }} Subagent a subagent's chat file, and the id of the tool call that launched it
- * @typedef {{ chats: Map<string, Entry[]>, agentByToolUse: Map<string, string>, placed: Set<string> }} SubagentPlacement
- *   the subagents' chats by agentId, the agentIds their meta files give the tool calls that launched them, and those already placed
+ * @typedef {{ chats: Map<string, Entry[]>, agentByToolUse: Map<string, string>, placedUpTo: Map<string, number> }} SubagentPlacement
+ *   the subagents' chats by agentId, the agentIds their meta files give the tool calls that launched them, and how many
+ *   of each subagent's entries the runs already placed hold
  */
 
 /**
- * Converts the lines of a Claude Code chat file to Markdown, with each subagent's chat in a `subagent <agentId>` block
- * where its parent learned it finished. The same lines always give the same text, and a chat or subagent that grows
- * only gains text at the end, so a re-upload continues the stored Transcript.
+ * Converts the lines of a Claude Code chat file to Markdown, with each run of a subagent's chat in a `subagent <agentId>`
+ * block where its parent learned that run finished: a subagent resumed after it finished has one block per run. The same
+ * lines always give the same text, and a chat or subagent that grows only gains text at the end, so a re-upload continues
+ * the stored Transcript.
  * @param {string} jsonl the main chat
  * @param {Record<string, Subagent>} [subagents] the subagents' chat files, by agentId
  * @returns {string}
@@ -41,11 +43,11 @@ function toMarkdown(jsonl, subagents = {}) {
     if (subagent.toolUseId) agentByToolUse.set(subagent.toolUseId, agentId);
   }
   const mainChat = entries.filter((entry) => !entry.isSidechain);
-  return chatMarkdown(mainChat, { chats, agentByToolUse, placed: new Set() });
+  return chatMarkdown(mainChat, { chats, agentByToolUse, placedUpTo: new Map() });
 }
 
 /**
- * One chat's entries as Markdown, with the chats of the subagents it learned finished, each placed once.
+ * One chat's entries as Markdown, with each run of the subagents it learned finished, where it learned that run finished.
  * @param {Entry[]} entries @param {SubagentPlacement} subagents
  * @returns {string}
  */
@@ -64,21 +66,29 @@ function chatMarkdown(entries, subagents) {
   };
   /** @type {Set<string>} The tool calls this chat made, which its subagents' completions must name. */
   const toolUses = new Set();
-  /** Appends the chat of the subagent `agentId`, unless it's missing or already placed. @param {string} agentId */
-  const placeSubagent = (agentId) => {
+  /**
+   * Appends the run of the subagent `agentId` that finished by `finishedAt`, the timestamp of the entry that tells this
+   * chat so: its entries from where its previous run ended up to that time. A run with no entries, such as one already
+   * placed at an earlier notice of the same completion, isn't appended.
+   * @param {string} agentId @param {string | undefined} finishedAt
+   */
+  const placeSubagent = (agentId, finishedAt) => {
     const chat = subagents.chats.get(agentId);
-    if (!chat || subagents.placed.has(agentId)) return;
-    subagents.placed.add(agentId);
-    append("Assistant", fenced(`subagent ${agentId}`, chatMarkdown(chat, subagents)));
+    if (!chat) return;
+    const start = subagents.placedUpTo.get(agentId) ?? 0;
+    const end = runEnd(chat, start, finishedAt);
+    if (end === start) return;
+    subagents.placedUpTo.set(agentId, end);
+    append("Assistant", fenced(`subagent ${agentId}`, chatMarkdown(chat.slice(start, end), subagents)));
   };
-  /** Places the background subagent whose completion `text` notifies, if this chat launched it. @param {string} text */
-  const placeCompleted = (text) => {
+  /** Places the background subagent's run whose completion `text` notifies, if this chat launched it. @param {string} text @param {Entry} entry */
+  const placeCompleted = (text, entry) => {
     const completed = completedSubagent(text);
-    if (completed && toolUses.has(completed.toolUseId)) placeSubagent(completed.agentId);
+    if (completed && toolUses.has(completed.toolUseId)) placeSubagent(completed.agentId, entry.timestamp);
   };
   for (const entry of entries) {
     // A completion that arrives while Claude is busy is queued as an attachment rather than written as a user entry.
-    if (entry.attachment?.type === "queued_command" && typeof entry.attachment.prompt === "string") placeCompleted(entry.attachment.prompt);
+    if (entry.attachment?.type === "queued_command" && typeof entry.attachment.prompt === "string") placeCompleted(entry.attachment.prompt, entry);
     // Left out: what Claude Code adds itself, such as the summary that continues a compacted chat.
     if (!entry.message || entry.isMeta || entry.isCompactSummary) continue;
     const blocks = typeof entry.message.content === "string" ? [{ type: "text", text: entry.message.content }] : (entry.message.content ?? []);
@@ -86,7 +96,7 @@ function chatMarkdown(entries, subagents) {
     if (!role) continue;
     for (const block of blocks) {
       if (block.type === "text") {
-        if (role === "User") placeCompleted(block.text ?? "");
+        if (role === "User") placeCompleted(block.text ?? "", entry);
         const text = role === "User" ? typedByUser(block.text ?? "") : block.text;
         if (text) append(role, text);
       } else if (block.type === "image") append(role, IMAGE);
@@ -97,14 +107,35 @@ function chatMarkdown(entries, subagents) {
       // A tool's result comes back in a user entry, but belongs to the Assistant's turn that called it.
       else if (block.type === "tool_result") {
         append("Assistant", fenced(block.is_error ? "tool-result error" : "tool-result", trimmed(resultText(block.content))));
-        // A foreground subagent has finished when its result comes back; a background one has only launched.
-        const result = /** @type {{ agentId?: unknown, status?: unknown } | undefined} */ (entry.toolUseResult);
-        const agentId = typeof result?.agentId === "string" ? result.agentId : subagents.agentByToolUse.get(block.tool_use_id ?? "");
-        if (agentId && result?.status !== "async_launched") placeSubagent(agentId);
+        // A foreground subagent has finished when its result comes back; a background one has only launched. So has a
+        // finished subagent resumed with a message, whose result names it as resumedAgentId.
+        const result = /** @type {{ agentId?: unknown, resumedAgentId?: unknown, status?: unknown } | undefined} */ (entry.toolUseResult);
+        const agentId =
+          typeof result?.agentId === "string"
+            ? result.agentId
+            : typeof result?.resumedAgentId === "string"
+              ? result.resumedAgentId
+              : subagents.agentByToolUse.get(block.tool_use_id ?? "");
+        if (agentId && result?.status !== "async_launched") placeSubagent(agentId, entry.timestamp);
       }
     }
   }
   return parts.map((part) => `${part.trimEnd()}\n`).join("\n");
+}
+
+/**
+ * Where the run of a subagent's `chat` that starts at `start` and finished by `finishedAt` ends: past its entries written
+ * by then. A resumed subagent appends its next run's entries, all written later, to the same chat. Without timestamps to
+ * tell runs apart, the run holds the rest of the chat.
+ * @param {Entry[]} chat @param {number} start @param {string | undefined} finishedAt
+ * @returns {number}
+ */
+function runEnd(chat, start, finishedAt) {
+  const finished = Date.parse(finishedAt ?? "");
+  if (Number.isNaN(finished)) return chat.length;
+  let end = start;
+  while (end < chat.length && !(Date.parse(chat[end]?.timestamp ?? "") > finished)) end++;
+  return end;
 }
 
 /**

@@ -12,7 +12,7 @@ export interface S3Server {
 declare module "vitest" {
   export interface ProvidedContext {
     postgresAdminUrl: string;
-    /** The disposable MinIO, or null when none could be started: S3 tests are then skipped. */
+    /** The S3-compatible server (TEST_S3_ENDPOINT or a disposable MinIO), or null when none could be started outside CI: S3 tests are then skipped. In CI it is never null. */
     s3Server: S3Server | null;
   }
 }
@@ -21,7 +21,8 @@ declare module "vitest" {
  * Starts one disposable Postgres and one disposable MinIO for the whole test run. Each test then creates
  * its own database (see harness.ts) or bucket on them. Set TEST_POSTGRES_URL to use an existing Postgres
  * instead of a container, and TEST_S3_ENDPOINT (with TEST_S3_ACCESS_KEY_ID and TEST_S3_SECRET_ACCESS_KEY)
- * to use an existing S3-compatible server. Without one, and with no MinIO to start, the S3 tests are skipped.
+ * to use an existing S3-compatible server. Without one, and with no MinIO to start, the S3 tests are skipped outside
+ * CI; in CI (with CI set) the run fails instead, so they can never be skipped unnoticed.
  */
 export default async function setup(project: TestProject) {
   const [postgres, minio] = await Promise.all([startPostgres(), startMinio()]);
@@ -50,13 +51,27 @@ async function startMinio(): Promise<{ server: S3Server | null; container?: Star
     };
   }
   try {
-    const container = await new MinioContainer("minio/minio:RELEASE.2025-09-07T16-13-09Z").start();
+    // Docker Hub no longer serves the upstream minio/minio image. Chainguard's free tier publishes only `latest`,
+    // which moves, so the image is pinned by digest to keep every run on the same server.
+    const container = await new MinioContainer(
+      "cgr.dev/chainguard/minio@sha256:59953701f8f8d0de81aab456f0b0b6c0a1804119415559bf7ede79d944108879",
+    ).start();
     return {
       server: { endpoint: container.getConnectionUrl(), accessKeyId: container.getUsername(), secretAccessKey: container.getPassword() },
       container,
     };
   } catch (err) {
-    console.warn(`No MinIO could be started, so the S3-compatible storage tests are skipped: ${(err as Error).message}`);
+    const reason = (err as Error).message;
+    if (inCi()) {
+      throw new Error(`No MinIO could be started, and in CI the S3-compatible storage tests must run, not be skipped: ${reason}`, { cause: err });
+    }
+    console.warn(`No MinIO could be started, so the S3-compatible storage tests are skipped: ${reason}`);
     return { server: null };
   }
+}
+
+/** Whether this run is in CI: CI is set to anything but "false" or "0", as CI services set it to "true". */
+function inCi() {
+  const ci = process.env.CI;
+  return ci !== undefined && ci !== "" && ci !== "false" && ci !== "0";
 }
