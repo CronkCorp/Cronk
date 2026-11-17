@@ -1,10 +1,11 @@
 import { applyRedactions, sameRedaction, type Redaction } from "../transcripts/redact.js";
 import {
   afterUpload,
-  changedItems,
+  changedItemsPerTranscript,
   findForUpdate,
   listTranscripts,
   redactionsOf,
+  redactionsPerTranscript,
   storeRedactions,
   storeTranscript,
   textToKeep,
@@ -29,11 +30,14 @@ import type { ImportContext } from "./import-context.js";
  */
 export async function exportTranscripts(ctx: ExportContext): Promise<void> {
   const transcripts = await listTranscripts(ctx.db, ctx.scope.workspaceId, "oldest");
+  const ids = transcripts.map((t) => t.id);
+  const changedItemsOf = await changedItemsPerTranscript(ctx.db, ids);
+  const redactionsOfEach = await redactionsPerTranscript(ctx.db, ids);
   for (const [i, t] of transcripts.entries()) {
     const n = i + 1;
     for (const id of t.sessionIds) ctx.usedSessions.add(id);
-    const items = await changedItems(ctx.db, t.sessionIds);
-    const redactions = await redactionsOf(ctx.db, t.id);
+    const items = changedItemsOf(t.id);
+    const redactions = redactionsOfEach(t.id);
     ctx.add(
       `transcripts/${n}.md`,
       {
