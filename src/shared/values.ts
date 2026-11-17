@@ -41,12 +41,12 @@ export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 export const WAITING_REASONS = ["answer", "mention", "comment", "published", "rejected", "suggestion_rejected"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
 
-/** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
-export const LINK_REASONS = ["report", "linked", "mention"] as const;
+/** Why a Ticket lists a Document: it is one of the Ticket's Reports, or was linked to it. */
+export const LINK_REASONS = ["report", "linked"] as const;
 export type LinkReason = (typeof LINK_REASONS)[number];
 
-/** What can mention a Decision or a Term: its text names the Decision's key or the Term's name. */
-export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision"] as const;
+/** What can mention a Ticket, a Decision or a Term: its text names the Ticket's or Decision's key or the Term's name. */
+export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision", "activity"] as const;
 export type MentionKind = (typeof MENTION_KINDS)[number];
 
 /** How a Comment @mentions an Agent, for the API's and the MCP tools' descriptions. */
@@ -67,7 +67,7 @@ export const SHOWN_MEDIA_TYPES = {
   text: ["text/plain"],
 } as const;
 
-export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term"] as const;
+export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term", "decision"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
@@ -76,6 +76,9 @@ export const MARKDOWN_FILE = /\.(md|markdown)$/i;
 /** The kinds of item a Suggestion can change (ADR 0014). */
 export const SUGGESTION_KINDS = ["document", "term", "decision", "guidance"] as const;
 export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
+
+/** The field of each kind of Suggestion's content that holds its Markdown, which merges section by section. */
+export const SUGGESTION_TEXT_FIELD: Record<SuggestionKind, string> = { document: "body", term: "definition", decision: "body", guidance: "markdown" };
 
 /** Where a Suggestion stands: open until a User accepts or rejects it. */
 export const SUGGESTION_STATES = ["open", "accepted", "rejected"] as const;

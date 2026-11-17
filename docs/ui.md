@@ -143,7 +143,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Side panel (280px, sticky):**
   - Status, Priority, Assignee, Delegate, Autonomy (Autonomous, or Stops at In Review; always shown, and pre-filled from the Project's default on delegating) and Labels, each edited in place. An Agent's completion adds a Verification row: an Unverified chip with Accept and Reopen…, or Verified.
   - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter spans the silence threshold, from when the Agent Session was last heard from to the lapse time. It is hidden when the Ticket is not Claimed.
-  - Parent, Sub-Tickets, Relations and Mentioned in.
+  - Parent, Sub-Tickets, Relations, Documents (those linked to it, with Link and Unlink) and Mentioned in (every Ticket, Document, Comment, Term, Decision and Activity naming its key, as on a Decision's or Term's page).
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.
@@ -190,6 +190,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button, together with Cronk's MCP address, a ready-made command to connect Claude Code, and the commands a script runs to change things within an Agent Session (reads need none).
   - **"Show what it did"** below the Agent Sessions opens what the Agent did across the Workspace, newest first: its Changes, Activities, Comments and saved Versions, each with when, its Agent Session and a link to the Ticket or Document.
 - **Admins** also see "Everyone else's Agents" below, as rows of Agent, Owner and liveness, read-only.
+- **Removed Agents** comes last, collapsed behind a "Removed Agents (n)" toggle and hidden when there are none: the User's own, and for an Admin every User's. Each is a card with its avatar, its name ("for <Owner>" when it isn't the User's own), when it was removed, and "Show what it did". It has no Rename, Remove, tokens or Agent Sessions.
 
 ### Inbox and Triage in Phase 2
 
@@ -247,7 +248,8 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Under the description:** the Ticket's own Attachments as 168px thumbnails (a frame for video, the type for other files) with name, size and who attached them, and a drop zone.
 - **Files** in the side panel: every Attachment on the Ticket, in Comments and Reports too, and the Artifacts from its work, each with type, size and Actor.
 - **Dropping a file anywhere** on the Ticket page attaches it to the Ticket, as does pasting one. Video and images posted in a Comment or Report show inline where they were posted.
-- **Opening one** (a thumbnail or a Files entry) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
+- **In the timeline:** attaching a file to the Ticket and deleting one are Change lines, "claude-laptop attached sign-in-flood.log (220 KB)" and "Ada removed proxy-ip.png". The attached file's name opens it while it is still on the Ticket; once deleted it is plain text. Files in Comments and Reports make no Change line, as they show with them.
+- **Opening one** (a thumbnail, a Files entry or a change line) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
 - **Workspace settings** hold the Attachment size limit, the Artifact limits (size and files per Version), the Artifact allow-list (one origin per line) and whether publishes may declare extra origins, and show Admins the storage Attachments and Artifacts use.
 
 ### Attachments on Documents, Reports and Comments

@@ -3,7 +3,7 @@ import { Actor, agentActor, userActor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { fileKind, formatBytes, typeLabel } from "./components/files.js";
 import { ConfirmDialog, Dialog } from "./components/overlays.js";
-import { api, attachmentFileUrl, type Attachment, type RecordedActor } from "./api.js";
+import { api, attachmentFileUrl, type Attachment, type RecordedActor, type RecordedChange } from "./api.js";
 import { messageOf } from "./ui.js";
 
 /**
@@ -289,6 +289,21 @@ export function AttachmentViewer(props: { attachment: Attachment | undefined; ca
 
 /** The Attachments a page has loaded, for Comments and Reports on it to show their own where they were posted. */
 export const PageAttachments = createContext<{ attachments: Attachment[]; onOpen: (attachment: Attachment) => void } | undefined>(undefined);
+
+/**
+ * The Attachment a Ticket's change line names, by the name it recorded: a button opening it while it is still on the
+ * Ticket, in a page that provides `PageAttachments`; otherwise, once deleted or where nothing can open it, its name alone.
+ */
+export function ChangeLineAttachment(props: { attachment: Extract<RecordedChange, { attachment: unknown }>["attachment"] }) {
+  const page = useContext(PageAttachments);
+  const found = page?.attachments.find((a) => a.id === props.attachment.id && a.on === "ticket");
+  if (!page || !found) return <>{props.attachment.name}</>;
+  return (
+    <button type="button" className="link-button" onClick={() => page.onOpen(found)}>
+      {props.attachment.name}
+    </button>
+  );
+}
 
 /**
  * The Attachments on one Comment, or on one Document or Report itself, shown where they were posted: images and video in

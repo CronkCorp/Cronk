@@ -1,10 +1,11 @@
 import { Fragment, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { Actor, agentActor, Avatar, type ActorLike } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
+import { formatBytes } from "./components/files.js";
 import { Chip, DecisionStatusPill, KindLabel, PRIORITY_NAMES, StatusPill } from "./components/tags.js";
 import { formatDay, RelativeTime, sameDay, useNow } from "./components/time.js";
 import { api, type Activity, type ActivityKind, type Comment, type NewComment, type RecordedChange, type RelationKind, type Report } from "./api.js";
-import { InlineAttachments } from "./attachments.js";
+import { ChangeLineAttachment, InlineAttachments } from "./attachments.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
 import { messageOf, Show, TextArea, useLoad, useSubmit } from "./ui.js";
@@ -362,6 +363,10 @@ export function describeChange(change: RecordedChange): ReactNode {
       return `linked the Document “${change.document.title}”`;
     case "document unlinked":
       return `unlinked the Document “${change.document.title}”`;
+    case "attachment added":
+      return <>attached <ChangeLineAttachment attachment={change.attachment} /> ({formatBytes(change.attachment.size)})</>;
+    case "attachment removed":
+      return `removed ${change.attachment.name}`;
     case "autonomous":
       return change.to ? "turned on Autonomous Delegation" : "turned off Autonomous Delegation";
     case "verification":

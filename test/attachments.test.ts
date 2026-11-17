@@ -447,3 +447,61 @@ describe.skipIf(!s3Server())("Attachments in S3-compatible storage", () => {
     expect(await bucketKeys(storage)).toEqual([]);
   });
 });
+
+describe("Attachments in a Ticket's history", () => {
+  /** The Ticket's Changes after the ones `delegatedSetup` made. */
+  const attachmentChanges = async (admin: Awaited<ReturnType<typeof delegatedSetup>>["admin"]) =>
+    (await admin.get("/api/tickets/CRONK-1/changes")).body.changes.filter((c: { change: string }) => c.change.startsWith("attachment"));
+
+  it("records attaching and deleting with who did it, in which Agent Session, and the file's id, name, media type and size", async () => {
+    const { admin, claude, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const log = Buffer.alloc(2048, "x");
+
+    const id = (await agent.upload("/api/tickets/CRONK-1/attachments?name=sign-in-flood.log", log, "text/plain")).body.attachment.id;
+    expect((await admin.delete(`/api/attachments/${id}`)).status).toBe(204);
+
+    const { changes } = (await admin.get("/api/tickets/CRONK-1/changes")).body;
+    const attachment = { id, name: "sign-in-flood.log", contentType: "text/plain", size: 2048 };
+    expect(changes.slice(-2)).toMatchObject([
+      { change: "attachment added", attachment, actor: { kind: "agent", id: claude.agentId, owner: { name: "Ada" }, session: { id: agent.sessionId } } },
+      { change: "attachment removed", attachment, actor: { kind: "user", name: "Ada" } },
+    ]);
+    expect(await attachmentChanges(admin)).toHaveLength(2);
+    // The Agent's own Record shows its attaching like its other Changes.
+    const record = (await admin.get(`/api/agents/${claude.agentId}/record`)).body.record;
+    expect(record[0]).toMatchObject({ kind: "change", session: { id: agent.sessionId }, ticket: { key: "CRONK-1" }, change: { change: "attachment added", attachment } });
+  });
+
+  it("records nothing for a refused upload or delete", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await admin.patch("/api/workspace", { attachmentMaxBytes: 1024 * 1024 });
+
+    expect((await agent.upload("/api/tickets/CRONK-1/attachments?name=log.txt", Buffer.from("log"), "text/plain")).status).toBe(409);
+    expect((await admin.upload("/api/tickets/CRONK-1/attachments?name=big.bin", Buffer.alloc(1024 * 1024 + 1), "application/octet-stream")).status).toBe(413);
+    const id = (await admin.upload("/api/tickets/CRONK-1/attachments?name=log.txt", Buffer.from("log"), "text/plain")).body.attachment.id;
+    expect((await agent.delete(`/api/attachments/${id}`)).status).toBe(409);
+
+    expect((await attachmentChanges(admin)).map((c: { change: string }) => c.change)).toEqual(["attachment added"]);
+  });
+
+  it("records nothing for files in the Ticket's Comments, its Reports or Comments on its Reports, which show with them", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const comment = (await admin.post("/api/tickets/CRONK-1/comments", { body: "This is what I see." })).body.comment;
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
+    const onReport = (await admin.post(`/api/documents/${report.id}/comments`, { body: "Which cache?" })).body.comment;
+
+    const ids = [
+      (await admin.upload(`/api/comments/${comment.id}/attachments?name=browser.png`, png, "image/png")).body.attachment.id,
+      (await agent.upload(`/api/documents/${report.id}/attachments?name=trace.log`, Buffer.from("miss"), "text/plain")).body.attachment.id,
+      (await admin.upload(`/api/comments/${onReport.id}/attachments?name=disk.png`, png, "image/png")).body.attachment.id,
+    ];
+    for (const id of ids) expect((await admin.delete(`/api/attachments/${id}`)).status).toBe(204);
+
+    expect(await attachmentChanges(admin)).toEqual([]);
+  });
+});

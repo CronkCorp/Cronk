@@ -1,11 +1,12 @@
 import type { Queryable } from "./database.js";
-import { backfillTicketMentions } from "../knowledge/ticket-mentions.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 import { recordAllEmbeds } from "../files/artifact-embeds.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
- * migration once it has shipped; add a new one instead.
+ * migration once it has shipped; add a new one instead. The one exception: a
+ * backfill that would no longer run against the schema of its time may be
+ * dropped when a later migration redoes it over all data (as 0041 does for 0015's and 0026's).
  */
 export interface Migration {
   id: string;
@@ -407,7 +408,7 @@ export const migrations: Migration[] = [
       );
       CREATE INDEX document_ticket_mentions_key ON document_ticket_mentions (ticket_key);
     `,
-    backfill: backfillTicketMentions,
+    // 0041_ticket_and_activity_mentions records these in mentions instead, from every source, and drops this table.
   },
   {
     id: "0016_ticket_document_links",
@@ -664,8 +665,7 @@ export const migrations: Migration[] = [
       CREATE INDEX mentions_term ON mentions (term_id);
       CREATE INDEX mentions_decision ON mentions (decision_id);
     `,
-    // Artifacts came later (0035_comments_on_artifacts), so this reads Comments as they were then.
-    backfill: (db) => recordAllMentions(db, null, { artifacts: false }),
+    // 0041_ticket_and_activity_mentions records every mention, from the schema as it is by then.
   },
   {
     id: "0027_proposed_decisions",
@@ -978,5 +978,30 @@ export const migrations: Migration[] = [
       ALTER TABLE ticket_relations ADD CONSTRAINT ticket_relations_discovered_block
         CHECK ((added_by_agent_id IS NULL) = (reason IS NULL) AND (added_by_agent_id IS NULL OR kind = 'blocks'));
     `,
+  },
+  {
+    id: "0040_decision_search",
+    sql: `
+      -- Full-text search (search/search.ts) matches this exact expression, as 0014_search's indexes do.
+      CREATE INDEX decisions_search ON decisions USING gin (to_tsvector('english', title || ' ' || body));
+    `,
+  },
+  {
+    id: "0041_ticket_and_activity_mentions",
+    sql: `
+      -- mentions (0026) also records Ticket keys, kept as written like Decision keys, and Activities as sources.
+      -- It replaces document_ticket_mentions (0015), which recorded Ticket keys from Documents only.
+      ALTER TABLE mentions ADD COLUMN activity_id uuid REFERENCES activities(id) ON DELETE CASCADE;
+      ALTER TABLE mentions ADD COLUMN ticket_key text;
+      ALTER TABLE mentions DROP CONSTRAINT mentions_check;
+      ALTER TABLE mentions DROP CONSTRAINT mentions_check1;
+      ALTER TABLE mentions ADD CONSTRAINT mentions_one_source
+        CHECK (num_nonnulls(ticket_id, document_id, comment_id, term_id, decision_id, activity_id) = 1);
+      ALTER TABLE mentions ADD CONSTRAINT mentions_one_target CHECK (num_nonnulls(ticket_key, decision_key, mentioned_term_id) = 1);
+      CREATE INDEX mentions_ticket_key ON mentions (ticket_key);
+      CREATE INDEX mentions_activity ON mentions (activity_id);
+      DROP TABLE document_ticket_mentions;
+    `,
+    backfill: (db) => recordAllMentions(db),
   },
 ];

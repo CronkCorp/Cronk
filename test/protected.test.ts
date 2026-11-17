@@ -119,27 +119,28 @@ describe("protecting a Document", () => {
 
 describe("lists that show a Document", () => {
   it("say a Ticket's linked Documents are Protected when marked or under a marked one, on reading the Ticket and on linking", async () => {
-    const { admin, architecture, backups, handbook } = await pageTree();
+    const { admin, architecture, storage, backups, handbook } = await pageTree();
     await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 1" });
     await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
-    await admin.patch(`/api/documents/${handbook.id}`, { baseVersion: handbook.version, body: "Before CRONK-1." });
+    await admin.patch(`/api/documents/${storage.id}`, { baseVersion: storage.version, body: "Before CRONK-1." });
     await admin.post(`/api/tickets/CRONK-1/documents/${architecture.id}`);
+    await admin.post(`/api/tickets/CRONK-1/documents/${handbook.id}`);
 
     const linked = await admin.post(`/api/tickets/CRONK-1/documents/${backups.id}`);
-    const expected = [
-      { title: "Architecture", reason: "linked", protected: true },
-      { title: "Backups", reason: "linked", protected: true },
-      { title: "Handbook", reason: "mention", protected: false },
-    ];
-    const marks = (documents: { title: string; reason: string; protected: boolean }[]) => documents.map(({ title, reason, protected: p }) => ({ title, reason, protected: p }));
+    const expected = ["Architecture: true", "Handbook: false", "Backups: true"];
+    const marks = (documents: { title: string; protected: boolean }[]) => documents.map((d) => `${d.title}: ${d.protected}`);
     expect(marks(linked.body.documents)).toEqual(expected);
-    const read = (await admin.get("/api/tickets/CRONK-1")).body.documents;
-    expect(marks(read)).toEqual(expected);
-    expect(read[0]).not.toHaveProperty("protectedBy");
-    expect(read[0]).not.toHaveProperty("covers");
+    const read = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(marks(read.documents)).toEqual(expected);
+    expect(read.documents[0]).not.toHaveProperty("protectedBy");
+    expect(read.documents[0]).not.toHaveProperty("covers");
+    // A Document mentioning the Ticket's key is among its mentions, with its mark.
+    expect(read.mentions.map((m: { kind: string; title: string; protected: boolean | null }) => `${m.kind}: ${m.title}: ${m.protected}`)).toEqual([
+      "document: Storage: true",
+    ]);
   });
 
-  it("say which search results are Protected: Documents and Reports by the same rule, Terms by their mark, never Tickets or Comments", async () => {
+  it("say which search results are Protected: Documents and Reports by the same rule, Terms and Decisions by their mark, never Tickets or Comments", async () => {
     const { admin, session } = await delegatedSetup(1);
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
@@ -152,6 +153,9 @@ describe("lists that show a Document", () => {
     await admin.post(`/api/documents/${handbook.id}/comments`, { body: "A zebra note." });
     const term = (await admin.post("/api/projects/CRONK/terms", { name: "Zebra", definition: "A striped thing." })).body.term;
     await admin.post("/api/projects/CRONK/terms", { name: "Zebra crossing", definition: "Where a zebra crosses." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Zebras first", body: "Always." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Zebras last", body: "Never." });
+    await admin.post("/api/decisions/CRONK-D1/protection", { protected: true });
     await admin.patch("/api/tickets/CRONK-1", { title: "Zebra work" });
     await admin.post("/api/tickets/CRONK-1/comments", { body: "A zebra comment." });
     for (const id of [architecture.id, report.id]) await admin.post(`/api/documents/${id}/protection`, { protected: true });
@@ -161,6 +165,8 @@ describe("lists that show a Document", () => {
     expect(results.map((r) => `${r.kind}: ${r.title}: ${r.protected}`).sort()).toEqual([
       "comment: Handbook: null",
       "comment: Zebra work: null",
+      "decision: Zebras first: true",
+      "decision: Zebras last: false",
       "document: Architecture: true",
       "document: Handbook: false",
       "document: Storage: true",

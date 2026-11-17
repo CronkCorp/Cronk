@@ -23,6 +23,7 @@ import {
 } from "./api.js";
 import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
+import { MentionList } from "./mentions.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
 import { AttachmentThumbnails, AttachmentViewer, FilesPanel, PageAttachments, type AttachmentsView, useAttach, usePageDrop } from "./attachments.js";
@@ -206,6 +207,10 @@ function TicketView(props: {
             )}
             <RelationsEditor detail={props.detail} readOnly={!canWrite} />
             <TicketDocuments detail={props.detail} readOnly={!canWrite} />
+            <div className="side-group">
+              <h3>Mentioned in</h3>
+              <MentionList mentions={props.detail.mentions} what="its key" />
+            </div>
           </section>
         </aside>
       </div>
@@ -539,9 +544,9 @@ const whereDocumentIs = (d: { ticketKey: string | null; projectKey: string | nul
   d.ticketKey ? `Report on ${d.ticketKey}` : (d.projectKey ?? "Workspace");
 
 /**
- * The Documents linked to the Ticket and those that mention its key, other Tickets' Reports included; its own
- * Reports show in its timeline. With Write, Documents found by search can be linked, and linked ones unlinked.
- * A link or unlink shows once the Ticket's stream tells of it.
+ * The Documents linked to the Ticket, other Tickets' Reports included; its own Reports show in its timeline.
+ * With Write, Documents found by search can be linked, and linked ones unlinked. A link or unlink shows once
+ * the Ticket's stream tells of it.
  */
 function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
   const t = props.detail.ticket;
@@ -567,15 +572,15 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
   if (props.readOnly && documents.length === 0) return null;
   return (
     <div className="side-group">
-      <h3>Mentioned in</h3>
+      <h3>Documents</h3>
       {documents.length > 0 && (
         <ul className="side-list" aria-label="Documents">
           {documents.map((d) => (
             <li key={d.id}>
               <Link to={`/documents/${d.id}`} className="link">{d.title}</Link>
               {d.protected && <> <ProtectedMark compact /></>}{" "}
-              <span className="muted">{whereDocumentIs(d)}</span> <Chip>{d.reason === "linked" ? "Linked" : "Mentions it"}</Chip>
-              {d.reason === "linked" && !props.readOnly && (
+              <span className="muted">{whereDocumentIs(d)}</span> <Chip>Linked</Chip>
+              {!props.readOnly && (
                 <Button variant="ghost" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
                   Unlink
                 </Button>

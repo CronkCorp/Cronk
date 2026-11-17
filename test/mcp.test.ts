@@ -75,7 +75,7 @@ describe("the MCP endpoint", () => {
     expect(mcp.client.getInstructions()).toContain("claude-laptop");
     expect(mcp.client.getInstructions()).toContain("Acme");
     expect(mcp.client.getInstructions()).toContain(
-      "Claiming a Ticket gives you its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and the Documents that mention it.",
+      "Claiming a Ticket gives you its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and what mentions it.",
     );
     const [agent] = (await admin.get("/api/agents")).body.agents;
     expect(agent.sessions).toEqual([expect.objectContaining({ id: mcp.transport.sessionId, startedAt: "2026-01-01T09:00:00.000Z" })]);
@@ -833,6 +833,19 @@ describe("the search tool", () => {
     const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
     expect(search.description).toMatch(/Terms[\s\S]*terms tool/);
     expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["term"]) } });
+  });
+
+  it("finds Decisions, and says to get one with the decisions tool", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/workspace/decisions", { title: "Postgres for storage", body: "One database for everything." });
+    await admin.post("/api/workspace/documents", { title: "Postgres notes", body: "Tuning the pool." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const found = await callTool(mcp, "search", { query: "postgres", kind: ["decision"] });
+    expect(found.body.results).toEqual([expect.objectContaining({ kind: "decision", title: "Postgres for storage", decisionKey: "D1" })]);
+    const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
+    expect(search.description).toMatch(/Decisions[\s\S]*decisions tool by its decisionKey/);
+    expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["decision"]) } });
   });
 });
 

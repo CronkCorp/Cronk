@@ -129,11 +129,11 @@ The nested arrangement of a Project's or the Workspace's Documents, where each D
 _Avoid_: Wiki, folder, hierarchy
 
 **Mention**:
-A Ticket, Document, Comment, Term or Decision whose text names a Decision's key (`CRONK-D7`, or `D7` for the Workspace's) or a Term's name, written with its capitalisation as a whole word, outside code and links. The text links to it, and the Decision or Term lists what mentions it under "Mentioned in". Not to be confused with a Comment's @mention of an Agent.
+A Ticket, Document, Comment, Term, Decision or Activity whose text names a Ticket's key (`CRONK-12`), a Decision's key (`CRONK-D7`, or `D7` for the Workspace's) or a Term's name, written with its capitalisation as a whole word, outside code and links. The text links to it, and the Ticket, Decision or Term lists what mentions it under "Mentioned in"; a Ticket leaves out its own text, Comments, Activities and Reports. Not to be confused with a Comment's @mention of an Agent.
 _Avoid_: Reference, backlink
 
 **Linked Document**:
-A Document an Actor linked to a Ticket from the Ticket's side, so it is one click away without editing the Document. The Ticket lists it beside its Reports and the Documents that mention its key. Unlike a Relation, it never blocks.
+A Document an Actor linked to a Ticket from the Ticket's side, so it is one click away without editing the Document. The Ticket lists it beside its Reports, apart from what mentions its key. Unlike a Relation, it never blocks.
 _Avoid_: Relation (reserved for Ticket to Ticket), attachment, reference
 
 **Version**:
@@ -187,7 +187,7 @@ One continuous connection of an Agent, from connect until it disconnects or stay
 _Avoid_: Run, instance, conversation
 
 **Agent Record**:
-Everything an Agent did across the Workspace, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved. Its Owner sees what they can read now; an Admin sees all of it. Gone once the Agent is removed, though what it did stays on the Tickets and Documents it was on.
+Everything an Agent did across the Workspace, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved. Its Owner sees what they can read now; an Admin sees all of it. It stays readable to them after the Agent is removed, as what it did stays on the Tickets and Documents it was on.
 _Avoid_: Work (reserved for Waiting Work), history, activity log, feed
 
 **Transcript**:

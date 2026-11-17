@@ -397,7 +397,7 @@ describe("Claims and access", () => {
 });
 
 describe("Context on claim", () => {
-  it("gives the Claimed Ticket with its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and the Documents that mention it", async () => {
+  it("gives the Claimed Ticket with its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and what mentions it", async () => {
     const { cronk, admin, session } = await delegatedSetup(2);
     await admin.post("/api/tickets/CRONK-1/sub-tickets", { title: "Wire the cache", description: "Put the cache in front of search." });
     await admin.post("/api/tickets/CRONK-3/sub-tickets", { title: "Measure hits" });
@@ -427,14 +427,18 @@ describe("Context on claim", () => {
     const documents = [
       { id: report, title: "First pass", projectKey: "CRONK", ticketKey: "CRONK-3", version: 1 },
       { id: spec, title: "Spec", projectKey: "CRONK", ticketKey: null, version: 1 },
-      { id: runbook, title: "Runbook", projectKey: null, ticketKey: null, version: 1 },
-      { id: design, title: "Design", projectKey: "CRONK", ticketKey: null, version: 1 },
     ];
     expect(claimed.documents).toEqual(documents.map((d) => expect.objectContaining(d)));
+    const mentions = [
+      { kind: "document", id: runbook, title: "Runbook", projectKey: null, ticketKey: null },
+      { kind: "document", id: design, title: "Design", projectKey: "CRONK", ticketKey: null },
+    ];
+    expect(claimed.mentions).toEqual(mentions.map((m) => expect.objectContaining(m)));
 
     await agent.delete("/api/tickets/CRONK-3/claim");
     const next = (await agent.post("/api/agent-sessions/current/next")).body.next;
     expect(next.ticket.key).toBe("CRONK-3");
     expect(next.documents).toEqual(documents.map((d) => expect.objectContaining(d)));
+    expect(next.mentions).toEqual(mentions.map((m) => expect.objectContaining(m)));
   });
 });
