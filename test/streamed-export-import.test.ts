@@ -217,13 +217,17 @@ function editFrontmatter(file: Buffer, edit: (data: any) => void): string {
   return `---\n${stringify(data)}---\n${file.toString().slice(match[0].length)}`;
 }
 
-/** An installation keeping its files in a directory the test can look into, and the files there. */
+/**
+ * An installation keeping its files in a directory the test can look into, the files there, and where an
+ * Attachment's file is kept, for a test to remove or change it behind Cronk's back.
+ */
 async function installationWithFilesIn(name: string) {
   const dir = await mkdtemp(join(tmpdir(), "cronk-files-"));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
   const { admin } = await startInstalledCronk(name, { storage: { kind: "disk", dir } });
   const stored = async () => (await readdir(dir, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
-  return { admin, stored, dir };
+  const attachmentFile = (id: string) => join(dir, "attachments", id);
+  return { admin, stored, attachmentFile };
 }
 
 describe("an import that fails partway", () => {
@@ -390,7 +394,7 @@ describe("an export whose stored files don't match their records", () => {
     await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
     const res = await admin.upload("/api/tickets/CRONK-1/attachments?name=trace.bin", binary(3000), "application/octet-stream");
     expect(res.status).toBe(201);
-    return { ...installation, file: join(installation.dir, "attachments", res.body.attachment.id) };
+    return { ...installation, file: installation.attachmentFile(res.body.attachment.id) };
   }
 
   it("answers an error naming the file, not a 200 with an archive cut short, when an Attachment's file is missing from the store", async () => {
@@ -416,7 +420,7 @@ describe("an export whose stored files don't match their records", () => {
   });
 
   it("aborts the download, never ending the archive cleanly, when a file checked before sending is removed before the archive reaches it", async () => {
-    const { admin, dir } = await installationWithFilesIn("Acme");
+    const { admin, attachmentFile } = await installationWithFilesIn("Acme");
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
     await admin.post("/api/projects/CRONK/tickets", { title: "Recordings" });
     await attach(admin, "/api/tickets/CRONK-1/attachments?name=first.bin", 1, 32 * MB);
@@ -426,7 +430,7 @@ describe("an export whose stored files don't match their records", () => {
     expect(res.statusCode).toBe(200);
     // The download is read no further until the second file is gone, which the archive reaches only after the first.
     await new Promise((resolve) => res.once("readable", resolve));
-    await rm(join(dir, "attachments", second.id));
+    await rm(attachmentFile(second.id));
 
     await expect(text(res)).rejects.toThrow();
   });
