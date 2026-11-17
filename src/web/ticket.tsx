@@ -515,12 +515,14 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean }) {
           (refs.length > 0 || (listKind === "blocked_by" && hidden.length > 0)) && (
             <div key={listKind} className="relation-group">
               <h4>{RELATION_NAMES[listKind]}</h4>
-              <TicketRefList
-                name={RELATION_NAMES[listKind]}
-                refs={refs}
-                onRemove={props.readOnly ? undefined : (ref) => void remove.run(listKind, ref.key)}
-                busy={busy}
-              />
+              {refs.length > 0 && (
+                <TicketRefList
+                  name={RELATION_NAMES[listKind]}
+                  refs={refs}
+                  onRemove={props.readOnly ? undefined : (ref) => void remove.run(listKind, ref.key)}
+                  busy={busy}
+                />
+              )}
               {listKind === "blocked_by" && hidden.length > 0 && (
                 <HiddenBlockerList blockers={hidden} onRemove={props.readOnly ? undefined : (b) => void removeHidden.run(b.blockId)} busy={busy} />
               )}
