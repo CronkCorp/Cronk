@@ -243,7 +243,7 @@ export function conversationRoutes(ctx: AppContext) {
                 "accepts for it. Tickets in Projects the caller can't see are left out, as the Reopen leaves them alone.",
               listing("dependents", ref("DependentChoice")),
             ),
-            ...errors(401, 403, 404, 409),
+            ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
