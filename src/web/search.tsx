@@ -7,7 +7,27 @@ import { transcriptAddress } from "./transcripts.js";
 import { Show, useLoad } from "./ui.js";
 import { FilterSelect } from "./work.js";
 
-const KIND_NAMES: Record<SearchKind, string> = { ticket: "Ticket", document: "Document", report: "Report", comment: "Comment", term: "Term", decision: "Decision", transcript: "Transcript" };
+/** Where a Ticket and a Document open. */
+const ticketPath = (r: SearchResult) => `/tickets/${r.ticketKey}`;
+const documentPath = (r: SearchResult) => `/documents/${r.documentId}`;
+
+/** For each kind of result: its name, where it opens, and the key shown beside its title (if it has one). */
+const KINDS: Record<SearchKind, { name: string; path: (r: SearchResult) => string; key: (r: SearchResult) => string | null }> = {
+  ticket: { name: "Ticket", path: ticketPath, key: (r) => r.ticketKey },
+  document: { name: "Document", path: documentPath, key: () => null },
+  // A Report opens as its Document, under its Ticket's key.
+  report: { name: "Report", path: documentPath, key: (r) => r.ticketKey },
+  // A Comment opens what it is on: its Artifact, its Document or its Ticket.
+  comment: {
+    name: "Comment",
+    path: (r) => (r.artifactId ? `/artifacts/${r.artifactId}` : r.documentId ? documentPath(r) : ticketPath(r)),
+    key: (r) => r.ticketKey,
+  },
+  term: { name: "Term", path: (r) => `/terms/${r.termId}`, key: () => null },
+  decision: { name: "Decision", path: (r) => `/decisions/${r.decisionKey}`, key: (r) => r.decisionKey },
+  // A Transcript opens at the turn that matches best.
+  transcript: { name: "Transcript", path: (r) => transcriptAddress(r.transcriptId!, r.turn), key: () => null },
+};
 
 /** What the search page searches for: the query, and optionally one kind and one Project key. */
 export interface SearchFilter {
@@ -58,20 +78,6 @@ export function SearchBox() {
   );
 }
 
-/** Where a search result opens: its Transcript at the turn that matched, its Artifact, its Decision, its Term, its Document or its Ticket. */
-const resultPath = (r: SearchResult) =>
-  r.transcriptId
-    ? transcriptAddress(r.transcriptId, r.turn)
-    : r.artifactId
-      ? `/artifacts/${r.artifactId}`
-    : r.decisionKey
-      ? `/decisions/${r.decisionKey}`
-    : r.termId
-      ? `/terms/${r.termId}`
-      : r.documentId
-        ? `/documents/${r.documentId}`
-        : `/tickets/${r.ticketKey}`;
-
 /** What the search for `filter` found, best match first, with controls to narrow it to a kind and a Project. */
 export function SearchPage(props: { filter: SearchFilter }) {
   const { q, kind, project } = props.filter;
@@ -84,7 +90,7 @@ export function SearchPage(props: { filter: SearchFilter }) {
         <h1>Search results for “{q}”</h1>
       </div>
       <div className="filters" role="group" aria-label="Filters">
-        <FilterSelect name="Kind" value={kind} onChange={set("kind")} options={SEARCH_KINDS.map((k) => [k, KIND_NAMES[k]])} />
+        <FilterSelect name="Kind" value={kind} onChange={set("kind")} options={SEARCH_KINDS.map((k) => [k, KINDS[k].name])} />
         <FilterSelect
           name="Project"
           value={project}
@@ -98,22 +104,26 @@ export function SearchPage(props: { filter: SearchFilter }) {
             <p className="muted">Nothing found.</p>
           ) : (
             <ul className="rows" aria-label="Search results">
-              {found.map((r, i) => (
-                <li key={i} className="row">
-                  <Link to={resultPath(r)} className="row-link search-result">
-                    <div className="search-result-head">
-                      <Chip>{KIND_NAMES[r.kind]}</Chip>
-                      {(r.ticketKey ?? r.decisionKey) && <span className="key">{r.ticketKey ?? r.decisionKey}</span>}
-                      <span className="grow">
-                        {r.kind === "comment" ? `On ${r.title}` : r.title}
-                        {r.protected && <> <ProtectedMark compact /></>}
-                      </span>
-                      <span className="muted">{r.kind === "transcript" ? `Turn ${r.turn}` : (r.projectKey ?? "Workspace")}</span>
-                    </div>
-                    <p className="muted search-excerpt">{r.excerpt}</p>
-                  </Link>
-                </li>
-              ))}
+              {found.map((r, i) => {
+                const { name, path, key } = KINDS[r.kind];
+                const shownKey = key(r);
+                return (
+                  <li key={i} className="row">
+                    <Link to={path(r)} className="row-link search-result">
+                      <div className="search-result-head">
+                        <Chip>{name}</Chip>
+                        {shownKey && <span className="key">{shownKey}</span>}
+                        <span className="grow">
+                          {r.kind === "comment" ? `On ${r.title}` : r.title}
+                          {r.protected && <> <ProtectedMark compact /></>}
+                        </span>
+                        <span className="muted">{r.kind === "transcript" ? `Turn ${r.turn}` : (r.projectKey ?? "Workspace")}</span>
+                      </div>
+                      <p className="muted search-excerpt">{r.excerpt}</p>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )
         }

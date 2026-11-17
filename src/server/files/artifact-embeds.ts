@@ -1,6 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Queryable } from "../db/database.js";
-import { documentReadableSql, type Readable } from "../identity/access.js";
+import { placeReadableSql, type Readable } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { artifactEmbedsIn, type ArtifactAt } from "../../shared/artifact-embeds.js";
 import type { MarkdownNode } from "../../shared/ticket-references.js";
@@ -155,7 +155,7 @@ export async function listEmbeddedIn(db: Queryable, artifactId: string, readable
          LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
      )
      SELECT kind, id, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", version, at
-     FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
+     FROM found f WHERE ${placeReadableSql("f", "$2::uuid[]", "$3::uuid")}
      ORDER BY at DESC, id, version NULLS FIRST LIMIT ${EMBEDDED_IN_LIMIT}`,
     [artifactId, readable.projectIds, readable.workspaceId],
   );

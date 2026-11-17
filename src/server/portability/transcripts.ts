@@ -67,8 +67,8 @@ export async function importTranscripts(ctx: ImportContext): Promise<void> {
     const texts: string[] = [];
     for (let k = 1; ctx.folder.has(`transcripts/${n}.earlier/${k}.md`); k++) texts.push(ctx.text(`transcripts/${n}.earlier/${k}.md`)!);
     texts.push(file.body);
-    // As if each text were uploaded again in turn, onto what this Workspace may already hold of the chat, scrubbed and with
-    // the redactions of both applied, as an export made before scrubbing, or edited by hand, may still hold secrets.
+    // As if each text were uploaded again in turn, onto what this Workspace may already hold of the chat, kept as an upload
+    // keeps it (`textToKeep`) with the redactions of both, as an export made before scrubbing, or edited by hand, may still hold secrets.
     const existing = await findForUpdate(ctx.db, agent.id, chatId);
     const kept = existing ? await redactionsOf(ctx.db, existing.id) : [];
     const added = redactionsIn(file).filter((r) => !kept.some((k) => sameRedaction(k, r)));
