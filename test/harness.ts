@@ -373,10 +373,31 @@ async function pollUntil(done: () => Promise<boolean>, failure: string | (() => 
   }
 }
 
+/** The connections whose queries wait on a lock, in the database named by parameter `$1`. */
+const LOCK_WAITERS = "FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'";
+
 /** How many queries on database `dbName` are waiting on a lock, asked through `client`. */
 async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
-  const { rows } = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'", [dbName]);
+  const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int AS n ${LOCK_WAITERS}`, [dbName]);
   return rows[0]!.n;
+}
+
+/**
+ * Runs `job` with a client connected to `connectionString`, and closes the client however connecting or `job` ends.
+ * Should closing fail after `job` failed, `job`'s error is the one thrown.
+ */
+async function withClient<T>(connectionString: string, job: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString });
+  let result: T;
+  try {
+    await client.connect();
+    result = await job(client);
+  } catch (err) {
+    await client.end().catch(() => {});
+    throw err;
+  }
+  await client.end();
+  return result;
 }
 
 /**
@@ -545,10 +566,16 @@ export async function startCronk(
   };
   /** Takes a lock with `sql` in a transaction it keeps open until released. */
   async function hold(sql: string, params: unknown[]): Promise<HeldLock> {
+    // The holder stays open until released, so it isn't closed by `withClient`; but should taking the lock fail, nothing would release it.
     const holder = new pg.Client({ connectionString: databaseUrl });
-    await holder.connect();
-    await holder.query("BEGIN");
-    await holder.query(sql, params);
+    try {
+      await holder.connect();
+      await holder.query("BEGIN");
+      await holder.query(sql, params);
+    } catch (err) {
+      await holder.end().catch(() => {});
+      throw err;
+    }
     let released = false;
     const release = async () => {
       if (released) return;
