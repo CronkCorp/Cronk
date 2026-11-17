@@ -962,7 +962,7 @@ describe("Upgrading a Transcript stored before scrubbing", () => {
     expect(read.earlier).toEqual([earlier]);
   });
 
-  it("keeps a passage its Owner redacted over a secret redacted in later uploads, so a re-upload continuing the chat replaces its text", async () => {
+  it("keeps a hand redaction made over a raw secret, so a re-upload continuing the chat replaces its text", async () => {
     const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
     const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
     const before = chat("Do it all", sessionId) + `\nMy token ${SECRETS.github} works.\n`;
@@ -971,16 +971,17 @@ describe("Upgrading a Transcript stored before scrubbing", () => {
     await cronk.restart();
 
     const hook = cronk.client(claude.secret);
-    expect((await upload(hook, "chat-1", `${before}\n## Assistant\n\nRotated.\n`)).status).toBe(200);
+    const continued = `${before}\n## Assistant\n\nRotated.\n`;
+    expect((await upload(hook, "chat-1", continued)).status).toBe(200);
     const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
     expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nMy [redacted] works.\n\n## Assistant\n\nRotated.\n");
     expect(read.earlier).toEqual([]);
 
-    expect((await upload(hook, "chat-1", `${before}\n## Assistant\n\nRotated.\n`)).status).toBe(200);
+    expect((await upload(hook, "chat-1", continued)).status).toBe(200);
     expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({ markdown: read.markdown, earlier: [] });
   });
 
-  it("keeps a passage its Owner redacted over a scrub note redacted in later uploads", async () => {
+  it("keeps a hand redaction made over a scrub note in later uploads", async () => {
     const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
     const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
     const before = chat("Do it all", sessionId) + `\nMy token ${SECRETS.github} works.\n`;
