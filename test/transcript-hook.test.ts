@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,40 @@ describe("The reference Claude Code Transcript hook", () => {
     // Foreground (at its result), background (at its completion notification), nested, and an older side chain in the
     // main file; one claimed subagent's file is missing and one file no chat claims.
     expect(await convert(fixture("subagents.jsonl"))).toBe(await readFile(fixture("subagents.md"), "utf8"));
+  });
+
+  it("converts subagents to the same text every run, and a chat or running background subagent that grows to text that continues it", async () => {
+    const whole = await convert(fixture("subagents.jsonl"));
+    expect(await convert(fixture("subagents.jsonl"))).toBe(whole);
+    const main = (await readFile(fixture("subagents.jsonl"), "utf8")).split("\n");
+    const background = (await readFile(fixture("subagents/subagents/agent-abg.jsonl"), "utf8")).split("\n");
+    // Claude Code tells the main chat a background subagent finished only once its chat is written.
+    const finished = main.findIndex((line) => line.includes("<task-notification>"));
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    for (let n = 1; n <= main.length; n++) {
+      for (let m = n > finished ? background.length : 0; m <= background.length; m++) {
+        const chat = join(dir, `${n}-${m}`);
+        await mkdir(join(chat, "subagents"), { recursive: true });
+        await cp(fixture("subagents/subagents"), join(chat, "subagents"), { recursive: true });
+        await writeFile(join(chat, "subagents", "agent-abg.jsonl"), background.slice(0, m).join("\n"));
+        await writeFile(`${chat}.jsonl`, main.slice(0, n).join("\n"));
+        expect(whole.startsWith(await convert(`${chat}.jsonl`)), `first ${n} lines, background subagent's first ${m}`).toBe(true);
+      }
+    }
+  });
+
+  it("converts the main chat when the subagents' folder or a subagent's file is missing, leaving those subagents out", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    await cp(fixture("subagents.jsonl"), join(dir, "no-folder.jsonl"));
+    expect(await convert(join(dir, "no-folder.jsonl"))).toBe(await readFile(fixture("subagents-without-folder.md"), "utf8"));
+
+    await cp(fixture("subagents.jsonl"), join(dir, "no-file.jsonl"));
+    await cp(fixture("subagents"), join(dir, "no-file"), { recursive: true });
+    await rm(join(dir, "no-file", "subagents", "agent-afg.jsonl"));
+    const withoutFile = await convert(join(dir, "no-file.jsonl"));
+    // The nested subagent goes with the subagent that launched it.
+    expect(withoutFile).not.toMatch(/subagent (afg|anested)/);
+    expect(withoutFile).toMatch(/^`{4}subagent abg$/m);
   });
 
   it("says how to use it when asked to print without a chat file", async () => {
