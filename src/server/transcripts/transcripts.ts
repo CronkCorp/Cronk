@@ -5,6 +5,7 @@ import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
 import { scrubSecrets } from "./scrub.js";
+import { firstTurnNaming, turnsOf } from "./turns.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -24,14 +25,17 @@ export interface Transcript {
   earlier: string[];
   /** The Agent Sessions it names, in the order they started. */
   sessions: { id: string }[];
-  /** The Tickets its Sessions changed, Activities and Comments included, that the reader can read. */
-  tickets: { key: string; title: string }[];
+  /**
+   * The Tickets its Sessions changed, Activities and Comments included, that the reader can read. Each item here and below has
+   * the turn of the latest text where its key or id first appears (see turns.ts), or null when none names it.
+   */
+  tickets: { key: string; title: string; turn: number | null }[];
   /** The Documents and Reports its Sessions saved or commented on, that the reader can read. */
-  documents: { id: string; title: string }[];
+  documents: { id: string; title: string; turn: number | null }[];
   /** The Terms its Sessions saved, that the reader can read. */
-  terms: { id: string; name: string }[];
+  terms: { id: string; name: string; turn: number | null }[];
   /** The Decisions its Sessions proposed or refined, that the reader can read. */
-  decisions: { key: string; title: string }[];
+  decisions: { key: string; title: string; turn: number | null }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -332,6 +336,8 @@ export async function readTranscript(
     "SELECT a.name AS agent_name, u.name AS owner_name FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1",
     [stored.agentId],
   );
+  const turns = turnsOf(stored.markdown);
+  const turn = (...keyOrId: string[]) => firstTurnNaming(turns, keyOrId);
   return {
     id: stored.id,
     chatId: stored.chatId,
@@ -339,10 +345,10 @@ export async function readTranscript(
     markdown: stored.markdown,
     earlier: stored.earlier,
     sessions: stored.sessionIds.map((id) => ({ id })),
-    tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title })),
-    documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title })),
-    terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name })),
-    decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title })),
+    tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title, turn: turn(t.key, t.id) })),
+    documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title, turn: turn(d.id) })),
+    terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name, turn: turn(t.id) })),
+    decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title, turn: turn(d.key, d.id) })),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };

@@ -100,6 +100,13 @@ const object = (properties: Record<string, object>, optional: string[] = []) => 
 const named = object({ id, name: { type: "string" } });
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
 
+/** The turn of a Transcript where an item first appears. */
+const firstTurn = {
+  ...nullable({ type: "integer", minimum: 1 }),
+  description:
+    "The turn of the latest text where the item's key or id first appears: each `## User` or `## Assistant` heading outside a fenced block " +
+    "starts one, numbered from 1. Null when no turn names it, so a link points at the top.",
+};
 /** What a Transcript and its summary share. */
 const transcriptFields = {
   id,
@@ -111,22 +118,22 @@ const transcriptFields = {
   sessions: { type: "array", items: object({ id }), description: "The uploading Agent's Agent Sessions it names, in the order they started." },
   tickets: {
     type: "array",
-    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    items: object({ key: { type: "string" }, title: { type: "string" }, turn: firstTurn }),
     description: "The Tickets its Sessions changed, wrote Activities or Comments on, or attached files to, that the caller can read.",
   },
   documents: {
     type: "array",
-    items: object({ id, title: { type: "string" } }),
+    items: object({ id, title: { type: "string" }, turn: firstTurn }),
     description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
   },
   terms: {
     type: "array",
-    items: object({ id, name: { type: "string" } }),
+    items: object({ id, name: { type: "string" }, turn: firstTurn }),
     description: "The Terms its Sessions saved, that the caller can read.",
   },
   decisions: {
     type: "array",
-    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    items: object({ key: { type: "string" }, title: { type: "string" }, turn: firstTurn }),
     description: "The Decisions its Sessions proposed or refined, that the caller can read.",
   },
   createdAt: timestamp,

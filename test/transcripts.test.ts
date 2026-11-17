@@ -62,7 +62,7 @@ describe("Uploading a Transcript", () => {
     expect(read).toMatchObject({ tickets: [], documents: [], terms: [], decisions: [{ key: "D1", title: "Compose for installs" }, { key: "CRONK-D1", title: "Markdown for Decisions" }] });
     const refined = await upload(cronk.client(claude.secret), "chat-2", chat("Refine it", refiner.sessionId));
     expect(refined.status, JSON.stringify(refined.body)).toBe(200);
-    expect((await admin.get(`/api/transcripts/${refined.body.transcript.id}`)).body.transcript.decisions).toEqual([{ key: "CRONK-D1", title: "Markdown for Decisions" }]);
+    expect((await admin.get(`/api/transcripts/${refined.body.transcript.id}`)).body.transcript.decisions).toEqual([{ key: "CRONK-D1", title: "Markdown for Decisions", turn: null }]);
   });
 
   it("links the Ticket its Sessions attached a file to, which alone is enough to keep it", async () => {
@@ -74,7 +74,7 @@ describe("Uploading a Transcript", () => {
 
     const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Attach the log", agent.sessionId));
     expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
-    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1" }]);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
@@ -345,7 +345,7 @@ describe("Who may read a Transcript", () => {
     await admin.delete(`/api/projects/SECRET/members/${bobId}`);
     const read = await bob.get(`/api/transcripts/${id}`);
     expect(read.status).toBe(200);
-    expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1" }]);
+    expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
   it("outlives its Agent's removal", async () => {
@@ -518,7 +518,7 @@ describe("Exporting and importing Transcripts", () => {
       id: listed[0].id,
       // The import keeps the Agent's and its Session's ids; only the Owner, a User, is new here.
       agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
-      documents: [{ id: handbook.id, title: "Handbook" }],
+      documents: [{ id: handbook.id, title: "Handbook", turn: null }],
     });
   });
 
@@ -614,5 +614,40 @@ describe("Linking a chat written before an import", () => {
     expect(byHand.status, JSON.stringify(byHand.body)).toBe(200);
     expect(byHand.body.transcript.tickets.map((t: { key: string }) => t.key)).toEqual(["HAND-1"]);
     expect((await upload(hook, "chat-3", "## Assistant\n\nnot-my-session-at-all\n")).status).toBe(422);
+  });
+});
+
+describe("Where a Transcript's items first appear", () => {
+  it("gives each item the turn where its key or id first appears, and none when no turn names it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    for (const key of ["CRONK-1", "CRONK-2"]) {
+      await agent.post(`/api/tickets/${key}/claim`);
+      await agent.post(`/api/tickets/${key}/activities`, { kind: "plan", body: "Go" });
+    }
+    const doc = (await agent.post("/api/projects/CRONK/documents", { title: "Notes", body: "Kept." })).body.document.id;
+    const term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
+    const decided = await agent.post("/api/projects/CRONK/decisions", { title: "Retry migrations", ticket: "CRONK-1" });
+    expect(decided.status, JSON.stringify(decided.body)).toBe(201);
+    const markdown = [
+      "## User\n\nThe migration test is flaky.\n",
+      "## Assistant\n\n```tool-result\nAgent Session " + agent.sessionId + "\n```\n",
+      // A heading inside a fenced block isn't a turn.
+      "## User\n\nLook at cronk-1, and this:\n\n````\n## Assistant\n\nCRONK-D1\n````\n",
+      "## Assistant\n\nSaved " + doc.toUpperCase() + " and recorded CRONK-D1; CRONK-12 is another Ticket.\n",
+    ].join("\n");
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", markdown);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({
+      tickets: [
+        { key: "CRONK-1", turn: 3 },
+        { key: "CRONK-2", turn: null },
+      ],
+      documents: [{ id: doc, turn: 4 }],
+      terms: [{ id: term, turn: null }],
+      decisions: [{ key: "CRONK-D1", turn: 3 }],
+    });
   });
 });
