@@ -177,8 +177,12 @@ export class Client {
       request.once("error", reject);
     });
     if (init.body) {
-      // A server answering before it has read the whole body, as it does refusing one, stops the upload; the answer still counts.
-      await pipeline(init.body, request).catch(() => {});
+      // A server answering before it has read the whole body, as it does refusing one, stops the upload; the answer still counts,
+      // so the request is left to the answer rather than torn down with it. A body that fails ends the request.
+      const body = init.body;
+      request.once("response", () => body.unpipe(request));
+      body.once("error", (err) => request.destroy(err));
+      body.pipe(request);
     } else {
       request.end();
     }
@@ -348,9 +352,9 @@ async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
 /**
  * Starts Cronk in-process on a fresh, empty database and stops it when the test ends.
  * `publicUrl` is the address Cronk is configured to be reached at, if any. `storage` is where it keeps files:
- * by default a directory of the test's own on local disk.
+ * by default a directory of the test's own on local disk. `importMaxBytes` is the most one import may write, 50 GiB by default.
  */
-export async function startCronk(opts: { publicUrl?: string; storage?: StorageConfig } = {}): Promise<Cronk> {
+export async function startCronk(opts: { publicUrl?: string; storage?: StorageConfig; importMaxBytes?: number } = {}): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
   const dbName = `cronk_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -367,7 +371,7 @@ export async function startCronk(opts: { publicUrl?: string; storage?: StorageCo
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
   const start = () =>
-    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),

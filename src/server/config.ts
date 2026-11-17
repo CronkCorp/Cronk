@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type { AppConfig } from "./app.js";
 import type { StorageConfig } from "./files/storage.js";
+import { DEFAULT_IMPORT_MAX_BYTES } from "./portability/archive.js";
 
 export interface ServerConfig extends AppConfig {
   host: string;
@@ -23,6 +24,8 @@ export interface ServerConfig extends AppConfig {
  * - With `s3`: `S3_BUCKET` (required), `S3_ENDPOINT` (default: AWS S3 itself), `S3_REGION` (default `us-east-1`),
  *   `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` (default: the AWS SDK's usual sources), and `S3_FORCE_PATH_STYLE`
  *   (default `true` with an `S3_ENDPOINT`, else `false`).
+ * - `IMPORT_MAX_BYTES` (default 53687091200, 50 GiB): the most bytes one import of an export may write, to local disk
+ *   while unpacking a zip archive and into the file store, before it is refused.
  * - `ARTIFACTS_URL` (optional, recommended): the address of the hostname Artifacts are served from, such as
  *   `https://artifacts.cronk.example`, pointed at this same server; it needs `PUBLIC_URL` too. Without it, Artifacts are
  *   served from Cronk's own hostname in a stricter sandbox (ADR 0007).
@@ -58,8 +61,19 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): Ser
     publicUrl,
     webRoot: env.WEB_ROOT ? resolve(env.WEB_ROOT) : defaultWebRoot,
     storage: loadStorage(env),
+    importMaxBytes: loadImportMaxBytes(env),
     artifactsUrl,
   };
+}
+
+function loadImportMaxBytes(env: NodeJS.ProcessEnv): number {
+  const value = env.IMPORT_MAX_BYTES || undefined;
+  if (value === undefined) return DEFAULT_IMPORT_MAX_BYTES;
+  const bytes = /^[0-9]+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+    throw new Error(`IMPORT_MAX_BYTES must be a positive whole number of bytes, such as ${DEFAULT_IMPORT_MAX_BYTES} for 50 GiB, got "${value}"`);
+  }
+  return bytes;
 }
 
 function loadStorage(env: NodeJS.ProcessEnv): StorageConfig {

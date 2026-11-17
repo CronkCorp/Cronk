@@ -50,3 +50,15 @@ describe("Configuring where files are stored", () => {
     expect(() => loadConfig({ DATABASE_URL, FILES_STORAGE: "s3", S3_BUCKET: "b", S3_FORCE_PATH_STYLE: "yes" })).toThrow(/S3_FORCE_PATH_STYLE must be "true" or "false"/);
   });
 });
+
+describe("Configuring the most an import may take", () => {
+  it("lets an import write 50 GiB by default, or the bytes IMPORT_MAX_BYTES gives", () => {
+    expect(loadConfig({ DATABASE_URL }).importMaxBytes).toBe(50 * 1024 ** 3);
+    expect(loadConfig({ DATABASE_URL, IMPORT_MAX_BYTES: "" }).importMaxBytes).toBe(50 * 1024 ** 3);
+    expect(loadConfig({ DATABASE_URL, IMPORT_MAX_BYTES: "1048576" }).importMaxBytes).toBe(1048576);
+  });
+
+  it.each(["lots", "0", "-5", "1.5", "1e9"])("refuses IMPORT_MAX_BYTES=%j, which is no positive whole number of bytes", (value) => {
+    expect(() => loadConfig({ DATABASE_URL, IMPORT_MAX_BYTES: value })).toThrow(`IMPORT_MAX_BYTES must be a positive whole number of bytes, such as 53687091200 for 50 GiB, got "${value}"`);
+  });
+});
