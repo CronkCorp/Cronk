@@ -45,7 +45,6 @@ import {
   type Visibility,
 } from "./projects.js";
 import {
-  findTicketById,
   findTicketByKey,
   findTicketsByIds,
   insertTicket,
@@ -796,12 +795,12 @@ export function workRoutes(ctx: AppContext) {
         requireUserActor(actor, "remove a block by its id");
         const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
           const ticket = await ticketFor(tx, actor, request.params.key, "write");
-          const blockerId = await findDiscoveredBlocker(tx, request.params.blockId, ticket.id);
-          if (!blockerId) throw new HttpError(404, "No such block");
-          const other = (await findTicketById(tx, blockerId))!;
+          const other = await findDiscoveredBlocker(tx, request.params.blockId, ticket.id);
+          if (!other) throw new HttpError(404, "No such block");
           // Removing the block may make the blocked Ticket Ready; the blocker's Readiness doesn't change.
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
-          await removeRelation(tx, { ticket, kind: "blocked_by", other, actor, now: ctx.clock.now() });
+          // Removed by another request since it was found: answered as any id that isn't a block on this Ticket.
+          if (!(await removeRelation(tx, { ticket, kind: "blocked_by", other, actor, now: ctx.clock.now() }))) throw new HttpError(404, "No such block");
           return { ends: [ticket, other], readyBefore, relations: await shownRelations(tx, actor, ticket.id) };
         });
         ticketsChanged(ctx.live, ends);

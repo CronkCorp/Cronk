@@ -1,7 +1,7 @@
 import type { Actor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "../../shared/values.js";
-import { listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
+import { findTicketById, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
 
 
 const inverse: Record<RelationKind, RelationKind> = { blocks: "blocked_by", blocked_by: "blocks", relates_to: "relates_to" };
@@ -134,12 +134,12 @@ export async function isDiscoveredBlock(db: Queryable, blocker: string, blocked:
 }
 
 /** The Ticket blocking `blockedId` by the block from a Discovered Ticket with this id, if there is one. */
-export async function findDiscoveredBlocker(db: Queryable, blockId: string, blockedId: string): Promise<string | undefined> {
+export async function findDiscoveredBlocker(db: Queryable, blockId: string, blockedId: string): Promise<Ticket | undefined> {
   const { rows } = await db.query<{ id: string }>(
     "SELECT from_ticket_id AS id FROM ticket_relations WHERE id = $1 AND kind = 'blocks' AND to_ticket_id = $2 AND added_by_agent_id IS NOT NULL",
     [blockId, blockedId],
   );
-  return rows[0]?.id;
+  return rows[0] && findTicketById(db, rows[0].id);
 }
 
 /** Removes a relation, recording it in both Tickets' history. Returns false if there was no such relation. Run inside a transaction. */

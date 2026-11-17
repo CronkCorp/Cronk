@@ -15,7 +15,7 @@ import type { publicInvitation } from "./identity/invitations.js";
 import type { Guidance as StoredGuidance, GuidanceVersion as StoredGuidanceVersion } from "./knowledge/guidance.js";
 import type { publicUser } from "./identity/users.js";
 import type { Project as StoredProject } from "./work/projects.js";
-import type { ShownRelations as StoredRelations } from "./work/relations.js";
+import type { ShownRelations } from "./work/relations.js";
 import type { DependentChoice as StoredDependentChoice } from "./work/reopen.js";
 import type {
   RecordedActor,
@@ -119,7 +119,8 @@ export type Project = Serialized<StoredProject> & {
 };
 
 export type Ticket = Serialized<StoredTicket>;
-export type Relations = Serialized<StoredRelations>;
+/** A Ticket's relations as the caller is shown them, hidden Discovered blockers as placeholders. */
+export type Relations = Serialized<ShownRelations>;
 /** A Ticket a Reopen would reach, with the choices it takes (GET /api/tickets/:key/reopen). */
 export type DependentChoice = Serialized<StoredDependentChoice>;
 /** Another Ticket at the other end of a block, with who added it from a Discovered Ticket and why. */
