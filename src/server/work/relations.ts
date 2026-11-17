@@ -90,6 +90,9 @@ async function wouldCycle(db: Queryable, blocker: string, blocked: string): Prom
   return rows.length > 0;
 }
 
+/** Whether a Relation of this kind is a block, one way or the other. */
+export const isBlocking = (kind: RelationKind): boolean => kind !== "relates_to";
+
 /**
  * Takes the Workspace's blocking lock until the transaction commits: one blocking change per Workspace at a time, so two
  * added at once can't close a cycle between them. A transaction adding a block takes it before locking any Ticket, since
