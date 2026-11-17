@@ -38,7 +38,7 @@ export interface Transcript {
   terms: { id: string; name: string; turn: number | null }[];
   /** The Decisions its Sessions proposed or refined, that the reader can read. */
   decisions: { key: string; title: string; turn: number | null }[];
-  /** The Artifacts its Sessions published a Version of or commented on, that the reader can read. */
+  /** The Artifacts its Sessions published a Version of, commented on or attached files to Comments on, that the reader can read. */
   artifacts: { id: string; title: string; turn: number | null }[];
   createdAt: Date;
   updatedAt: Date;

@@ -136,7 +136,7 @@ const transcriptFields = {
   artifacts: {
     type: "array",
     items: object({ id, title: { type: "string" }, turn: firstTurn }),
-    description: "The Artifacts its Sessions published a Version of or commented on, that the caller can read, in the order they were created.",
+    description: "The Artifacts its Sessions published a Version of, commented on or attached files to Comments on, that the caller can read.",
   },
   terms: {
     type: "array",
