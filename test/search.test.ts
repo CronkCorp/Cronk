@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, type Client } from "./harness.js";
 
 describe("Searching", () => {
   it("finds a Ticket by a word in its description, with an excerpt around the match", async () => {
@@ -56,9 +56,27 @@ describe("Searching", () => {
     expect(found).toHaveLength(3);
     expect(found).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "report", title: "Findings", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: report }),
-        expect.objectContaining({ kind: "comment", title: "Ticket 1", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: null, excerpt: "Could the scheduler drop jobs too?" }),
-        expect.objectContaining({ kind: "comment", title: "Plan", projectKey: "CRONK", ticketKey: null, documentId: plan }),
+        expect.objectContaining({ kind: "report", title: "Findings", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: report, artifactId: null }),
+        expect.objectContaining({ kind: "comment", title: "Ticket 1", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: null, artifactId: null, excerpt: "Could the scheduler drop jobs too?" }),
+        expect.objectContaining({ kind: "comment", title: "Plan", projectKey: "CRONK", ticketKey: null, documentId: plan, artifactId: null }),
+      ]),
+    );
+  });
+
+  it("finds Comments on Artifacts of a Project and of the Workspace, naming the Artifact they are on", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
+    const usage = (await admin.upload("/api/workspace/artifacts?title=Usage", await tarGz({ "index.html": "<h1>Usage</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${limits}/comments`, { body: "Can the bars show the threshold as a line?" });
+    await admin.post(`/api/artifacts/${usage}/comments`, { body: "Mark the threshold here too." });
+
+    const found = (await admin.get("/api/search?q=threshold&kind=comment")).body.results;
+    expect(found).toHaveLength(2);
+    expect(found).toEqual(
+      expect.arrayContaining([
+        { kind: "comment", title: "Limits", excerpt: "Can the bars show the threshold as a line?", projectKey: "CRONK", ticketKey: null, documentId: null, termId: null, decisionKey: null, artifactId: limits, transcriptId: null, turn: null, protected: null },
+        { kind: "comment", title: "Usage", excerpt: "Mark the threshold here too.", projectKey: null, ticketKey: null, documentId: null, termId: null, decisionKey: null, artifactId: usage, transcriptId: null, turn: null, protected: null },
       ]),
     );
   });
@@ -73,8 +91,8 @@ describe("Searching", () => {
     expect(found).toHaveLength(2);
     expect(found).toEqual(
       expect.arrayContaining([
-        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null, transcriptId: null, turn: null, protected: false },
-        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null, transcriptId: null, turn: null, protected: false },
+        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null, artifactId: null, transcriptId: null, turn: null, protected: false },
+        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null, artifactId: null, transcriptId: null, turn: null, protected: false },
       ]),
     );
   });
@@ -83,7 +101,7 @@ describe("Searching", () => {
     const { admin } = await startInstalledCronk();
     const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work tracked within a Project.", avoid: ["Issue", "chore"] })).body
       .term.id;
-    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null, transcriptId: null, turn: null, protected: false };
+    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null, artifactId: null, transcriptId: null, turn: null, protected: false };
 
     expect((await admin.get("/api/search?q=tracking")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=issues")).body.results).toEqual([asResult]);
@@ -107,6 +125,7 @@ describe("Searching", () => {
       documentId: null,
       termId: null,
       decisionKey,
+      artifactId: null,
       transcriptId: null,
       turn: null,
       protected: false,

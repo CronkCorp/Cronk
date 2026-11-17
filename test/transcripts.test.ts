@@ -733,7 +733,7 @@ describe("Searching Transcripts", () => {
     const [, hit] = found.body.results;
     expect(hit).toMatchObject({ kind: "transcript", title: "The deploy failed.", projectKey: null, transcriptId: id, turn: 3, protected: null });
     expect(hit.excerpt).toMatch(/^Rollback the rollback/);
-    expect(found.body.results[0]).toMatchObject({ transcriptId: null, turn: null });
+    expect(found.body.results[0]).toMatchObject({ transcriptId: null, turn: null, artifactId: null });
 
     expect((await admin.get("/api/search?q=rollback&kind=transcript")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["transcript"]);
     expect((await admin.get("/api/search?q=rollback&kind=document")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["document"]);

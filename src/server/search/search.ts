@@ -16,7 +16,7 @@ import { searchTranscripts } from "../transcripts/search.js";
 /** One thing a search found, with an excerpt of its text around the match. */
 export interface SearchResult {
   kind: SearchKind;
-  /** The Ticket's, Document's, Decision's or Transcript's title, or the Term's name. */
+  /** The Ticket's, Document's, Artifact's, Decision's or Transcript's title, or the Term's name; for a Comment, of what it is on. */
   title: string;
   /** The text around the match, as written (Markdown), from the body (or the title when the body is empty). */
   excerpt: string;
@@ -27,6 +27,8 @@ export interface SearchResult {
   termId: string | null;
   /** The Decision, by its key: `CRONK-D7`, or `D7` in the Workspace. */
   decisionKey: string | null;
+  /** A Comment's Artifact; null for every other kind. */
+  artifactId: string | null;
   transcriptId: string | null;
   /** The Transcript's turn that matches best (see shared/transcript-turns.ts); null for every other kind. */
   turn: number | null;
@@ -62,6 +64,8 @@ const columns = (c: {
   documentId: string;
   termId: string;
   decisionKey: string;
+  /** SQL for a Comment's Artifact; NULL for everything else. */
+  artifactId?: string;
   /** SQL for whether it is Protected; NULL for kinds that can't be. */
   protected: string;
   excerptOf: [string, string];
@@ -71,7 +75,8 @@ const columns = (c: {
   boost?: string;
 }) =>
   `SELECT '${c.kind}' AS kind, ${c.title} AS title, ${c.projectKey} AS "projectKey", ${c.ticketKey}::text AS "ticketKey",
-     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${c.decisionKey}::text AS "decisionKey", ${c.protected}::boolean AS protected,
+     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${c.decisionKey}::text AS "decisionKey",
+     ${c.artifactId ?? "NULL"}::uuid AS "artifactId", ${c.protected}::boolean AS protected,
      ${excerpt(...c.excerptOf)} AS excerpt,
      ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
 
@@ -122,6 +127,13 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
       WHERE ${documentReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
+    // Artifacts are placed like Documents: in a Project, or in the Workspace outside any.
+    kind: "comment",
+    sql: `${columns({ kind: "comment", title: "a.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: "NULL", artifactId: "a.id", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+      FROM q, comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id
+      WHERE ${documentReadableSql("a", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+  },
+  {
     kind: "term",
     sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", decisionKey: "NULL", protected: "tm.protected", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
       FROM q, terms tm LEFT JOIN projects p ON p.id = tm.project_id
@@ -159,8 +171,8 @@ export async function search(
        LIMIT $4`,
       [input.query, places.projectIds, places.workspaceId, input.limit],
     );
-    for (const { kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, protected: isProtected } of rows) {
-      results.push({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, transcriptId: null, turn: null, protected: isProtected });
+    for (const { kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, artifactId, protected: isProtected } of rows) {
+      results.push({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, artifactId, transcriptId: null, turn: null, protected: isProtected });
     }
   }
   // Transcripts are a separate kind, ranked below everything else: they fill what the limit leaves.
@@ -176,6 +188,7 @@ export async function search(
         documentId: null,
         termId: null,
         decisionKey: null,
+        artifactId: null,
         transcriptId: hit.transcriptId,
         turn: hit.turn,
         protected: null,
