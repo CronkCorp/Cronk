@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, tarGz, type Client } from "./harness.js";
+
+/** A small site to publish as an Artifact. */
+const site = (take: number) => tarGz({ "index.html": `<h1>Sign-in limits, take ${take}</h1>` });
 
 describe("What an Agent did", () => {
   it("lists its changes, Activities, Comments and saved Versions across Tickets and Documents, newest first", async () => {
@@ -28,6 +31,35 @@ describe("What an Agent did", () => {
       { kind: "change", at: "2026-01-01T09:00:03.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, change: { change: "status", to: { id: started.id } } },
       { kind: "comment", at: "2026-01-01T09:00:02.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, comment: { body: "Picking this up" } },
       { kind: "activity", at: "2026-01-01T09:00:01.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, activity: { kind: "plan", body: "Read the code", blocking: false } },
+    ]);
+  });
+});
+
+describe("What an Agent did on Artifacts", () => {
+  it("lists the Versions it published among its other entries, newest first, and not those published by a User or another Agent", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const codex = await startSession(cronk, (await registerAgent(admin, "codex")).secret);
+    await agent.post("/api/tickets/CRONK-1/claim");
+    cronk.clock.advance(1000);
+    const { artifact } = (await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await site(1))).body;
+    cronk.clock.advance(1000);
+    await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await site(2));
+    cronk.clock.advance(1000);
+    await codex.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=2`, await site(3));
+    cronk.clock.advance(1000);
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body: "Published the limits" });
+    cronk.clock.advance(1000);
+    await agent.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=3`, await site(4));
+
+    const res = await admin.get(`/api/agents/${claude.agentId}/record`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const inSession = { id: agent.sessionId };
+    const nowhere = { ticket: null, document: null, change: null, activity: null, comment: null, version: null };
+    expect(res.body.record).toEqual([
+      { kind: "artifact_version", at: "2026-01-01T09:00:05.000Z", session: inSession, projectKey: "CRONK", ...nowhere, artifact: { id: artifact.id, title: "Limits", version: 4 } },
+      expect.objectContaining({ kind: "activity", at: "2026-01-01T09:00:04.000Z", artifact: null }),
+      { kind: "artifact_version", at: "2026-01-01T09:00:01.000Z", session: inSession, projectKey: "CRONK", ...nowhere, artifact: { id: artifact.id, title: "Limits", version: 1 } },
     ]);
   });
 });

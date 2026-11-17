@@ -941,16 +941,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   AgentRecordEntry: {
-    description: "One entry in an Agent Record: one thing the Agent did. `kind` says which; the field named after it holds what, and the other three are null.",
+    description:
+      "One entry in an Agent Record: one thing the Agent did. `kind` says which; the field named after it holds what, and the others are null. " +
+      "An `artifact_version` entry, a published Artifact Version, holds it in `artifact`.",
     ...object({
-      kind: { type: "string", enum: ["change", "activity", "comment", "version"], description: "A Change to a Ticket, an Activity, a Comment or a saved Version." },
+      kind: {
+        type: "string",
+        enum: ["change", "activity", "comment", "version", "artifact_version"],
+        description: "A Change to a Ticket, an Activity, a Comment, a saved Version of a Document, or a published Version of an Artifact.",
+      },
       at: timestamp,
       session: { ...nullable(object({ id })), description: "The Agent Session it was done in; null for an imported entry that names none." },
-      projectKey: { ...nullable({ type: "string" }), description: "Null for a Document in the Workspace outside any Project." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Document or Artifact in the Workspace outside any Project." },
       ticket: { ...nullable(ticketName), description: "The Ticket it was on: a Change's, Activity's or Comment's, or a Report's." },
       document: {
         ...nullable(object({ id, title: { type: "string" } })),
         description: "The Document or Report it was on, for a Comment or a saved Version.",
+      },
+      artifact: {
+        ...nullable(object({ id, title: { type: "string", description: "The Artifact's current title." }, version: { type: "integer" } })),
+        description: "The Artifact it was on, at a Version: the Version it published, or the Version a Comment is on.",
       },
       change: { ...nullable(ref("RecordedChange")), description: "A Change it made to the Ticket." },
       activity: {
