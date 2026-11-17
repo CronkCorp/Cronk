@@ -108,7 +108,8 @@ export async function buildApp(opts: {
   const lapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
   opts.onLapseWatch?.(lapses.lookNow);
   app.addHook("onClose", async () => {
-    lapses.stop();
+    // A look still running would otherwise query the pool after it has ended.
+    await lapses.stop();
     await Promise.all([db.end(), ctx.files.close()]);
   });
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
