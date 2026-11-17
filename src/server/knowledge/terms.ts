@@ -199,7 +199,7 @@ export async function listApplicableTerms(db: Queryable, place: TermPlace & { pr
 export async function answeredTerms(db: Queryable, workspaceId: string, terms: StoredTerm[], readable: Readable): Promise<Term[]> {
   if (terms.length === 0) return [];
   const ids = terms.map((t) => t.id);
-  const suggestions = await openSuggestionCounts(db, ids);
+  const suggestions = await countOpenSuggestions(db, ids);
   const mentions = await countTermMentions(db, ids, readable);
   return (await withOverrides(db, workspaceId, terms, readable)).map((term) => ({
     ...term,
@@ -209,7 +209,7 @@ export async function answeredTerms(db: Queryable, workspaceId: string, terms: S
 }
 
 /** How many open Suggestions each of these Terms has, by id; Terms without any are left out. */
-async function openSuggestionCounts(db: Queryable, termIds: string[]): Promise<Map<string, number>> {
+async function countOpenSuggestions(db: Queryable, termIds: string[]): Promise<Map<string, number>> {
   const { rows } = await db.query<{ term_id: string; n: number }>(
     "SELECT term_id, count(*)::int AS n FROM suggestions WHERE term_id = ANY($1::uuid[]) AND state = 'open' GROUP BY term_id",
     [termIds],
