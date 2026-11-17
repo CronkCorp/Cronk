@@ -794,10 +794,11 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
     server,
     ctx,
     "search",
-    "Full-text search across the Tickets, Documents, Reports, Comments, Terms and Decisions you may read, best match first, each result " +
-      "with an excerpt around the match; a Term is found by its name, definition or words to avoid, a Decision of any status by its title " +
-      "or body, and a Ticket or Decision key such as CRONK-12 or CRONK-D3 puts that one first. Get a result with the tickets or documents " +
-      "tool by its ticketKey or documentId, a Term with the terms tool by its termId, or a Decision with the decisions tool by its decisionKey. " +
+    "Full-text search across the Tickets, Documents, Reports, Comments (on Tickets, Documents and Artifacts), Terms and Decisions you may read, " +
+      "best match first, each result with an excerpt around the match; a Term is found by its name, definition or words to avoid, a Decision of " +
+      "any status by its title or body, and a Ticket or Decision key such as CRONK-12 or CRONK-D3 puts that one first. Get a result with the " +
+      "tickets or documents tool by its ticketKey or documentId, a Comment's Artifact with the artifacts tool by its artifactId, a Term with " +
+      "the terms tool by its termId, or a Decision with the decisions tool by its decisionKey. " +
       "Transcripts (the chats that led Agents to change things) are found too, after everything else, each by its transcriptId with the turn that matches.",
     inputSchema,
     (api, { query: q, kind, project, limit }) =>
