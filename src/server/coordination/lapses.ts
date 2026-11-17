@@ -3,7 +3,7 @@ import { findLapsedClaims, listLiveClaims } from "./claims.js";
 import { claimsEnded } from "./ready.js";
 import { lookAtLiveAgentSessions, ownersWithChangedSessions, type SessionLook } from "./agent-sessions.js";
 import { agentsTopic } from "../live/topics.js";
-import { transaction } from "../db/database.js";
+import { snapshot } from "../db/database.js";
 
 /**
  * Watches what changes by time alone, as Agent Sessions fall silent. Claims lapse by time alone, when their Agent Session stays silent too long (or the Workspace
@@ -22,14 +22,11 @@ export function watchSilence(ctx: AppContext, intervalMs: number): { stop: () =>
     const now = ctx.clock.now();
     // One snapshot for the whole look: a silence threshold lowered between finding lapsed Claims and listing live ones
     // would otherwise leave a Claim neither lapsed this time nor live for the next look to find lapsed.
-    const { lapsed, live, sessions } = await transaction(ctx.db, async (tx) => {
-      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
-      return {
-        lapsed: await findLapsedClaims(tx, last.live, last.at, now),
-        live: await listLiveClaims(tx, now),
-        sessions: await lookAtLiveAgentSessions(tx, now),
-      };
-    });
+    const { lapsed, live, sessions } = await snapshot(ctx.db, async (tx) => ({
+      lapsed: await findLapsedClaims(tx, last.live, last.at, now),
+      live: await listLiveClaims(tx, now),
+      sessions: await lookAtLiveAgentSessions(tx, now),
+    }));
     if (lapsed.length > 0) await claimsEnded(ctx, lapsed);
     for (const owner of ownersWithChangedSessions(last.sessions, sessions)) ctx.live.publish(agentsTopic(owner), { event: "changed", data: {} });
     last = { at: now, live, sessions };

@@ -99,6 +99,17 @@ export async function transaction<T>(on: Database | LiveDatabase, fn: (tx: Publi
   return result;
 }
 
+/**
+ * Runs `fn` in a read-only, repeatable-read transaction, so everything it reads is one snapshot of the database:
+ * rows that change while it runs read as they were at its first read.
+ */
+export function snapshot<T>(db: Database, fn: (tx: Transaction) => Promise<T>): Promise<T> {
+  return transaction(db, async (tx) => {
+    await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    return fn(tx);
+  });
+}
+
 /** Takes a lock named `name` until the transaction ends, so work under the same name runs one at a time. */
 export async function lockUntilCommit(tx: Queryable, name: string): Promise<void> {
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [name]);
