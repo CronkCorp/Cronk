@@ -1576,7 +1576,7 @@ test("comment on an Artifact's Version from the drawer beside it, and see a repl
   // A search finds the Comment, and its result opens the Artifact.
   await page.getByRole("searchbox", { name: "Search" }).fill("limit line");
   await page.getByRole("searchbox", { name: "Search" }).press("Enter");
-  await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /On Limits/ }).first().click();
+  await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /On Limits/ }).click();
   await expect(page).toHaveURL(`/artifacts/${artifact.id}`);
 });
 

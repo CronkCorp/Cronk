@@ -168,16 +168,21 @@ describe("Searching", () => {
     await admin.post("/api/projects/OPS/terms", { name: "Backup", definition: "A copy kept elsewhere." });
     await admin.post("/api/workspace/terms", { name: "Restore", definition: "Bringing a backup back." });
     await admin.post("/api/projects/OPS/decisions", { title: "Nightly backups" });
+    for (const place of ["projects/OPS", "workspace"]) {
+      const artifact = (await admin.upload(`/api/${place}/artifacts?title=Disk usage`, await tarGz({ "index.html": "<h1>Disks</h1>" }))).body.artifact.id;
+      await admin.post(`/api/artifacts/${artifact}/comments`, { body: "Show the backup volume too." });
+    }
     const found = async (filters: string) =>
       ((await admin.get(`/api/search?q=backup${filters}`)).body.results as { kind: string; projectKey: string | null }[])
         .map((r) => `${r.kind} ${r.projectKey}`)
         .sort();
 
-    expect(await found("&kind=ticket&kind=comment")).toEqual(["comment CRONK", "comment OPS", "ticket CRONK", "ticket OPS"]);
-    expect(await found("&project=ops")).toEqual(["comment OPS", "decision OPS", "document OPS", "term OPS", "ticket OPS"]);
+    expect(await found("&kind=ticket&kind=comment")).toEqual(["comment CRONK", "comment OPS", "comment OPS", "comment null", "ticket CRONK", "ticket OPS"]);
+    expect(await found("&project=ops")).toEqual(["comment OPS", "comment OPS", "decision OPS", "document OPS", "term OPS", "ticket OPS"]);
     expect(await found("&kind=term")).toEqual(["term OPS", "term null"]);
     expect(await found("&kind=decision")).toEqual(["decision OPS"]);
     expect(await found("&project=OPS&kind=document")).toEqual(["document OPS"]);
+    expect(await found("&project=OPS&kind=comment")).toEqual(["comment OPS", "comment OPS"]);
     expect(await found("&kind=ticket")).toEqual(["ticket CRONK", "ticket OPS"]);
     expect(await found("&kind=document")).toEqual(["document CRONK", "document OPS", "document null"]);
 
