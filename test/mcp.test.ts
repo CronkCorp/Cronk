@@ -817,6 +817,19 @@ describe("the documents tool", () => {
     expect(await tree()).toEqual([["Usage", 0], ["Guide", 0], ["Install", 1], ["Setup", 0]]);
   });
 
+  it("passes on the API's refusal of a move, such as of a Report, and asks for an id", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+    const { id } = (await callTool(mcp, "documents", { action: "write_report", key: "CRONK-1", title: "Findings", body: "Done." })).body.report;
+
+    expect(await callTool(mcp, "documents", { action: "move", id })).toEqual({
+      isError: true,
+      body: "A Report lives with its Ticket, outside the page tree, so it can't be moved",
+    });
+    expect(await callTool(mcp, "documents", { action: "move" })).toEqual({ isError: true, body: "The move action needs an id" });
+  });
+
   it("offers a read-only token only get and tree", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop", { readOnly: true })).secret);
@@ -1046,7 +1059,6 @@ describe("the documents tool and a Protected Document", () => {
       isError: true,
       body: `Policies is Protected: Agents may read it but not move it. ${askAUser(policies.id)}`,
     });
-    expect(await callTool(mcp, "documents", { action: "move", parentId: handbook.id })).toEqual({ isError: true, body: "The move action needs an id" });
   });
 
   it("is described as changed through Suggestions, but moved by a User asked in a Comment, as the API refuses a move", async () => {

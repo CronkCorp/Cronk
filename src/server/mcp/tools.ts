@@ -359,7 +359,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
-      id: z.string().optional().describe("Document id, a Report's included (get, update, replace_section, move)"),
+      id: z.string().optional().describe("Document id, a Report's included (get, update, replace_section); a Document in the page tree (move)"),
       parentId: z
         .string()
         .nullable()
