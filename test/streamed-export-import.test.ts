@@ -9,7 +9,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import tar from "tar-stream";
 import { parse, stringify } from "yaml";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { ARTIFACT_HOST, registerAgent, startInstalledCronk, startSession, tarGz, zip, type Client } from "./harness.js";
+import { ARTIFACT_HOST, bucketKeys, disposableBucket, registerAgent, s3Server, startInstalledCronk, startSession, tarGz, zip, type Client } from "./harness.js";
 
 /**
  * Exports and imports streamed, so Workspaces whose files add up to more than fits in memory round-trip (#209).
@@ -389,6 +389,19 @@ describe("an import larger than the installation lets one take", () => {
     const elsewhere = await installationWithFilesIn("Elsewhere", { importMaxBytes: 5 * MB });
     expect((await elsewhere.admin.upload("/api/import", exported)).status).toBe(201);
     expect((await elsewhere.admin.get("/api/workspace/storage")).body).toEqual((await admin.get("/api/workspace/storage")).body);
+  });
+});
+
+describe.skipIf(!s3Server())("an import larger than the installation lets one take, into S3-compatible storage", () => {
+  it("is refused with the same 413, leaving nothing in the bucket", async () => {
+    const { exported } = await exportWithTwoAttachments(2 * MB);
+
+    const storage = await disposableBucket();
+    const { admin } = await startInstalledCronk("Elsewhere", { storage, importMaxBytes: 3 * MB });
+    const res = await admin.upload("/api/import", exported);
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe("This archive is larger than 3 MB, the most an import may take");
+    expect(await bucketKeys(storage)).toEqual([]);
   });
 });
 
