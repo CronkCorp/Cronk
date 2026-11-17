@@ -25,6 +25,19 @@ describe("Linking a Document to a Ticket", () => {
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`)).status).toBe(404);
   });
 
+  it("moves a Document naming the Ticket's key from its mentions to its Documents while linked, in the link's own answer", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 1" });
+    const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "Do CRONK-1 first." })).body.document.id;
+    const titles = (list: { title: string }[]) => list.map((d) => d.title);
+
+    const linked = (await admin.post(`/api/tickets/CRONK-1/documents/${plan}`)).body;
+    expect([titles(linked.documents), titles(linked.mentions)]).toEqual([["Plan"], []]);
+    const unlinked = (await admin.delete(`/api/tickets/CRONK-1/documents/${plan}`)).body;
+    expect([titles(unlinked.documents), titles(unlinked.mentions)]).toEqual([[], ["Plan"]]);
+  });
+
   it("refuses linking one of the Ticket's own Reports, which it lists already", async () => {
     const { admin, session } = await delegatedSetup(1);
     const agent = await session();

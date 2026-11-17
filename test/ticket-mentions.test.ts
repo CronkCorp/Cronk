@@ -25,6 +25,27 @@ describe("What mentions a Ticket", () => {
   });
 });
 
+describe("What mentions a Ticket, from a Document", () => {
+  it("follows the Document's current Version through edits, a section replaced, a restore and its deletion", async () => {
+    const { admin } = await delegatedSetup(3);
+    const id = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "## Next\n\nCRONK-3 first." })).body.document.id;
+    expect(await mentionsOf(admin, "CRONK-3")).toEqual(["document: Plan"]);
+
+    expect((await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Next\n\nCRONK-2 first." })).status).toBe(200);
+    expect(await mentionsOf(admin, "CRONK-3")).toEqual([]);
+    expect(await mentionsOf(admin, "CRONK-2")).toEqual(["document: Plan"]);
+
+    expect((await admin.post(`/api/documents/${id}/replace-section`, { baseVersion: 2, heading: "Next", body: "Then `CRONK-2`." })).status).toBe(200);
+    expect(await mentionsOf(admin, "CRONK-2")).toEqual([]);
+
+    expect((await admin.post(`/api/documents/${id}/versions/1/restore`, { baseVersion: 3 })).status).toBe(200);
+    expect(await mentionsOf(admin, "CRONK-3")).toEqual(["document: Plan"]);
+
+    expect((await admin.delete(`/api/documents/${id}?baseVersion=4`)).status).toBe(204);
+    expect(await mentionsOf(admin, "CRONK-3")).toEqual([]);
+  });
+});
+
 describe("What mentions a Ticket, besides Documents", () => {
   it("is each other Ticket, Comment, Term, Decision and Activity naming its key in prose, following edits", async () => {
     const { admin, session } = await delegatedSetup(3);
