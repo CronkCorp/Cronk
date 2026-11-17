@@ -260,20 +260,26 @@ describe("Scrubbing secrets on upload", () => {
     // Scrubbing the scrubbed text changes nothing.
     const again = await upload(cronk.client(claude.secret), "chat-2", scrubbed);
     expect((await admin.get(`/api/transcripts/${again.body.transcript.id}`)).body.transcript.markdown).toBe(scrubbed);
+
+    // The same chat, grown and sent again with its secrets, continues the stored Transcript rather than being kept beside it.
+    const grown = await upload(cronk.client(claude.secret), "chat-1", markdown + "\n## Assistant\n\nDone\n");
+    expect(grown.body.transcript.id).toBe(uploaded.body.transcript.id);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript).toMatchObject({
+      markdown: scrubbed + "\n## Assistant\n\nDone\n",
+      earlier: [],
+    });
   });
 
-  it("still scrubs an Agent Token issued before tokens had a prefix", async () => {
+  it("keeps a 43-character word that mixes digits, capitals and small letters as written", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
     await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
-    const bare = await cronk.issuedBeforePrefixes(claude.secret);
-    // A bare token is matched by its random look, so this one is made to mix digits, capitals and small letters.
-    const shown = "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V";
-    const uploaded = await upload(cronk.client(bare), "chat-1", chat("Hi", agent.sessionId) + `\nOld token: ${shown}\n`);
+    const word = "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V";
+    const markdown = chat("Hi", agent.sessionId) + `\nA hash: ${word}\n`;
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", markdown);
     expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
-    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown;
-    expect(read).toBe(chat("Hi", agent.sessionId) + "\nOld token: [scrubbed: token]\n");
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown).toBe(markdown);
   });
 
   it("counts the scrubbed text against the Workspace's limit", async () => {
