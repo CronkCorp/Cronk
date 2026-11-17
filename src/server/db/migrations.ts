@@ -4,7 +4,9 @@ import { recordAllEmbeds } from "../files/artifact-embeds.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
- * migration once it has shipped; add a new one instead.
+ * migration once it has shipped; add a new one instead. The one exception: a
+ * backfill that would no longer run against the schema of its time may be
+ * dropped when a later migration redoes it over all data (as 0041 does for 0015's and 0026's).
  */
 export interface Migration {
   id: string;
