@@ -93,9 +93,10 @@ Cronk is a plain Node.js process configured only through environment variables, 
 | `WEB_ROOT`      | `dist/web` if present | Directory of the built web client                              |
 | `FILES_STORAGE` | `disk`                | Where the files of Attachments and Artifacts are stored: `disk`, or `s3` for any S3-compatible store (see below) |
 | `FILES_DIR`     | `data/files`          | With `disk`: directory the files are stored in, relative to the working directory |
+| `IMPORT_MAX_BYTES` | `53687091200` (50 GiB) | The most bytes one import of an export may write, counting the temporary copy of a zip archive and every file it stores; past it the import is refused with a 413 |
 | `ARTIFACTS_URL` | (none; recommended)   | Address of a hostname of its own that serves Artifacts, e.g. `https://artifacts.cronk.example`; needs `PUBLIC_URL` too |
 
-By default Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files.
+By default Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files; importing one may write at most `IMPORT_MAX_BYTES` (50 GiB by default), counting a zip archive's temporary copy on local disk as well as the files it stores.
 
 ### S3-compatible storage
 
