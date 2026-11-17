@@ -63,11 +63,26 @@ async function attach(client: Client, path: string, seed: number, size: number) 
 }
 
 /**
+ * Collects garbage now. `process.memoryUsage().arrayBuffers` also counts Buffers that are garbage but not yet
+ * collected, and how late the collector runs varies with the Node version and the machine's load (#301), so a
+ * baseline taken without collecting first measures that lag rather than what is held. The vitest config exposes
+ * the collector to this file with `--expose-gc`.
+ */
+function collectGarbage() {
+  if (typeof globalThis.gc !== "function") {
+    throw new Error("The garbage collector isn't exposed, so Buffers held can't be told from garbage: run this file with --expose-gc (see vitest.config.ts).");
+  }
+  globalThis.gc();
+}
+
+/**
  * Runs `work` while sampling how many bytes of Buffers the process holds beyond what it held before, and answers
- * the most it saw. The server runs in this process, so this counts what it holds.
+ * the most it saw. The server runs in this process, so this counts what it holds. The baseline is taken after
+ * collecting garbage, so what was garbage before `work` started isn't counted as held during it.
  */
 async function peakBuffers(work: () => Promise<void>): Promise<number> {
   const held = () => process.memoryUsage().arrayBuffers;
+  collectGarbage();
   const before = held();
   let peak = 0;
   const sampling = setInterval(() => (peak = Math.max(peak, held() - before)), 5);
