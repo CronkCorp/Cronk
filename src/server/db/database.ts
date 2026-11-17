@@ -175,6 +175,20 @@ export async function lockUntilCommit(tx: Queryable, name: string): Promise<void
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [name]);
 }
 
+/**
+ * Whether the transaction already holds the lock `lockUntilCommit` takes for `name`. Postgres lists a lock on a bigint key
+ * with its high 32 bits as `classid` and its low 32 bits as `objid`.
+ */
+export async function holdsLockUntilCommit(tx: Queryable, name: string): Promise<boolean> {
+  const { rowCount } = await tx.query(
+    `SELECT 1 FROM pg_locks, (SELECT hashtextextended($1, 0) AS key) k
+     WHERE pid = pg_backend_pid() AND granted AND locktype = 'advisory' AND objsubid = 1
+       AND classid::bigint = (k.key >> 32) & 4294967295 AND objid::bigint = k.key & 4294967295`,
+    [name],
+  );
+  return rowCount !== 0;
+}
+
 // Arbitrary constant so concurrent starts against one database migrate one at a time.
 const MIGRATION_LOCK = 0x63726f6e6b;
 
