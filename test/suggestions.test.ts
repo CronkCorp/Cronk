@@ -109,16 +109,42 @@ describe("accepting a Suggestion", () => {
     expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion.state).toBe("open");
   });
 
-  it("is refused while the item has a newer Version than the Suggestion's base, which marks it outdated", async () => {
-    const { admin, agent, documentId } = await protectedDocument();
-    const suggestion = await suggestBody(agent, documentId, "Fifty per IP.\n");
-    await admin.patch(`/api/documents/${documentId}`, { baseVersion: 1, body: "Six per minute.\n" });
+});
 
-    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({ outdated: true, item: { version: 2 } });
-    const refused = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
-    expect(refused.status).toBe(409);
-    expect(refused.body.error).toMatch(/outdated/);
-    expect((await admin.get(`/api/documents/${documentId}`)).body.document.body).toBe("Six per minute.\n");
+/** A protected Document with two sections at Version 1, as `protectedDocument` sets one up. */
+async function sectionedDocument() {
+  const setup = await protectedDocument();
+  await setup.admin.post(`/api/documents/${setup.documentId}/protection`, { protected: false });
+  await setup.admin.patch(`/api/documents/${setup.documentId}`, { baseVersion: 1, body: LIMITS_V2 });
+  await setup.admin.post(`/api/documents/${setup.documentId}/protection`, { protected: true });
+  return setup;
+}
+
+const LIMITS_V2 = "## Limits\n\nFive per minute.\n\n## Why\n\nThe proxy hides client IPs.\n";
+
+describe("accepting an outdated Suggestion", () => {
+  it("merges it with the newer Version section by section, as the User's Version linked to the Suggestion", async () => {
+    const { cronk, admin, agent, documentId } = await sectionedDocument();
+    const ada = (await admin.get("/api/me")).body.user;
+    const suggestion = await suggestBody(agent, documentId, "## Limits\n\nFive per minute.\n\n## Why\n\nThe proxy passes client IPs through now.\n", 2);
+    cronk.clock.advance(60_000);
+    await admin.patch(`/api/documents/${documentId}`, { baseVersion: 2, body: "## Limits\n\nFive per minute, sliding.\n\n## Why\n\nThe proxy hides client IPs.\n" });
+
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({
+      outdated: true,
+      item: { version: 3 },
+      newerVersion: { number: 3, actor: { kind: "user", id: ada.id, name: "Ada" } },
+    });
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.suggestion).toMatchObject({ state: "accepted", acceptedWithEdits: true, resultVersion: 4, outdated: false, newerVersion: null });
+    expect((await admin.get(`/api/documents/${documentId}/versions/4`)).body.version).toMatchObject({
+      title: "Sign-in limits",
+      body: "## Limits\n\nFive per minute, sliding.\n\n## Why\n\nThe proxy passes client IPs through now.\n",
+      actor: { kind: "user", id: ada.id },
+      suggestion: { id: suggestion.id, acceptedWithEdits: true, acceptedBy: { id: ada.id } },
+    });
   });
 });
 

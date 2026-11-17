@@ -82,7 +82,8 @@ export type SharedSchemaName =
   | "StaleArtifact"
   | "EmbeddedIn"
   | "AvoidedWord"
-  | "Suggestion";
+  | "Suggestion"
+  | "SuggestionMerge";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -278,6 +279,9 @@ const conflict = {
 const keyList = { type: "array", items: { type: "string" } } as const;
 
 /** The sections of a merge, in order; joined, they make the merged `whole`. */
+/** A field of a Suggestion's content: text, a list of words (a Term's `avoid`), or null (no group). */
+const fieldValue = { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }] };
+
 const mergedSections = (whole: string) => ({
   type: "array",
   description: `The merged sections in order, each from one heading to the next; joined, their texts (or the chosen text of each conflict) make the ${whole}.`,
@@ -1052,12 +1056,41 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           "The User whose Inbox it is in: on a Project item, the source Ticket's Assignee, else the Agent's Owner; null when it is in Triage, as on a Workspace item.",
       },
       state: { type: "string", enum: SUGGESTION_STATES },
-      outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then needs a merge." },
+      outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then merges it with that Version." },
+      newerVersion: {
+        ...nullable(object({ number: { type: "integer" }, actor: recordedActor })),
+        description: "While it is outdated: the item's current Version and who saved it; null otherwise.",
+      },
       acceptedWithEdits: { ...nullable({ type: "boolean" }), description: "Whether the User changed it before accepting it; null unless accepted." },
       resultVersion: { ...nullable({ type: "integer" }), description: "The Version of the item accepting it made; null unless accepted." },
       decidedBy: { ...nullable(named), description: "The User who accepted or rejected it." },
       decidedAt: nullable(timestamp),
       reason: { ...nullable({ type: "string" }), description: "Why it was rejected; null unless rejected." },
+    }),
+  },
+  SuggestionMerge: {
+    description:
+      "An outdated Suggestion's content merged with its item's current Version, with the Version the Suggestion started from as the common ancestor: " +
+      "the Markdown field (a Document's or Decision's `body`, a Term's `definition`, Guidance's `markdown`) section by section, every other field whole. " +
+      "Only conflicts need a User's choice. Nothing is saved.",
+    ...object({
+      onto: { type: "integer", description: "The item's current Version merged onto; accept the settled result with it as `onto`." },
+      current: { ...suggestedContent, description: "What the item holds at `onto`." },
+      content: { ...nullable(suggestedContent), description: "The merged content; null while any field conflicts." },
+      fields: {
+        type: "array",
+        description: "Each field of the item's content, in order.",
+        items: object({
+          field: { type: "string" },
+          value: { ...fieldValue, description: "The merged value; null when it conflicts (and for a group, when there is none)." },
+          conflict: {
+            ...nullable(object({ base: fieldValue, mine: fieldValue, theirs: fieldValue })),
+            description: "For a field that merges whole: the base's, the Suggestion's (`mine`) and the current Version's (`theirs`) values, set when both changed it differently.",
+          },
+          sections: { ...nullable(mergedSections("Markdown")), description: "For the Markdown field: its merged sections; null for a field that merges whole." },
+        }),
+      },
+      conflicts: { type: "integer", description: "How many sections of the Markdown field conflict, plus one for each other field that does." },
     }),
   },
   SearchResult: {

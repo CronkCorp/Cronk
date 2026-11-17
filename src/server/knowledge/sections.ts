@@ -485,7 +485,7 @@ export interface DecisionSide {
 }
 
 /** The three-way merge of a whole field: the side that changed it, or null and a conflict when both did, differently. */
-function mergeField<T>(base: T, mine: T, theirs: T, same: (a: T, b: T) => boolean): { merged: T | null; conflict: FieldConflict<T> | null } {
+export function mergeField<T>(base: T, mine: T, theirs: T, same: (a: T, b: T) => boolean): { merged: T | null; conflict: FieldConflict<T> | null } {
   if (same(mine, theirs) || same(mine, base)) return { merged: theirs, conflict: null };
   if (same(theirs, base)) return { merged: mine, conflict: null };
   return { merged: null, conflict: { base, mine, theirs } };

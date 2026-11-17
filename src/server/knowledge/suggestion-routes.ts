@@ -9,6 +9,8 @@ import { markSuggestionRejected, suggestionRejectionOf, waitingEvent, withWaitin
 import { answer, errors, holding, listing, pathParams, ref } from "../schemas.js";
 import {
   acceptSuggestion,
+  mergeSuggestion,
+  type Acceptance,
   createSuggestion,
   listAgentSuggestions,
   rejectSuggestion,
@@ -151,7 +153,21 @@ export function suggestionRoutes(ctx: AppContext) {
       async (request) => ({ suggestion: await suggestionFor(ctx.db, await requireActor(ctx, request), request.params.id, "read") }),
     );
 
-    app.post<{ Params: { id: string }; Body: { content?: Record<string, unknown> } | undefined }>(
+    app.post<{ Params: { id: string } }>(
+      "/api/suggestions/:id/merge",
+      {
+        schema: {
+          params: suggestionParams,
+          response: {
+            200: answer("The Suggestion's content merged with its item's current Version; nothing is saved", holding("merge", "SuggestionMerge")),
+            ...errors(400, 401, 403, 404, 409, 410),
+          },
+        },
+      },
+      async (request) => ({ merge: await mergeSuggestion(ctx.db, await requireActor(ctx, request), request.params.id) }),
+    );
+
+    app.post<{ Params: { id: string }; Body: Acceptance | undefined }>(
       "/api/suggestions/:id/accept",
       {
         schema: {
@@ -164,7 +180,17 @@ export function suggestionRoutes(ctx: AppContext) {
                 ...contentBody,
                 description:
                   "Edit and accept: the content as the User changed it, fields left out as suggested. If it differs from the Suggestion, the new Version " +
-                  "is credited to the User and linked to the Suggestion; left out, or unchanged, the Version is credited to the Agent.",
+                  "is credited to the User and linked to the Suggestion; left out, or unchanged, the Version is credited to the Agent. " +
+                  "For an outdated Suggestion: the fields as the User settled its merge (see `POST /api/suggestions/{id}/merge`), " +
+                  "fields left out as merged; needs `onto`.",
+              },
+              onto: {
+                type: "integer",
+                minimum: 0,
+                description:
+                  "The item's Version the User merged an outdated Suggestion onto, the merge's `onto`; refused if the item has moved on since. " +
+                  "Accepting an outdated Suggestion merges it with the item's current Version, credited to the User and linked to the Suggestion; " +
+                  "a merge that conflicts needs the settled fields as `content`.",
               },
             },
           },
@@ -176,7 +202,7 @@ export function suggestionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const suggestion = await transaction(ctx.db, (tx) => acceptSuggestion(tx, user, request.params.id, request.body?.content, ctx.clock.now()));
+        const suggestion = await transaction(ctx.db, (tx) => acceptSuggestion(tx, user, request.params.id, request.body ?? {}, ctx.clock.now()));
         changed(suggestion, user.workspaceId);
         return { suggestion };
       },
