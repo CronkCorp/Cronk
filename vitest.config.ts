@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 /** Test files that measure the Buffers the process holds: they run with the garbage collector exposed, so they can collect garbage before measuring (#301). */
-const measuresMemory = ["test/streamed-export-import.test.ts"];
+const memoryMeasuringFiles = ["test/streamed-export-import.test.ts"];
 
 export default defineConfig({
   test: {
@@ -9,8 +9,8 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 120_000,
     projects: [
-      { extends: true, test: { name: "api", include: ["test/**/*.test.ts"], exclude: measuresMemory } },
-      { extends: true, test: { name: "memory", include: measuresMemory, execArgv: ["--expose-gc"] } },
+      { extends: true, test: { name: "default", include: ["test/**/*.test.ts"], exclude: memoryMeasuringFiles } },
+      { extends: true, test: { name: "memory", include: memoryMeasuringFiles, execArgv: ["--expose-gc"] } },
     ],
   },
 });

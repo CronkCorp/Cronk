@@ -63,26 +63,18 @@ async function attach(client: Client, path: string, seed: number, size: number) 
 }
 
 /**
- * Collects garbage now. `process.memoryUsage().arrayBuffers` also counts Buffers that are garbage but not yet
- * collected, and how late the collector runs varies with the Node version and the machine's load (#301), so a
- * baseline taken without collecting first measures that lag rather than what is held. The vitest config exposes
- * the collector to this file with `--expose-gc`.
+ * Runs `work` while sampling how many bytes of Buffers the process holds beyond what it held before, and answers
+ * the most it saw. The server runs in this process, so this counts what it holds. `arrayBuffers` also counts
+ * Buffers that are garbage but not yet collected, and how late the collector runs varies with the Node version and
+ * the machine's load (#301), so garbage is collected before the baseline is taken: the vitest config exposes the
+ * collector to this file with `--expose-gc`.
  */
-function collectGarbage() {
+async function peakBuffers(work: () => Promise<void>): Promise<number> {
   if (typeof globalThis.gc !== "function") {
     throw new Error("The garbage collector isn't exposed, so Buffers held can't be told from garbage: run this file with --expose-gc (see vitest.config.ts).");
   }
-  globalThis.gc();
-}
-
-/**
- * Runs `work` while sampling how many bytes of Buffers the process holds beyond what it held before, and answers
- * the most it saw. The server runs in this process, so this counts what it holds. The baseline is taken after
- * collecting garbage, so what was garbage before `work` started isn't counted as held during it.
- */
-async function peakBuffers(work: () => Promise<void>): Promise<number> {
   const held = () => process.memoryUsage().arrayBuffers;
-  collectGarbage();
+  globalThis.gc();
   const before = held();
   let peak = 0;
   const sampling = setInterval(() => (peak = Math.max(peak, held() - before)), 5);
@@ -113,6 +105,8 @@ describe("a Workspace export holding more than 200 MB of Attachments", () => {
     expect(exportPeak).toBeLessThan(64 * MB);
 
     const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    // Warmed up as the first installation was by the uploads, so what its first requests set up once isn't counted.
+    expect((await elsewhere.get("/api/workspace/storage")).status).toBe(200);
     const importPeak = await peakBuffers(async () => {
       const imported = await elsewhere.send("/api/import", { method: "POST", body: createReadStream(archive), headers: { "content-type": "application/gzip" } });
       expect(imported.statusCode, await text(imported)).toBe(201);
@@ -180,6 +174,8 @@ describe("an export's Attachments and Artifact files", () => {
     const exported = await admin.download("/api/export");
 
     const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    // Warmed up as the first installation was by the uploads, so what its first requests set up once isn't counted.
+    expect((await elsewhere.get("/api/workspace/storage")).status).toBe(200);
     const imported = await elsewhere.upload("/api/import", exported.body);
     expect(imported.status, JSON.stringify(imported.body)).toBe(201);
 
