@@ -13,7 +13,7 @@ export const transcriptAddress = (id: string, turn: number | null) => `/transcri
 
 /** One item a Transcript led to, as its chips and list show it. */
 interface LedTo {
-  kind: "Ticket" | "Document" | "Term" | "Decision";
+  kind: "Ticket" | "Document" | "Term" | "Decision" | "Artifact";
   /** The key of a Ticket or Decision. */
   key?: string;
   name: string;
@@ -27,6 +27,7 @@ const ledToOf = (t: Transcript): LedTo[] => [
   ...t.decisions.map((i): LedTo => ({ kind: "Decision", key: i.key, name: i.title, address: `/decisions/${i.key}`, turn: i.turn })),
   ...t.documents.map((i): LedTo => ({ kind: "Document", name: i.title, address: `/documents/${i.id}`, turn: i.turn })),
   ...t.terms.map((i): LedTo => ({ kind: "Term", name: i.name, address: `/terms/${i.id}`, turn: i.turn })),
+  ...t.artifacts.map((i): LedTo => ({ kind: "Artifact", name: i.title, address: `/artifacts/${i.id}`, turn: i.turn })),
 ];
 
 /** A chip for an item a turn led to, opening the item. */
