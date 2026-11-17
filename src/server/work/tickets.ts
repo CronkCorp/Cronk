@@ -107,6 +107,8 @@ interface TicketRow {
   discovered_by_agent_id: string | null;
   discovered_by_agent_name: string | null;
   discovered_session_id: string | null;
+  source_project_id: string | null;
+  source_project_key: string | null;
   source_number: number | null;
   source_title: string | null;
   discovery_kept: boolean;
@@ -136,7 +138,7 @@ const toTicket = (row: TicketRow): Ticket => ({
       : {
           agent: { id: row.discovered_by_agent_id, name: row.discovered_by_agent_name! },
           session: row.discovered_session_id === null ? null : { id: row.discovered_session_id },
-          sourceTicket: row.source_number === null ? null : { key: `${row.project_key}-${row.source_number}`, title: row.source_title! },
+          sourceTicket: row.source_number === null ? null : { key: `${row.source_project_key}-${row.source_number}`, title: row.source_title! },
           kept: row.discovery_kept,
         },
   createdAt: row.created_at,
@@ -147,10 +149,10 @@ const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
          a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title,
-         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.number AS source_number, st.title AS source_title, t.discovery_kept
+         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.project_id AS source_project_id, sp.key AS source_project_key, st.number AS source_number, st.title AS source_title, t.discovery_kept
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
   LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id
-  LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id`;
+  LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id`;
 
 /**
  * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated and not kept there.
