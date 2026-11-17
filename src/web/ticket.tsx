@@ -377,19 +377,24 @@ function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
   return (
     <div className="side-field">
       <span className="side-field-label">Verification</span>
-      <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
+      {/* The chip and the actions wrap within the value column, and Accept and Reopen… only ever move down together. */}
+      <span className="side-field-value side-field-controls">
+        <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
+        {unverified && props.canWrite && (
+          <span className="side-field-actions">
+            <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+            <Button variant="secondary" onClick={() => setReopening(true)} disabled={accept.busy}>Reopen…</Button>
+          </span>
+        )}
+      </span>
       {unverified && props.canWrite && (
-        <>
-          <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
-          <Button variant="secondary" onClick={() => setReopening(true)} disabled={accept.busy}>Reopen…</Button>
-          <ReopenDialog
-            ticket={props.ticket}
-            open={reopening}
-            onOpenChange={setReopening}
-            reopen={(input) => api.reopen(props.ticket.key, input)}
-            onDone={() => {}}
-          />
-        </>
+        <ReopenDialog
+          ticket={props.ticket}
+          open={reopening}
+          onOpenChange={setReopening}
+          reopen={(input) => api.reopen(props.ticket.key, input)}
+          onDone={() => {}}
+        />
       )}
       {accept.error && <p className="error" role="alert">{accept.error}</p>}
     </div>
