@@ -170,8 +170,8 @@ describe("A Project's live updates", () => {
     expect((await stream.next())?.event).toBe("ready");
 
     cronk.clock.advance(120_000);
-    // Long enough for the server to have looked for lapsed Claims since the clock moved.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // The server has looked since the clock moved and found the Claim still live, so only the lower threshold lapses it.
+    await cronk.lookForLapses();
     expect((await admin.patch("/api/workspace", { silenceThresholdSeconds: 60 })).status).toBe(200);
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
   });
