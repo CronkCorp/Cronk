@@ -11,7 +11,9 @@ Act and assert only on state the page has reached, never on how fast a step happ
 - **An element, before acting on it.** Locator actions (`click`, `fill`) wait for their element; reach a page through
   what it shows, as `signIn` waits for the sidebar's Project link before the test goes on.
 - **A finished save, before the next step relies on it.** Assert what the save shows (a `status` saying "Saved.", the
-  new text, the timeline line) before navigating away or changing the same thing through the API.
+  new text, the timeline line) before navigating away or changing the same thing through the API. Where the page shows
+  nothing for a save (the Diff view choice), start `page.waitForResponse` for its request before the action, then await
+  it and check it succeeded.
 - **A settled page, before reading a value.** Read values the page computes (`window.scrollY`, sizes, counts) with
   `expect.poll` or a web-first assertion (`toHaveText`, `toHaveCount`), not a one-shot `page.evaluate` or
   `textContent()`: a live update may still be laying out.
