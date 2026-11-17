@@ -124,12 +124,8 @@ async function requireBlockingLockFirst(db: Queryable, name: string): Promise<vo
      WHERE pid = pg_backend_pid() AND granted AND locktype = 'relation' AND relation = 'tickets'::regclass
        AND mode IN ('RowShareLock', 'RowExclusiveLock')`,
   );
-  if (rowCount !== 0) {
-    const err = new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
-    // Printed too, as a request answers only "Something went wrong" and tests run without a logger.
-    console.error(err);
-    throw err;
-  }
+  // Thrown to the request, whose error handler logs it.
+  if (rowCount !== 0) throw new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
 }
 
 /**
