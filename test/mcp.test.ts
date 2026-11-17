@@ -984,6 +984,16 @@ describe("the documents tool and a Protected Document", () => {
     expect(update.isError).toBe(true);
     expect(update.body).toMatch(/^Handbook is Protected: Agents may read it but not change it\. Make a Suggestion/);
   });
+
+  it("is described as changed through Suggestions, but moved by a User asked in a Comment, as the API refuses a move", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const description = (await mcp.client.listTools()).tools.find((t) => t.name === "documents")!.description!;
+
+    expect(description).toMatch(/propose a change to it, or a new Document under it, with the `suggestions` tool/i);
+    expect(description).toMatch(/to move it[^.]*ask a User to make the move instead, in a Comment on the Document you are moving with the `comments` tool/);
+    expect(description).not.toMatch(/move[^.]*`suggestions` tool/);
+  });
 });
 
 describe("the attachments tool", () => {
