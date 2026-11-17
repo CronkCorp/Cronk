@@ -1,0 +1,10 @@
+{"type":"user","message":{"role":"user","content":"Log a plan on CRONK-4."},"timestamp":"2026-11-16T09:00:01.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_s1","name":"mcp__cronk__activities","input":{"action":"log","key":"CRONK-4","kind":"plan"}}]},"timestamp":"2026-11-16T09:00:04.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s1","content":"Agent Session 0b5e7a52-8c1e-4f7e-9a51-3f0c2d8e1a77"}]},"timestamp":"2026-11-16T09:00:05.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Planned CRONK-4."}]},"timestamp":"2026-11-16T09:00:06.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"user","message":{"role":"user","content":"Add a test plan."},"timestamp":"2026-11-16T09:00:09.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Added a test plan."}]},"timestamp":"2026-11-16T09:00:11.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"user","message":{"role":"user","content":"Log the estimate."},"timestamp":"2026-11-16T09:00:16.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_s2","name":"mcp__cronk__activities","input":{"action":"log","key":"CRONK-4","kind":"estimate"}}]},"timestamp":"2026-11-16T09:00:17.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s2","content":"Agent Session 0b5e7a52-8c1e-4f7e-9a51-3f0c2d8e1a77"}]},"timestamp":"2026-11-16T09:00:17.000Z","isSidechain":true,"agentId":"ares"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Logged the estimate."}]},"timestamp":"2026-11-16T09:00:18.000Z","isSidechain":true,"agentId":"ares"}
