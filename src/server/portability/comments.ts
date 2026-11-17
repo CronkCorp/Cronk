@@ -34,8 +34,9 @@ export async function exportComments(
   const numbers = new Map(rows.map((c, i) => [c.id, i + 1]));
   const attachments = await attachmentsOfComments(ctx, rows.map((c) => c.id));
   for (const c of rows) {
+    const base = `${dir}/${numbers.get(c.id)}`;
     ctx.add(
-      `${dir}/${numbers.get(c.id)}.md`,
+      `${base}.md`,
       {
         at: iso(c.at),
         by: ctx.actor(c),
@@ -47,7 +48,7 @@ export async function exportComments(
       },
       c.body,
     );
-    writeAttachments(ctx, `${dir}/${numbers.get(c.id)}`, attachments.get(c.id) ?? []);
+    writeAttachments(ctx, base, attachments.get(c.id) ?? []);
   }
   return numbers;
 }

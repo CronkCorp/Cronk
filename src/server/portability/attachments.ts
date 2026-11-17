@@ -13,7 +13,7 @@ import type { ImportContext } from "./import-context.js";
  * whom and when.
  */
 
-interface AttachmentRow extends ActorColumns {
+export interface AttachmentRow extends ActorColumns {
   id: string;
   name: string;
   content_type: string;

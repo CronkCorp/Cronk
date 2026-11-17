@@ -1246,9 +1246,11 @@ describe("Attachments in an export", () => {
     });
     const withOne = await exporting();
 
+    // Comments 2, 4 and 6 have a file each; 3 and 5 have none.
+    const withFile = new Set([2, 4, 6]);
     for (let i = 2; i <= 6; i++) {
       const comment = (await admin.post("/api/tickets/CRONK-1/comments", { body: `Comment ${i}` })).body.comment;
-      if (i % 2 === 0) await admin.upload(`/api/comments/${comment.id}/attachments?name=${i}.txt`, Buffer.from(`${i}`), "text/plain");
+      if (withFile.has(i)) await admin.upload(`/api/comments/${comment.id}/attachments?name=${i}.txt`, Buffer.from(`${i}`), "text/plain");
     }
     const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
     expect(files["projects/CRONK/tickets/CRONK-1.comments/4.attachments/1-4.txt"]).toBe("4");
