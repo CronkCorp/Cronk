@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { Mention } from "./api.js";
 import { Chip } from "./components/tags.js";
 import { Link } from "./router.js";
@@ -14,9 +13,10 @@ const KIND_NAMES: Record<Mention["kind"], string> = {
   comment: "Comment",
   term: "Term",
   decision: "Decision",
+  activity: "Activity",
 };
 
-/** Where a mention leads: the thing itself, or for a Comment the Ticket, Document or Artifact it is on. */
+/** Where a mention leads: the thing itself, or for a Comment or Activity the Ticket, Document or Artifact it is on. */
 function addressOf(m: Mention): string {
   switch (m.kind) {
     case "ticket":
@@ -30,13 +30,15 @@ function addressOf(m: Mention): string {
       return `/terms/${m.id}`;
     case "decision":
       return `/decisions/${m.key}`;
+    case "activity":
+      return `/tickets/${m.ticketKey}`;
   }
 }
 
-/** Where a mention lies, as a list says: the Ticket a Report or Comment is on, its Project, or the Workspace. */
+/** Where a mention lies, as a list says: the Ticket a Report, Comment or Activity is on, its Project, or the Workspace. */
 function whereItIs(m: Mention): string {
   if (m.kind === "ticket" || m.kind === "decision") return m.projectKey ?? "Workspace";
-  if (m.ticketKey) return m.kind === "comment" ? `on ${m.ticketKey}` : `Report on ${m.ticketKey}`;
+  if (m.ticketKey) return m.kind === "document" ? `Report on ${m.ticketKey}` : `on ${m.ticketKey}`;
   if (m.kind === "comment") return `on ${m.artifactId ? "an Artifact" : "a Document"} in ${m.projectKey ?? "the Workspace"}`;
   return m.projectKey ?? "Workspace";
 }
@@ -51,35 +53,38 @@ function MentionRow(props: { mention: Mention }) {
   );
 }
 
+/** A list of what mentions something, or for none what would show there. `what` says what they name. */
+export function MentionList(props: { mentions: Mention[]; what: string }) {
+  return props.mentions.length === 0 ? (
+    <p className="muted small">Nothing names {props.what} yet. Tickets, Documents, Comments, Terms, Decisions and Activities that do show here.</p>
+  ) : (
+    <ul className="side-list" aria-label="Mentioned in">
+      {props.mentions.map((m) => (
+        <MentionRow key={`${m.kind}:${m.id}`} mention={m} />
+      ))}
+    </ul>
+  );
+}
+
 /**
- * What mentions a Term or Decision, as `load` lists it: each Ticket, Document, Comment, Term and Decision
- * naming it, most recently changed first. `what` says what they name, for the empty state. `compact` fits it
- * into a side panel.
+ * What mentions a Term or Decision, as `load` lists it: each Ticket, Document, Comment, Term, Decision and
+ * Activity naming it, most recently changed first. `what` says what they name, for the empty state. `compact`
+ * fits it into a side panel.
  */
 export function MentionedIn(props: { load: () => Promise<Mention[]>; deps: unknown[]; what: string; compact?: boolean }) {
   const [mentions] = useLoad(props.load, props.deps);
-  const body = (list: Mention[]): ReactNode =>
-    list.length === 0 ? (
-      <p className="muted small">Nothing names {props.what} yet. Tickets, Documents, Comments, Terms and Decisions that do show here.</p>
-    ) : (
-      <ul className="side-list" aria-label="Mentioned in">
-        {list.map((m) => (
-          <MentionRow key={`${m.kind}:${m.id}`} mention={m} />
-        ))}
-      </ul>
-    );
   return (
     <Show state={mentions}>
       {(list) =>
         props.compact ? (
           <div className="side-group">
             <h4>Mentioned in</h4>
-            {body(list)}
+            <MentionList mentions={list} what={props.what} />
           </div>
         ) : (
           <section className="panel wide">
             <h2>Mentioned in · {list.length >= LISTED_AT_MOST ? `${LISTED_AT_MOST} most recent` : list.length}</h2>
-            {body(list)}
+            <MentionList mentions={list} what={props.what} />
           </section>
         )
       }

@@ -56,6 +56,25 @@ describe("What mentions a Decision, besides Documents", () => {
   });
 });
 
+describe("What mentions a Decision or Term, from an Agent's work", () => {
+  it("is each Activity naming the Decision's key or the Term's name, read as on its Ticket", async () => {
+    const { cronk, admin } = await withDecisions();
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse" });
+    const agent = await agentOf(cronk, admin, "claude");
+    const adaId = (await admin.get("/api/users")).body.users[0].id;
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: (await admin.get("/api/agents")).body.agents[0].id });
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    expect((await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Lapse each Claim per CRONK-D1." })).status).toBe(201);
+    expect((await agent.post("/api/tickets/CRONK-1/activities", { kind: "progress", body: "Ran `D1` and `Claim`." })).status).toBe(201);
+
+    expect(await mentionsOfTerm(admin, claim.id)).toEqual(["activity: Lapse"]);
+    const [mention] = (await admin.get("/api/decisions/CRONK-D1/mentions")).body.mentions;
+    expect(mention).toMatchObject({ kind: "activity", title: "Lapse", ticketKey: "CRONK-1", projectKey: "CRONK" });
+    expect(await mentionsOfDecision(admin, "D1")).toEqual([]);
+  });
+});
+
 describe("What mentions a Decision or Term, as the reader lists it", () => {
   it("leaves out what lies in private Projects they aren't in, and the Workspace's when an Agent can't read it", async () => {
     const { cronk, admin } = await withDecisions();
@@ -153,6 +172,8 @@ describe("Mentions of Decisions and Terms", () => {
     const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold; see D1." })).body.term;
     await admin.post("/api/projects/CRONK/documents", { title: "Runbook", body: "A Claim follows CRONK-D1." });
 
+    // Mentions are recorded from today's schema once its later changes are in (0040_ticket_and_activity_mentions).
+    await cronk.undoMigration("0040_ticket_and_activity_mentions", "CREATE TABLE document_ticket_mentions (document_id uuid, ticket_key text)");
     await cronk.undoMigration("0026_mentions", "DROP TABLE mentions");
     await cronk.restart();
 

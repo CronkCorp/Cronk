@@ -14,12 +14,14 @@ describe("Linking a Document to a Ticket", () => {
 
     const linked = await admin.post(`/api/tickets/cronk-1/documents/${runbook}`);
     expect(linked.status).toBe(201);
-    expect(listed(linked.body.documents)).toEqual(["Runbook (linked)", "Plan (mention)"]);
-    expect(listed((await admin.get("/api/tickets/CRONK-1")).body.documents)).toEqual(["Runbook (linked)", "Plan (mention)"]);
+    expect(listed(linked.body.documents)).toEqual(["Runbook (linked)"]);
+    const detail = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(listed(detail.documents)).toEqual(["Runbook (linked)"]);
+    expect(detail.mentions.map((m: { title: string }) => m.title)).toEqual(["Plan"]);
 
     const unlinked = await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`);
     expect(unlinked.status).toBe(200);
-    expect(listed(unlinked.body.documents)).toEqual(["Plan (mention)"]);
+    expect(listed(unlinked.body.documents)).toEqual([]);
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`)).status).toBe(404);
   });
 

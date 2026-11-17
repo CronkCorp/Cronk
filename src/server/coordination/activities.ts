@@ -1,4 +1,5 @@
 import { actorColumns, type AgentActor, type StoredActor } from "../actor.js";
+import { recordMentions } from "../knowledge/mentions.js";
 import type { Queryable } from "../db/database.js";
 import type { ActivityKind } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
@@ -62,7 +63,7 @@ const toActivity = (row: ActivityRow): Activity => ({
 /** An Agent writing in an Agent Session, as an Activity records it. */
 export type ActivityActor = (AgentActor & { session: { id: string } }) | (StoredActor & { kind: "agent"; agentId: string; sessionId: string });
 
-/** Records an Activity the Agent Session of `agent` wrote on the Ticket. Callers check it holds the Claim. */
+/** Records an Activity the Agent Session of `agent` wrote on the Ticket, with what it mentions. Callers check it holds the Claim. */
 export async function insertActivity(
   db: Queryable,
   ticketId: string,
@@ -78,6 +79,7 @@ export async function insertActivity(
      ${selectFrom("inserted")}`,
     [ticketId, input.kind, input.body, input.blocking, at, userId, agentId, sessionId],
   );
+  await recordMentions(db, { kind: "activity", id: rows[0]!.id });
   return toActivity(rows[0]!);
 }
 
