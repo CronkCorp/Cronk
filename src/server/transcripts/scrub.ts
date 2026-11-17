@@ -7,6 +7,8 @@
  * route scans for those in the text as uploaded anyway.
  */
 
+import { TOKEN_PREFIXES, type TokenKind } from "../identity/tokens.js";
+
 /** Characters a token runs on with, so a match next to one is part of a longer word. */
 const TOKEN_CHAR = "A-Za-z0-9_-";
 
@@ -43,9 +45,26 @@ const AUTHORIZATION =
 /** A bearer credential outside an `Authorization` header. */
 const BEARER = /\b(bearer[ \t]+)(?![[$])[A-Za-z0-9._~+/-]{16,}=*/gi;
 
+/** What each kind of Cronk's own secrets is called in its scrubbed note, in the Glossary's terms. */
+const CRONK_TOKEN_NAMES: Record<TokenKind, string> = {
+  agentToken: "Cronk Token",
+  signIn: "Cronk sign-in",
+  invitation: "Cronk Invitation",
+  passwordReset: "Cronk Password reset link",
+};
+
 /**
- * An Agent token, sign-in or link token of Cronk's own: 32 random bytes as base64url, 43 characters with no prefix. Matched as a
- * 43-character word mixing digits, capitals and small letters, which a word or identifier of that length rarely does.
+ * A secret of Cronk's own, by the prefix of its kind (`newToken`): the prefix, then 32 random bytes as base64url (43 characters,
+ * any of them, digits or not).
+ */
+const PREFIXED_CRONK_TOKENS = (Object.keys(TOKEN_PREFIXES) as TokenKind[]).map(
+  (kind): [RegExp, string] => [token(`${TOKEN_PREFIXES[kind]}[${TOKEN_CHAR}]{43}`), CRONK_TOKEN_NAMES[kind]],
+);
+
+/**
+ * A secret of Cronk's own issued before secrets had a prefix: 43 characters of base64url and nothing more. Matched as a
+ * 43-character word mixing digits, capitals and small letters, which a word or identifier of that length rarely does. Kept
+ * while such secrets are still in use.
  */
 const CRONK_TOKEN = token(`[${TOKEN_CHAR}]{43}`);
 const looksRandom = (word: string) => /[0-9]/.test(word) && /[A-Z]/.test(word) && /[a-z]/.test(word);
@@ -54,6 +73,6 @@ const looksRandom = (word: string) => /[0-9]/.test(word) && /[A-Z]/.test(word) &
 export function scrubSecrets(markdown: string): string {
   let text = markdown.replace(PRIVATE_KEY, "[scrubbed: private key]");
   text = text.replace(AUTHORIZATION, "$1$2[scrubbed]").replace(BEARER, "$1[scrubbed]");
-  for (const [pattern, kind] of PROVIDER_TOKENS) text = text.replace(pattern, `[scrubbed: ${kind}]`);
+  for (const [pattern, kind] of [...PROVIDER_TOKENS, ...PREFIXED_CRONK_TOKENS]) text = text.replace(pattern, `[scrubbed: ${kind}]`);
   return text.replace(CRONK_TOKEN, (word) => (looksRandom(word) ? "[scrubbed: token]" : word));
 }

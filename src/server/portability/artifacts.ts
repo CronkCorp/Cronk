@@ -67,6 +67,7 @@ export async function exportArtifacts(ctx: ExportContext, dir: string, projectId
         files: files.map((f) => ({ path: f.path, contentType: f.content_type })),
       });
     }
+    ctx.artifactPaths.set(a.id, `${base}.md`);
     ctx.add(`${base}.md`, {
       id: a.id,
       title: a.title,

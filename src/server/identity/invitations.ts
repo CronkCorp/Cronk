@@ -43,7 +43,7 @@ export async function createInvitation(
   db: Queryable,
   input: { workspaceId: string; email: string; role: Role; invitedBy: string; now: Date },
 ): Promise<{ invitation: Invitation; token: string }> {
-  const token = newToken();
+  const token = newToken("invitation");
   const expiresAt = new Date(input.now.getTime() + INVITATION_TTL_MS);
   const { rows } = await db.query<InvitationRow>(
     `INSERT INTO invitations (workspace_id, email, role, token_hash, invited_by, created_at, expires_at)

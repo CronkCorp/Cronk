@@ -67,6 +67,22 @@ describe("invitations", () => {
     expect((await cronk.client().get(`/api/invitations/by-token/${fresh.body.token}`)).status).toBe(404);
   });
 
+  it("carry the cronk_inv_ prefix", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const token: string = (await admin.post("/api/invitations", { email: "bob@example.com" })).body.token;
+    expect(token).toMatch(/^cronk_inv_[A-Za-z0-9_-]{43}$/);
+    expect((await cronk.client().post(`/api/invitations/by-token/${token}/accept`, { name: "Bob", password: "bobs password" })).status).toBe(201);
+  });
+
+  it("can still be accepted when sent before invitations had a prefix", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bare = await cronk.issuedBeforePrefixes((await admin.post("/api/invitations", { email: "bob@example.com" })).body.token);
+    const bob = cronk.client();
+    expect((await bob.get(`/api/invitations/by-token/${bare}`)).body.email).toBe("bob@example.com");
+    expect((await bob.post(`/api/invitations/by-token/${bare}/accept`, { name: "Bob", password: "bobs password" })).status).toBe(201);
+    expect((await bob.get("/api/me")).body.user.name).toBe("Bob");
+  });
+
   it("can make the invitee an Admin", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const bob = await joinAs(cronk, admin, "bob@example.com", "admin");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, type Client } from "./harness.js";
 
 describe("Searching", () => {
   it("finds a Ticket by a word in its description, with an excerpt around the match", async () => {
@@ -56,9 +56,27 @@ describe("Searching", () => {
     expect(found).toHaveLength(3);
     expect(found).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "report", title: "Findings", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: report }),
-        expect.objectContaining({ kind: "comment", title: "Ticket 1", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: null, excerpt: "Could the scheduler drop jobs too?" }),
-        expect.objectContaining({ kind: "comment", title: "Plan", projectKey: "CRONK", ticketKey: null, documentId: plan }),
+        expect.objectContaining({ kind: "report", title: "Findings", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: report, artifactId: null }),
+        expect.objectContaining({ kind: "comment", title: "Ticket 1", projectKey: "CRONK", ticketKey: "CRONK-1", documentId: null, artifactId: null, excerpt: "Could the scheduler drop jobs too?" }),
+        expect.objectContaining({ kind: "comment", title: "Plan", projectKey: "CRONK", ticketKey: null, documentId: plan, artifactId: null }),
+      ]),
+    );
+  });
+
+  it("finds Comments on Artifacts of a Project and of the Workspace, naming the Artifact they are on", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
+    const usage = (await admin.upload("/api/workspace/artifacts?title=Usage", await tarGz({ "index.html": "<h1>Usage</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${limits}/comments`, { body: "Can the bars show the threshold as a line?" });
+    await admin.post(`/api/artifacts/${usage}/comments`, { body: "Mark the threshold here too." });
+
+    const found = (await admin.get("/api/search?q=threshold&kind=comment")).body.results;
+    expect(found).toHaveLength(2);
+    expect(found).toEqual(
+      expect.arrayContaining([
+        { kind: "comment", title: "Limits", excerpt: "Can the bars show the threshold as a line?", projectKey: "CRONK", ticketKey: null, documentId: null, termId: null, decisionKey: null, artifactId: limits, transcriptId: null, turn: null, protected: null },
+        { kind: "comment", title: "Usage", excerpt: "Mark the threshold here too.", projectKey: null, ticketKey: null, documentId: null, termId: null, decisionKey: null, artifactId: usage, transcriptId: null, turn: null, protected: null },
       ]),
     );
   });
@@ -73,8 +91,8 @@ describe("Searching", () => {
     expect(found).toHaveLength(2);
     expect(found).toEqual(
       expect.arrayContaining([
-        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null, transcriptId: null, turn: null, protected: false },
-        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null, transcriptId: null, turn: null, protected: false },
+        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null, artifactId: null, transcriptId: null, turn: null, protected: false },
+        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null, artifactId: null, transcriptId: null, turn: null, protected: false },
       ]),
     );
   });
@@ -83,7 +101,7 @@ describe("Searching", () => {
     const { admin } = await startInstalledCronk();
     const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work tracked within a Project.", avoid: ["Issue", "chore"] })).body
       .term.id;
-    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null, transcriptId: null, turn: null, protected: false };
+    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null, artifactId: null, transcriptId: null, turn: null, protected: false };
 
     expect((await admin.get("/api/search?q=tracking")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=issues")).body.results).toEqual([asResult]);
@@ -107,6 +125,7 @@ describe("Searching", () => {
       documentId: null,
       termId: null,
       decisionKey,
+      artifactId: null,
       transcriptId: null,
       turn: null,
       protected: false,
@@ -149,16 +168,21 @@ describe("Searching", () => {
     await admin.post("/api/projects/OPS/terms", { name: "Backup", definition: "A copy kept elsewhere." });
     await admin.post("/api/workspace/terms", { name: "Restore", definition: "Bringing a backup back." });
     await admin.post("/api/projects/OPS/decisions", { title: "Nightly backups" });
+    for (const place of ["projects/OPS", "workspace"]) {
+      const artifact = (await admin.upload(`/api/${place}/artifacts?title=Disk usage`, await tarGz({ "index.html": "<h1>Disks</h1>" }))).body.artifact.id;
+      await admin.post(`/api/artifacts/${artifact}/comments`, { body: "Show the backup volume too." });
+    }
     const found = async (filters: string) =>
       ((await admin.get(`/api/search?q=backup${filters}`)).body.results as { kind: string; projectKey: string | null }[])
         .map((r) => `${r.kind} ${r.projectKey}`)
         .sort();
 
-    expect(await found("&kind=ticket&kind=comment")).toEqual(["comment CRONK", "comment OPS", "ticket CRONK", "ticket OPS"]);
-    expect(await found("&project=ops")).toEqual(["comment OPS", "decision OPS", "document OPS", "term OPS", "ticket OPS"]);
+    expect(await found("&kind=ticket&kind=comment")).toEqual(["comment CRONK", "comment OPS", "comment OPS", "comment null", "ticket CRONK", "ticket OPS"]);
+    expect(await found("&project=ops")).toEqual(["comment OPS", "comment OPS", "decision OPS", "document OPS", "term OPS", "ticket OPS"]);
     expect(await found("&kind=term")).toEqual(["term OPS", "term null"]);
     expect(await found("&kind=decision")).toEqual(["decision OPS"]);
     expect(await found("&project=OPS&kind=document")).toEqual(["document OPS"]);
+    expect(await found("&project=OPS&kind=comment")).toEqual(["comment OPS", "comment OPS"]);
     expect(await found("&kind=ticket")).toEqual(["ticket CRONK", "ticket OPS"]);
     expect(await found("&kind=document")).toEqual(["document CRONK", "document OPS", "document null"]);
 
@@ -171,8 +195,8 @@ describe("Searching", () => {
 
 describe("Search access", () => {
   /**
-   * A Ticket, a Document, a Report, a Term, a Decision and Comments in SECRET, and a Workspace Document with a Comment, a Workspace Term
-   * and a Workspace Decision, all about the comet.
+   * A Ticket, a Document, a Report, an Artifact, a Term, a Decision and Comments in SECRET, and a Workspace Document and a Workspace Artifact
+   * each with a Comment, a Workspace Term and a Workspace Decision, all about the comet.
    */
   async function cometEverywhere() {
     const { cronk, admin } = await startInstalledCronk();
@@ -194,6 +218,10 @@ describe("Search access", () => {
     await admin.post("/api/workspace/terms", { name: "Tail", definition: "What a comet trails.", avoid: ["coma"] });
     await admin.post("/api/projects/SECRET/decisions", { title: "Watch the comet nightly" });
     await admin.post("/api/workspace/decisions", { title: "Telescopes", body: "Point them at the comet." });
+    const chart = (await admin.upload("/api/projects/SECRET/artifacts?title=Orbit", await tarGz({ "index.html": "<h1>Orbit</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${chart}/comments`, { body: "Plot the comet's perihelion." });
+    const sky = (await admin.upload("/api/workspace/artifacts?title=Sky map", await tarGz({ "index.html": "<h1>Sky</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${sky}/comments`, { body: "Where is the comet tonight?" });
     return { cronk, admin };
   }
   const places = async (client: Client) =>
@@ -204,6 +232,8 @@ describe("Search access", () => {
     "comment SECRET",
     "comment SECRET",
     "comment SECRET",
+    "comment SECRET",
+    "comment null",
     "comment null",
     "decision SECRET",
     "decision null",
@@ -214,7 +244,7 @@ describe("Search access", () => {
     "term null",
     "ticket SECRET",
   ];
-  const workspaceOnly = ["comment null", "decision null", "document null", "term null"];
+  const workspaceOnly = ["comment null", "comment null", "decision null", "document null", "term null"];
 
   it("leaves out a private Project's Tickets, Documents, Reports, Comments, Terms and Decisions for Members not in it", async () => {
     const { cronk, admin } = await cometEverywhere();
