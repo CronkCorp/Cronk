@@ -1364,7 +1364,7 @@ test("see the selected item marked Resolved elsewhere once it is answered in ano
 });
 
 // Runs after the tests above, so Ada exists. It works in a Project of its own, filtered to it.
-test("open a Suggestion from the Inbox, switch to side by side, and accept it", async ({ page, request }) => {
+test("open a Suggestion from the Inbox, switch to side by side, and accept it", async ({ page, request, browser }) => {
   await signIn(page);
   await page.request.post("/api/projects", { data: { name: "Inbox suggestions", key: "INS" } });
   const { document } = await (await page.request.post("/api/projects/INS/documents", { data: { title: "Sign-in limits", body: "Five per email.\n\nNo per-IP limits.\n" } })).json();
@@ -1389,13 +1389,23 @@ test("open a Suggestion from the Inbox, switch to side by side, and accept it", 
   await expect(changes.locator(".diff-removed")).toHaveText(/No per-IP limits\./);
   await expect(changes.locator(".diff-added")).toHaveText(/Fifty per IP\./);
 
-  // Side by side shows the current Version beside the suggestion, and stays chosen for this User.
+  // Side by side shows the current Version beside the suggestion, and stays chosen for this User across a reload.
   await detail.getByRole("button", { name: "Side by side" }).click();
   await expect(detail.getByRole("list", { name: "Version 1, current" })).toContainText("No per-IP limits.");
   await expect(detail.getByRole("list", { name: "Suggested by suggest-bot" })).toContainText("Fifty per IP.");
   await page.reload();
   await expect(detail.getByRole("button", { name: "Side by side" })).toHaveAttribute("aria-pressed", "true");
   await expect(detail).toContainText("Version 2 will be credited to suggest-bot, accepted by you.");
+  // The choice is kept on the server, so another browser signed in as Ada opens the Diff side by side too.
+  const elsewhere = await browser.newContext();
+  const other = await elsewhere.newPage();
+  await signIn(other);
+  await other.goto(page.url());
+  const otherDetail = other.getByRole("region", { name: "Selected item" });
+  await expect(otherDetail).toContainText("The proxy passes client IPs now.");
+  await expect(otherDetail.getByRole("button", { name: "Side by side" })).toHaveAttribute("aria-pressed", "true");
+  await expect(otherDetail.getByRole("list", { name: "Suggested by suggest-bot" })).toContainText("Fifty per IP.");
+  await elsewhere.close();
 
   await detail.getByRole("button", { name: "Accept", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Nothing waiting on you" })).toBeVisible();

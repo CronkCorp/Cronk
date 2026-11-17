@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
-import type { Conflict, RecordedActor, SuggestedContent, Suggestion, SuggestionMerge } from "./api.js";
+import { api, type Conflict, type RecordedActor, type SuggestedContent, type Suggestion, type SuggestionMerge, type User } from "./api.js";
 import type { Fields, Mergeable, MergedField } from "./merge.js";
-import { SUGGESTION_TEXT_FIELD as MAIN_FIELD } from "../shared/values.js";
+import { SUGGESTION_TEXT_FIELD as MAIN_FIELD, type DiffView } from "../shared/values.js";
 import { KindLabel } from "./components/tags.js";
 import { diffLines, type DiffLine } from "./diff.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -38,28 +38,20 @@ export function contentText(kind: Suggestion["item"]["kind"], c: SuggestedConten
   return [...lines, ...(lines.length ? [""] : []), String(main ?? "")].join("\n");
 }
 
-/** How a Diff is shown: one column of changes, or the two Versions side by side. */
-export type DiffView = "unified" | "split";
+/** The Diff view each User chose on this page, which holds even when saving it failed, until the page reloads. */
+const chosenHere = new Map<string, DiffView>();
 
-/** Where the Diff view each User last chose is kept in this browser. */
-const viewKey = (userId: string) => `cronk:diff-view:${userId}`;
-
-/** The Diff view `userId` last chose, remembered in this browser; unified until they choose. */
-export function useDiffView(userId: string): [DiffView, (view: DiffView) => void] {
-  const [view, setView] = useState<DiffView>(() => {
-    try {
-      return localStorage.getItem(viewKey(userId)) === "split" ? "split" : "unified";
-    } catch {
-      return "unified";
-    }
-  });
+/**
+ * The Diff view `me` last chose, kept on their User so it follows them to other browsers; unified until they choose.
+ * A choice is saved as it is made. `me` was read as the page loaded, so a choice made since, saved or not, wins over it.
+ */
+export function useDiffView(me: User): [DiffView, (view: DiffView) => void] {
+  const [view, setView] = useState<DiffView>(() => chosenHere.get(me.id) ?? me.diffView);
   const choose = (next: DiffView) => {
     setView(next);
-    try {
-      localStorage.setItem(viewKey(userId), next);
-    } catch {
-      // Not remembered, as in a private window; the choice still holds for this page.
-    }
+    chosenHere.set(me.id, next);
+    // If the save fails, the choice still holds on this page, so the switch never feels broken.
+    api.setDiffView(next).catch(() => {});
   };
   return [view, choose];
 }
