@@ -62,6 +62,30 @@ describe("What an Agent did on Artifacts", () => {
       { kind: "artifact_version", at: "2026-01-01T09:00:01.000Z", session: inSession, projectKey: "CRONK", ...nowhere, artifact: { id: artifact.id, title: "Limits", version: 1 } },
     ]);
   });
+
+  it("lists the Comments it posted on an Artifact, naming the Version each is on", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const { artifact } = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await site(1))).body;
+    await admin.upload(`/api/artifacts/${artifact.id}/versions?baseVersion=1`, await site(2));
+    cronk.clock.advance(1000);
+    const onFirst = (await agent.post(`/api/artifacts/${artifact.id}/comments`, { body: "The first take had the line.", version: 1 })).body.comment;
+    cronk.clock.advance(1000);
+    await admin.post(`/api/artifacts/${artifact.id}/comments`, { body: "Not by the Agent." });
+    cronk.clock.advance(1000);
+    const onLatest = (await agent.post(`/api/artifacts/${artifact.id}/comments`, { body: "This one doesn't." })).body.comment;
+
+    const res = await admin.get(`/api/agents/${claude.agentId}/record`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const inSession = { id: agent.sessionId };
+    const nowhere = { ticket: null, document: null, change: null, activity: null, version: null };
+    expect(res.body.record).toEqual([
+      { kind: "comment", at: "2026-01-01T09:00:03.000Z", session: inSession, projectKey: "CRONK", ...nowhere,
+        comment: { id: onLatest.id, body: "This one doesn't." }, artifact: { id: artifact.id, title: "Limits", version: 2 } },
+      { kind: "comment", at: "2026-01-01T09:00:01.000Z", session: inSession, projectKey: "CRONK", ...nowhere,
+        comment: { id: onFirst.id, body: "The first take had the line." }, artifact: { id: artifact.id, title: "Limits", version: 1 } },
+    ]);
+  });
 });
 
 describe("What an Agent did, as each User may see it", () => {
