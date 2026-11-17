@@ -27,6 +27,7 @@ import {
   textToKeep,
 } from "./transcripts.js";
 import { redactionOf } from "./redact.js";
+import type { TranscriptRefusalReason } from "../../shared/values.js";
 
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
@@ -108,7 +109,11 @@ export function transcriptRoutes(ctx: AppContext) {
           response: {
             200: answer("The Transcript, created or changed", holding("transcript", "Transcript")),
             ...errors(400, 401, 403, 410, 413),
-            422: { description: "The chat names none of the Agent's Agent Sessions that changed anything, so it isn't kept", ...ref("NothingChanged") },
+            // Any other 422 this route may come to answer is the plain error, so it's sent as it is rather than refused by the serializer.
+            422: {
+              description: "The chat isn't kept: with `reason` `nothing_changed` when it names none of the Agent's Agent Sessions that changed anything",
+              anyOf: [ref("TranscriptRefused"), ref("Error")],
+            },
           },
         },
       },
@@ -137,7 +142,7 @@ export function transcriptRoutes(ctx: AppContext) {
             throw new HttpError(
               422,
               "This chat names none of this Agent's Agent Sessions that changed anything, so it isn't kept. Only chats that led to changes are",
-              { reason: "nothing_changed" },
+              { reason: "nothing_changed" satisfies TranscriptRefusalReason },
             );
           }
           return storeTranscript(tx, { workspaceId, agentId: actor.agent.id, chatId, existing, upload, at: ctx.clock.now() });
