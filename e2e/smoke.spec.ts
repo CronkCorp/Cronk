@@ -1732,6 +1732,9 @@ test("download a Project's Decisions as docs/adr from its register", async ({ pa
   expect(download.suggestedFilename()).toMatch(/^cronk-ADR-adr-.*\.tar\.gz$/);
 });
 
+/** The bytes of a PNG file, enough for its type to be told. */
+const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
+
 /**
  * Pastes `files` into the element `target` matches, as the clipboard would hand them over. Answers whether the paste's
  * default was left alone, as `dispatchEvent` does.
@@ -1760,7 +1763,6 @@ test("paste an image into a Document's editor, and see it in the rendered body a
     el.focus();
     el.setSelectionRange(8, 8);
   });
-  const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
   await pasteFiles(editor, [{ name: "flow.png", type: "image/png", bytes: png }]);
   await expect(editor).toHaveValue(/^Before\.\n!\[flow\.png\]\(\/api\/attachments\/[0-9a-f-]+\/file\)\nAfter\.$/);
   const embedded = (await editor.inputValue()).split("\n")[1]!;
@@ -1838,7 +1840,6 @@ test("paste a spreadsheet's cells into a Ticket's Comment box as text, while a p
   const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Pasted into" } })).json();
   const attachments = async () => (await (await page.request.get(`/api/tickets/${ticket.key}/attachments`)).json()).attachments as { name: string }[];
   await page.goto(`/tickets/${ticket.key}`);
-  const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
   const box = page.getByLabel("Comment", { exact: true });
 
   // Text with an image beside it, as a copy from a spreadsheet carries, is the field's to paste: nothing is attached.
@@ -1862,7 +1863,6 @@ test("paste a spreadsheet's cells into a Document's passage Comment as text, att
   const box = page.getByLabel("Comment", { exact: true });
   await expect(box).toBeFocused();
 
-  const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
   expect(await pasteFiles(box, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1")).toBe(true);
   // An image pasted alone attaches to the Document, so the earlier paste had its chance to as well.
   expect(await pasteFiles(box, [{ name: "chart.png", type: "image/png", bytes: png }])).toBe(false);

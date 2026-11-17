@@ -76,7 +76,7 @@ export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): 
     const paste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
       if (files.length === 0 || e.defaultPrevented) return;
-      if (e.clipboardData?.types.includes("text/plain") && isEditable(e.target)) return;
+      if (e.clipboardData?.types.includes("text/plain") && takesPastedText(e.target)) return;
       e.preventDefault();
       latest.current(files);
     };
@@ -95,12 +95,15 @@ export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): 
 }
 
 /** Input types that take typed text, so take a paste's text. */
-const textInputTypes = new Set(["text", "search", "url", "tel", "email", "password", "number"]);
+const textInputTypes = new Set(["text", "search", "url", "tel", "email", "password"]);
 
-/** Whether `target` is a field a paste's text goes into: a text area, a text-type input or something content-editable. */
-function isEditable(target: EventTarget | null): boolean {
-  if (target instanceof HTMLTextAreaElement) return true;
-  if (target instanceof HTMLInputElement) return textInputTypes.has(target.type);
+/**
+ * Whether `target` takes a paste's text: a text area or text-type input that isn't read-only, or something
+ * content-editable.
+ */
+function takesPastedText(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return !target.readOnly;
+  if (target instanceof HTMLInputElement) return !target.readOnly && textInputTypes.has(target.type);
   return target instanceof HTMLElement && target.isContentEditable;
 }
 
