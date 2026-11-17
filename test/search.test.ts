@@ -145,14 +145,16 @@ describe("Searching", () => {
     await admin.post("/api/workspace/documents", { title: "Backup policy" });
     await admin.post("/api/projects/OPS/terms", { name: "Backup", definition: "A copy kept elsewhere." });
     await admin.post("/api/workspace/terms", { name: "Restore", definition: "Bringing a backup back." });
+    await admin.post("/api/projects/OPS/decisions", { title: "Nightly backups" });
     const found = async (filters: string) =>
       ((await admin.get(`/api/search?q=backup${filters}`)).body.results as { kind: string; projectKey: string | null }[])
         .map((r) => `${r.kind} ${r.projectKey}`)
         .sort();
 
     expect(await found("&kind=ticket&kind=comment")).toEqual(["comment CRONK", "comment OPS", "ticket CRONK", "ticket OPS"]);
-    expect(await found("&project=ops")).toEqual(["comment OPS", "document OPS", "term OPS", "ticket OPS"]);
+    expect(await found("&project=ops")).toEqual(["comment OPS", "decision OPS", "document OPS", "term OPS", "ticket OPS"]);
     expect(await found("&kind=term")).toEqual(["term OPS", "term null"]);
+    expect(await found("&kind=decision")).toEqual(["decision OPS"]);
     expect(await found("&project=OPS&kind=document")).toEqual(["document OPS"]);
     expect(await found("&kind=ticket")).toEqual(["ticket CRONK", "ticket OPS"]);
     expect(await found("&kind=document")).toEqual(["document CRONK", "document OPS", "document null"]);
@@ -165,7 +167,10 @@ describe("Searching", () => {
 });
 
 describe("Search access", () => {
-  /** A Ticket, a Document, a Report, a Term and Comments in SECRET, and a Workspace Document with a Comment and a Workspace Term, all about the comet. */
+  /**
+   * A Ticket, a Document, a Report, a Term, a Decision and Comments in SECRET, and a Workspace Document with a Comment, a Workspace Term
+   * and a Workspace Decision, all about the comet.
+   */
   async function cometEverywhere() {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
@@ -184,6 +189,8 @@ describe("Search access", () => {
     await admin.post(`/api/documents/${handbook}/comments`, { body: "Comet again." });
     await admin.post("/api/projects/SECRET/terms", { name: "Comet", definition: "What we track." });
     await admin.post("/api/workspace/terms", { name: "Tail", definition: "What a comet trails.", avoid: ["coma"] });
+    await admin.post("/api/projects/SECRET/decisions", { title: "Watch the comet nightly" });
+    await admin.post("/api/workspace/decisions", { title: "Telescopes", body: "Point them at the comet." });
     return { cronk, admin };
   }
   const places = async (client: Client) =>
@@ -195,6 +202,8 @@ describe("Search access", () => {
     "comment SECRET",
     "comment SECRET",
     "comment null",
+    "decision SECRET",
+    "decision null",
     "document SECRET",
     "document null",
     "report SECRET",
@@ -202,9 +211,9 @@ describe("Search access", () => {
     "term null",
     "ticket SECRET",
   ];
-  const workspaceOnly = ["comment null", "document null", "term null"];
+  const workspaceOnly = ["comment null", "decision null", "document null", "term null"];
 
-  it("leaves out a private Project's Tickets, Documents, Reports, Comments and Terms for Members not in it", async () => {
+  it("leaves out a private Project's Tickets, Documents, Reports, Comments, Terms and Decisions for Members not in it", async () => {
     const { cronk, admin } = await cometEverywhere();
     const bob = await joinAs(cronk, admin, "bob@example.com");
     expect(await places(bob)).toEqual(everything);
