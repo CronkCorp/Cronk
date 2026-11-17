@@ -6,8 +6,9 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type User } from "./api.js";
-import { ContentEditor, contentText, creditNote, Diff, Reasoning, useDiffView } from "./suggestions.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type User } from "./api.js";
+import { ContentEditor, contentText, creditNote, Diff, mainText, mergeCreditNote, Reasoning, settledContent, suggestionMergeable, useDiffView } from "./suggestions.js";
+import { conflictCount, ResolveMerge } from "./merge.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CONTINUED, ReopenDialog } from "./components/reopen-dialog.js";
 import { CronkMarkdown, plainText } from "./markdown.js";
@@ -781,21 +782,36 @@ function DecisionDetail(props: DetailProps<DecisionItem>) {
  * A Suggestion an Agent made: its item, the Agent and its Agent Session, the base Version and the Ticket it came from,
  * then the Agent's reasoning and the Diff, and Accept, Edit and accept… and Reject… with a required reason, which
  * reaches the Agent (docs/ui.md § Inbox and Triage in Phase 2). The note beside the actions says who the new Version
- * will be credited to.
+ * will be credited to. An outdated one names the newer Version and who saved it, and Accept becomes Merge and
+ * accept…, which merges the Suggestion with that Version, leaving parts both changed for the User to settle.
  */
 function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
   const { suggestion } = props.item;
   const { item, proposedBy } = suggestion;
-  const [mode, setMode] = useState<"read" | "edit" | "reject">("read");
+  const [mode, setMode] = useState<"read" | "edit" | "reject" | "merge">("read");
   const [edited, setEdited] = useState<SuggestedContent>(suggestion.content);
   const [reason, setReason] = useState("");
+  const [merge, setMerge] = useState<SuggestionMerge>();
   const [view, setView] = useDiffView(props.me.id);
   const accept = useAction(() => props.acting(() => api.acceptSuggestion(suggestion.id, mode === "edit" ? edited : undefined)), props.onDone);
+  const acceptMerged = useAction(
+    (content: SuggestedContent, onto: number) => props.acting(() => api.acceptSuggestion(suggestion.id, content, onto)),
+    props.onDone,
+  );
+  const openMerge = useAction(
+    () => api.mergeSuggestion(suggestion.id),
+    (m) => {
+      setMerge(m);
+      setMode("merge");
+    },
+  );
   const reject = useAction(() => props.acting(() => api.rejectSuggestion(suggestion.id, reason)), props.onDone);
-  const error = accept.error ?? reject.error;
-  const blocked = props.resolved || suggestion.outdated;
+  const error = accept.error ?? acceptMerged.error ?? openMerge.error ?? reject.error;
   const runAccept = () => {
-    if (!accept.busy && !blocked) void accept.run();
+    if (props.resolved) return;
+    if (!suggestion.outdated) {
+      if (!accept.busy) void accept.run();
+    } else if (mode !== "merge" && !openMerge.busy) void openMerge.run();
   };
   const reasonBox = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -829,13 +845,24 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
           )}
         </span>
       </div>
-      {suggestion.outdated && (
-        <Banner tone="info" role="status">
-          <p>{`Outdated: the item is at Version ${item.version} now, newer than Version ${suggestion.baseVersion} this Suggestion started from. It stays open; accepting it needs a merge with Version ${item.version}.`}</p>
-        </Banner>
-      )}
+      {suggestion.outdated && <OutdatedBanner suggestion={suggestion} merge={mode === "merge" ? merge : undefined} />}
       <Reasoning projectKey={item.projectKey}>{suggestion.reasoning}</Reasoning>
-      {mode === "edit" ? (
+      {mode === "merge" && merge ? (
+        <ResolveMerge
+          merge={suggestionMergeable(item.kind, merge)}
+          mine={mainText(item.kind, suggestion.content)}
+          mineLabel="Suggestion"
+          theirsLabel={`Version ${merge.onto}${suggestion.newerVersion ? `, ${suggestion.newerVersion.actor.name}` : ""}`}
+          onResolved={(settled) => {
+            if (!acceptMerged.busy) void acceptMerged.run(settledContent(item.kind, settled), merge.onto);
+          }}
+          onBack={() => setMode("read")}
+          submitLabel={`Accept merged as Version ${merge.onto + 1}`}
+          backLabel="Back"
+          note={mergeCreditNote(merge.onto + 1)}
+          busy={acceptMerged.busy || props.resolved}
+        />
+      ) : mode === "edit" ? (
         <ContentEditor kind={item.kind} value={edited} onChange={setEdited} disabled={props.resolved} />
       ) : (
         <Diff
@@ -861,19 +888,58 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         />
       ) : mode === "edit" ? (
         <div className="actions suggestion-actions">
-          <Button onClick={runAccept} disabled={blocked || accept.busy}>Accept</Button>
+          <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
           <Button variant="secondary" onClick={() => setMode("read")}>Cancel</Button>
           <span className="muted small">{creditNote(next, proposedBy, changed)}</span>
         </div>
+      ) : mode === "merge" ? null : suggestion.outdated ? (
+        <div className="actions suggestion-actions">
+          <Button onClick={runAccept} disabled={props.resolved || openMerge.busy}>Merge and accept…</Button>
+          <Button variant="secondary" onClick={() => setMode("reject")} disabled={props.resolved}>Reject…</Button>
+          <span className="muted small">{mergeCreditNote(next)}</span>
+        </div>
       ) : (
         <div className="actions suggestion-actions">
-          <Button onClick={runAccept} disabled={blocked || accept.busy}>Accept</Button>
-          <Button variant="secondary" onClick={() => setMode("edit")} disabled={blocked}>Edit and accept…</Button>
+          <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+          <Button variant="secondary" onClick={() => setMode("edit")} disabled={props.resolved}>Edit and accept…</Button>
           <Button variant="secondary" onClick={() => setMode("reject")} disabled={props.resolved}>Reject…</Button>
-          {!suggestion.outdated && <span className="muted small">{creditNote(next, proposedBy, false)}</span>}
+          <span className="muted small">{creditNote(next, proposedBy, false)}</span>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The `--info` banner of an outdated Suggestion: the newer Version and who saved it, and what accepting it does; once its
+ * merge is open, how many parts need a choice.
+ */
+function OutdatedBanner(props: { suggestion: SuggestionItem["suggestion"]; merge?: SuggestionMerge }) {
+  const { suggestion, merge } = props;
+  const newer = suggestion.newerVersion;
+  const choices = merge ? conflictCount(suggestionMergeable(suggestion.item.kind, merge)) : 0;
+  const advice = !merge
+    ? "Merge and accept… merges both: parts only one side changed merge on their own."
+    : choices === 0
+      ? "Everything merged cleanly; check it and accept."
+      : `${choices === 1 ? "One part needs" : `${choices} parts need`} your choice; the rest merged cleanly.`;
+  return (
+    <Banner tone="info" role="status">
+      <p>
+        <strong>{`Version ${suggestion.item.version} was saved since Version ${suggestion.baseVersion}, which this Suggestion started from.`}</strong>
+      </p>
+      <p>
+        {newer && (
+          <>
+            <Actor actor={newer.actor} />
+            {` saved Version ${newer.number} `}
+            <RelativeTime at={newer.at} />
+            {". "}
+          </>
+        )}
+        {advice}
+      </p>
+    </Banner>
   );
 }
 
