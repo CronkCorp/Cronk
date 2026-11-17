@@ -163,7 +163,7 @@ const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
 
 /** The Artifacts a Markdown body embeds: their addresses standing alone on a line. */
-const embeds = (whose: string) => ({
+export const embeds = (whose: string) => ({
   type: "array",
   items: object({
     artifactId: id,
