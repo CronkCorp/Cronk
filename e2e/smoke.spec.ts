@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, resendOnNetworkChange, test, type Locator } from "./fixtures.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -215,7 +215,7 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await page.getByRole("button", { name: "Invite" }).click();
   const link = await page.getByLabel("Invitation link").inputValue();
 
-  const bobContext = await browser.newContext();
+  const bobContext = resendOnNetworkChange(await browser.newContext());
   const bob = await bobContext.newPage();
   await bob.goto(link);
   await expect(bob.getByRole("heading", { name: "Join Acme" })).toBeVisible();
@@ -238,10 +238,7 @@ test("invite a Member, who joins from the link and loses sight of the Project on
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
 test("register an Agent, issue it a token, and see its change in a Ticket's history", async ({ page, request }) => {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(ada.email);
-  await page.getByLabel("Password").fill(ada.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signIn(page);
 
   await page.getByRole("link", { name: "Agents" }).click();
   // Registering happens in a dialog opened from the page head.
@@ -1180,7 +1177,8 @@ test("answer a blocking question in the timeline, where only Comments and questi
   await write("activities", { kind: "question", body: "Per email or per IP?", blocking: true });
   const question = timeline.getByRole("listitem").filter({ hasText: "Per email or per IP?" });
   await expect(question).toContainText("Blocking question");
-  expect(await page.evaluate(() => window.scrollY)).toBe(120);
+  // Polled: the page may still be laying out what arrived, and settles where the User was reading.
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(120);
 
   // A Plan offers no Reply; a Report is a card with its headings scaled down and a link to open it.
   const plan = timeline.getByRole("listitem").filter({ hasText: "Count failed sign-ins." });
@@ -1589,4 +1587,102 @@ test("download a Project's Decisions as docs/adr from its register", async ({ pa
   await head.getByRole("link", { name: "Export docs/adr" }).click();
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/^cronk-ADR-adr-.*\.tar\.gz$/);
+});
+
+/** Pastes `files` into the element `target` matches, as the clipboard would hand them over. */
+const pasteFiles = (target: Locator, files: { name: string; type: string; bytes: number[] }[], text?: string) =>
+  target.evaluate(
+    (el, { files, text }) => {
+      const data = new DataTransfer();
+      for (const f of files) data.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }));
+      if (text !== undefined) data.setData("text/plain", text);
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    },
+    { files, text },
+  );
+
+test("paste an image into a Document's editor, and see it in the rendered body and in the earlier Version", async ({ page }) => {
+  await signIn(page);
+  const created = await page.request.post("/api/workspace/documents", { data: { title: "Sign-in flow", body: "Before.\n\nAfter." } });
+  const id = (await created.json()).document.id as string;
+  await page.goto(`/documents/${id}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+
+  // Pasting a file uploads it and puts its Markdown where the cursor is; Ctrl+Z takes the Markdown out again.
+  const editor = page.getByLabel("Body (Markdown)");
+  await editor.evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    el.setSelectionRange(8, 8);
+  });
+  const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
+  await pasteFiles(editor, [{ name: "flow.png", type: "image/png", bytes: png }]);
+  await expect(editor).toHaveValue(/^Before\.\n!\[flow\.png\]\(\/api\/attachments\/[0-9a-f-]+\/file\)\nAfter\.$/);
+  const embedded = (await editor.inputValue()).split("\n")[1]!;
+  // Attached once, by the editor, not again by the page.
+  await expect(page.getByRole("region", { name: "Attachments" }).getByRole("button", { name: "Open flow.png" })).toHaveCount(1);
+  await page.keyboard.press("Control+z");
+  await expect(editor).toHaveValue("Before.\n\nAfter.");
+  await page.keyboard.press("Control+Shift+z");
+  await expect(editor).toHaveValue(`Before.\n${embedded}\nAfter.`);
+  // A paste that carries text too, as a copy from a spreadsheet does, is the text's to paste: nothing is attached.
+  await pasteFiles(editor, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1");
+  await page.getByRole("button", { name: "Save" }).click();
+
+  const body = page.getByTestId("document-body");
+  await expect(body.getByRole("img", { name: "flow.png" })).toBeVisible();
+  expect((await (await page.request.get(`/api/documents/${id}/attachments`)).json()).attachments).toHaveLength(1);
+  // Saved again without it, the earlier Version still shows it.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Rewritten.");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Rewritten.");
+  await page.getByRole("button", { name: "Versions" }).click();
+  await page.getByRole("list", { name: "Versions" }).getByRole("listitem").filter({ hasText: "Version 2" }).getByRole("button", { name: "View" }).click();
+  await expect(page.getByLabel("Version 2").getByRole("img", { name: "flow.png" })).toBeVisible();
+});
+
+test("insert an attached video from its thumbnail while editing, and play it in the rendered body and the earlier Version", async ({ page }) => {
+  await signIn(page);
+  const created = await page.request.post("/api/workspace/documents", { data: { title: "Demo reel", body: "Watch:" } });
+  const id = (await created.json()).document.id as string;
+  const attach = async (name: string, data: Buffer, type: string) => {
+    const res = await page.request.post(`/api/documents/${id}/attachments?name=${name}`, { data, headers: { "content-type": type } });
+    expect(res.status()).toBe(201);
+    return (await res.json()).attachment.id as string;
+  };
+  const video = await attach("demo.mp4", Buffer.alloc(2048), "video/mp4");
+  await attach("still.png", Buffer.from("89504e470d0a1a0a", "hex"), "image/png");
+  await page.goto(`/documents/${id}`);
+  const thumbnails = page.getByRole("region", { name: "Attachments" });
+  await expect(thumbnails.getByRole("button", { name: "Open demo.mp4" })).toBeVisible();
+  // "Insert" is only there while the editor is open.
+  await expect(thumbnails.getByRole("button", { name: "Insert demo.mp4" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  const editor = page.getByLabel("Body (Markdown)");
+  await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
+  await editor.press("Enter");
+  await thumbnails.getByRole("button", { name: "Insert demo.mp4" }).click();
+  await editor.press("Enter");
+  await thumbnails.getByRole("button", { name: "Insert still.png" }).click();
+  await expect(editor).toHaveValue(new RegExp(`^Watch:\\n!\\[demo\\.mp4\\]\\(/api/attachments/${video}/file\\)\\n!\\[still\\.png\\]\\(/api/attachments/[0-9a-f-]+/file\\)$`));
+  await expect(page.getByRole("region", { name: "Preview" }).locator("video")).toHaveAttribute("controls", "");
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // An embedded video plays in place; an embedded image is still an image.
+  const body = page.getByTestId("document-body");
+  const player = body.locator("video");
+  await expect(player).toHaveAttribute("src", `/api/attachments/${video}/file`);
+  await expect(player).toHaveAttribute("controls", "");
+  await expect(body.getByRole("img", { name: "demo.mp4" })).toHaveCount(0);
+  await expect(body.getByRole("img", { name: "still.png" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Cut.");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Cut.");
+  await page.getByRole("button", { name: "Versions" }).click();
+  await page.getByRole("list", { name: "Versions" }).getByRole("listitem").filter({ hasText: "Version 2" }).getByRole("button", { name: "View" }).click();
+  await expect(page.getByLabel("Version 2").locator("video")).toHaveAttribute("src", `/api/attachments/${video}/file`);
+  await expect(page.getByLabel("Version 2").getByRole("img", { name: "still.png" })).toBeVisible();
 });

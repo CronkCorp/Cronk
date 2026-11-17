@@ -47,6 +47,7 @@ import type {
   BlockingRef,
   Report,
   ReopenChoice,
+  DependentChoice,
   Role,
   SearchKind,
   Storage,
@@ -121,6 +122,7 @@ export type {
   BlockingRef,
   Report,
   ReopenChoice,
+  DependentChoice,
   Role,
   SearchKind,
   Storage,
@@ -185,12 +187,17 @@ const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
-    body: body === undefined ? null : JSON.stringify(body),
-    credentials: "same-origin",
-  });
+  const send = () =>
+    fetch(path, {
+      method,
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? null : JSON.stringify(body),
+      credentials: "same-origin",
+    });
+  // A browser drops requests in flight when the machine's network changes (Chromium's ERR_NETWORK_CHANGED: a laptop
+  // joining another network, a VPN or a container coming up). A read is safe to send again, so it is, once; a write is
+  // not, as it may have gone through. A server that is really down fails the second time too.
+  const res = await send().catch((err: unknown) => (method === "GET" ? send() : Promise.reject(err)));
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
@@ -538,6 +545,9 @@ export const api = {
   /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
   rejectSuggestion: (id: string, reason: string) =>
     request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),
+  /** What a Reopen of an Unverified completion would ask about each Ticket it blocks: its choices, whether the User may change it, where a Pause moves it. */
+  reopenChoices: (key: string) =>
+    request<{ dependents: DependentChoice[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/reopen`).then((r) => r.dependents),
   /**
    * Reopens an Agent's Unverified completion back to its Delegate in a Started Status, with a Comment saying why, and a choice
    * for each Ticket it blocks that already continued on the work.

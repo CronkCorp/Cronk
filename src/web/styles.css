@@ -151,6 +151,7 @@ a.link:hover { text-decoration: underline; }
 .segment + .segment { border-left: 1px solid var(--border); }
 .segment:hover { background: var(--surface-2); }
 .segment.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.segment:disabled { opacity: 0.5; cursor: not-allowed; background: var(--surface); }
 .panel.wide { max-width: none; margin-bottom: 16px; }
 .panel { margin-bottom: 16px; }
 
@@ -284,6 +285,8 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .preview-video .play { position: absolute; color: var(--on-accent); background: var(--accent); border-radius: 999px; padding: 4px 8px; font-size: 12px; }
 .thumbnail-caption { display: flex; flex-direction: column; padding: 8px; font-size: 12px; min-width: 0; }
 .thumbnail-name { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumbnails > li { display: flex; flex-direction: column; gap: 4px; }
+.thumbnail-insert { align-self: flex-start; }
 .drop-zone { padding: 12px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 13px; }
 .drop-zone.dragging { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .side-files { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }

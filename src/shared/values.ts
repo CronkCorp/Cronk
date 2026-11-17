@@ -17,6 +17,10 @@ export const WORKABLE_CATEGORIES: readonly StatusCategory[] = ["backlog", "unsta
 export const VERIFICATIONS = ["unverified", "verified"] as const;
 export type Verification = (typeof VERIFICATIONS)[number];
 
+/** What a Reopen does to a Ticket it blocks that already continued on the work. */
+export const REOPEN_CHOICES = ["keep", "pause", "reopen"] as const;
+export type ReopenChoice = (typeof REOPEN_CHOICES)[number];
+
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];
