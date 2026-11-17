@@ -385,6 +385,30 @@ describe("The Workspace's Terms' live updates", () => {
     await expectQuiet(stream);
   });
 
+  it("tell nothing of a create or save that rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ticket = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    // Each writes the Term's new Version, then fails recording what it mentions, as on a database blip.
+    let creating!: Promise<{ status: number }>;
+    let saving!: Promise<{ status: number }>;
+    await cronk.interruptQueriesOn("mentions", async () => {
+      creating = admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." });
+    });
+    await cronk.interruptQueriesOn("mentions", async () => {
+      saving = admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "Lost." });
+    });
+    expect((await creating).status).toBe(500);
+    expect((await saving).status).toBe(500);
+    expect((await admin.get("/api/workspace/terms")).body.terms).toEqual([expect.objectContaining({ name: "Ticket", version: 1 })]);
+
+    await admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "A unit of tracked work." });
+    expect(await stream.next()).toEqual(CHANGED);
+    await expectQuiet(stream);
+  });
+
   it("tell their watchers when a Project Term changes, as it may override a Workspace Term", async () => {
     const { admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });

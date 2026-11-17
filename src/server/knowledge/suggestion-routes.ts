@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { actingUser } from "../actor.js";
-import { termsChanged } from "./term-routes.js";
+import { termsChanged } from "./terms.js";
 import { transaction } from "../db/database.js";
 import { waitingItemsChanged } from "../inbox/inbox.js";
 import { agentTopic } from "../live/topics.js";
@@ -90,12 +90,12 @@ export function suggestionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /**
      * Tells whoever a change to `suggestion`, in the Workspace with this id, concerns: its reviewer's Inbox; the watchers of
-     * a Term's Terms, whenever its count of open Suggestions or (once accepted) the Term changes. A Document's or a Decision's
-     * watchers hear of the Version it made from `saveVersion` or `saveDecision`.
+     * a Term's Terms, whenever its count of open Suggestions changes. Once it is accepted, the watchers of the Document, Term
+     * or Decision it changed hear of the Version it made from `saveVersion`, `saveTermVersion` or `saveDecision`.
      */
     const changed = (suggestion: Suggestion, workspaceId: string) => {
       waitingItemsChanged(ctx.live, [suggestion.reviewer?.id]);
-      if (suggestion.item.kind === "term") termsChanged(ctx.live, { workspaceId, projectId: suggestion.item.projectId });
+      if (suggestion.item.kind === "term" && suggestion.state !== "accepted") termsChanged(ctx.live, { workspaceId, projectId: suggestion.item.projectId });
     };
 
     app.post<{ Body: NewSuggestion }>(

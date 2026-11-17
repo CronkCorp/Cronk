@@ -5,7 +5,7 @@ import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
-import { termsChanged } from "../knowledge/term-routes.js";
+import { termsChanged } from "../knowledge/terms.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
