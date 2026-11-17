@@ -192,10 +192,15 @@ export function afterUpload(existing: Upload | undefined, markdown: string, name
 }
 
 /**
- * What a Transcript keeps of an uploaded text: the text with known secrets scrubbed and then the Owner's `redactions` applied,
- * as they were applied to its earlier texts, so a re-upload continuing one still starts with it.
+ * What a Transcript keeps of an uploaded text: the Owner's `redactions` applied, known secrets scrubbed, and the redactions applied
+ * again, as they were applied to its earlier texts, so a re-upload continuing one still starts with it. The first pass finds
+ * passages redacted over raw text, as on a Transcript stored before scrubbing, which scrubbing would otherwise change so they no
+ * longer match; the last finds passages redacted over scrubbed text, which may hold a scrub note. Where a redaction covered only
+ * part of a raw secret, the rest may no longer look like a secret and stays as it is, as the stored text already holds it.
+ * Keeping what it returns again returns the same text.
  */
-export const textToKeep = (markdown: string, redactions: Redaction[]): string => applyRedactions(scrubSecrets(markdown), redactions);
+export const textToKeep = (markdown: string, redactions: Redaction[]): string =>
+  applyRedactions(scrubSecrets(applyRedactions(markdown, redactions)), redactions);
 
 /** The Transcript's hand redactions, in the order they were made. */
 export async function redactionsOf(db: Queryable, transcriptId: string): Promise<Redaction[]> {
