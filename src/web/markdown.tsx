@@ -1,8 +1,10 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ComponentProps } from "react";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Nodes } from "mdast";
 import Markdown, { type Components } from "react-markdown";
-import { api } from "./api.js";
+import { api, attachmentFileUrl } from "./api.js";
+import { InlinePlayer, PageAttachments } from "./attachments.js";
+import { fileKind } from "./components/files.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
 import { alignCodeToSource, alignToSource, encodeBounds, type Container, type SourceBounds } from "./source-map.js";
@@ -436,6 +438,18 @@ async function loadLinkTargets(projectKey: string | null | undefined): Promise<L
 const NO_TARGETS: LinkTargets = { projectKeys: new Set(), workspaceDecisions: new Set(), terms: new Map() };
 
 /**
+ * An image in rendered Markdown. One whose address is the file of an Attachment the page loaded, and that is video or
+ * audio, plays in place instead; anything else is the image as written.
+ */
+function MarkdownImage({ node: _, ...props }: ComponentProps<"img"> & { node?: unknown }) {
+  const page = useContext(PageAttachments);
+  const attachment = props.src === undefined ? undefined : page?.attachments.find((a) => attachmentFileUrl(a.id) === props.src);
+  const kind = attachment && fileKind(attachment.contentType);
+  if (attachment && (kind === "video" || kind === "audio")) return <InlinePlayer kind={kind} attachment={attachment} label={props.alt} />;
+  return <img {...props} />;
+}
+
+/**
  * How rendered Markdown shows its elements. Defined once, not per render: a new component each render
  * would remount every link, and a selection ending inside one would lose its end.
  */
@@ -446,6 +460,7 @@ const COMPONENTS: Components = {
     ) : (
       <a href={href} className="link">{children}</a>
     ),
+  img: MarkdownImage,
   // Not an HTML element, so react-markdown's types don't know it.
   ...({ "artifact-embed": EmbedElement } as Components),
 };
