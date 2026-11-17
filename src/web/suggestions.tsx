@@ -40,6 +40,8 @@ export function contentText(kind: Suggestion["item"]["kind"], c: SuggestedConten
 
 /** The Diff view each User chose on this page, which holds even when saving it failed, until the page reloads. */
 const chosenHere = new Map<string, DiffView>();
+/** The saves of those choices, one after another, so the last choice made is the last one saved. */
+let saving = Promise.resolve();
 
 /**
  * The Diff view `me` last chose, kept on their User so it follows them to other browsers; unified until they choose.
@@ -51,7 +53,10 @@ export function useDiffView(me: User): [DiffView, (view: DiffView) => void] {
     setView(next);
     chosenHere.set(me.id, next);
     // If the save fails, the choice still holds on this page, so the switch never feels broken.
-    api.setDiffView(next).catch(() => {});
+    saving = saving.then(() => api.setDiffView(next)).then(
+      () => {},
+      () => {},
+    );
   };
   return [view, choose];
 }

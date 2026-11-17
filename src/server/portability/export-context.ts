@@ -1,4 +1,5 @@
 import type { Queryable } from "../db/database.js";
+import type { DiffView } from "../../shared/values.js";
 import type { StoredFolder } from "./archive.js";
 import type { ActorRef } from "./format.js";
 import { writeFrontmatter } from "./frontmatter.js";
@@ -28,7 +29,7 @@ export interface UserRow {
   name: string;
   role: string;
   deactivated_at: Date | null;
-  diff_view: string;
+  diff_view: DiffView;
 }
 
 /**
