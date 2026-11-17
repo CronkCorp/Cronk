@@ -21,6 +21,9 @@ export const projectTopic = (projectId: string) => `project:${projectId}`;
 /** The topic of one Document's changes: its new Comments and Versions. */
 export const documentTopic = (documentId: string) => `document:${documentId}`;
 
+/** The topic of one Decision's changes: its new Versions. */
+export const decisionTopic = (decisionId: string) => `decision:${decisionId}`;
+
 /** The topic of one Artifact's changes: its new Comments. */
 export const artifactTopic = (artifactId: string) => `artifact:${artifactId}`;
 

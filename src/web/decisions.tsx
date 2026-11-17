@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Actor } from "./components/actor.js";
 import { Banner } from "./components/banner.js";
+import { LiveIndicator, useLiveState } from "./components/live.js";
 import { Button, buttonClass } from "./components/button.js";
 import { Menu, type MenuItem } from "./components/overlays.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
@@ -8,8 +9,8 @@ import { DECISION_STATUS_NAMES, DecisionStatusPill, FilterChip, ProtectedMark } 
 import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
-import { api, decisionsExportUrl, type Decision, type DecisionStatus, type DecisionSummary, type DecisionVersion, type FieldConflict } from "./api.js";
-import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, type Draft, type MergedField } from "./merge.js";
+import { api, decisionsExportUrl, watchDecision, type Decision, type DecisionStatus, type DecisionSummary, type DecisionVersion, type FieldConflict } from "./api.js";
+import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, VersionDiff, type Draft, type MergedField } from "./merge.js";
 import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
 import { MentionedIn } from "./mentions.js";
 import { LoadFromTranscripts } from "./transcripts.js";
@@ -195,7 +196,7 @@ function NewDecision(props: { projectKey: string | undefined; onCancel: () => vo
 
 /** One Decision: its head, banners for what it supersedes or what superseded it, its body, and the side panel. */
 function DecisionPage(props: { decisionKey: string; onChanged: () => void }) {
-  const [decision, , setDecision] = useLoad(() => api.decision(props.decisionKey), [props.decisionKey]);
+  const [decision, reload, setDecision] = useLoad(() => api.decision(props.decisionKey), [props.decisionKey]);
   const editing = new URLSearchParams(location.search).get("edit") === "1";
   return (
     <Show state={decision}>
@@ -204,6 +205,11 @@ function DecisionPage(props: { decisionKey: string; onChanged: () => void }) {
           <DecisionView
             decision={d}
             startEditing={editing}
+            onReload={() => {
+              // The register row above it shows the title and status too.
+              reload();
+              props.onChanged();
+            }}
             onChanged={(changed) => {
               setDecision(changed);
               props.onChanged();
@@ -215,10 +221,28 @@ function DecisionPage(props: { decisionKey: string; onChanged: () => void }) {
   );
 }
 
-function DecisionView(props: { decision: Decision; startEditing: boolean; onChanged: (d: Decision) => void }) {
+function DecisionView(props: { decision: Decision; startEditing: boolean; onChanged: (d: Decision) => void; onReload: () => void }) {
   const d = props.decision;
   const canWrite = useCanWrite(d.projectKey);
   const [editing, setEditing] = useState(props.startEditing);
+  // The newest Version anyone saved, as the Decision's stream tells it.
+  const [latest, setLatest] = useState(d.version);
+  const [live, onLive] = useLiveState();
+  useEffect(
+    () =>
+      watchDecision(d.key, {
+        onLive,
+        // On (re)connecting, catch up on what was saved meanwhile.
+        ready: () => void api.decision(d.key).then((current) => setLatest((v) => Math.max(v, current.version)), () => {}),
+        on: { version: ({ version }) => setLatest((v) => Math.max(v, version)) },
+      }),
+    [d.key],
+  );
+  // Someone else's Version is shown at once, unless it would pull the Decision out from under an edit.
+  const newer = latest > d.version ? latest : undefined;
+  useEffect(() => {
+    if (newer !== undefined && !editing) props.onReload();
+  }, [newer, editing]);
   const status = useAction((to: DecisionStatus) => api.setDecisionStatus(d.key, to), props.onChanged);
   // Rejecting needs a reason, typed into a box the Reject action opens.
   const [rejecting, setRejecting] = useState(false);
@@ -243,6 +267,7 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
     return (
       <EditDecision
         decision={d}
+        newerVersion={newer}
         onCancel={() => setEditing(false)}
         onSaved={(saved) => {
           props.onChanged(saved);
@@ -258,24 +283,27 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
           <span className="key">{d.key}</span>
           <DecisionStatusPill status={d.status} />
           {d.protected && <ProtectedMark />}
-          {canWrite && (
-            <div className="actions">
-              <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
-              <Menu
-                label="More actions"
-                trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
-                items={[
-                  ...otherMoves.map(([to, label]) => ({
-                    label: to === "rejected" ? `${label}…` : label,
-                    onSelect: () => (to === "rejected" ? setRejecting(true) : void status.run(to)),
-                    disabled: status.busy,
-                  })),
-                  { label: d.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!d.protected), disabled: protect.busy },
-                ]}
-              />
-              {d.status === "proposed" && <Button onClick={() => void status.run("accepted")} disabled={status.busy}>Accept</Button>}
-            </div>
-          )}
+          <div className="actions">
+            <LiveIndicator state={live} />
+            {canWrite && (
+              <>
+                <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
+                <Menu
+                  label="More actions"
+                  trigger={<Button variant="secondary" aria-label="More actions">…</Button>}
+                  items={[
+                    ...otherMoves.map(([to, label]) => ({
+                      label: to === "rejected" ? `${label}…` : label,
+                      onSelect: () => (to === "rejected" ? setRejecting(true) : void status.run(to)),
+                      disabled: status.busy,
+                    })),
+                    { label: d.protected ? "Unprotect" : "Protect", onSelect: () => void protect.run(!d.protected), disabled: protect.busy },
+                  ]}
+                />
+                {d.status === "proposed" && <Button onClick={() => void status.run("accepted")} disabled={status.busy}>Accept</Button>}
+              </>
+            )}
+          </div>
         </div>
         {status.error && <p className="error" role="alert">{status.error}</p>}
         {protect.error && <p className="error" role="alert">{protect.error}</p>}
@@ -387,7 +415,7 @@ function mergedField<T>(label: string, merged: T | null, conflict: FieldConflict
  * the body section by section, the other fields whole, leaving what both changed differently for
  * the User to choose or combine.
  */
-function EditDecision(props: { decision: Decision; onSaved: (d: Decision) => void; onCancel: () => void }) {
+function EditDecision(props: { decision: Decision; newerVersion: number | undefined; onSaved: (d: Decision) => void; onCancel: () => void }) {
   const d = props.decision;
   const edit = (draft: Draft) => ({
     title: draft.title!,
@@ -401,7 +429,6 @@ function EditDecision(props: { decision: Decision; onSaved: (d: Decision) => voi
     save: (draft, baseVersion) => api.saveDecision(d.key, { baseVersion, ...edit(draft) }),
     merge: async (draft, baseVersion) => {
       const [merge, started] = await Promise.all([api.mergeDecision(d.key, { baseVersion, ...edit(draft) }), api.decisionVersion(d.key, baseVersion)]);
-      const saved = (v: DecisionVersion) => ({ number: v.number, title: v.title, body: v.body, fields: fieldsOf(v) });
       const fields = [
         mergedField(GROUP, merge.group, merge.groupConflict, (g) => g ?? "", false),
         mergedField(SUPERSEDES, merge.supersedes, merge.supersedesConflict, (keys) => keys.join(", "), true),
@@ -419,6 +446,7 @@ function EditDecision(props: { decision: Decision; onSaved: (d: Decision) => voi
   const setField = (label: string) => (value: string) => setDraft((dr) => ({ ...dr, fields: { ...dr.fields, [label]: value } }));
   return (
     <>
+      {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile decision={d} version={props.newerVersion} />}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
@@ -441,5 +469,37 @@ function EditDecision(props: { decision: Decision; onSaved: (d: Decision) => voi
         </section>
       )}
     </>
+  );
+}
+
+/** A Decision Version as a diff or a merge shows it: its title, body, and other fields as the editor's. */
+const saved = (v: DecisionVersion) => ({ number: v.number, title: v.title, body: v.body, fields: fieldsOf(v) });
+
+/**
+ * Warns, while a Decision is being edited, that someone saved a newer Version meanwhile: who, and
+ * what they changed since the Version the edit started from. Saving then merges it in.
+ */
+function SavedMeanwhile(props: { decision: Decision; version: number }) {
+  const { key, version: started } = props.decision;
+  const [versions] = useLoad(() => Promise.all([api.decisionVersion(key, started), api.decisionVersion(key, props.version)]), [key, started, props.version]);
+  return (
+    <Banner tone="warn" role="status">
+      <Show state={versions}>
+        {([base, theirs]) => (
+          <>
+            <p>
+              <strong>
+                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
+              </strong>{" "}
+              Saving merges their changes into yours.
+            </p>
+            <details>
+              <summary>See what they changed</summary>
+              <VersionDiff before={saved(base)} after={saved(theirs)} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+            </details>
+          </>
+        )}
+      </Show>
+    </Banner>
   );
 }

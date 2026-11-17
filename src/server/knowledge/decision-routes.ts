@@ -9,7 +9,7 @@ import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { findProjectById } from "../work/projects.js";
 import { decisionReviewer, waitingItemsChanged } from "../inbox/inbox.js";
 import { markRejected, rejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
-import { agentTopic } from "../live/topics.js";
+import { agentTopic, decisionTopic } from "../live/topics.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import {
   contentOf,
@@ -113,20 +113,36 @@ export async function decisionFor(db: Queryable, actor: Actor, key: string, need
   return decision;
 }
 
+/**
+ * Tells the Decision's watchers of its Version `number`, its current one unless given, and who saved it. Call once it
+ * is committed, for every new Version of a Decision.
+ */
+export async function decisionVersionSaved(ctx: AppContext, decision: Decision, number = decision.version): Promise<void> {
+  const version = await findDecisionVersion(ctx.db, decision, number);
+  if (version) ctx.live.publish(decisionTopic(decision.id), { event: "version", data: { version: version.number, by: version.actor } });
+}
+
 export function decisionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /** Tells the Inbox of whoever reviews each of `decisions`, if an Agent proposed it, that it may have changed. Call once committed. */
     const reviewersHear = async (decisions: Decision[]) =>
       waitingItemsChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
 
+    /** Tells of a save that gave `versioned` new Versions, `decision` among them unless it changed nothing: their watchers, and their reviewers' Inboxes. */
+    const announceSave = async (decision: Decision, versioned: Decision[]) => {
+      await reviewersHear([decision, ...versioned]);
+      for (const d of versioned) await decisionVersionSaved(ctx, d);
+    };
+
     /**
      * Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step, adding
-     * those it changed to `changed`, whose reviewers' Inboxes may then have changed too.
+     * every Decision it gave a new Version to `versioned`, to tell of once committed (see `announceSave`).
      */
-    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent, changed: Decision[]) => {
+    const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent, versioned: Decision[]) => {
       const now = ctx.clock.now();
       const saved = await saveDecision(tx, current, content, actor, now);
-      changed.push(...(await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now)));
+      if (saved.version !== current.version) versioned.push(saved);
+      versioned.push(...(await applySuperseding(tx, scopeOf(actor, saved), contentOf(current), saved, actor, now)));
       // A Decision becoming accepted is marked Protected by default (ADR 0004), as by whoever accepted it.
       if (current.status !== "accepted" && saved.status === "accepted" && !saved.protected) {
         await setProtected(tx, { kind: "decision", id: saved.id }, true, actingUser(actor).id, now);
@@ -236,6 +252,33 @@ export function decisionRoutes(ctx: AppContext) {
       },
     );
 
+    app.get<{ Params: { key: string } }>(
+      "/api/decisions/:key/events",
+      {
+        schema: {
+          params: decisionParams,
+          response: {
+            200: {
+              description:
+                "A server-sent event stream of the Decision's changes as they happen, for as long as the caller can see it. It opens " +
+                "with a `ready` event; each new Version, whether an edit, a change of status, being superseded or an accepted Suggestion, " +
+                "arrives as a `version` event whose data is `{ version, by }`: its number and the Actor who saved it.",
+              content: { "text/event-stream": { schema: { type: "string" } } },
+            },
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request, reply) => {
+        const decision = await decisionFor(ctx.db, await requireActor(ctx, request), request.params.key, "read");
+        const canSee = async () => {
+          const actor = await requireActor(ctx, request, { refreshSession: false });
+          return !!(await decisionFor(ctx.db, actor, decision.key, "read"));
+        };
+        ctx.live.stream(reply, decisionTopic(decision.id), canSee);
+      },
+    );
+
     app.patch<{ Params: { key: string }; Body: DecisionEdit }>(
       "/api/decisions/:key",
       {
@@ -256,7 +299,7 @@ export function decisionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const changed: Decision[] = [];
+        const versioned: Decision[] = [];
         const saved = await transaction(ctx.db, async (tx) => {
           const current = await decisionFor(tx, actor, request.params.key, "write", { forUpdate: true });
           if (actor.kind === "agent" && current.status !== "proposed") {
@@ -278,11 +321,11 @@ export function decisionRoutes(ctx: AppContext) {
             ...(newSupersedes !== undefined && { supersedes: await requireSuperseded(tx, scopeOf(actor, current), current.number, newSupersedes) }),
           };
           return {
-            decision: await save(tx, actor, current, content, changed),
+            decision: await save(tx, actor, current, content, versioned),
             avoidedWords: await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body)),
           };
         });
-        await reviewersHear([saved.decision, ...changed]);
+        await announceSave(saved.decision, versioned);
         return saved;
       },
     );
@@ -366,7 +409,7 @@ export function decisionRoutes(ctx: AppContext) {
         const { status } = request.body;
         const reason = request.body.reason?.trim() || null;
         // A rejection waits for the Agent that proposed the Decision, pushed to it once committed.
-        const changed: Decision[] = [];
+        const versioned: Decision[] = [];
         const { decision } = await withWaitingWork(
           ctx,
           async (tx, positioned) => {
@@ -376,7 +419,7 @@ export function decisionRoutes(ctx: AppContext) {
               throw new HttpError(400, "A Decision is superseded when a Decision that supersedes it is accepted; record that Decision, or deprecate this one");
             }
             if (status === "rejected" && reason === null) throw new HttpError(400, "Rejecting a Decision needs a reason, so whoever proposed it knows why");
-            const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason }, changed);
+            const saved = await save(tx, actor, current, { ...contentOf(current), status, statusReason: reason }, versioned);
             const proposer = saved.proposedBy;
             if (status !== "rejected" || saved.version === current.version || proposer.kind !== "agent") return { decision: saved };
             const seq = await markRejected(tx, actingUser(actor).workspaceId, saved, proposer.id, ctx.clock.now(), positioned);
@@ -387,7 +430,7 @@ export function decisionRoutes(ctx: AppContext) {
             if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
           },
         );
-        await reviewersHear([decision, ...changed]);
+        await announceSave(decision, versioned);
         return { decision };
       },
     );

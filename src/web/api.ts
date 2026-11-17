@@ -629,6 +629,12 @@ export interface DocumentEvents {
   attachments: Record<string, never>;
 }
 
+/** The events a Decision's live-update stream pushes, by name, with their data. */
+export interface DecisionEvents {
+  /** A new Version was saved: an edit, a change of status, being superseded or an accepted Suggestion; `version` is its number, `by` who saved it. */
+  version: { version: number; by: RecordedActor };
+}
+
 /** The events an Artifact's live-update stream pushes, by name, with their data. */
 export interface ArtifactEvents {
   comment: { comment: Comment };
@@ -693,6 +699,10 @@ export const watchTerms = (projectKey: string | null | undefined, handlers: Para
 /** Watches one Document's new Comments and Versions as they happen (see `watch`). */
 export const watchDocument = (id: string, handlers: Parameters<typeof watch<DocumentEvents>>[1]) =>
   watch<DocumentEvents>(`${documentPath(id)}/events`, handlers);
+
+/** Watches one Decision's new Versions as they happen (see `watch`). */
+export const watchDecision = (key: string, handlers: Parameters<typeof watch<DecisionEvents>>[1]) =>
+  watch<DecisionEvents>(`${decisionPath(key)}/events`, handlers);
 
 /** Watches one Artifact's new Comments as they happen (see `watch`). */
 export const watchArtifact = (id: string, handlers: Parameters<typeof watch<ArtifactEvents>>[1]) =>
