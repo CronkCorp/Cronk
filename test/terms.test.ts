@@ -184,11 +184,14 @@ describe("deleting a Term", () => {
   });
 });
 
-/** Ada with the Project CRONK holding the Protected Term Claim, and claude-laptop holding the Claim on CRONK-1 to suggest from. */
-async function protectedProjectTerm() {
+/**
+ * Ada with the Project CRONK and the Protected Term Claim, CRONK's own or the Workspace's, and claude-laptop holding
+ * the Claim on CRONK-1 to suggest changes to it from.
+ */
+async function protectedTerm(place: "/api/projects/CRONK" | "/api/workspace") {
   const { cronk, admin } = await startInstalledCronk();
   await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
-  const term = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold." })).body.term;
+  const term = (await admin.post(`${place}/terms`, { name: "Claim", definition: "A hold." })).body.term;
   await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
   await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
   const claude = await agentOf(cronk, admin, "claude-laptop");
@@ -200,12 +203,12 @@ async function protectedProjectTerm() {
     expect(made.status).toBe(201);
     return made.body.suggestion.id;
   };
-  return { cronk, admin, term, suggest };
+  return { admin, term, suggest };
 }
 
 describe("a Term's Suggestion count", () => {
   it("counts its open Suggestions, wherever the Term is answered, leaving out accepted and rejected ones", async () => {
-    const { admin, term, suggest } = await protectedProjectTerm();
+    const { admin, term, suggest } = await protectedTerm("/api/projects/CRONK");
     const counts = async () => [
       (await admin.get(`/api/terms/${term.id}`)).body.term.suggestions,
       (await admin.get("/api/projects/CRONK/terms")).body.terms[0].suggestions,
@@ -222,10 +225,10 @@ describe("a Term's Suggestion count", () => {
     expect(await counts()).toEqual([1, 1]);
   });
 
-  it("is answered on Workspace Terms too", async () => {
-    const { admin } = await startInstalledCronk();
-    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
-    expect((await admin.get("/api/workspace/terms")).body.terms[0]).toMatchObject({ suggestions: 0 });
+  it("counts a Workspace Term's on the Workspace's Terms too", async () => {
+    const { admin, suggest } = await protectedTerm("/api/workspace");
+    await suggest("A temporary hold.");
+    expect((await admin.get("/api/workspace/terms")).body.terms[0]).toMatchObject({ name: "Claim", suggestions: 1 });
   });
 });
 
