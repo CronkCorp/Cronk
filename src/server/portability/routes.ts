@@ -9,7 +9,7 @@ import { termsChanged } from "../knowledge/term-routes.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
-import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
+import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, checkStoredFiles, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
 import { exportDecisionsFolder, exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
@@ -131,13 +131,20 @@ function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
 /**
  * Answers with the folder `build` makes as a gzipped tar archive to save, named `cronk-<name>-<stamp>.tar.gz`.
  * It is built in a read-only, repeatable-read transaction so its files agree with each other, and streamed: the files
- * of Attachments and Artifacts are read from the file store only as the archive reaches them.
+ * of Attachments and Artifacts are read from the file store only as the archive reaches them. Each of those is checked
+ * first, so a file missing or the wrong size is answered with an error rather than a 200 and an archive cut short; one
+ * that fails after the check, removed meanwhile, aborts the download.
  */
 async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<StoredFolder>) {
   const now = ctx.clock.now();
   const folder = await transaction(ctx.db, async (tx) => {
     await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     return build(tx, now);
+  });
+  await checkStoredFiles(folder, ctx.files).catch((err: unknown) => {
+    // A file the records name but the store lacks, or holds at another size, is for an operator to look into; other errors are logged as any are.
+    if (err instanceof HttpError) reply.log.error(err);
+    throw err;
   });
   const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
   return reply
