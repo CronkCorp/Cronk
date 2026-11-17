@@ -380,8 +380,8 @@ describe("Uploading the same chat again", () => {
  * Bob's Agent changes CRONK-1 (an open Project), SECRET-1 (private, where Bob has Write) and a Workspace Document, and
  * uploads the chat. Carol is another Member; Ada the Admin.
  */
-async function transcriptAcrossProjects() {
-  const { cronk, admin } = await startInstalledCronk();
+async function transcriptAcrossProjects(opts: Parameters<typeof startInstalledCronk>[1] = {}) {
+  const { cronk, admin } = await startInstalledCronk("Acme", opts);
   const bob = await joinAs(cronk, admin, "bob@example.com");
   const carol = await joinAs(cronk, admin, "carol@example.com");
   const bobId = (await bob.get("/api/me")).body.user.id;
@@ -899,6 +899,102 @@ describe("Searching Transcripts", () => {
     expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "Done" })).status).toBe(200);
     expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
     expect((await bob.get("/api/search?q=redacted&kind=transcript")).body.results).toHaveLength(1);
+  });
+});
+
+/** Looks for lapsed Claims too seldom to fall among the queries a test counts. */
+const QUIET = { lapseCheckMs: 3_600_000 };
+
+describe("Who may read Transcripts, decided for many at once", () => {
+  /** Whether `client` reads the Transcript `id` and finds it in search. */
+  const finds = async (client: Client, id: string) => ({
+    read: (await client.get(`/api/transcripts/${id}`)).status === 200,
+    search: ((await client.get("/api/search?q=done&kind=transcript")).body.results as { transcriptId: string }[]).some((r) => r.transcriptId === id),
+  });
+  /** Whether `client` reads the Transcript `id`, finds it in search and sees it among the Transcripts `ticket` came from. */
+  const views = async (client: Client, id: string, ticket: string) => {
+    const links = await client.get(`/api/tickets/${ticket}/transcripts`);
+    return { ...(await finds(client, id)), links: links.status === 200 && (links.body.transcripts as { id: string }[]).some((t) => t.id === id) };
+  };
+  const seen = { read: true, search: true, links: true };
+  const unseen = { read: false, search: false, links: false };
+
+  it("agrees with reading one Transcript, for every reader", async () => {
+    const { cronk, admin, bob, carol, carolId, id } = await transcriptAcrossProjects();
+    expect(await views(bob, id, "CRONK-1")).toEqual(seen);
+    expect(await views(admin, id, "CRONK-1")).toEqual(seen);
+    expect(await views(carol, id, "CRONK-1")).toEqual(unseen);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect(await views(carol, id, "CRONK-1")).toEqual(seen);
+    // Carol's Agent is capped by the Workspace's Agent Access, for the Handbook.
+    const codex = cronk.client((await registerAgent(carol, "codex")).secret);
+    expect(await views(codex, id, "CRONK-1")).toEqual(seen);
+    await admin.patch("/api/workspace", { agentAccess: "read" });
+    await admin.patch("/api/projects/SECRET", { agentAccess: "none" });
+    expect(await views(codex, id, "CRONK-1")).toEqual(unseen);
+  });
+
+  it("hides it once a Ticket its Session changed lies where a Member can't read, but not from its Owner", async () => {
+    const { admin, bob, carol, carolId, id } = await transcriptAcrossProjects();
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect(await views(carol, id, "SECRET-1")).toEqual(seen);
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await views(carol, id, "SECRET-1")).toEqual(unseen);
+    // Bob has no Read in CRONK now either, but it is his.
+    expect(await views(bob, id, "SECRET-1")).toEqual(seen);
+  });
+
+  it("is found only by its Owner once nothing its Sessions changed is left", async () => {
+    const { cronk, admin, bob, claude } = await transcriptAcrossProjects();
+    const agent = await startSession(cronk, claude.secret);
+    const notes = (await agent.post("/api/workspace/documents", { title: "Notes", body: "Kept" })).body.document.id;
+    const id = (await upload(cronk.client(claude.secret), "chat-2", chat("Note it", agent.sessionId))).body.transcript.id;
+    expect(await finds(admin, id)).toEqual({ read: true, search: true });
+
+    expect((await admin.delete(`/api/documents/${notes}?baseVersion=1`)).status).toBe(204);
+    expect(await finds(admin, id)).toEqual({ read: false, search: false });
+    expect(await finds(bob, id)).toEqual({ read: true, search: true });
+  });
+
+  it("lets search find them in a fixed number of queries, however many match", async () => {
+    const { cronk, admin, carol, claude, bob } = await transcriptAcrossProjects(QUIET);
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/SECRET-1/comments", { body: "More" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    // Carol may read none of them; Ada all of them.
+    const searching = async () => ({
+      carol: await cronk.queries(() => carol.get("/api/search?q=done&kind=transcript")),
+      admin: await cronk.queries(() => admin.get("/api/search?q=done&kind=transcript")),
+      bob: await cronk.queries(() => bob.get("/api/search?q=done&kind=transcript&project=CRONK")),
+    });
+    const withOne = await searching();
+
+    for (let i = 2; i <= 6; i++) expect((await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId))).status).toBe(200);
+    expect((await admin.get("/api/search?q=done&kind=transcript")).body.results).toHaveLength(6);
+    expect((await carol.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
+    expect(await searching()).toEqual(withOne);
+  });
+
+  it("lets an item and its detail list the Transcripts it came from in a fixed number of queries, however many there are", async () => {
+    const { cronk, admin, carol, claude } = await transcriptAcrossProjects(QUIET);
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "More" })).status).toBe(201);
+    expect((await agent.post("/api/tickets/SECRET-1/comments", { body: "More" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    // Carol reads CRONK-1 but none of the Transcripts it came from; Ada all of them.
+    const listing = async () => ({
+      carol: await cronk.queries(() => carol.get("/api/tickets/CRONK-1/transcripts")),
+      admin: await cronk.queries(() => admin.get("/api/tickets/CRONK-1/transcripts")),
+      detail: await cronk.queries(() => admin.get("/api/tickets/CRONK-1")),
+    });
+    const withOne = await listing();
+
+    for (let i = 2; i <= 6; i++) expect((await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId))).status).toBe(200);
+    expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toHaveLength(6);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.transcripts).toHaveLength(6);
+    expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toEqual([]);
+    expect(await listing()).toEqual(withOne);
   });
 });
 

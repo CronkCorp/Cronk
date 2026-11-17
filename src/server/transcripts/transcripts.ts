@@ -1,6 +1,6 @@
 import { actingUser, type Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { readablePlaces } from "../identity/access.js";
+import { readablePlaces, type Readable } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
@@ -154,6 +154,50 @@ const RECORDS = `
   UNION ALL SELECT actor_session_id, NULL, NULL, term_id, NULL, NULL FROM term_versions
   UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id, NULL FROM decision_versions
   UNION ALL SELECT actor_session_id, NULL, NULL, NULL, NULL, artifact_id FROM artifact_versions`;
+
+/**
+ * Where the Sessions of the Transcript aliased `tr` changed things, one row per record of a change to an item that is still there:
+ * the item's `project_id`, NULL for the Workspace outside any Project, a Report's being its Ticket's. Derived from the current rows,
+ * so an item that changes place counts where it lies now. The places `changedItems` gives, for many Transcripts at once.
+ */
+const transcriptPlacesSql = (tr: string) => `
+  SELECT place.project_id
+  FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
+  LEFT JOIN tickets t ON t.id = r.ticket_id
+  LEFT JOIN documents d ON d.id = r.document_id LEFT JOIN tickets rt ON rt.id = d.ticket_id
+  LEFT JOIN terms tm ON tm.id = r.term_id
+  LEFT JOIN decisions dc ON dc.id = r.decision_id
+  LEFT JOIN artifacts a ON a.id = r.artifact_id
+  CROSS JOIN LATERAL (VALUES
+    (t.id IS NOT NULL, t.project_id),
+    (d.id IS NOT NULL, coalesce(rt.project_id, d.project_id)),
+    (tm.id IS NOT NULL, tm.project_id),
+    (dc.id IS NOT NULL, dc.project_id),
+    (a.id IS NOT NULL, a.project_id)
+  ) AS place(changed, project_id)
+  WHERE ts.transcript_id = ${tr}.id AND place.changed`;
+
+/**
+ * SQL for whether the Transcript aliased `tr`, whose Owner's id is the SQL `ownerId`, may be read (see readTranscript) by an Actor
+ * reading where SQL for a `Readable`'s `projectIds` (a uuid[]) and `workspaceId` (a uuid, NULL when the Workspace isn't readable)
+ * says, and who is the User with the id `userId` (NULL for an Agent): when they are its Owner, or when its Sessions changed something
+ * and every place they changed something is readable. What `accessTo` decides for one Transcript, for many in one query.
+ */
+export const transcriptReadableSql = (tr: string, ownerId: string, projectIds: string, workspaceId: string, userId: string) =>
+  `(${ownerId} = ${userId} OR coalesce((
+     SELECT bool_and(coalesce(p.project_id = ANY(${projectIds}), ${workspaceId} IS NOT NULL)) FROM (${transcriptPlacesSql(tr)}) p
+   ), false))`;
+
+/** The parameters `transcriptReadableSql` takes for `actor` reading where `readable` says: its Projects, its Workspace, its User. */
+export const readerParams = (actor: Actor, readable: Readable): [string[], string | null, string | null] => [
+  readable.projectIds,
+  readable.workspaceId,
+  actor.kind === "user" ? actor.user.id : null,
+];
+
+/** SQL for whether the Sessions of the Transcript aliased `tr` changed something in one of the Projects `projectIds` (a uuid[]). */
+export const transcriptChangedInSql = (tr: string, projectIds: string) =>
+  `EXISTS (SELECT 1 FROM (${transcriptPlacesSql(tr)}) p WHERE p.project_id = ANY(${projectIds}))`;
 
 /** Everything the Agent Sessions `$1` did (see RECORDS). */
 const SESSION_RECORDS = `SELECT * FROM (${RECORDS}) all_records WHERE actor_session_id = ANY($1::uuid[])`;
@@ -391,16 +435,7 @@ async function accessTo(db: Queryable, actor: Actor, stored: StoredTranscript, o
   const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
   // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
   if (!readsAnyway && !(somewhere && everywhere)) return undefined;
-  return { items, places, canReadIn };
-}
-
-/**
- * Whether `actor` may read the Transcript and, when `projectIds` narrows a search to Projects, whether its Sessions changed
- * something in one of them.
- */
-export async function findable(db: Queryable, actor: Actor, stored: StoredTranscript, projectIds?: string[]): Promise<boolean> {
-  const access = await accessTo(db, actor, stored);
-  return access !== undefined && (!projectIds || access.places.projectIds.some((p) => projectIds.includes(p)));
+  return { items, canReadIn };
 }
 
 /**
@@ -454,17 +489,6 @@ export async function listTranscripts(db: Queryable, workspaceId: string, order:
 /** An item a Transcript may have led to: a Ticket, Document (or Report), Term or Decision, by its id, and its key if it has one. */
 export type LinkedItem = { kind: "ticket" | "document" | "term" | "decision"; id: string; key?: string };
 
-/** The Transcripts linked to an Agent Session that changed `item`, most recently uploaded first, whoever may read them. */
-export async function transcriptsOf(db: Queryable, workspaceId: string, item: LinkedItem): Promise<StoredTranscript[]> {
-  const { rows } = await db.query<TranscriptRow>(
-    `${SELECT_TRANSCRIPTS} WHERE tr.workspace_id = $1 AND tr.id IN (
-       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
-     ORDER BY ${ORDERS.newest}`,
-    [workspaceId, item.id],
-  );
-  return rows.map(toStored);
-}
-
 /**
  * A Transcript as an item it led to links to it ("From Transcript"): without its text, not even its title, so context on claim
  * never holds any of the chat; with the turn where the item first appears.
@@ -477,17 +501,29 @@ export interface TranscriptLink {
   updatedAt: Date;
 }
 
-/** The Transcripts `item` came from that `actor` may read, most recently uploaded first. */
+/**
+ * The Transcripts `item` came from (linked to an Agent Session that changed it) that `actor` may read, most recently uploaded first.
+ * Who may read each is decided in the same query (transcriptReadableSql), so this takes the same few queries however many there are.
+ */
 export async function transcriptLinks(db: Queryable, actor: Actor, item: LinkedItem): Promise<TranscriptLink[]> {
-  const links: TranscriptLink[] = [];
-  for (const stored of await transcriptsOf(db, actingUser(actor).workspaceId, item)) {
-    const transcript = await readTranscript(db, actor, stored);
-    if (!transcript) continue;
-    // Found as readTranscript finds each item's turn.
-    const turn = firstTurnNaming(turnsOf(stored.markdown), item.key ? [item.key, item.id] : [item.id]);
-    links.push({ id: transcript.id, agent: { id: transcript.agent.id, name: transcript.agent.name }, turn, updatedAt: transcript.updatedAt });
-  }
-  return links;
+  const readable = await readablePlaces(db, actor);
+  const { rows } = await db.query<{ id: string; agent_id: string; agent_name: string; markdown: string; updated_at: Date }>(
+    `SELECT tr.id, tr.agent_id, a.name AS agent_name, tr.markdown, tr.updated_at
+     FROM transcripts tr JOIN agents a ON a.id = tr.agent_id
+     WHERE tr.workspace_id = $1 AND tr.id IN (
+       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
+       AND ${transcriptReadableSql("tr", "a.owner_id", "$3::uuid[]", "$4::uuid", "$5::uuid")}
+     ORDER BY ${ORDERS.newest}`,
+    [actingUser(actor).workspaceId, item.id, ...readerParams(actor, readable)],
+  );
+  // Found as readTranscript finds each item's turn.
+  const named = item.key ? [item.key, item.id] : [item.id];
+  return rows.map((row) => ({
+    id: row.id,
+    agent: { id: row.agent_id, name: row.agent_name },
+    turn: firstTurnNaming(turnsOf(row.markdown), named),
+    updatedAt: row.updated_at,
+  }));
 }
 
 /** A Transcript without its text, as listings show it: its title, the first line of a turn, is text too. */
