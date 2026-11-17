@@ -4,7 +4,7 @@ import { Chip, DecisionStatusPill, KindLabel, ProtectedMark, StatusPill, type Ki
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type User } from "./api.js";
 import { ContentEditor, contentText, creditNote, Diff, mainText, mergeCreditNote, Reasoning, settledContent, suggestionMergeable, useDiffView } from "./suggestions.js";
@@ -19,15 +19,6 @@ import { Show, TextArea, useAction, useLoad } from "./ui.js";
 // The Inbox as a split view (docs/ui.md § Inbox): the waiting items, grouped, on the left, and the selected
 // one on the right, where the User reads it in full and acts on it without leaving the Inbox. Triage (triage.tsx)
 // is the same split view over the waiting items with no clear User (docs/ui.md § Inbox and Triage in Phase 2).
-
-const KIND_NAMES: Record<InboxKind, string> = {
-  question: "Questions",
-  review: "To review",
-  unverified: "Unverified",
-  suggestion: "Suggestions",
-  discovered: "Discovered",
-  decision: "Proposed Decisions",
-};
 
 /** Where the Inbox is: its filter, and the item selected in it, if the address names one. */
 export interface InboxAddress {
@@ -69,16 +60,148 @@ type DecisionItem = Extract<WaitingItem, { kind: "decision" }>;
 type SuggestionItem = Extract<WaitingItem, { kind: "suggestion" }>;
 type UnattendedItem = Extract<WaitingItem, { kind: "unattended" }>;
 type DiscoveredItem = Extract<WaitingItem, { kind: "discovered" }>;
+/** An item about a Ticket, which names it. */
+type TicketItem = QuestionItem | ReviewItem | UnverifiedItem | UnattendedItem | DiscoveredItem;
+
+/** How the split views show items of one kind. Kinds an Inbox holds also say what its empty state says when narrowed to them. */
+type KindView<K extends WaitingKind, I = Extract<WaitingItem, { kind: K }>> = {
+  /** The kind's filter chip. */
+  name: string;
+  /** The item's id in the address: stable across reloads, and readable for a review or a Decision. */
+  id: (item: I) => string;
+  /** The item's kind label, short in the list and in full in the detail pane, and how it is coloured. */
+  label: (item: I) => KindLabelling;
+  /** What the item is about: its key and title, and where that is. */
+  named: (item: I) => Named;
+  /** The line under the item's title in the list. */
+  snippet: (item: I) => string;
+  /** Marks the detail pane's head shows after the item's title. */
+  marks?: (item: I) => ReactNode;
+  /** The detail pane that shows the item in full and acts on it. */
+  Detail: (props: DetailProps<I & WaitingItem>) => ReactNode;
+} & (K extends InboxKind ? { empty: string } : { empty?: never });
+
+/** What an item's kind label says, short in the list and in full in the detail pane, and how it is coloured. */
+interface KindLabelling {
+  kind: Kind;
+  label: string;
+  full: string;
+}
+
+/** What an item is about, as its list item and detail pane's head name it: a key, a title, and where it is. */
+interface Named {
+  key: string;
+  title: string;
+  to: string;
+}
+
+/** Every kind a split view lists, described in one place, in the order their filter chips are shown. */
+const KINDS: { [K in WaitingKind]: KindView<K> } = {
+  question: {
+    name: "Questions",
+    empty: "No questions waiting",
+    id: (item) => `question-${item.question.id}`,
+    label: (item) =>
+      item.question.blocking ? { kind: "blocking", label: "Blocking", full: "Blocking question" } : { kind: "question", label: "Question", full: "Question" },
+    named: ticketNamed,
+    snippet: (item) => plainText(item.question.body),
+    Detail: QuestionDetail,
+  },
+  review: {
+    name: "To review",
+    empty: "Nothing to review",
+    id: ticketId,
+    label: () => ({ kind: "review", label: "To review", full: "To review" }),
+    named: ticketNamed,
+    snippet: reportTitles,
+    Detail: ReviewDetail,
+  },
+  unverified: {
+    name: "Unverified",
+    empty: "No Unverified completions",
+    id: ticketId,
+    label: () => ({ kind: "unverified", label: "Unverified", full: "Unverified completion" }),
+    named: ticketNamed,
+    snippet: reportTitles,
+    Detail: UnverifiedDetail,
+  },
+  unattended: {
+    name: "Unattended",
+    id: ticketId,
+    label: () => ({ kind: "unattended", label: "Unattended", full: "Unattended Ticket" }),
+    named: ticketNamed,
+    snippet: unattendedBecause,
+    Detail: UnattendedDetail,
+  },
+  suggestion: {
+    name: "Suggestions",
+    empty: "No Suggestions",
+    id: (item) => `suggestion-${item.suggestion.id}`,
+    label: () => ({ kind: "suggestion", label: "Suggestion", full: "Suggestion" }),
+    named: (item) => suggestedItem(item.suggestion),
+    snippet: (item) => `${item.suggestion.proposedBy.name}: ${plainText(item.suggestion.reasoning)}`,
+    Detail: SuggestionDetail,
+    marks: ({ suggestion: { item } }) => (
+      <>
+        {item.status && <DecisionStatusPill status={item.status} />}
+        {item.protected && item.kind !== "guidance" && <ProtectedMark />}
+      </>
+    ),
+  },
+  discovered: {
+    name: "Discovered",
+    empty: "No Discovered Tickets",
+    id: ticketId,
+    label: () => ({ kind: "discovered", label: "Discovered", full: "Discovered Ticket" }),
+    named: ticketNamed,
+    snippet: foundBy,
+    Detail: DiscoveredDetail,
+  },
+  decision: {
+    name: "Proposed Decisions",
+    empty: "No proposed Decisions",
+    id: (item) => `decision-${item.decision.key}`,
+    label: () => ({ kind: "decision", label: "Decision", full: "Proposed Decision" }),
+    named: ({ decision }) => ({ key: decision.key, title: decision.title, to: `/decisions/${decision.key}` }),
+    snippet: (item) => `${item.decision.proposedBy.name}: ${plainText(item.decision.body)}`,
+    Detail: DecisionDetail,
+  },
+};
+
+/** The view of an item's own kind. TypeScript can't tie `KINDS[item.kind]` to `item`'s kind, so this says it once. */
+const viewOf = <I extends WaitingItem>(item: I) => KINDS[item.kind] as unknown as KindView<I["kind"], I>;
+
+/** An item about a Ticket, by its kind and the Ticket's key. */
+function ticketId(item: TicketItem): string {
+  return `${item.kind}-${item.ticket.key}`;
+}
+
+/** An item about a Ticket, named by the Ticket. */
+function ticketNamed({ ticket }: TicketItem): Named {
+  return { key: ticket.key, title: ticket.title, to: `/tickets/${ticket.key}` };
+}
+
+/** A Ticket's Reports, by their titles, as its list item says them. */
+function reportTitles({ reports }: ReviewItem | UnverifiedItem): string {
+  return reports.length ? `Report: ${reports.map((r) => r.title).join(", ")}` : "No Report";
+}
+
+/** The filter chips' names of the kinds in `kinds`, in the order KINDS gives them. */
+export function kindNames<K extends WaitingKind>(kinds: Record<K, unknown>): Record<K, string> {
+  const named = (Object.keys(KINDS) as WaitingKind[]).filter((kind) => kind in kinds).map((kind) => [kind, KINDS[kind].name]);
+  return Object.fromEntries(named) as Record<K, string>;
+}
+
+/** The empty state's heading of each kind an Inbox holds: the kinds that have one. */
+const INBOX_EMPTY = Object.fromEntries(Object.entries(KINDS).flatMap(([kind, view]) => (view.empty ? [[kind, view.empty]] : []))) as Record<InboxKind, string>;
+
+/** The empty state's heading, by the kind the Inbox is narrowed to. */
+const NOTHING: Record<InboxKind | "all", string> = { all: "Nothing waiting on you", ...INBOX_EMPTY };
+
+const KIND_NAMES = kindNames(INBOX_EMPTY);
 
 /** An item's id in the address: stable across reloads, and readable for a review or a Decision. */
-export const itemId = (item: WaitingItem) =>
-  item.kind === "question"
-    ? `question-${item.question.id}`
-    : item.kind === "decision"
-      ? `decision-${item.decision.key}`
-      : item.kind === "suggestion"
-        ? `suggestion-${item.suggestion.id}`
-        : `${item.kind}-${item.ticket.key}`;
+export const itemId = (item: WaitingItem) => viewOf(item).id(item);
 
 /** A group of the list: its name, the kind of item it holds, and which items of that kind. */
 export interface Group {
@@ -94,13 +217,18 @@ export interface Group {
 export const GROUPS: Group[] = [
   { name: "Blocking", kind: "question", holds: (item) => item.kind === "question" && item.question.blocking },
   { name: "Questions", kind: "question", holds: (item) => item.kind === "question" && !item.question.blocking },
-  { name: "To review", kind: "review", holds: (item) => item.kind === "review" },
-  { name: "Unverified", kind: "unverified", holds: (item) => item.kind === "unverified" },
-  { name: "Unattended", kind: "unattended", holds: (item) => item.kind === "unattended" },
-  { name: "Suggestions", kind: "suggestion", holds: (item) => item.kind === "suggestion" },
-  { name: "Discovered", kind: "discovered", holds: (item) => item.kind === "discovered" },
-  { name: "Proposed Decisions", kind: "decision", holds: (item) => item.kind === "decision" },
+  wholeKind("review"),
+  wholeKind("unverified"),
+  wholeKind("unattended"),
+  wholeKind("suggestion"),
+  wholeKind("discovered"),
+  wholeKind("decision"),
 ];
+
+/** A group holding every item of one kind, named as the kind's filter chip is. */
+function wholeKind(kind: WaitingKind): Group {
+  return { name: KINDS[kind].name, kind, holds: (item) => item.kind === kind };
+}
 
 /**
  * The signed-in User's Inbox: Tickets In Review they are Assignee of, Agents' Unverified completions of them, their Agents' open questions,
@@ -227,6 +355,8 @@ interface DetailProps<I extends WaitingItem> {
   /** Runs one of the pane's actions, so the item isn't taken for resolved elsewhere if the reload it causes lands first. */
   acting: <T>(run: () => Promise<T>) => Promise<T>;
   onDone: () => void;
+  /** The signed-in User. */
+  me: User;
 }
 
 /** The selected item as last seen in the list, and its neighbours there then. */
@@ -237,17 +367,6 @@ interface Seen {
   before?: string;
   after?: string;
 }
-
-/** The empty state's heading, by the kind the Inbox is narrowed to. */
-const NOTHING: Record<InboxKind | "all", string> = {
-  all: "Nothing waiting on you",
-  question: "No questions waiting",
-  review: "Nothing to review",
-  unverified: "No Unverified completions",
-  suggestion: "No Suggestions",
-  discovered: "No Discovered Tickets",
-  decision: "No proposed Decisions",
-};
 
 /** What the split view shows and where: its items, the one the address names, and how it groups and names them. */
 interface SplitProps {
@@ -386,26 +505,18 @@ export function InboxSplit(props: SplitProps) {
           <Link to={pathTo()} className="link inbox-back">
             Back to the list
           </Link>
-          {selected.kind === "question" ? (
-            <QuestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
-          ) : selected.kind === "unverified" ? (
-            <UnverifiedDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
-          ) : selected.kind === "decision" ? (
-            <DecisionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
-          ) : selected.kind === "unattended" ? (
-            <UnattendedDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
-          ) : selected.kind === "suggestion" ? (
-            <SuggestionDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
-          ) : selected.kind === "discovered" ? (
-            <DiscoveredDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
-          ) : (
-            <ReviewDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} />
-          )}
+          <SelectedDetail key={selectedId} item={selected} resolved={resolved} keys={keys} acting={acting} onDone={actedOn} me={props.me} />
         </section>
       </div>
       <p className="muted inbox-keys">{props.keysHint}</p>
     </div>
   );
+}
+
+/** The detail pane of the selected item's kind. */
+function SelectedDetail(props: DetailProps<WaitingItem>) {
+  const { Detail } = viewOf(props.item);
+  return <Detail {...props} />;
 }
 
 /** Whether a key press lands in a field the User is typing in, where the Inbox's shortcuts stay out of the way. */
@@ -416,19 +527,6 @@ function typing(target: EventTarget | null): boolean {
 
 /** Whether a key press lands in an open menu or dialog, such as a filter's, which has keys of its own. */
 const inOverlay = (target: EventTarget | null) => target instanceof Element && !!target.closest('[role="menu"], [role="dialog"]');
-
-/** What an item's kind label says, short in the list and in full in the detail pane, and how it is coloured. */
-function kindOf(item: WaitingItem): { kind: Kind; label: string; full: string } {
-  if (item.kind === "review") return { kind: "review", label: "To review", full: "To review" };
-  if (item.kind === "unverified") return { kind: "unverified", label: "Unverified", full: "Unverified completion" };
-  if (item.kind === "unattended") return { kind: "unattended", label: "Unattended", full: "Unattended Ticket" };
-  if (item.kind === "decision") return { kind: "decision", label: "Decision", full: "Proposed Decision" };
-  if (item.kind === "suggestion") return { kind: "suggestion", label: "Suggestion", full: "Suggestion" };
-  if (item.kind === "discovered") return { kind: "discovered", label: "Discovered", full: "Discovered Ticket" };
-  return item.question.blocking
-    ? { kind: "blocking", label: "Blocking", full: "Blocking question" }
-    : { kind: "question", label: "Question", full: "Question" };
-}
 
 /** Whether a Suggestion proposes a new Document under a protected branch, not created until a User accepts it. */
 const isNewDocument = (suggestion: SuggestionItem["suggestion"]) => suggestion.item.kind === "document" && suggestion.item.id === null;
@@ -452,22 +550,10 @@ function suggestedItem(suggestion: SuggestionItem["suggestion"]): { key: string;
  */
 function ListItem(props: { item: WaitingItem; selected: boolean; arrived: boolean; to: string }) {
   const { item } = props;
-  const { kind, label } = kindOf(item);
-  const named = item.kind === "decision" ? item.decision : item.kind === "suggestion" ? suggestedItem(item.suggestion) : item.ticket;
-  const snippet =
-    item.kind === "question"
-      ? plainText(item.question.body)
-      : item.kind === "decision"
-        ? `${item.decision.proposedBy.name}: ${plainText(item.decision.body)}`
-        : item.kind === "suggestion"
-          ? `${item.suggestion.proposedBy.name}: ${plainText(item.suggestion.reasoning)}`
-          : item.kind === "unattended"
-          ? unattendedBecause(item)
-          : item.kind === "discovered"
-            ? foundBy(item)
-          : item.reports.length
-          ? `Report: ${item.reports.map((r) => r.title).join(", ")}`
-          : "No Report";
+  const view = viewOf(item);
+  const { kind, label } = view.label(item);
+  const named = view.named(item);
+  const snippet = view.snippet(item);
   return (
     <Link
       to={props.to}
@@ -488,20 +574,15 @@ function ListItem(props: { item: WaitingItem; selected: boolean; arrived: boolea
 /** The detail pane's head: the item's kind, and its Ticket's key and title, linking to the Ticket, or else its Decision's. */
 function DetailHead(props: { item: WaitingItem }) {
   const { item } = props;
-  const { kind, full } = kindOf(item);
-  const [key, title, to] =
-    item.kind === "decision"
-      ? [item.decision.key, item.decision.title, `/decisions/${item.decision.key}`]
-      : item.kind === "suggestion"
-        ? Object.values(suggestedItem(item.suggestion))
-        : [item.ticket.key, item.ticket.title, `/tickets/${item.ticket.key}`];
+  const view = viewOf(item);
+  const { kind, full } = view.label(item);
+  const { key, title, to } = view.named(item);
   return (
     <div className="inbox-detail-head">
       <KindLabel kind={kind}>{full}</KindLabel>
       <span className="key">{key}</span>
-      <Link to={to!} className="link">{title}</Link>
-      {item.kind === "suggestion" && item.suggestion.item.status && <DecisionStatusPill status={item.suggestion.item.status} />}
-      {item.kind === "suggestion" && item.suggestion.item.protected && item.suggestion.item.kind !== "guidance" && <ProtectedMark />}
+      <Link to={to} className="link">{title}</Link>
+      {view.marks?.(item)}
     </div>
   );
 }
@@ -669,7 +750,7 @@ function unattendedBecause(item: UnattendedItem): string {
  * and Reports, and Reassign to… (primary), which offers the active Users, and a link to the Ticket. Reassigning it to someone who
  * can see the Project takes it out of Triage; one who can't is refused, saying so.
  */
-function UnattendedDetail(props: DetailProps<UnattendedItem> & { me: User }) {
+function UnattendedDetail(props: DetailProps<UnattendedItem>) {
   const { ticket, reports } = props.item;
   const [users] = useLoad(api.users, []);
   const reassign = useAction((assigneeId: string) => props.acting(() => api.updateTicket(ticket.key, { assigneeId })), props.onDone);
@@ -785,7 +866,7 @@ function DecisionDetail(props: DetailProps<DecisionItem>) {
  * will be credited to. An outdated one names the newer Version and who saved it, and Accept becomes Merge and
  * accept…, which merges the Suggestion with that Version, leaving parts both changed for the User to settle.
  */
-function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
+function SuggestionDetail(props: DetailProps<SuggestionItem>) {
   const { suggestion } = props.item;
   const { item, proposedBy } = suggestion;
   const [mode, setMode] = useState<"read" | "edit" | "reject" | "merge">("read");
@@ -959,7 +1040,7 @@ function foundBy(item: DiscoveredItem): string {
  * to… another of their Agents, Keep in Backlog, and Cancel. In Triage, where nobody who can act on it is Assignee: Take it, which assigns it to the
  * User and moves it to their Inbox, and Cancel.
  */
-function DiscoveredDetail(props: DetailProps<DiscoveredItem> & { me: User }) {
+function DiscoveredDetail(props: DetailProps<DiscoveredItem>) {
   const { ticket, blocks } = props.item;
   const { agent, session, sourceTicket } = ticket.discovered!;
   // An Inbox holds only the User's own; Triage, those with no Assignee or one who can't act on them.
