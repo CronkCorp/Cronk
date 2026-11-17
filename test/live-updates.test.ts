@@ -492,6 +492,45 @@ describe("A Project's Terms' live updates", () => {
     expect(await project.next()).toEqual(CHANGED);
     expect(await workspace.next()).toEqual(CHANGED);
   });
+
+  it("tell their watchers, and the Workspace's, when a Suggestion on one of its Terms is made or rejected, so its count shows", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const term = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const project = await admin.events("/api/projects/CRONK/terms/events");
+    const workspace = await admin.events("/api/workspace/terms/events");
+    expect((await project.next())?.event).toBe("ready");
+    expect((await workspace.next())?.event).toBe("ready");
+
+    const made = await claude.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition: "A temporary hold." }, reasoning: "Say it ends." });
+    expect(made.status).toBe(201);
+    expect(await project.next()).toEqual(CHANGED);
+    expect(await workspace.next()).toEqual(CHANGED);
+
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/reject`, { reason: "It doesn't." })).status).toBe(200);
+    expect(await project.next()).toEqual(CHANGED);
+    expect(await workspace.next()).toEqual(CHANGED);
+  });
+
+  it("tell nothing of a Suggestion on a Document", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Limits", body: "Five." })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const project = await admin.events("/api/projects/CRONK/terms/events");
+    expect((await project.next())?.event).toBe("ready");
+
+    const made = await claude.post("/api/suggestions", { item: { kind: "document", id: document.id }, baseVersion: 1, content: { body: "Six." }, reasoning: "More." });
+    expect(made.status).toBe(201);
+    await expectQuiet(project);
+  });
 });
 
 describe("Terms' live updates after an import", () => {
