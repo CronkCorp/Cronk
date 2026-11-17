@@ -1,20 +1,22 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Queryable } from "../db/database.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
-import { replaceReferenceText } from "../../shared/ticket-references.js";
+import { replaceReferenceText, TICKET_REFERENCE } from "../../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowledge-references.js";
 import type { MentionKind } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "./decisions.js";
+import { documentProtectedSql } from "./protection.js";
 
 /**
- * What mentions each Decision and Term: the Tickets, Documents, Comments, Terms and Decisions whose
- * text names a Decision's key or a Term's name, as the web client links them. Recorded whenever that
- * text changes, so a Decision or Term finds what mentions it through an index instead of reading
- * everything. Decision keys are kept as written, so a mention counts once a Decision with that key exists.
+ * What mentions each Ticket, Decision and Term: the Tickets, Documents, Comments, Terms, Decisions and
+ * Activities whose text names a Ticket's or Decision's key or a Term's name, as the web client links them.
+ * Recorded whenever that text changes, so a Ticket, Decision or Term finds what mentions it through an
+ * index instead of reading everything. Keys are kept as written, so a mention counts once a Ticket or
+ * Decision with that key exists.
  */
 
-/** Something whose text may mention Decisions and Terms. */
+/** Something whose text may mention Tickets, Decisions and Terms. */
 export interface MentionSource {
   kind: MentionKind;
   id: string;
@@ -27,32 +29,29 @@ const SOURCE_COLUMN: Record<MentionKind, string> = {
   comment: "comment_id",
   term: "term_id",
   decision: "decision_id",
+  activity: "activity_id",
 };
 
 /**
  * Every source's text with where it lies, as `s`: its kind, id, Workspace, Project (null for the
- * Workspace), a title read as plain text (empty for none) and a Markdown body. Without `artifacts`,
- * Comments are read as before Comments on Artifacts existed, as a migration from then must.
+ * Workspace), a title read as plain text (empty for none) and a Markdown body. An Activity lies where its Ticket does.
  */
-const sources = (artifacts = true) => `(
+const SOURCES = `(
   SELECT 'ticket' AS kind, t.id, p.workspace_id, t.project_id, t.title, t.description AS body
   FROM tickets t JOIN projects p ON p.id = t.project_id
   UNION ALL
   SELECT 'document', d.id, d.workspace_id, d.project_id, d.title, d.body FROM documents d
   UNION ALL
-  ${
-    artifacts
-      ? `SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id, x.workspace_id), coalesce(t.project_id, d.project_id, x.project_id), '', c.body
+  SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id, x.workspace_id), coalesce(t.project_id, d.project_id, x.project_id), '', c.body
   FROM comments c LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
-    LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN artifacts x ON x.id = c.artifact_id`
-      : `SELECT 'comment', c.id, coalesce(tp.workspace_id, d.workspace_id), coalesce(t.project_id, d.project_id), '', c.body
-  FROM comments c LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
-    LEFT JOIN documents d ON d.id = c.document_id`
-  }
+    LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN artifacts x ON x.id = c.artifact_id
   UNION ALL
   SELECT 'term', id, workspace_id, project_id, '', definition FROM terms
   UNION ALL
   SELECT 'decision', id, workspace_id, project_id, title, body FROM decisions
+  UNION ALL
+  SELECT 'activity', a.id, p.workspace_id, t.project_id, '', a.body
+  FROM activities a JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id
 ) s`;
 
 interface SourceRow {
@@ -74,8 +73,14 @@ function proseTexts(body: string): string[] {
   return texts;
 }
 
-/** The Decision keys `texts` name, without repeats. */
-const decisionKeysIn = (texts: string[]) => [...new Set(texts.flatMap((text) => [...text.matchAll(DECISION_REFERENCE)].map((m) => m[0])))];
+/** The keys `pattern` finds in `texts`, without repeats. */
+const keysIn = (texts: string[], pattern: RegExp) => [...new Set(texts.flatMap((text) => [...text.matchAll(pattern)].map((m) => m[0])))];
+
+/** The key of the Ticket with this id, for leaving out its mentions of itself. */
+async function ownTicketKey(db: Queryable, id: string): Promise<string | undefined> {
+  const { rows } = await db.query<{ key: string }>(`SELECT ${ticketKeySql("p", "t")} AS key FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.id = $1`, [id]);
+  return rows[0]?.key;
+}
 
 /** The key of the Decision with this id, for leaving out its mentions of itself. */
 async function ownDecisionKey(db: Queryable, id: string): Promise<string | undefined> {
@@ -112,11 +117,17 @@ async function record(db: Queryable, source: SourceRow): Promise<void> {
   const column = SOURCE_COLUMN[source.kind];
   await db.query(`DELETE FROM mentions WHERE ${column} = $1`, [source.id]);
   const texts = [source.title, ...proseTexts(source.body)];
-  const own = source.kind === "decision" ? await ownDecisionKey(db, source.id) : undefined;
-  const keys = decisionKeysIn(texts).filter((k) => k !== own);
-  await db.query(`INSERT INTO mentions (${column}, decision_key) SELECT $1, unnest($2::text[])`, [source.id, keys]);
-  const termIds = termIdsIn(texts, await applicableTerms(db, source.workspace_id, source.project_id)).filter((id) => id !== source.id);
-  await db.query(`INSERT INTO mentions (${column}, mentioned_term_id) SELECT $1, unnest($2::uuid[])`, [source.id, termIds]);
+  const ownTicket = source.kind === "ticket" ? await ownTicketKey(db, source.id) : undefined;
+  const ownDecision = source.kind === "decision" ? await ownDecisionKey(db, source.id) : undefined;
+  const terms = await applicableTerms(db, source.workspace_id, source.project_id);
+  const targets: [target: string, type: string, values: string[]][] = [
+    ["ticket_key", "text", keysIn(texts, TICKET_REFERENCE).filter((k) => k !== ownTicket)],
+    ["decision_key", "text", keysIn(texts, DECISION_REFERENCE).filter((k) => k !== ownDecision)],
+    ["mentioned_term_id", "uuid", termIdsIn(texts, terms).filter((id) => id !== source.id)],
+  ];
+  for (const [target, type, values] of targets) {
+    await db.query(`INSERT INTO mentions (${column}, ${target}) SELECT $1, unnest($2::${type}[])`, [source.id, values]);
+  }
 }
 
 /**
@@ -124,7 +135,7 @@ async function record(db: Queryable, source: SourceRow): Promise<void> {
  * Run in the transaction that creates or changes it.
  */
 export async function recordMentions(db: Queryable, source: MentionSource): Promise<void> {
-  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${sources()} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
+  const { rows } = await db.query<SourceRow>(`SELECT * FROM ${SOURCES} WHERE s.kind = $1 AND s.id = $2`, [source.kind, source.id]);
   if (rows[0]) await record(db, rows[0]);
 }
 
@@ -138,7 +149,7 @@ export async function recordMentionsOfNames(db: Queryable, place: { workspaceId:
   // where Markdown escapes the punctuation around it.
   const words = names.map((name) => (name.match(/[\p{L}\p{N}]+/gu) ?? [name]).reduce((a, b) => (b.length > a.length ? b : a)).toLowerCase());
   const { rows } = await db.query<SourceRow>(
-    `SELECT * FROM ${sources()}
+    `SELECT * FROM ${SOURCES}
      WHERE s.workspace_id = $1 AND ($2::uuid IS NULL OR s.project_id = $2)
        AND EXISTS (SELECT 1 FROM unnest($3::text[]) w WHERE strpos(lower(s.title || ' ' || s.body), w) > 0)
      ORDER BY s.kind, s.id`,
@@ -152,14 +163,13 @@ const BATCH = 200;
 
 /**
  * Records what every source mentions, in the Workspace `workspaceId` (all Workspaces when null), as
- * for a database or an import that didn't record them yet. It parses as `recordMentions` does now: if
- * what counts as a mention changes, add a migration that runs it again. A migration from before Comments
- * on Artifacts existed passes `artifacts` false.
+ * for a database or an import that didn't record them yet. It parses as `recordMentions` does now, and
+ * reads the schema as it is now: if what counts as a mention changes, add a migration that runs it again.
  */
-export async function recordAllMentions(db: Queryable, workspaceId: string | null = null, opts: { artifacts?: boolean } = {}): Promise<void> {
+export async function recordAllMentions(db: Queryable, workspaceId: string | null = null): Promise<void> {
   for (let after = { kind: "", id: "00000000-0000-0000-0000-000000000000" }; ; ) {
     const { rows } = await db.query<SourceRow>(
-      `SELECT * FROM ${sources(opts.artifacts)} WHERE ($1::uuid IS NULL OR s.workspace_id = $1) AND (s.kind, s.id) > ($2, $3::uuid)
+      `SELECT * FROM ${SOURCES} WHERE ($1::uuid IS NULL OR s.workspace_id = $1) AND (s.kind, s.id) > ($2, $3::uuid)
        ORDER BY s.kind, s.id LIMIT $4`,
       [workspaceId, after.kind, after.id, BATCH],
     );
@@ -169,63 +179,92 @@ export async function recordAllMentions(db: Queryable, workspaceId: string | nul
   }
 }
 
-/** Something that mentions a Decision or Term, as its page lists it. */
+/** Something that mentions a Ticket, Decision or Term, as its page lists it. */
 export interface Mention {
   kind: MentionKind;
   id: string;
   /** A Ticket's or Decision's key; null for the others. */
   key: string | null;
-  /** Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on. */
+  /** Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on; for an Activity, its Ticket's. */
   title: string;
   /** Null when it lies in the Workspace outside any Project. */
   projectKey: string | null;
-  /** For a Comment on a Ticket, or a Report: the Ticket's key. */
+  /** For a Comment on a Ticket, an Activity, or a Report: the Ticket's key. */
   ticketKey: string | null;
   /** For a Comment on a Document: the Document's id. */
   documentId: string | null;
   /** For a Comment on an Artifact: the Artifact's id. */
   artifactId: string | null;
-  /** When it last changed; for a Comment, when it was posted. */
+  /** When it last changed; for a Comment or Activity, when it was posted. */
   at: Date;
+  /**
+   * Whether Agents may read but not change it: for a Document, it (or one above it in its page tree) is
+   * marked Protected; for a Term or Decision, it is marked. Null for a Ticket, Comment or Activity.
+   */
+  protected: boolean | null;
 }
 
-/** How many mentions a Decision or Term lists. */
+/** How many mentions a Ticket, Decision or Term lists. */
 const MENTIONS_LIMIT = 50;
 
+/** What a mentions list is for: a Decision by key, a Term by id, or a Ticket by key along with its id. */
+export type MentionTarget = { decisionKey: string } | { termId: string } | { ticketKey: string; ticketId: string };
+
 /**
- * What mentions a Decision (`decisionKey`) or a Term (`termId`), most recently changed first (at most
- * 50), leaving out what lies where `readable` doesn't let its reader read.
+ * The condition picking `target`'s rows of `mentions m`, with the query parameters it numbers from $1. A Ticket's
+ * own Comments, Activities and Reports and the Documents linked to it are left out, as the Ticket shows them already.
  */
-export async function listMentions(db: Queryable, target: { decisionKey: string } | { termId: string }, readable: Readable): Promise<Mention[]> {
-  const [condition, value] = "decisionKey" in target ? ["m.decision_key = $1", target.decisionKey] : ["m.mentioned_term_id = $1", target.termId];
+function mentionsOf(target: MentionTarget): { condition: string; params: string[] } {
+  if ("decisionKey" in target) return { condition: "m.decision_key = $1", params: [target.decisionKey] };
+  if ("termId" in target) return { condition: "m.mentioned_term_id = $1", params: [target.termId] };
+  return {
+    condition: `m.ticket_key = $1
+     AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id = m.comment_id AND c.ticket_id = $2)
+     AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = m.activity_id AND a.ticket_id = $2)
+     AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = m.document_id AND d.ticket_id = $2)
+     AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.document_id = m.document_id AND l.ticket_id = $2)`,
+    params: [target.ticketKey, target.ticketId],
+  };
+}
+
+/**
+ * What mentions a Ticket, a Decision or a Term, most recently changed first (at most 50), leaving out what
+ * lies where `readable` doesn't let its reader read.
+ */
+export async function listMentions(db: Queryable, target: MentionTarget, readable: Readable): Promise<Mention[]> {
+  const { condition, params } = mentionsOf(target);
+  const n = params.length;
   const { rows } = await db.query<Mention>(
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
        SELECT 'ticket' AS kind, t.id, ${ticketKeySql("p", "t")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
-              NULL::uuid AS artifact_id, t.updated_at AS at, t.project_id, p.workspace_id
+              NULL::uuid AS artifact_id, t.updated_at AS at, NULL::boolean AS protected, t.project_id, p.workspace_id
        FROM m JOIN tickets t ON t.id = m.ticket_id JOIN projects p ON p.id = t.project_id
        UNION ALL
-       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, d.project_id, d.workspace_id
+       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, ${documentProtectedSql("d")}, d.project_id, d.workspace_id
        FROM m JOIN documents d ON d.id = m.document_id LEFT JOIN projects p ON p.id = d.project_id
          LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
        UNION ALL
        SELECT 'comment', c.id, NULL, coalesce(t.title, d.title, x.title), coalesce(tp.key, dp.key, xp.key), ${ticketKeySql("tp", "t")}, c.document_id,
-              c.artifact_id, c.at, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
+              c.artifact_id, c.at, NULL, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
        FROM m JOIN comments c ON c.id = m.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
          LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
          LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
        UNION ALL
-       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.project_id, tm.workspace_id
+       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.protected, tm.project_id, tm.workspace_id
        FROM m JOIN terms tm ON tm.id = m.term_id LEFT JOIN projects p ON p.id = tm.project_id
        UNION ALL
        SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL, NULL,
-              dc.updated_at, dc.project_id, dc.workspace_id
+              dc.updated_at, dc.protected, dc.project_id, dc.workspace_id
        FROM m JOIN decisions dc ON dc.id = m.decision_id LEFT JOIN projects p ON p.id = dc.project_id
+       UNION ALL
+       SELECT 'activity', a.id, NULL, t.title, p.key, ${ticketKeySql("p", "t")}, NULL, NULL, a.at, NULL, t.project_id, p.workspace_id
+       FROM m JOIN activities a ON a.id = m.activity_id JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id
      )
-     SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at
-     FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
+     SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
+     FROM found f WHERE ${documentReadableSql("f", `$${n + 1}::uuid[]`, `$${n + 2}::uuid`)}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
-    [value, readable.projectIds, readable.workspaceId],
+    [...params, readable.projectIds, readable.workspaceId],
   );
   return rows;
 }

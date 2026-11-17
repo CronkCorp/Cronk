@@ -41,12 +41,12 @@ export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 export const WAITING_REASONS = ["answer", "mention", "comment", "published", "rejected", "suggestion_rejected"] as const;
 export type WaitingReason = (typeof WAITING_REASONS)[number];
 
-/** Why a Ticket lists a Document: it is one of the Ticket's Reports, was linked to it, or mentions its key. */
-export const LINK_REASONS = ["report", "linked", "mention"] as const;
+/** Why a Ticket lists a Document: it is one of the Ticket's Reports, or was linked to it. */
+export const LINK_REASONS = ["report", "linked"] as const;
 export type LinkReason = (typeof LINK_REASONS)[number];
 
-/** What can mention a Decision or a Term: its text names the Decision's key or the Term's name. */
-export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision"] as const;
+/** What can mention a Ticket, a Decision or a Term: its text names the Ticket's or Decision's key or the Term's name. */
+export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision", "activity"] as const;
 export type MentionKind = (typeof MENTION_KINDS)[number];
 
 /** How a Comment @mentions an Agent, for the API's and the MCP tools' descriptions. */

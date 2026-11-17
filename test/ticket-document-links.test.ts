@@ -14,13 +14,28 @@ describe("Linking a Document to a Ticket", () => {
 
     const linked = await admin.post(`/api/tickets/cronk-1/documents/${runbook}`);
     expect(linked.status).toBe(201);
-    expect(listed(linked.body.documents)).toEqual(["Runbook (linked)", "Plan (mention)"]);
-    expect(listed((await admin.get("/api/tickets/CRONK-1")).body.documents)).toEqual(["Runbook (linked)", "Plan (mention)"]);
+    expect(listed(linked.body.documents)).toEqual(["Runbook (linked)"]);
+    const detail = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(listed(detail.documents)).toEqual(["Runbook (linked)"]);
+    expect(detail.mentions.map((m: { title: string }) => m.title)).toEqual(["Plan"]);
 
     const unlinked = await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`);
     expect(unlinked.status).toBe(200);
-    expect(listed(unlinked.body.documents)).toEqual(["Plan (mention)"]);
+    expect(listed(unlinked.body.documents)).toEqual([]);
     expect((await admin.delete(`/api/tickets/CRONK-1/documents/${runbook}`)).status).toBe(404);
+  });
+
+  it("moves a Document naming the Ticket's key from its mentions to its Documents while linked, in the link's own answer", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 1" });
+    const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan", body: "Do CRONK-1 first." })).body.document.id;
+    const titles = (list: { title: string }[]) => list.map((d) => d.title);
+
+    const linked = (await admin.post(`/api/tickets/CRONK-1/documents/${plan}`)).body;
+    expect([titles(linked.documents), titles(linked.mentions)]).toEqual([["Plan"], []]);
+    const unlinked = (await admin.delete(`/api/tickets/CRONK-1/documents/${plan}`)).body;
+    expect([titles(unlinked.documents), titles(unlinked.mentions)]).toEqual([[], ["Plan"]]);
   });
 
   it("refuses linking one of the Ticket's own Reports, which it lists already", async () => {

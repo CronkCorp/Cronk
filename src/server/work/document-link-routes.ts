@@ -6,13 +6,33 @@ import { requireAgentMayChange } from "../coordination/claims.js";
 import { readablePlaces } from "../identity/access.js";
 import { documentFor } from "../knowledge/document-reads.js";
 import { listLinkedDocuments, type Document } from "../knowledge/documents.js";
-import { answer, documentIdParam, errors, listing, pathParams, ref, ticketKeyParam } from "../schemas.js";
+import { listMentions } from "../knowledge/mentions.js";
+import { answer, documentIdParam, errors, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { linkDocument, unlinkDocument } from "./document-links.js";
 import { ticketsChanged } from "./ticket-changes.js";
 import { ticketFor } from "./ticket-reads.js";
 import type { Ticket } from "./tickets.js";
 
 const linkParams = pathParams({ key: ticketKeyParam, documentId: documentIdParam });
+
+/** A Ticket's Documents and what mentions it, as a link or unlink answers them: a Document naming its key moves between the two. */
+const documentsAndMentions = {
+  type: "object",
+  required: ["documents", "mentions"],
+  properties: {
+    documents: { type: "array", items: ref("LinkedDocument"), description: "Its Reports and linked Documents, as the Ticket lists them." },
+    mentions: { type: "array", items: ref("Mention"), description: "What mentions it, as the Ticket lists it." },
+  },
+} as const;
+
+/** The Ticket's Documents and what mentions it, as `actor` may read them. */
+async function documentsAndMentionsOf(tx: Queryable, actor: Actor, ticket: Ticket) {
+  const readable = await readablePlaces(tx, actor);
+  return {
+    documents: await listLinkedDocuments(tx, ticket, readable),
+    mentions: await listMentions(tx, { ticketKey: ticket.key, ticketId: ticket.id }, readable),
+  };
+}
 
 /** Linking Documents to a Ticket from the Ticket's side. */
 export function documentLinkRoutes(ctx: AppContext) {
@@ -23,21 +43,21 @@ export function documentLinkRoutes(ctx: AppContext) {
         schema: {
           params: linkParams,
           response: {
-            201: answer("The Ticket's Documents, with the one linked. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.", listing("documents", ref("LinkedDocument"))),
+            201: answer("The Ticket's Documents, with the one linked, and what mentions it. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.", documentsAndMentions),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const { ticket, documents } = await transaction(ctx.db, async (tx) => {
+        const { ticket, listed } = await transaction(ctx.db, async (tx) => {
           const { ticket, document } = await linkEnds(tx, actor, request.params.key, request.params.documentId, ctx.clock.now());
           if (document.ticketKey === ticket.key) throw new HttpError(400, `That Document is a Report on ${ticket.key}, which lists it already`);
           await linkDocument(tx, { ticket, document, actor, now: ctx.clock.now() });
-          return { ticket, documents: await listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor)) };
+          return { ticket, listed: await documentsAndMentionsOf(tx, actor, ticket) };
         });
         ticketsChanged(ctx.live, [ticket]);
-        return reply.code(201).send({ documents });
+        return reply.code(201).send(listed);
       },
     );
 
@@ -47,20 +67,20 @@ export function documentLinkRoutes(ctx: AppContext) {
         schema: {
           params: linkParams,
           response: {
-            200: answer("The Ticket's remaining Documents. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.", listing("documents", ref("LinkedDocument"))),
+            200: answer("The Ticket's remaining Documents, and what mentions it. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.", documentsAndMentions),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { ticket, documents } = await transaction(ctx.db, async (tx) => {
+        const { ticket, listed } = await transaction(ctx.db, async (tx) => {
           const { ticket, document } = await linkEnds(tx, actor, request.params.key, request.params.documentId, ctx.clock.now());
           if (!(await unlinkDocument(tx, { ticket, document, actor, now: ctx.clock.now() }))) throw new HttpError(404, "That Document isn't linked to this Ticket");
-          return { ticket, documents: await listLinkedDocuments(tx, ticket, await readablePlaces(tx, actor)) };
+          return { ticket, listed: await documentsAndMentionsOf(tx, actor, ticket) };
         });
         ticketsChanged(ctx.live, [ticket]);
-        return { documents };
+        return listed;
       },
     );
   };

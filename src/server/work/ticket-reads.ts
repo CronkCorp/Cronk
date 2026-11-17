@@ -5,6 +5,7 @@ import { findLiveClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
 import { canRead, readablePlaces, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
 import { listLinkedDocuments } from "../knowledge/documents.js";
+import { listMentions } from "../knowledge/mentions.js";
 import { ref } from "../schemas.js";
 import { findProjectById, listAllProjects } from "./projects.js";
 import { listRelations, type Relations } from "./relations.js";
@@ -27,7 +28,7 @@ export async function ticketFor(db: Queryable, actor: Actor, key: string, need: 
 /** A Ticket with the Tickets and Documents around it and its live Claim, as its page and a Claim show it. */
 export const ticketDetailSchema = {
   type: "object",
-  required: ["ticket", "subTickets", "relations", "documents", "claim"],
+  required: ["ticket", "subTickets", "relations", "documents", "mentions", "claim"],
   properties: {
     ticket: ref("Ticket"),
     subTickets: { type: "array", items: ref("TicketRef") },
@@ -36,19 +37,27 @@ export const ticketDetailSchema = {
       type: "array",
       items: ref("LinkedDocument"),
       description:
-        "Its Reports, oldest first; then the Documents the caller can read that were linked to it, in the order linked; then those whose current Version mentions its key, most recently changed first (at most 20). Each is listed once.",
+        "Its Reports, oldest first; then the Documents the caller can read that were linked to it, in the order linked. Each is listed once.",
+    },
+    mentions: {
+      type: "array",
+      items: ref("Mention"),
+      description:
+        "What the caller can read whose current text names its key, as the web client links it, most recently changed first (at most 50): Tickets, Documents (other Tickets' Reports included), Comments, Terms, Decisions and Activities. Its own text, Comments, Activities and Reports and the Documents linked to it are left out.",
     },
     claim: { anyOf: [ref("Claim"), { type: "null" }], description: "Null unless an Agent Session holds a live Claim." },
   },
 } as const;
 
-/** The Ticket with its Sub-Tickets, the relations and linked Documents `actor` can see, and its live Claim at `now`. */
+/** The Ticket with its Sub-Tickets, the relations, linked Documents and mentions `actor` can see, and its live Claim at `now`. */
 export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, now: Date) {
+  const readable = await readablePlaces(db, actor);
   return {
     ticket,
     subTickets: await listSubTickets(db, ticket.id),
     relations: await visibleRelations(db, actor, await listRelations(db, ticket.id)),
-    documents: await listLinkedDocuments(db, ticket, await readablePlaces(db, actor)),
+    documents: await listLinkedDocuments(db, ticket, readable),
+    mentions: await listMentions(db, { ticketKey: ticket.key, ticketId: ticket.id }, readable),
     claim: (await findLiveClaim(db, ticket.id, now)) ?? null,
   };
 }

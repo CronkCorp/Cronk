@@ -2,9 +2,9 @@ import { actorColumns, toRecordedActor, type Actor, type StoredActor, type Recor
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
-import { recordTicketMentions } from "./ticket-mentions.js";
 import { recordMentions } from "./mentions.js";
 import { embedsIn, embedsSql, recordEmbeds } from "../files/artifact-embeds.js";
+import { documentProtectedSql } from "./protection.js";
 import type { ArtifactAt } from "../../shared/artifact-embeds.js";
 import type { LinkReason } from "../../shared/values.js";
 import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
@@ -171,7 +171,6 @@ export async function insertDocument(
   );
   const id = rows[0]!.id;
   await insertVersion(db, id, { number: 1, title: input.title, body: input.body, actor: input.actor, now: input.now, restoredFrom: null });
-  await recordTicketMentions(db, id, input);
   await recordMentions(db, { kind: "document", id });
   await recordEmbeds(db, { kind: "document", id });
   return (await findDocument(db, input.tree.workspaceId, id))!;
@@ -200,7 +199,6 @@ export async function insertDocumentRow(db: Queryable, d: DocumentRowInput): Pro
     [d.workspaceId, d.projectId, d.parentId, d.position, d.title, d.body, d.version, d.createdAt, d.updatedAt, d.ticketId, d.claimId],
   );
   const id = rows[0]!.id;
-  await recordTicketMentions(db, id, d);
   await recordMentions(db, { kind: "document", id });
   await recordEmbeds(db, { kind: "document", id });
   return id;
@@ -305,7 +303,6 @@ export async function saveVersion(
     number,
     save.now,
   ]);
-  await recordTicketMentions(db, document.id, save);
   await recordMentions(db, { kind: "document", id: document.id });
   const embeds = await recordEmbeds(db, { kind: "document", id: document.id });
   return { ...document, title: save.title, body: save.body, version: number, embeds, updatedAt: save.now };
@@ -389,17 +386,14 @@ export interface LinkedDocument {
   version: number;
   updatedAt: Date;
   reason: LinkReason;
+  /** Whether Agents may read but not change it: it, or a Document above it, is marked Protected. */
+  protected: boolean;
 }
-
-/** How many Documents mentioning a Ticket it lists, besides its Reports and the Documents linked to it. */
-const MENTIONS_LIMIT = 20;
 
 /**
  * The Documents linked to a Ticket, each once: its own Reports, oldest first; then the Documents
- * linked to it, in the order they were linked; then the other Documents (other Tickets' Reports
- * included) whose current Version mentions its key, as Markdown links Ticket keys, most recently
- * changed first. Only those in `readable` places are listed; the Ticket's Reports always are, as
- * they share its Project.
+ * linked to it, in the order they were linked. Only those in `readable` places are listed; the
+ * Ticket's Reports always are, as they share its Project. What mentions its key is `listMentions`'.
  */
 export async function listLinkedDocuments(
   db: Queryable,
@@ -407,7 +401,8 @@ export async function listLinkedDocuments(
   readable: Readable,
 ): Promise<LinkedDocument[]> {
   const select = (reason: LinkReason) =>
-    `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason
+    `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason,
+       ${documentProtectedSql("d")} AS protected
      FROM (${SELECT_DOCUMENTS}) d`;
   const isReadable = documentReadableSql("d", "$2::uuid[]", "$3::uuid");
   const reports = await db.query<LinkedDocument>(`${select("report")} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
@@ -417,13 +412,5 @@ export async function listLinkedDocuments(
      ORDER BY l.seq`,
     [ticket.id, readable.projectIds, readable.workspaceId],
   );
-  const mentions = await db.query<LinkedDocument>(
-    `${select("mention")} JOIN document_ticket_mentions m ON m.document_id = d.id AND m.ticket_key = $4
-     WHERE d.ticket_id IS DISTINCT FROM $1
-       AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.ticket_id = $1 AND l.document_id = d.id)
-       AND ${isReadable}
-     ORDER BY d.updated_at DESC, d.id LIMIT ${MENTIONS_LIMIT}`,
-    [ticket.id, readable.projectIds, readable.workspaceId, ticket.key],
-  );
-  return [...reports.rows, ...linked.rows, ...mentions.rows];
+  return [...reports.rows, ...linked.rows];
 }
