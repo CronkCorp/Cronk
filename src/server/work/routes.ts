@@ -69,7 +69,7 @@ import { clearClaim, isOwnDiscoveryAwaitingDelegation, requireAgentMayChange, re
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { discoverySourceClaimOf } from "../coordination/sources.js";
 import { shownRelations, ticketDetail, ticketDetailSchema, ticketFor, visibleChanges } from "./ticket-reads.js";
-import { assigneesWaitingOn, waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
+import { usersShownTickets, waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
 import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
 import { readyNow, tellReadyAfter, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
@@ -429,7 +429,7 @@ export function workRoutes(ctx: AppContext) {
         ticketsChanged(ctx.live, [...moved, ...(await findTicketsByIds(ctx.db, mayBecomeReady))]);
         await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
         // Moved Tickets may have entered or left an In Review Status, and the Discovered Tickets blocking them show their Status.
-        waitingItemsChanged(ctx.live, [...moved.map((t) => t.assignee?.id), ...(await assigneesWaitingOn(ctx.db, moved.map((t) => t.id)))]);
+        waitingItemsChanged(ctx.live, await usersShownTickets(ctx.db, moved));
         return reply.code(204).send();
       },
     );
@@ -915,7 +915,8 @@ export function workRoutes(ctx: AppContext) {
         // Discovered Tickets blocking it: keep `shown` in step with what `withBlocks` lists of each Ticket blocked.
         if (ticket !== before) {
           const shown = ticket.title !== before.title || ticket.status.id !== before.status.id;
-          waitingItemsChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id, ...(shown ? await assigneesWaitingOn(ctx.db, [ticket.id]) : [])]);
+          // Unshown, only the previous and current Assignee are told, without looking up the Discovered Tickets blocking it.
+          waitingItemsChanged(ctx.live, [before.assignee?.id, ...(shown ? await usersShownTickets(ctx.db, [ticket]) : [ticket.assignee?.id])]);
           // The Tickets it blocks show its Status, and may now be unblocked.
           // Its parents list their Sub-Tickets, and Sub-Tickets may have followed its Autonomous Delegation.
           ticketsChanged(ctx.live, [ticket, ...alsoChanged, ...(await findTicketsByIds(ctx.db, blockedIds))]);
