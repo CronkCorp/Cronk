@@ -46,8 +46,8 @@ function MentionRow(props: { mention: Mention }) {
   return (
     <li>
       {(m.kind === "ticket" || m.kind === "decision") && <span className="key">{m.key}</span>}
-      <Link to={addressOf(m)} className="link">{m.title}</Link> {m.protected && <><ProtectedMark compact /> </>}
-      <span className="muted">{whereItIs(m)}</span> <Chip>{KIND_NAMES[m.kind]}</Chip>
+      <Link to={addressOf(m)} className="link">{m.title}</Link>
+      {m.protected && <> <ProtectedMark compact /></>} <span className="muted">{whereItIs(m)}</span> <Chip>{KIND_NAMES[m.kind]}</Chip>
     </li>
   );
 }

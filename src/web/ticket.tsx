@@ -572,8 +572,8 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
         <ul className="side-list" aria-label="Documents">
           {documents.map((d) => (
             <li key={d.id}>
-              <Link to={`/documents/${d.id}`} className="link">{d.title}</Link>{" "}
-              {d.protected && <><ProtectedMark compact />{" "}</>}
+              <Link to={`/documents/${d.id}`} className="link">{d.title}</Link>
+              {d.protected && <> <ProtectedMark compact /></>}{" "}
               <span className="muted">{whereDocumentIs(d)}</span> <Chip>{d.reason === "linked" ? "Linked" : "Mentions it"}</Chip>
               {d.reason === "linked" && !props.readOnly && (
                 <Button variant="ghost" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
@@ -603,8 +603,8 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
           <ul className="side-list" aria-label="Documents to link">
             {found.map((r) => (
               <li key={r.documentId}>
-                {r.title} {r.protected && <><ProtectedMark compact />{" "}</>}
-                <span className="muted">{whereDocumentIs(r)}</span>{" "}
+                {r.title}
+                {r.protected && <> <ProtectedMark compact /></>} <span className="muted">{whereDocumentIs(r)}</span>{" "}
                 <Button variant="ghost" aria-label={`Link ${r.title}`} disabled={link.busy} onClick={() => void link.run(r.documentId!)}>
                   Link
                 </Button>

@@ -131,9 +131,10 @@ describe("lists that show a Document", () => {
       { title: "Backups", reason: "linked", protected: true },
       { title: "Handbook", reason: "mention", protected: false },
     ];
-    expect(linked.body.documents.map(({ title, reason, protected: p }: { title: string; reason: string; protected: boolean }) => ({ title, reason, protected: p }))).toEqual(expected);
+    const marks = (documents: { title: string; reason: string; protected: boolean }[]) => documents.map(({ title, reason, protected: p }) => ({ title, reason, protected: p }));
+    expect(marks(linked.body.documents)).toEqual(expected);
     const read = (await admin.get("/api/tickets/CRONK-1")).body.documents;
-    expect(read.map(({ title, reason, protected: p }: { title: string; reason: string; protected: boolean }) => ({ title, reason, protected: p }))).toEqual(expected);
+    expect(marks(read)).toEqual(expected);
     expect(read[0]).not.toHaveProperty("protectedBy");
     expect(read[0]).not.toHaveProperty("covers");
   });
@@ -147,7 +148,8 @@ describe("lists that show a Document", () => {
       (await admin.post("/api/projects/CRONK/documents", { title, body: "About the zebra.", parentId })).body.document as { id: string };
     const architecture = await add("Architecture");
     await add("Storage", architecture.id);
-    await add("Handbook");
+    const handbook = await add("Handbook");
+    await admin.post(`/api/documents/${handbook.id}/comments`, { body: "A zebra note." });
     const term = (await admin.post("/api/projects/CRONK/terms", { name: "Zebra", definition: "A striped thing." })).body.term;
     await admin.post("/api/projects/CRONK/terms", { name: "Zebra crossing", definition: "Where a zebra crosses." });
     await admin.patch("/api/tickets/CRONK-1", { title: "Zebra work" });
@@ -157,6 +159,7 @@ describe("lists that show a Document", () => {
 
     const results = (await admin.get("/api/search?q=zebra&limit=50")).body.results as { kind: string; title: string; protected: boolean | null }[];
     expect(results.map((r) => `${r.kind}: ${r.title}: ${r.protected}`).sort()).toEqual([
+      "comment: Handbook: null",
       "comment: Zebra work: null",
       "document: Architecture: true",
       "document: Handbook: false",
@@ -167,6 +170,13 @@ describe("lists that show a Document", () => {
       "ticket: Zebra work: null",
     ]);
   });
+
+  /** What mentions a Term or Decision, as `path` lists it: each one's kind, title and Protected flag. */
+  const mentionMarks = async (admin: Awaited<ReturnType<typeof pageTree>>["admin"], path: string) => {
+    const res = await admin.get(path);
+    expect(res.status).toBe(200);
+    return res.body.mentions.map((m: { kind: string; title: string; protected: boolean | null }) => `${m.kind}: ${m.title}: ${m.protected}`).sort();
+  };
 
   it("say which of what mentions a Term or Decision is Protected: Documents by the same rule, Terms and Decisions by their mark", async () => {
     const { admin, architecture, storage, handbook } = await pageTree();
@@ -182,9 +192,7 @@ describe("lists that show a Document", () => {
     await admin.post(`/api/terms/${lapse.id}/protection`, { protected: true });
     await admin.post("/api/decisions/CRONK-D1/protection", { protected: true });
 
-    const res = await admin.get(`/api/terms/${claim.id}/mentions`);
-    expect(res.status).toBe(200);
-    expect(res.body.mentions.map((m: { kind: string; title: string; protected: boolean | null }) => `${m.kind}: ${m.title}: ${m.protected}`).sort()).toEqual([
+    expect(await mentionMarks(admin, `/api/terms/${claim.id}/mentions`)).toEqual([
       "comment: Lapse a stale Claim: null",
       "decision: Claims are released: false",
       "decision: Claims lapse: true",
@@ -194,6 +202,15 @@ describe("lists that show a Document", () => {
       "term: Lapse: true",
       "term: Release: false",
       "ticket: Lapse a stale Claim: null",
+    ]);
+
+    await admin.post("/api/workspace/decisions", { title: "Claims", body: "Per CRONK-D1." });
+    await admin.patch(`/api/documents/${storage.id}`, { baseVersion: 2, body: "Per CRONK-D1." });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "See CRONK-D1." });
+    expect(await mentionMarks(admin, "/api/decisions/CRONK-D1/mentions")).toEqual([
+      "comment: Lapse a stale Claim: null",
+      "decision: Claims: false",
+      "document: Storage: true",
     ]);
   });
 });
