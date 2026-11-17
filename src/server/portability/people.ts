@@ -1,5 +1,6 @@
 import { insertAgent } from "../identity/agents.js";
 import { insertUserWithoutPassword } from "../identity/users.js";
+import { DIFF_VIEWS } from "../../shared/values.js";
 import { roleSchema } from "../schemas.js";
 import { iso, type ExportContext } from "./export-context.js";
 import { date, isUuid, list, oneOf, optionalDate, refuse, text, type File } from "./fields.js";
@@ -31,7 +32,7 @@ export async function exportPeople(ctx: ExportContext): Promise<void> {
     {
       users: ctx.users
         .filter((u) => whole || ctx.usedUsers.has(u.id))
-        .map((u) => ({ email: u.email, name: u.name, role: u.role, active: u.deactivated_at === null })),
+        .map((u) => ({ email: u.email, name: u.name, role: u.role, active: u.deactivated_at === null, diffView: u.diff_view })),
       agents: exportedAgents.map((a) => ({ id: a.id, name: a.name, owner: ctx.emailOf.get(a.owner_id), createdAt: iso(a.created_at), removedAt: iso(a.removed_at) })),
       sessions: sessions.map((s) => ({ id: s.id, agent: s.agent_id, startedAt: iso(s.started_at), lastSeenAt: iso(s.last_seen_at), endedAt: iso(s.ended_at) })),
     },
@@ -47,11 +48,15 @@ export async function importPeople(ctx: ImportContext): Promise<void> {
   await importSessions(ctx, people);
 }
 
-/** Users already here by email are used as they are; the rest come in deactivated, with no password until they accept an invitation. */
+/**
+ * Users already here by email are used as they are, keeping their own Diff view; the rest come in deactivated, with no
+ * password until they accept an invitation, and the export's Diff view (unified when it has none, as older exports don't).
+ */
 async function importUsers(ctx: ImportContext, people: File): Promise<void> {
   for (const [i, u] of list(people, "users").entries()) {
     const where = `people.md users[${i}]`;
     const email = text(u.email, `${where}.email`);
+    const diffView = u.diffView === undefined ? "unified" : oneOf(u.diffView, DIFF_VIEWS, `${where}.diffView`);
     const { rows } = await ctx.db.query<{ id: string; workspace_id: string }>("SELECT id, workspace_id FROM users WHERE lower(email) = lower($1)", [email]);
     if (rows[0] && rows[0].workspace_id !== ctx.workspaceId) refuse(`${email} is a User of another Workspace`);
     // With no password, the User can't sign in until they accept an invitation.
@@ -63,6 +68,7 @@ async function importUsers(ctx: ImportContext, people: File): Promise<void> {
           email,
           name: text(u.name, `${where}.name`),
           role: oneOf(u.role, roleSchema.enum, `${where}.role`),
+          diffView,
           now: ctx.now,
         })
       ).id;

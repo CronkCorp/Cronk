@@ -98,12 +98,12 @@ export async function findUserByEmail(db: Queryable, email: string): Promise<{ u
 /** Adds a User who has no password yet, deactivated, as an import brings them in. */
 export async function insertUserWithoutPassword(
   db: Queryable,
-  input: { workspaceId: string; email: string; name: string; role: Role; now: Date },
+  input: { workspaceId: string; email: string; name: string; role: Role; diffView: DiffView; now: Date },
 ): Promise<User> {
   const { rows } = await db.query<UserRow>(
-    `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING *`,
-    [input.workspaceId, input.email, input.name, NO_PASSWORD, input.role, input.now],
+    `INSERT INTO users (workspace_id, email, name, password_hash, role, created_at, deactivated_at, diff_view)
+     VALUES ($1, $2, $3, $4, $5, $6, $6, $7) RETURNING *`,
+    [input.workspaceId, input.email, input.name, NO_PASSWORD, input.role, input.now, input.diffView],
   );
   return toUser(rows[0]!);
 }

@@ -81,6 +81,20 @@ describe("the OpenAPI description", () => {
     expect(doc.paths["/api/agents/{id}/record"].get.responses["200"].description).toMatch(/after the Agent is removed/);
   });
 
+  it("describes each User's Diff view and the route a User changes their own with", async () => {
+    const doc = await openapi();
+    expect(doc.components.schemas.User.properties.diffView).toMatchObject({ enum: ["unified", "split"] });
+    expect(doc.components.schemas.User.properties.diffView.description).toMatch(/side by side/);
+    expect(doc.components.schemas.User.required).toContain("diffView");
+    const patch = doc.paths["/api/me"].patch;
+    expect(patch.requestBody.content["application/json"].schema).toMatchObject({
+      additionalProperties: false,
+      properties: { diffView: { enum: ["unified", "split"] } },
+    });
+    expect(patch.responses["200"].content["application/json"].schema.properties.user).toEqual({ $ref: "#/components/schemas/User" });
+    expect(Object.keys(patch.responses)).toEqual(expect.arrayContaining(["400", "403"]));
+  });
+
   it("keeps the old names of the Agent Record and a Ticket's Changes out", async () => {
     const doc = await openapi();
     expect(doc.components.schemas).not.toHaveProperty("AgentWork");
