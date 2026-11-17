@@ -694,3 +694,21 @@ describe("From Transcript links", () => {
     expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
   });
 });
+
+describe("Context on claim", () => {
+  it("lists the Transcripts the Ticket came from, without their text", async () => {
+    const { cronk, claude, session } = await delegatedSetup();
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    await first.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Started" });
+    await first.delete("/api/tickets/CRONK-1/claim");
+    const id = (await upload(cronk.client(claude.secret), "chat-1", chat("Start on CRONK-1", first.sessionId))).body.transcript.id;
+
+    const claimed = await (await session()).post("/api/tickets/CRONK-1/claim");
+    expect(claimed.status, JSON.stringify(claimed.body)).toBe(200);
+    expect(claimed.body.transcripts).toEqual([
+      { id, title: "Start on CRONK-1", agent: { id: claude.agentId, name: "claude-laptop" }, turn: 1, updatedAt: expect.any(String) },
+    ]);
+    expect(JSON.stringify(claimed.body)).not.toContain("tool-result");
+  });
+});
