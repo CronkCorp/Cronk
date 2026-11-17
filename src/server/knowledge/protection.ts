@@ -78,7 +78,7 @@ export const suggestNewDocumentInstead = (parentId: string) =>
  * instead, ending a refusal's sentence. A Suggestion carries content only, never a place, so a User makes the move.
  */
 export const askToMoveInstead = (documentId: string) =>
-  `ask a User to move it instead, in a Comment on it (POST /api/documents/${documentId}/comments, or the \`comments\` tool) ` +
+  `ask a User to make the move instead, in a Comment on the Document you are moving (POST /api/documents/${documentId}/comments, or the \`comments\` tool) ` +
   "saying where it should go and why";
 
 /**

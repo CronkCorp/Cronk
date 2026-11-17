@@ -240,7 +240,7 @@ describe("an Agent and a Protected Document", () => {
     expect(refused[0]!.body.error).toMatch(/^Storage is Protected/);
     const move = await agent.post(`/api/documents/${storage.id}/move`, { parentId: architecture.id, position: 0 });
     expect(move.status).toBe(403);
-    expect(move.body.error).toMatch(/^Storage is Protected.*Ask a User to move it instead, in a Comment/);
+    expect(move.body.error).toMatch(/^Storage is Protected.*Ask a User to make the move instead, in a Comment/);
 
     expect((await agent.get(`/api/documents/${storage.id}`)).status).toBe(200);
     expect((await agent.post(`/api/documents/${storage.id}/comments`, { body: "This misses the backups." })).status).toBe(201);
@@ -264,7 +264,7 @@ describe("an Agent and a Protected Document", () => {
     for (const [res, moved] of [[into, loose], [out, storage], [above, architecture]] as const) {
       expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/Protected/);
-      expect(res.body.error).toContain(`Ask a User to move it instead, in a Comment on it (POST /api/documents/${moved.id}/comments, or the \`comments\` tool)`);
+      expect(res.body.error).toContain(`Ask a User to make the move instead, in a Comment on the Document you are moving (POST /api/documents/${moved.id}/comments, or the \`comments\` tool)`);
       expect(res.body.error).not.toMatch(/Suggestion|\/api\/suggestions/);
     }
     expect(into.body.error).toMatch(/^Storage is Protected/);
@@ -397,7 +397,7 @@ describe("getting around a protection", () => {
 
     const moved = await agent.post(`/api/documents/${architecture.id}/move`, { parentId: handbook.id });
     expect(moved.status).toBe(403);
-    expect(moved.body.error).toMatch(/^Storage is Protected.*Ask a User to move it instead, in a Comment/);
+    expect(moved.body.error).toMatch(/^Storage is Protected.*Ask a User to make the move instead, in a Comment/);
     expect((await admin.get(`/api/documents/${architecture.id}`)).body.document.parentId).toBeNull();
   });
 
