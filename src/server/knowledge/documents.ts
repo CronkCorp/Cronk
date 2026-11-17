@@ -368,12 +368,16 @@ export async function findProtectedUnder(db: Queryable, documentId: string): Pro
   return rows[0];
 }
 
-/** Deletes a Document and its Versions, or returns false if any Document sits under it. Run inside a transaction. */
-export async function deleteDocument(db: Queryable, tree: Tree, document: Document): Promise<boolean> {
+/**
+ * Deletes a Document and its Versions, and tells its watchers, who can no longer see it, once `db` commits; or returns
+ * false, deleting and telling nothing, if any Document sits under it.
+ */
+export async function deleteDocument(db: PublishingTransaction, tree: Tree, document: Document): Promise<boolean> {
   await lockTree(db, tree);
   const { rows } = await db.query("SELECT 1 FROM documents WHERE parent_id = $1 LIMIT 1", [document.id]);
   if (rows.length > 0) return false;
   await db.query("DELETE FROM documents WHERE id = $1", [document.id]);
+  db.publish(documentTopic(document.id), { event: "deleted", data: {} });
   return true;
 }
 
