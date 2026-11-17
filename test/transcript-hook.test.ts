@@ -1,5 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +25,21 @@ function runHook(event: object, env: Record<string, string>): Promise<{ code: nu
     child.on("close", (code) => resolve({ code, stdout, stderr }));
     child.stdin.end(JSON.stringify(event));
   });
+}
+
+/** Runs the hook once against a stand-in for Cronk that answers every upload with `status` and `body`. */
+async function runHookAgainst(status: number, body: string, event: object): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => response.writeHead(status, { "content-type": "application/json" }).end(body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    return await runHook(event, { CRONK_URL: `http://127.0.0.1:${port}`, CRONK_TOKEN: "cronk_token" });
+  } finally {
+    server.close();
+  }
 }
 
 /** Converts the Claude Code chat file `jsonl` with the hook's `--print` mode, returning what it prints. */
@@ -188,5 +205,31 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(unset).toMatchObject({ code: 1, stderr: expect.stringMatching(/Set CRONK_URL and CRONK_TOKEN/) });
     const badToken = await runHook(event, { CRONK_URL: url, CRONK_TOKEN: "not-a-token" });
     expect(badToken).toMatchObject({ code: 1, stderr: expect.stringMatching(/Cronk didn't take the Transcript \(401\)/) });
+  });
+
+  it("stays quiet about a 422 only when its reason is nothing_changed, and reports any other 422 like every other refusal", async () => {
+    const event = { session_id: "claude-chat-1", transcript_path: fixture("text-only.jsonl"), hook_event_name: "Stop" };
+    const quiet = { code: 0, stdout: "", stderr: "" };
+
+    expect(await runHookAgainst(422, JSON.stringify({ error: "Changed nothing", reason: "nothing_changed" }), event)).toEqual(quiet);
+    expect(await runHookAgainst(200, JSON.stringify({ transcript: {} }), event)).toEqual(quiet);
+
+    expect(await runHookAgainst(422, JSON.stringify({ error: "something else" }), event)).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Cronk didn't take the Transcript (422): something else\n",
+    });
+    expect(await runHookAgainst(422, JSON.stringify({ error: "something else", reason: "too_long" }), event)).toMatchObject({
+      code: 1,
+      stderr: "Cronk didn't take the Transcript (422): something else\n",
+    });
+    expect(await runHookAgainst(422, "<html>Bad gateway</html>", event)).toMatchObject({
+      code: 1,
+      stderr: "Cronk didn't take the Transcript (422): <html>Bad gateway</html>\n",
+    });
+    expect(await runHookAgainst(500, JSON.stringify({ error: "boom" }), event)).toMatchObject({
+      code: 1,
+      stderr: "Cronk didn't take the Transcript (500): boom\n",
+    });
   });
 });
