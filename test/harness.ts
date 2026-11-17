@@ -454,21 +454,26 @@ export async function startCronk(
     },
     interruptQueriesOn: async (table, cause) => {
       const admin = new pg.Client({ connectionString: databaseUrl });
+      // Asked outside the locking transaction, as pg_stat_activity stays the same within one: a query
+      // that reaches the table after the first look would otherwise never be seen waiting.
+      const watcher = new pg.Client({ connectionString: databaseUrl });
       await admin.connect();
       try {
+        await watcher.connect();
         await admin.query("BEGIN");
         await admin.query(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
         await cause();
         // Terminates the connections whose queries wait on a lock, once there are any.
         const terminated = async () =>
           (
-            await admin.query<{ n: number }>(
+            await watcher.query<{ n: number }>(
               "SELECT count(pg_terminate_backend(pid))::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
               [dbName],
             )
           ).rows[0]!.n > 0;
         await pollUntil(terminated, `No query waited on ${table}`);
       } finally {
+        await watcher.end().catch(() => {});
         await admin.query("ROLLBACK").catch(() => {});
         await admin.end();
       }
