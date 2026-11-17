@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type EventStream } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type EventStream } from "./harness.js";
 
 describe("A Project's live updates", () => {
   it("tell its watchers which Ticket changed when one is edited", async () => {
@@ -494,7 +494,6 @@ describe("A Project's Terms' live updates", () => {
   });
 });
 
-
 describe("Terms' live updates after an import", () => {
   /** An export of the Project CRONK holding a Term "Ticket", made in another installation. */
   async function projectExport(visibility: "public" | "private" = "public"): Promise<Buffer> {
@@ -542,14 +541,21 @@ describe("Terms' live updates after an import", () => {
     expect(await stream.next()).toEqual(CHANGED);
   });
 
-  it("tell nothing of an import that is refused", async () => {
-    const exported = await projectExport();
+  it("tell nothing of an import that is refused, even once it has written Terms", async () => {
+    const before = await startInstalledCronk("Elsewhere");
+    await before.admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await before.admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of Cronk work." });
+    await before.admin.post("/api/projects/CRONK/tickets", { title: "Ship it" });
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    // Tickets are imported after Terms, so a Ticket's history Cronk can't take rolls back Terms already written.
+    const broken = { ...files, "projects/CRONK/tickets/CRONK-1.history.md": "---\nchanges:\n  - { at: 2026-01-01T09:00:00Z, by: ada@example.com, change: renamed }\n---\n" };
     const { admin } = await startInstalledCronk();
-    await admin.post("/api/projects", { name: "Mine", key: "CRONK" });
     const stream = await admin.events("/api/workspace/terms/events");
     expect((await stream.next())?.event).toBe("ready");
 
-    expect((await admin.upload("/api/import", exported)).status).toBe(409);
+    const refused = await admin.upload("/api/import", await tarGz(broken));
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/CRONK-1\.history\.md/);
     await expectQuiet(stream);
   });
 });
