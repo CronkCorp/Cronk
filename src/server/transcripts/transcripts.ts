@@ -543,8 +543,8 @@ function placesOf(items: ChangedItems): Places {
 /** Of each kind's changed `items`, those a reader who `canReadIn` a place can read, each as the Transcript lists it (see LISTED). */
 function listedAsRead(items: ChangedItems, canReadIn: (projectId: string | null) => boolean, turn: TurnNaming) {
   const listed = <C extends LinkedCollection>(collection: C): Transcript[C][number][] => {
-    const asListed = LISTED[collection] as (item: ChangedItems[C][number], turn: TurnNaming) => Transcript[C][number];
-    return (items[collection] as ChangedItems[C][number][]).filter((i) => canReadIn(i.project_id)).map((i) => asListed(i, turn));
+    const asListed = LISTED[collection];
+    return items[collection].filter((i) => canReadIn(i.project_id)).map((i) => asListed(i, turn));
   };
   return Object.fromEntries(COLLECTIONS.map((c) => [c, listed(c)])) as { [C in LinkedCollection]: Transcript[C] };
 }
