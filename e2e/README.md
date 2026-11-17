@@ -24,8 +24,9 @@ Never `waitForTimeout` or another fixed delay.
 
 Import `test` and `expect` from `./fixtures.js`. Its `page` and `context` send a `goto` or `reload` again when Chromium
 fails it with `ERR_NETWORK_CHANGED`, which Docker starting or stopping another worktree's containers causes; the web
-client does the same for reads. Wrap a context a test makes itself in `steadyNavigations`. Each test also starts only
+client does the same for reads. Wrap a context a test makes itself in `resendOnNetworkChange`. Each test also starts only
 once the server answers.
 
-If the server exits mid-run, the global setup says so on the console, starts it again on the same database, and keeps
-its log in `test-results/cronk-server.log`. The test that was running fails; the ones after it run on their own.
+If the server exits mid-run, the global setup says so on the console and starts it again on the same database, up to
+three times and only while the port is still free. Its log is kept in `test-results/cronk-server.log`. The test that was
+running fails; the ones after it run on their own.

@@ -8,8 +8,8 @@ export { expect, type Locator } from "@playwright/test";
  * page of `context` sends such a `goto` or `reload` again, up to twice; any other failure stands.
  * The `page` and `context` of every test get this already; call it on a context a test makes itself.
  */
-export function steadyNavigations(context: BrowserContext): BrowserContext {
-  const steady = (page: Page) => {
+export function resendOnNetworkChange(context: BrowserContext): BrowserContext {
+  const resend = (page: Page) => {
     for (const name of ["goto", "reload"] as const) {
       const navigate = page[name].bind(page) as (...args: unknown[]) => Promise<unknown>;
       page[name] = (async (...args: unknown[]) => {
@@ -23,16 +23,16 @@ export function steadyNavigations(context: BrowserContext): BrowserContext {
       }) as never;
     }
   };
-  context.pages().forEach(steady);
-  context.on("page", steady);
+  context.pages().forEach(resend);
+  context.on("page", resend);
   return context;
 }
 
 export const test = base.extend<{ context: BrowserContext; serverUp: void }>({
   context: async ({ context }, use) => {
-    await use(steadyNavigations(context));
+    await use(resendOnNetworkChange(context));
   },
-  // Each test starts once Cronk answers, so one the global setup is starting again (see there) does not fail it too.
+  // Each test starts once Cronk answers, so one that `global-setup.ts` is starting again after it exited does not fail it too.
   serverUp: [
     async ({ request }, use) => {
       await expect

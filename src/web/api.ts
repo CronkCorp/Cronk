@@ -186,8 +186,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body === undefined ? null : JSON.stringify(body),
       credentials: "same-origin",
     });
-  // A browser drops requests in flight when the machine's network changes (Chromium's ERR_NETWORK_CHANGED, such as when
-  // Docker adds an interface). A read is safe to send again, so it is, once; a write is not, as it may have gone through.
+  // A browser drops requests in flight when the machine's network changes (Chromium's ERR_NETWORK_CHANGED: a laptop
+  // joining another network, a VPN or a container coming up). A read is safe to send again, so it is, once; a write is
+  // not, as it may have gone through. A server that is really down fails the second time too.
   const res = await send().catch((err: unknown) => (method === "GET" ? send() : Promise.reject(err)));
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
