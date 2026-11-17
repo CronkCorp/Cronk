@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ada, delegatedSetup, startCronk, startInstalledCronk } from "./harness.js";
+import { ada, delegatedSetup, startCronk, startInstalledCronk, type Cronk, type HeldLock } from "./harness.js";
 
 /** The bound on closing these tests start Cronk with. */
 const CLOSE_WITHIN_MS = 500;
@@ -15,6 +15,26 @@ async function expectWithin(ms: number, work: Promise<unknown>): Promise<void> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Holds the Tickets table, starts `wait` on it, and once it waits there closes the application and starts it again, failing
+ * unless closing finishes within its bound and Cronk then answers over HTTP. Answers what `wait` started, which a test awaits to
+ * see how it failed, and the table, still held until the test releases it.
+ */
+async function restartWhileWaiting<T>(cronk: Cronk, wait: () => Promise<T>): Promise<{ waiting: Promise<T>; held: HeldLock }> {
+  const held = await cronk.holdTable("tickets");
+  const waiting = wait();
+  // Cut off by the close, so it fails before the test awaits it.
+  waiting.catch(() => {});
+  await held.waiters(1);
+
+  await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+
+  const health = await cronk.client().send("/api/health");
+  health.resume();
+  expect(health.statusCode).toBe(200);
+  return { waiting, held };
 }
 
 describe("starting the application", () => {
@@ -63,48 +83,34 @@ describe("stopping the application", () => {
     const { cronk, admin, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000, closeWithinMs: CLOSE_WITHIN_MS });
     const threshold = (await admin.get("/api/workspace")).body.silenceThresholdSeconds;
     expect((await (await session()).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
-    const held = await cronk.holdTable("tickets");
     cronk.clock.advance(threshold * 1000 + 1);
-    const looking = cronk.lookForLapses();
-    looking.catch(() => {});
-    await held.waiters(1);
 
-    await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+    const { waiting: looking, held } = await restartWhileWaiting(cronk, () => cronk.lookForLapses());
 
     // The look cut off finds nothing done; the Claim is found lapsed again once the table is free.
     await expect(looking).rejects.toThrow();
-    expect(await admin.get("/api/health")).toEqual({ status: 200, body: { status: "ok" } });
     await held.release();
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
   });
 
   it("finishes within its bound while a request waits on a lock never released, and answers after it starts again", async () => {
     const { cronk, admin } = await delegatedSetup(1, { closeWithinMs: CLOSE_WITHIN_MS });
-    const held = await cronk.holdTable("tickets");
-    const editing = admin.patch("/api/tickets/CRONK-1", { title: "Cut off" });
-    await held.waiters(1);
 
-    await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+    const { waiting: editing, held } = await restartWhileWaiting(cronk, () => admin.patch("/api/tickets/CRONK-1", { title: "Cut off" }));
 
     // The edit cut off is answered as failed, and nothing of it is kept.
     expect((await editing).status).toBe(500);
-    expect(await admin.get("/api/health")).toEqual({ status: 200, body: { status: "ok" } });
     await held.release();
     expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.title).toBe("Ticket 1");
   });
 
   it("finishes within its bound while a request over HTTP waits on a lock never released", async () => {
     const { cronk, admin } = await delegatedSetup(1, { closeWithinMs: CLOSE_WITHIN_MS });
-    const held = await cronk.holdTable("tickets");
-    // Over a connection kept alive, which would hold the server open after the answer unless the answer ends it.
-    const reading = admin.send("/api/tickets/CRONK-1");
-    reading.catch(() => {});
-    await held.waiters(1);
 
-    await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+    // Over a connection kept alive, which would hold the server open after the answer unless the answer ends it.
+    const { waiting: reading } = await restartWhileWaiting(cronk, () => admin.send("/api/tickets/CRONK-1"));
 
     expect((await reading).statusCode).toBe(500);
-    expect((await admin.send("/api/health")).statusCode).toBe(200);
   });
 });
 
