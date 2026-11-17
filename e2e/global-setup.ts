@@ -1,25 +1,48 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { E2E_HOST, E2E_PORT } from "../playwright.config.js";
 
+const SERVER_LOG = "test-results/cronk-server.log";
+// A server that keeps exiting is broken, not unlucky: after this many restarts the tests are left to fail.
+const MAX_RESTARTS = 3;
+
 /**
  * Starts a disposable Postgres and the real server process, configured only
  * through environment variables, serving the built web client (`npm run build:web`).
+ *
+ * The server's log goes to `test-results/cronk-server.log`, kept with the traces. Should the server exit while
+ * the tests run, every later test would fail at once with ERR_CONNECTION_REFUSED; instead it is said on the
+ * console and started again on the same database, so the tests after the one it took down run on their own.
  */
 export default async function globalSetup() {
   await assertPortFree(E2E_PORT);
   const container = await new PostgreSqlContainer("postgres:17-alpine").start();
-  const server = spawn(process.execPath, ["--import", "tsx", "src/server/main.ts"], {
-    env: {
-      ...process.env,
-      DATABASE_URL: container.getConnectionUri(),
-      HOST: E2E_HOST,
-      PORT: String(E2E_PORT),
-      WEB_ROOT: "dist/web",
-    },
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+  await mkdir("test-results", { recursive: true });
+  const log = createWriteStream(SERVER_LOG);
+  const start = () =>
+    spawn(process.execPath, ["--import", "tsx", "src/server/main.ts"], {
+      env: {
+        ...process.env,
+        DATABASE_URL: container.getConnectionUri(),
+        HOST: E2E_HOST,
+        PORT: String(E2E_PORT),
+        WEB_ROOT: "dist/web",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+  let stopping = false;
+  let server = start();
+  const watch = (running: ChildProcess) => {
+    running.stdout!.pipe(log, { end: false });
+    running.stderr!.pipe(log, { end: false });
+    // Errors also reach the console, so a run that fails shows why the server did.
+    running.stderr!.pipe(process.stderr, { end: false });
+  };
+  watch(server);
 
   let exited = false;
   server.once("exit", () => (exited = true));
@@ -27,11 +50,31 @@ export default async function globalSetup() {
   if (!healthy) {
     server.kill();
     await container.stop();
-    throw new Error(exited ? "Cronk exited during startup" : "Cronk did not become healthy within 30 seconds");
+    throw new Error(`${exited ? "Cronk exited during startup" : "Cronk did not become healthy within 30 seconds"}; see ${SERVER_LOG}`);
   }
 
+  let restarts = 0;
+  const restartOnExit = (running: ChildProcess) =>
+    running.once("exit", (code, signal) => {
+      if (stopping || restarts++ === MAX_RESTARTS) return;
+      console.error(
+        `\nCronk exited during the smoke tests (${signal ?? `code ${code}`}); the test running then fails. ` +
+          `Starting it again on the same database. Its log is in ${SERVER_LOG}.\n`,
+      );
+      server = start();
+      watch(server);
+      restartOnExit(server);
+    });
+  restartOnExit(server);
+
   return async () => {
-    server.kill("SIGTERM");
+    stopping = true;
+    if (server.exitCode === null && server.signalCode === null) {
+      const stopped = new Promise((resolve) => server.once("exit", resolve));
+      server.kill("SIGTERM");
+      await stopped;
+    }
+    log.end();
     await container.stop();
   };
 }
