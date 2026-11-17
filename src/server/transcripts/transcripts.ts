@@ -6,7 +6,7 @@ import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
 import { scrubSecrets } from "./scrub.js";
 import { firstTurnNaming, titleOf, turnsOf } from "../../shared/transcript-turns.js";
-import type { LinkedKind } from "../../shared/from-transcript.js";
+import { LINKED_KIND_NAMES, type LinkedCollection, type LinkedKind } from "../../shared/from-transcript.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -145,18 +145,48 @@ function hasWord(text: string, word: string): boolean {
  * the Ticket changes they made, the Activities, Comments and Attachments they added and the Document, Term, Decision and Artifact
  * Versions they saved or published. Each branch reads from one table, looking an Attachment's Comment up by its id rather than
  * joining it, so Postgres can look each branch up by Session in its actor_session_id index (migration 0046).
+ *
+ * Besides actor_session_id, RECORDS has one `{kind}_id` column (recordColumn) per LinkedKind, in LINKED_KINDS' order, and each
+ * branch says what it puts in each (RecordsBranch), so a kind added to LINKED_KINDS without its column in every branch is a type error.
  */
-const RECORDS = `
-  SELECT actor_session_id, ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id, NULL::uuid AS artifact_id FROM ticket_changes
-  UNION ALL SELECT actor_session_id, ticket_id, NULL, NULL, NULL, NULL FROM activities
-  UNION ALL SELECT actor_session_id, ticket_id, document_id, NULL, NULL, artifact_id FROM comments
-  UNION ALL SELECT actor_session_id, NULL, document_id, NULL, NULL, NULL FROM document_versions
-  UNION ALL SELECT x.actor_session_id, coalesce(x.ticket_id, (SELECT c.ticket_id FROM comments c WHERE c.id = x.comment_id)),
-    coalesce(x.document_id, (SELECT c.document_id FROM comments c WHERE c.id = x.comment_id)), NULL, NULL,
-    (SELECT c.artifact_id FROM comments c WHERE c.id = x.comment_id) FROM attachments x
-  UNION ALL SELECT actor_session_id, NULL, NULL, term_id, NULL, NULL FROM term_versions
-  UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id, NULL FROM decision_versions
-  UNION ALL SELECT actor_session_id, NULL, NULL, NULL, NULL, artifact_id FROM artifact_versions`;
+/** The column of RECORDS that holds the id of the item of a LinkedKind a record is on. */
+const recordColumn = (kind: LinkedKind) => `${kind}_id` as const;
+
+/**
+ * One branch of RECORDS: the table it reads (`from`, which has an actor_session_id), and the SQL for the id of the item of each
+ * LinkedKind each record is on, or null when it is on none of that kind.
+ */
+interface RecordsBranch {
+  from: string;
+  on: Record<LinkedKind, string | null>;
+}
+
+/** SQL for the `column` of the Comment that the Attachment aliased `x` is on, if any. */
+const attachmentsComments = (column: string) => `(SELECT c.${column} FROM comments c WHERE c.id = x.comment_id)`;
+
+const RECORDS_BRANCHES: RecordsBranch[] = [
+  { from: "ticket_changes", on: { ticket: "ticket_id", document: null, term: null, decision: null, artifact: null } },
+  { from: "activities", on: { ticket: "ticket_id", document: null, term: null, decision: null, artifact: null } },
+  { from: "comments", on: { ticket: "ticket_id", document: "document_id", term: null, decision: null, artifact: "artifact_id" } },
+  { from: "document_versions", on: { ticket: null, document: "document_id", term: null, decision: null, artifact: null } },
+  {
+    from: "attachments x",
+    on: {
+      ticket: `coalesce(x.ticket_id, ${attachmentsComments("ticket_id")})`,
+      document: `coalesce(x.document_id, ${attachmentsComments("document_id")})`,
+      term: null,
+      decision: null,
+      artifact: attachmentsComments("artifact_id"),
+    },
+  },
+  { from: "term_versions", on: { ticket: null, document: null, term: "term_id", decision: null, artifact: null } },
+  { from: "decision_versions", on: { ticket: null, document: null, term: null, decision: "decision_id", artifact: null } },
+  { from: "artifact_versions", on: { ticket: null, document: null, term: null, decision: null, artifact: "artifact_id" } },
+];
+const RECORDS = RECORDS_BRANCHES.map(
+  ({ from, on }) =>
+    `SELECT actor_session_id, ${LINKED_KIND_NAMES.map((kind) => `${on[kind] ?? "NULL::uuid"} AS ${recordColumn(kind)}`).join(", ")} FROM ${from}`,
+).join("\n  UNION ALL ");
 
 /**
  * Where the Sessions of the Transcript aliased `tr` changed things, one row per record of a change to an item that is still there:
@@ -386,33 +416,35 @@ const TRANSCRIPT_GROUPS: Grouping = `
   SELECT ts.transcript_id AS grp, r.* FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
   WHERE ts.transcript_id = ANY($1::uuid[])`;
 
-/** Each group's changed items in `column` (ticket_id, ...): one row per group and item, joined to the item aliased `alias`. */
-const changedIn = (grouping: Grouping, column: string, alias: string) =>
-  `JOIN (SELECT DISTINCT grp, ${column} FROM (${grouping}) g WHERE ${column} IS NOT NULL) c ON c.${column} = ${alias}.id`;
+/** Each group's changed items of `kind`: one row per group and item, joined to the item aliased `alias`. */
+const changedIn = (grouping: Grouping, kind: LinkedKind, alias: string) => {
+  const column = recordColumn(kind);
+  return `JOIN (SELECT DISTINCT grp, ${column} FROM (${grouping}) g WHERE ${column} IS NOT NULL) c ON c.${column} = ${alias}.id`;
+};
 
 /** The Tickets each group changed, with the Project each lies in, by Project key and number. */
 const changedTickets = (g: Grouping) => `
   SELECT c.grp, t.id, ${ticketKeySql("p", "t")} AS key, t.title, t.project_id FROM tickets t JOIN projects p ON p.id = t.project_id
-  ${changedIn(g, "ticket_id", "t")} ORDER BY p.key, t.number`;
+  ${changedIn(g, "ticket", "t")} ORDER BY p.key, t.number`;
 
 /** The Documents and Reports each group changed, with the Project each lies in: a Report's Ticket's; null for the Workspace. */
 const changedDocuments = (g: Grouping) => `
   SELECT c.grp, d.id, d.title, coalesce(rt.project_id, d.project_id) AS project_id FROM documents d LEFT JOIN tickets rt ON rt.id = d.ticket_id
-  ${changedIn(g, "document_id", "d")} ORDER BY d.created_at, d.id`;
+  ${changedIn(g, "document", "d")} ORDER BY d.created_at, d.id`;
 
 /** The Terms each group changed, with the Project each lies in; null for the Workspace. The Workspace's first. */
 const changedTerms = (g: Grouping) => `
   SELECT c.grp, tm.id, tm.name, tm.project_id, p.key AS project_key FROM terms tm LEFT JOIN projects p ON p.id = tm.project_id
-  ${changedIn(g, "term_id", "tm")} ORDER BY p.key NULLS FIRST, lower(tm.name), tm.id`;
+  ${changedIn(g, "term", "tm")} ORDER BY p.key NULLS FIRST, lower(tm.name), tm.id`;
 
 /** The Decisions each group changed, with the Project each lies in; null for the Workspace. The Workspace's first. */
 const changedDecisions = (g: Grouping) => `
   SELECT c.grp, dc.id, ${decisionKeySql("p", "dc")} AS key, dc.title, dc.project_id FROM decisions dc LEFT JOIN projects p ON p.id = dc.project_id
-  ${changedIn(g, "decision_id", "dc")} ORDER BY p.key NULLS FIRST, dc.number`;
+  ${changedIn(g, "decision", "dc")} ORDER BY p.key NULLS FIRST, dc.number`;
 
 /** The Artifacts each group changed, with the Project each lies in; null for the Workspace. */
 const changedArtifacts = (g: Grouping) => `
-  SELECT c.grp, a.id, a.title, a.project_id FROM artifacts a ${changedIn(g, "artifact_id", "a")} ORDER BY a.created_at, a.id`;
+  SELECT c.grp, a.id, a.title, a.project_id FROM artifacts a ${changedIn(g, "artifact", "a")} ORDER BY a.created_at, a.id`;
 
 /** What some Sessions changed, each with the Project it lies in (see changedItems). */
 export interface ChangedItems {
@@ -423,8 +455,11 @@ export interface ChangedItems {
   artifacts: { id: string; title: string; project_id: string | null }[];
 }
 
-/** The query for what each group changed, of each kind. */
-const CHANGED: Record<keyof ChangedItems, (g: Grouping) => string> = {
+/**
+ * The query for what each group changed, of each LinkedKind, by the kind's collection. Typed over those collections, so a kind added
+ * to LINKED_KINDS without its query here, or its list in ChangedItems, is a type error.
+ */
+const CHANGED: Record<LinkedCollection, (g: Grouping) => string> = {
   tickets: changedTickets,
   documents: changedDocuments,
   terms: changedTerms,
@@ -440,7 +475,7 @@ const noChanges = (): ChangedItems => ({ tickets: [], documents: [], terms: [], 
  */
 async function changedItemsPerGroup(db: Queryable, grouping: Grouping, ids: string[]): Promise<Map<string | null, ChangedItems>> {
   const byGroup = new Map<string | null, ChangedItems>();
-  for (const [kind, changed] of Object.entries(CHANGED) as [keyof ChangedItems, (g: Grouping) => string][]) {
+  for (const [kind, changed] of Object.entries(CHANGED) as [LinkedCollection, (g: Grouping) => string][]) {
     const { rows } = await db.query<{ grp: string | null }>(changed(grouping), [ids]);
     for (const { grp, ...item } of rows) {
       if (!byGroup.has(grp)) byGroup.set(grp, noChanges());
@@ -600,7 +635,7 @@ export async function transcriptLinks(db: Queryable, actor: Actor, item: LinkedI
     `SELECT tr.id, tr.agent_id, a.name AS agent_name, tr.markdown, tr.updated_at
      FROM transcripts tr JOIN agents a ON a.id = tr.agent_id
      WHERE tr.workspace_id = $1 AND tr.id IN (
-       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
+       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${recordColumn(item.kind)} = $2)
        AND ${transcriptReadableSql("tr", "a.owner_id", "$3::uuid[]", "$4::uuid", "$5::uuid")}
      ORDER BY ${ORDERS.newest}`,
     [actingUser(actor).workspaceId, item.id, ...readerParams(actor, readable)],
