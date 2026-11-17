@@ -1330,7 +1330,7 @@ describe("the transcripts tool", () => {
     expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toEqual([expect.objectContaining({ id })]);
   });
 
-  it("is offered to a read-only token with all its actions, and it and the search tool name each other", async () => {
+  it("is offered to a read-only token with all its actions, names Artifacts among the kinds, and it and the search tool name each other", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
     const { tools } = await mcp.client.listTools();
@@ -1338,6 +1338,9 @@ describe("the transcripts tool", () => {
     const transcripts = tools.find((t) => t.name === "transcripts")!;
     expect(transcripts.inputSchema.properties?.action).toMatchObject({ enum: ["get", "list", "from"] });
     expect(transcripts.description).toMatch(/search tool/);
+    expect(transcripts.description).toMatch(/`from`: the Transcripts a Ticket, Document \(or Report\), Term, Decision or Artifact came from/);
+    expect(transcripts.inputSchema.properties?.kind).toMatchObject({ enum: expect.arrayContaining(["artifact"]) });
+    expect(transcripts.inputSchema.properties?.itemId).toMatchObject({ description: "The Document's, Report's, Term's or Artifact's id (from)" });
     expect(tools.find((t) => t.name === "search")!.description).toMatch(/transcripts tool's get action[\s\S]*turn/);
   });
 });

@@ -793,9 +793,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     parameters: {
       id: z.string().optional().describe("The Transcript's id, such as a search hit's transcriptId (get)"),
       turn: z.number().int().optional().describe("Only this turn of the Transcript, numbered from 1, such as a search hit's turn (get)"),
-      kind: z.enum(LINKED_KINDS).optional().describe("What kind of item the Transcripts came from; a Report is a document (from)"),
+      kind: z.enum(LINKED_KINDS).optional().describe("What kind of item the Transcripts came from: a Ticket, Document, Term, Decision or Artifact; a Report is a document (from)"),
       key: z.string().optional().describe("The Ticket's or Decision's key, such as CRONK-12 or CRONK-D3 (from)"),
-      itemId: z.string().optional().describe("The Document's, Report's or Term's id (from)"),
+      itemId: z.string().optional().describe("The Document's, Report's, Term's or Artifact's id (from)"),
     },
     actions: {
       get: {
@@ -819,7 +819,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       },
       from: {
         description:
-          "the Transcripts a Ticket, Document (or Report), Term or Decision came from (\"From Transcript\"), most recently uploaded first, " +
+          "the Transcripts a Ticket, Document (or Report), Term, Decision or Artifact came from (\"From Transcript\"), most recently uploaded first, " +
           "each with the turn where the item first appears, or null for none",
         writes: false,
         run: (api, a) => {
