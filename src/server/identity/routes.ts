@@ -325,10 +325,8 @@ export function identityRoutes(ctx: AppContext) {
         await claimsEnded(ctx, updated.endedClaims.ticketIds);
         // A new role can show or hide private Projects, and so the items in them; deactivating a User sends what
         // they review to Triage, or to the Owners of the Agents that suggested it, and reactivating them takes it back.
-        if (request.body.role !== undefined || request.body.active !== undefined) {
-          const inheriting = request.body.active !== undefined ? await usersInheritingFrom(ctx.db, updated.user.id) : [];
-          waitingItemsChanged(ctx.live, [updated.user.id, ...inheriting]);
-        }
+        if (request.body.active !== undefined) waitingItemsChanged(ctx.live, [updated.user.id, ...(await usersInheritingFrom(ctx.db, updated.user.id))]);
+        else if (request.body.role !== undefined) waitingItemsChanged(ctx.live, [updated.user.id]);
         return { user: publicUser(updated.user) };
       },
     );
