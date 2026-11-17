@@ -77,6 +77,18 @@ describe("Uploading a Transcript", () => {
     expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
+  it("links the Artifact its Session published, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const published = await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }));
+    expect(published.status, JSON.stringify(published.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Publish the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({ tickets: [], documents: [], artifacts: [{ id: published.body.artifact.id, title: "Limits" }] });
+  });
+
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const idle = await session();

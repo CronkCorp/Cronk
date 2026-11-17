@@ -38,6 +38,8 @@ export interface Transcript {
   terms: { id: string; name: string; turn: number | null }[];
   /** The Decisions its Sessions proposed or refined, that the reader can read. */
   decisions: { key: string; title: string; turn: number | null }[];
+  /** The Artifacts its Sessions published a Version of or commented on, that the reader can read. */
+  artifacts: { id: string; title: string; turn: number | null }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -138,25 +140,27 @@ function hasWord(text: string, word: string): boolean {
 }
 
 /**
- * Everything Agent Sessions did, by the Session that did it and the Ticket, Document, Term or Decision each record is on: the Ticket
- * changes they made, the Activities, Comments and Attachments they added and the Document, Term and Decision Versions they saved.
+ * Everything Agent Sessions did, by the Session that did it and the Ticket, Document, Term, Decision or Artifact each record is on:
+ * the Ticket changes they made, the Activities, Comments and Attachments they added and the Document, Term, Decision and Artifact
+ * Versions they saved or published.
  */
 const RECORDS = `
-  SELECT actor_session_id, ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id FROM ticket_changes
-  UNION ALL SELECT actor_session_id, ticket_id, NULL, NULL, NULL FROM activities
-  UNION ALL SELECT actor_session_id, ticket_id, document_id, NULL, NULL FROM comments
-  UNION ALL SELECT actor_session_id, NULL, document_id, NULL, NULL FROM document_versions
-  UNION ALL SELECT x.actor_session_id, coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL FROM attachments x
+  SELECT actor_session_id, ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id, NULL::uuid AS artifact_id FROM ticket_changes
+  UNION ALL SELECT actor_session_id, ticket_id, NULL, NULL, NULL, NULL FROM activities
+  UNION ALL SELECT actor_session_id, ticket_id, document_id, NULL, NULL, NULL FROM comments
+  UNION ALL SELECT actor_session_id, NULL, document_id, NULL, NULL, NULL FROM document_versions
+  UNION ALL SELECT x.actor_session_id, coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL, NULL FROM attachments x
     LEFT JOIN comments c ON c.id = x.comment_id
-  UNION ALL SELECT actor_session_id, NULL, NULL, term_id, NULL FROM term_versions
-  UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id FROM decision_versions`;
+  UNION ALL SELECT actor_session_id, NULL, NULL, term_id, NULL, NULL FROM term_versions
+  UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id, NULL FROM decision_versions
+  UNION ALL SELECT actor_session_id, NULL, NULL, NULL, NULL, artifact_id FROM artifact_versions`;
 
 /** Everything the Agent Sessions `$1` did (see RECORDS). */
 const SESSION_RECORDS = `SELECT * FROM (${RECORDS}) all_records WHERE actor_session_id = ANY($1::uuid[])`;
 
 /**
- * Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, an Attachment, or a Document, Term or
- * Decision Version.
+ * Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, an Attachment, or a Document, Term,
+ * Decision or Artifact Version.
  */
 export async function changedAnything(db: Queryable, sessionIds: string[]): Promise<boolean> {
   if (sessionIds.length === 0) return false;
@@ -303,9 +307,14 @@ const CHANGED_DECISIONS = `
   SELECT dc.id, ${decisionKeySql("p", "dc")} AS key, dc.title, dc.project_id FROM decisions dc LEFT JOIN projects p ON p.id = dc.project_id
   WHERE dc.id IN (SELECT decision_id FROM (${SESSION_RECORDS}) r)`;
 
+/** The Artifacts changed by these Sessions (`$1`), with the Project each lies in; null for the Workspace. */
+const CHANGED_ARTIFACTS = `
+  SELECT a.id, a.title, a.project_id, a.created_at FROM artifacts a
+  WHERE a.id IN (SELECT artifact_id FROM (${SESSION_RECORDS}) r)`;
+
 /**
- * What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents in the order they
- * were created, Terms and Decisions the Workspace's first.
+ * What the Sessions changed, each with the Project it lies in: Tickets by Project key and number, Documents and Artifacts in the
+ * order they were created, Terms and Decisions the Workspace's first.
  */
 export async function changedItems(db: Queryable, sessionIds: string[]) {
   const { rows: tickets } = await db.query<{ id: string; key: string; title: string; project_id: string }>(
@@ -324,14 +333,18 @@ export async function changedItems(db: Queryable, sessionIds: string[]) {
     `${CHANGED_DECISIONS} ORDER BY p.key NULLS FIRST, dc.number`,
     [sessionIds],
   );
-  return { tickets, documents, terms, decisions };
+  const { rows: artifacts } = await db.query<{ id: string; title: string; project_id: string | null }>(
+    `${CHANGED_ARTIFACTS} ORDER BY a.created_at, a.id`,
+    [sessionIds],
+  );
+  return { tickets, documents, terms, decisions, artifacts };
 }
 
 /** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
 function placesOf(items: Awaited<ReturnType<typeof changedItems>>): Places {
   const projectIds = new Set<string>(items.tickets.map((t) => t.project_id));
   let workspace = false;
-  for (const item of [...items.documents, ...items.terms, ...items.decisions]) {
+  for (const item of [...items.documents, ...items.terms, ...items.decisions, ...items.artifacts]) {
     if (item.project_id === null) workspace = true;
     else projectIds.add(item.project_id);
   }
@@ -398,6 +411,7 @@ export async function readTranscript(
     documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title, turn: turn(d.id) })),
     terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name, turn: turn(t.id) })),
     decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title, turn: turn(d.key, d.id) })),
+    artifacts: items.artifacts.filter((a) => canReadIn(a.project_id)).map((a) => ({ id: a.id, title: a.title, turn: turn(a.id) })),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };
