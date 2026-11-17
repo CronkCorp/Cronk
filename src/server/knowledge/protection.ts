@@ -82,3 +82,17 @@ export function requireUnprotected(actor: Actor, item: { protected: boolean }, w
   if (actor.kind !== "agent" || !item.protected) return;
   throw new HttpError(403, `${what} is Protected: Agents may read it but not ${change}. ${instead.charAt(0).toUpperCase()}${instead.slice(1)}`);
 }
+
+/**
+ * SQL for whether the Document `document` (a table alias) is Protected: it, or a Document above it in its
+ * page tree, is marked. A Report sits outside any tree, so only its own mark counts. It reads within the
+ * query it is part of, so a list can carry each row's mark without fetching each Document.
+ */
+export const documentProtectedSql = (document: string) =>
+  `(${document}.protected OR EXISTS (
+     WITH RECURSIVE above(parent_id, protected) AS (
+       SELECT x.parent_id, x.protected FROM documents x WHERE x.id = ${document}.parent_id
+       UNION ALL SELECT x.parent_id, x.protected FROM documents x JOIN above ON x.id = above.parent_id
+     )
+     SELECT 1 FROM above WHERE above.protected
+   ))`;

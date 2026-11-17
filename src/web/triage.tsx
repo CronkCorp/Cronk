@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { api, watchInboxAndTriage, type TriageFilter, type TriageKind, type User } from "./api.js";
-import { GROUPS, InboxSplit, itemId, KindAndProjectFilters, viewPath, type Group } from "./inbox.js";
+import { GROUPS, InboxSplit, itemId, KindAndProjectFilters, kindNames, viewPath, type Group } from "./inbox.js";
 import { navigate } from "./router.js";
 import { Show, useLoad } from "./ui.js";
 
@@ -13,8 +13,8 @@ export interface TriageAddress {
   item?: string;
 }
 
-/** The kinds Triage holds, by the names its chips give them. */
-const TRIAGE_KIND_NAMES: Record<TriageKind, string> = { unverified: "Unverified", unattended: "Unattended", suggestion: "Suggestions", discovered: "Discovered" };
+/** The kinds Triage holds, by the names its chips give them, in the Inbox's order. */
+const TRIAGE_KIND_NAMES = kindNames<TriageKind>({ unverified: true, unattended: true, suggestion: true, discovered: true });
 
 /** Triage's groups, in the order they are shown: the Inbox's groups that hold its kinds. */
 const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.kind in TRIAGE_KIND_NAMES);
