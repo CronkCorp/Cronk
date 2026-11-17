@@ -26,7 +26,7 @@ import { avoidedWordsIn, titleAndBody } from "./avoided-words.js";
 import { documentFor } from "./document-reads.js";
 import { deleteDocument, findDocument, findProtectedUnder, findVersion, insertDocument, listTree, listVersions, moveDocument, saveVersion, type Document, type Tree, type Version } from "./documents.js";
 import { listProjectReports } from "./reports.js";
-import { listProtectionMarkings, requireUnprotected, setProtected, suggestNewDocumentInstead } from "./protection.js";
+import { askToMoveInstead, listProtectionMarkings, requireUnprotected, setProtected, suggestNewDocumentInstead } from "./protection.js";
 import { headingsIn, mergeEdits, replaceSection, type SectionRefusal } from "./sections.js";
 
 /** A Document title: non-blank, at most 500 characters. */
@@ -90,7 +90,7 @@ export function knowledgeRoutes(ctx: AppContext) {
     /**
      * Refuses an Agent's putting a Document under `parentId` when the branch there is Protected, so
      * Agents can't add to a protected branch, or move a Document into one, pointing it to what it may
-     * do instead, given the parent's id. A parent that isn't a Document of the tree is left for the caller to refuse.
+     * do instead, given the parent's id (a move's pointer names the moved Document instead). A parent that isn't a Document of the tree is left for the caller to refuse.
      */
     const requireOpenToAgentsUnder = async (tx: Queryable, actor: Actor, parentId: string | null, change: string, instead?: (parentId: string) => string) => {
       if (actor.kind !== "agent" || parentId === null) return;
@@ -407,11 +407,12 @@ export function knowledgeRoutes(ctx: AppContext) {
         const { parentId, position } = request.body;
         const document = await transaction(ctx.db, async (tx) => {
           const document = await documentFor(tx, actor, request.params.id, "write");
-          requireUnprotected(actor, document, document.title, "move it");
+          const askToMove = askToMoveInstead(document.id);
+          requireUnprotected(actor, document, document.title, "move it", askToMove);
           // Moving it would move a protected branch under it along with it.
           const protectedUnder = actor.kind === "agent" ? await findProtectedUnder(tx, document.id) : undefined;
-          if (protectedUnder) requireUnprotected(actor, { protected: true }, protectedUnder.title, "move it, or a Document above it");
-          await requireOpenToAgentsUnder(tx, actor, parentId, "move Documents under it");
+          if (protectedUnder) requireUnprotected(actor, { protected: true }, protectedUnder.title, "move it, or a Document above it", askToMove);
+          await requireOpenToAgentsUnder(tx, actor, parentId, "move Documents under it", () => askToMove);
           const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
           if (moved === "a report") throw new HttpError(400, "A Report lives with its Ticket, outside the page tree, so it can't be moved");
           if (moved === "no such parent") throw notInTree();

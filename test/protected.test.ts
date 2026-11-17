@@ -222,7 +222,7 @@ describe("lists that show a Document", () => {
 });
 
 describe("an Agent and a Protected Document", () => {
-  it("is refused every change to it or anything under it, pointed to Suggestions, but may read it and comment", async () => {
+  it("is refused every change to it or anything under it, pointed to Suggestions or, for a move, a User, but may read it and comment", async () => {
     const { cronk, admin, architecture, storage } = await pageTree();
     const agent = await agentOf(cronk, admin, "claude");
     await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
@@ -231,7 +231,6 @@ describe("an Agent and a Protected Document", () => {
       await agent.patch(`/api/documents/${storage.id}`, { baseVersion: 1, body: "Rewritten." }),
       await agent.post(`/api/documents/${architecture.id}/replace-section`, { baseVersion: 1, heading: "Anything", body: "x" }),
       await agent.post(`/api/documents/${storage.id}/versions/1/restore`, { baseVersion: 1 }),
-      await agent.post(`/api/documents/${storage.id}/move`, { parentId: architecture.id, position: 0 }),
       await agent.delete(`/api/documents/${storage.id}?baseVersion=1`),
     ];
     for (const res of refused) {
@@ -239,6 +238,9 @@ describe("an Agent and a Protected Document", () => {
       expect(res.body.error).toMatch(/Protected.*Suggestion/);
     }
     expect(refused[0]!.body.error).toMatch(/^Storage is Protected/);
+    const move = await agent.post(`/api/documents/${storage.id}/move`, { parentId: architecture.id, position: 0 });
+    expect(move.status).toBe(403);
+    expect(move.body.error).toMatch(/^Storage is Protected.*Ask a User to move it instead, in a Comment/);
 
     expect((await agent.get(`/api/documents/${storage.id}`)).status).toBe(200);
     expect((await agent.post(`/api/documents/${storage.id}/comments`, { body: "This misses the backups." })).status).toBe(201);
@@ -255,11 +257,18 @@ describe("an Agent and a Protected Document", () => {
     const under = await agent.post("/api/projects/CRONK/documents", { title: "Restore drills", parentId: storage.id });
     const into = await agent.post(`/api/documents/${loose.id}/move`, { parentId: storage.id });
     const out = await agent.post(`/api/documents/${storage.id}/move`, { parentId: handbook.id });
-    for (const res of [under, into, out]) {
+    const above = await agent.post(`/api/documents/${architecture.id}/move`, { parentId: handbook.id });
+    expect(under.status).toBe(403);
+    expect(under.body.error).toMatch(/Protected.*Suggestion/);
+    // A Suggestion can't express a move, so a refused move points to asking a User in a Comment.
+    for (const [res, moved] of [[into, loose], [out, storage], [above, architecture]] as const) {
       expect(res.status).toBe(403);
-      expect(res.body.error).toMatch(/Protected.*Suggestion/);
+      expect(res.body.error).toMatch(/Protected/);
+      expect(res.body.error).toContain(`Ask a User to move it instead, in a Comment on it (POST /api/documents/${moved.id}/comments, or the \`comments\` tool)`);
+      expect(res.body.error).not.toMatch(/Suggestion|\/api\/suggestions/);
     }
     expect(into.body.error).toMatch(/^Storage is Protected/);
+    expect(above.body.error).toMatch(/^Storage is Protected/);
 
     // Outside the branch, and above it, the Agent works as before.
     expect((await agent.post("/api/projects/CRONK/documents", { title: "Roadmap", parentId: architecture.id })).status).toBe(201);
@@ -388,7 +397,7 @@ describe("getting around a protection", () => {
 
     const moved = await agent.post(`/api/documents/${architecture.id}/move`, { parentId: handbook.id });
     expect(moved.status).toBe(403);
-    expect(moved.body.error).toMatch(/^Storage is Protected.*Suggestion/);
+    expect(moved.body.error).toMatch(/^Storage is Protected.*Ask a User to move it instead, in a Comment/);
     expect((await admin.get(`/api/documents/${architecture.id}`)).body.document.parentId).toBeNull();
   });
 
