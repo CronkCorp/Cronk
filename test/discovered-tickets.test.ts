@@ -67,6 +67,27 @@ describe("A Discovered Ticket's source", () => {
     // A User names no source.
     expect((await admin.post("/api/projects/CRONK/tickets", { title: "Mine", ticket: "CRONK-2" })).status).toBe(400);
   });
+
+  it("is the one Claim still held once a release committed first has ended the other", async () => {
+    const { cronk, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-2/claim");
+    const ticketId = (await agent.get("/api/tickets/CRONK-1")).body.ticket.id;
+
+    // The release of CRONK-1 waits on it first, then filing waits behind it rather than counting both Claims.
+    const held = await cronk.holdRow("tickets", ticketId);
+    const release = agent.delete("/api/tickets/CRONK-1/claim");
+    await held.waiters(1);
+    const filing = agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+    expect(await Promise.race([filing.then(() => "filed"), held.waiters(2).then(() => "waited")])).toBe("waited");
+    await held.release();
+
+    expect((await release).status).toBe(204);
+    const filed = await filing;
+    expect(filed.status).toBe(201);
+    expect(filed.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-2", title: "Ticket 2" });
+  });
 });
 
 describe("A Discovered Ticket filed in another Project than its source", () => {

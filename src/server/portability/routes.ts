@@ -5,10 +5,11 @@ import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
+import { termsChanged } from "../knowledge/term-routes.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
-import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
+import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, checkStoredFiles, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
 import { exportDecisionsFolder, exportFolder } from "./export.js";
 import { importExport } from "./import.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
@@ -130,13 +131,20 @@ function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
 /**
  * Answers with the folder `build` makes as a gzipped tar archive to save, named `cronk-<name>-<stamp>.tar.gz`.
  * It is built in a read-only, repeatable-read transaction so its files agree with each other, and streamed: the files
- * of Attachments and Artifacts are read from the file store only as the archive reaches them.
+ * of Attachments and Artifacts are read from the file store only as the archive reaches them. Each of those is checked
+ * first, so a file missing or the wrong size is answered with an error rather than a 200 and an archive cut short; one
+ * that fails after the check, removed meanwhile, aborts the download.
  */
 async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<StoredFolder>) {
   const now = ctx.clock.now();
   const folder = await transaction(ctx.db, async (tx) => {
     await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     return build(tx, now);
+  });
+  await checkStoredFiles(folder, ctx.files).catch((err: unknown) => {
+    // A file the records name but the store lacks, or holds at another size, is for an operator to look into; other errors are logged as any are.
+    if (err instanceof HttpError) reply.log.error(err);
+    throw err;
   });
   const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
   return reply
@@ -162,6 +170,8 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           "The archive is read as it streams in. Its Markdown files may take up to 200 MB packed and 512 MB unpacked; every other file, such as an Attachment's, " +
           "is streamed into storage and may be as large as the Workspace allows an Attachment (or an Artifact Version) to be, under the export's own workspace.md limits " +
           "for a Workspace export. A file over its limit refuses the import with a 413 naming it. " +
+          "On top of those, one import may write at most what the server's IMPORT_MAX_BYTES allows (50 GiB by default), counting a zip archive, which is " +
+          "written to a temporary file before it is read, and every file streamed into storage; an archive larger than that is refused with a 413 as soon as it crosses it. " +
           archiveUpload,
         response: {
           201: answer("What the import brought in", {
@@ -197,10 +207,15 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           },
           isMarkdown: isExportMarkdown,
           limit: (path, markdown) => streamedFileLimit(path, markdown, workspace),
+          importMaxBytes: ctx.importMaxBytes,
         });
-        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
+        const { imported, termPlaces } = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
+        // Committed now: Terms pages already open learn of the imported Terms, which may override Workspace Terms.
+        for (const place of termPlaces) termsChanged(ctx.live, place);
         return reply.code(201).send(imported);
       } catch (err) {
+        // A refusal can come before the whole archive has arrived, which is then left unread: the connection closes once answered.
+        if (!request.raw.complete) reply.header("connection", "close");
         await removeFiles(request, ctx, stored);
         // The database refusing a value (a constraint or a malformed value) means the export holds data Cronk can't take.
         const code = (err as { code?: unknown }).code;

@@ -110,6 +110,15 @@ export async function lockProject(db: Queryable, projectId: string): Promise<voi
 }
 
 /**
+ * Keeps the Project row from being locked by `lockProject` until the transaction ends, as inserting a row
+ * that references it does, without holding up other such inserts. Take it before locking a Ticket of the
+ * Project, to keep Project before Ticket.
+ */
+export async function shareProject(db: Queryable, projectId: string): Promise<void> {
+  await db.query("SELECT 1 FROM projects WHERE id = $1 FOR KEY SHARE", [projectId]);
+}
+
+/**
  * Adds a Status last in its Status Category, or returns undefined if the
  * Project already has a Status with that name. Lock the Project first.
  */

@@ -32,6 +32,7 @@ import { attachmentRoutes } from "./files/attachment-routes.js";
 import { artifactRoutes } from "./files/artifact-routes.js";
 import { artifactHostRoutes, keepArtifactHostApart } from "./files/artifact-host.js";
 import { createFileStore, type StorageConfig } from "./files/storage.js";
+import { DEFAULT_IMPORT_MAX_BYTES } from "./portability/archive.js";
 import { cachedSerializers } from "./serializers.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
@@ -51,6 +52,8 @@ export interface AppConfig {
   webRoot?: string | undefined;
   /** Where the files of Attachments and Artifacts are stored: a directory on local disk, or a bucket of an S3-compatible store. */
   storage: StorageConfig;
+  /** The most bytes one import of an export may write, to local disk and the file store together; 50 GiB if not given. */
+  importMaxBytes?: number | undefined;
   /**
    * The address Artifacts are served from, a hostname of their own such as `https://artifacts.cronk.example` (ADR 0007).
    * Without it, they are served from Cronk's own hostname in a stricter sandbox.
@@ -92,6 +95,7 @@ export async function buildApp(opts: {
     cookieSecure: opts.config.cookieSecure,
     live: opts.live ?? new LiveUpdates(),
     files: createFileStore(opts.config.storage),
+    importMaxBytes: opts.config.importMaxBytes ?? DEFAULT_IMPORT_MAX_BYTES,
     publicUrl: opts.config.publicUrl,
     artifactsUrl: opts.config.artifactsUrl,
   };

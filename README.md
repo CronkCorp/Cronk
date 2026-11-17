@@ -55,7 +55,7 @@ A Transcript is the chat that led an Agent to change things, kept beside what it
 
 Each time Claude finishes answering, and when the chat ends, the hook converts the whole chat to Markdown and uploads it under Claude Code's session id. Cronk keeps only chats in which the Agent changed something, so the hook uploads every chat and stays quiet about the ones Cronk turns down for that; anything else that goes wrong is shown in Claude Code without stopping Claude. To see what it would upload, run `node cronk-transcript.mjs --print <chat.jsonl>` on a chat file from `~/.claude/projects/`.
 
-The conversion leaves out Claude's reasoning, subagents' chats, and what Claude Code adds itself (commands' output, notifications and the summary that continues a compacted chat), shows images as `[image]`, and trims a tool call or result over 4,000 characters to its first 3,000 and last 1,000. Because subagents' chats are left out, a change only a subagent made through Cronk doesn't link the chat. A chat you rewound keeps the turns you went back on, in the order they happened. Cronk scrubs known secret patterns from what it receives, but only on a best-effort basis: don't rely on it for secrets you paste into a chat.
+The conversion includes each subagent's chat inside the main chat's, so a change only a subagent made through Cronk still links the chat: a foreground subagent's chat goes right after its result, and a background subagent's where Claude Code tells the main chat it finished. A background subagent still running at an upload appears in a later one. The conversion leaves out Claude's reasoning and what Claude Code adds itself (commands' output, notifications and the summary that continues a compacted chat), shows images as `[image]`, and trims a tool call or result over 4,000 characters to its first 3,000 and last 1,000. A chat you rewound keeps the turns you went back on, in the order they happened. Cronk scrubs known secret patterns from what it receives, but only on a best-effort basis: don't rely on it for secrets you paste into a chat.
 
 #### The turn convention
 
@@ -63,6 +63,7 @@ A hook for another client uploads its chat with `PUT /api/transcripts/by-chat/{c
 
 - Each turn starts with a `## User` or `## Assistant` line, followed by its text.
 - A tool call is a fenced block in the Assistant's turn with the info string `tool-call <tool name>`, holding its input; its result follows as a block with `tool-result`, or `tool-result error` when the tool failed. Each fence is longer than any run of backticks inside it.
+- A subagent's chat is a fenced block in the Assistant's turn with the info string `subagent <agent id>`, holding that chat written the same way, its own subagents nested inside it. It goes where the chat that launched the subagent learns it finished, and each subagent appears once.
 - Results of Cronk's tools keep their first line, which names the Agent Session: that's how Cronk links the Transcript to what the Session changed.
 - The same chat always converts to the same text, and a chat that has grown converts to text that starts with what was uploaded before. Cronk then replaces the stored text; when the new text doesn't continue it, Cronk keeps the old text as well.
 
@@ -92,9 +93,10 @@ Cronk is a plain Node.js process configured only through environment variables, 
 | `WEB_ROOT`      | `dist/web` if present | Directory of the built web client                              |
 | `FILES_STORAGE` | `disk`                | Where the files of Attachments and Artifacts are stored: `disk`, or `s3` for any S3-compatible store (see below) |
 | `FILES_DIR`     | `data/files`          | With `disk`: directory the files are stored in, relative to the working directory |
+| `IMPORT_MAX_BYTES` | `53687091200` (50 GiB) | The most bytes one import of an export may write, counting the temporary copy of a zip archive and every file it stores; past it the import is refused with a 413 |
 | `ARTIFACTS_URL` | (none; recommended)   | Address of a hostname of its own that serves Artifacts, e.g. `https://artifacts.cronk.example`; needs `PUBLIC_URL` too |
 
-By default Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files.
+By default Attachments are files on local disk under `FILES_DIR`, so keep it on a volume that outlives Cronk and back it up with the database: the database records what each file is, the directory holds its bytes. `compose.yaml` keeps it in the `files-data` volume. Each Attachment may be up to 100 MB unless an Admin changes the limit in Workspace settings, where Admins also see how much storage they use; there is no quota. Exports include the files; importing one may write at most `IMPORT_MAX_BYTES` (50 GiB by default), counting a zip archive's temporary copy on local disk as well as the files it stores.
 
 ### S3-compatible storage
 

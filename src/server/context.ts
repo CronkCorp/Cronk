@@ -31,6 +31,8 @@ export interface AppContext {
   live: LiveUpdates;
   /** Where the files of Attachments and Artifacts are stored. */
   files: FileStore;
+  /** The most bytes one import of an export may write, to local disk and the file store together (see `AppConfig`). */
+  importMaxBytes: number;
   /** The address Cronk is reached at, if configured (see `AppConfig`). */
   publicUrl?: string | undefined;
   /** The address of the Artifact hostname, if configured (see `AppConfig`). */
