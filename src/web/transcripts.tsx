@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { turnsOf } from "../shared/transcript-turns.js";
 import { api, type Transcript, type TranscriptLink } from "./api.js";
 import { Actor, agentActor, userActor } from "./components/actor.js";
+import { KindLabel } from "./components/tags.js";
 import { RelativeTime } from "./components/time.js";
 import { CronkMarkdown } from "./markdown.js";
 import { Link } from "./router.js";
@@ -97,9 +98,9 @@ function TranscriptView(props: { transcript: Transcript }) {
         {turns.map((turn) => {
           const chips = ledTo.filter((item) => item.turn === turn.n);
           return (
-            <li key={turn.n} id={`turn-${turn.n}`} className={`transcript-turn ${turn.role.toLowerCase()}`}>
+            <li key={turn.n} id={`turn-${turn.n}`} className="transcript-turn">
               <div className="transcript-turn-head">
-                <span className={`kind-label ${turn.role === "Assistant" ? "report" : "comment"}`}>{turn.role}</span>
+                <KindLabel kind={turn.role === "Assistant" ? "assistant" : "user"}>{turn.role}</KindLabel>
                 <a href={`#turn-${turn.n}`} className="transcript-turn-number muted">Turn {turn.n}</a>
                 {chips.length > 0 && (
                   <span className="transcript-chips" aria-label="First appears here">

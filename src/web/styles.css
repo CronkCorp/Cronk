@@ -562,7 +562,8 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label.question, .kind-label.unattended, .kind-label.discovered { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
 .kind-label.report, .kind-label.decision, .kind-label.suggestion { color: var(--agent); }
-.kind-label.comment { color: var(--accent); }
+.kind-label.comment, .kind-label.user { color: var(--accent); }
+.kind-label.assistant { color: var(--agent); }
 .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; color: var(--muted); }
 .priority.urgent { color: var(--on-accent); background: var(--danger); }
 .priority.high { color: var(--danger); background: var(--danger-soft); }
@@ -771,8 +772,6 @@ a.register-row:hover { background: var(--bg); }
 .transcript-led-to h2 { font-size: 16px; margin: 0 0 12px; }
 .transcript-turns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .transcript-turn { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 16px; border-left: 3px solid transparent; padding-left: 12px; }
-.transcript-turn.user { border-left-color: var(--border); }
-.transcript-turn.assistant { border-left-color: var(--agent-soft); }
 .transcript-turn:target { border-left-color: var(--accent); }
 .transcript-turn:target .transcript-turn-body { border-color: var(--accent); }
 .transcript-turn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
