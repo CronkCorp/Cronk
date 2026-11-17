@@ -713,8 +713,6 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { kind, reason } = request.body;
         const { ends, relations } = await transaction(ctx.db, async (tx) => {
-          // Before relationEnds locks an Agent's Ticket, as the block's row then waits on both Tickets (see lockBlocking).
-          if (isBlocking(kind)) await lockBlocking(tx, actingUser(actor).workspaceId);
           const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now());
           if (discoveredBlock && reason === undefined) throw new HttpError(400, `Say why ${ticket.key} blocks ${other.key} with a reason`);
           if (!discoveredBlock && reason !== undefined) {
@@ -1100,7 +1098,7 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
  * since the change shows on both. A missing or hidden `key` answers 404; a missing or
  * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409), except for a
  * block from its own Discovered Ticket no User has delegated or finished yet (`discoveredBlock`), which
- * may block any Ticket the Agent can read.
+ * may block any Ticket the Agent can read. Adding a block takes the Workspace's blocking lock (see lockBlocking).
  */
 async function relationEnds(
   tx: Queryable,
@@ -1111,12 +1109,21 @@ async function relationEnds(
   now: Date,
   opts: { removing?: boolean } = {},
 ): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: AgentActor | null }> {
+  // The checks that lock nothing come first, so a block they refuse doesn't queue behind every other block in the Workspace.
+  const unlocked = await ticketFor(tx, actor, key, "write");
+  const other = await otherTicketFor(tx, actor, otherKey);
+  if (other.id === unlocked.id) throw new HttpError(400, "A Ticket can't be related to itself");
+  // A User adding a Relation needs Write in the other Project too; an Agent's need depends on its Ticket, read under the lock.
+  const userAdding = actor.kind === "user" && !opts.removing;
+  if (userAdding) await ticketFor(tx, actor, otherKey, "write");
+  // Before an Agent's Ticket is locked, as the block's row then waits on both Tickets (see lockBlocking).
+  const locking = isBlocking(kind) && !opts.removing;
+  if (locking) await lockBlocking(tx, actingUser(actor).workspaceId);
+  // Read again once the lock is held, as the Ticket may have changed while waiting for it.
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
-  const ticket = await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" });
+  const ticket = locking || actor.kind === "agent" ? await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" }) : unlocked;
   let discoveredBlock = actor.kind === "agent" && kind === "blocks" && (await isOwnDiscoveryAwaitingDelegation(tx, actor, ticket)) ? actor : null;
   if (actor.kind === "agent" && !discoveredBlock) await requireClaimHolder(tx, actor, ticket, now, "changing its Relations");
-  const other = await otherTicketFor(tx, actor, otherKey);
-  if (other.id === ticket.id) throw new HttpError(400, "A Ticket can't be related to itself");
   // Without its Claim, the Agent removes only the blocks it added from its Discovered Ticket, not those a User added.
   if (discoveredBlock && opts.removing && !(await isDiscoveredBlock(tx, ticket.id, other.id))) {
     await requireClaimHolder(tx, discoveredBlock, ticket, now, "changing its Relations");
@@ -1124,7 +1131,7 @@ async function relationEnds(
   }
   // A User removes a block from a Discovered Ticket with Write on the blocked Ticket alone, as the Agent added it reading that one only.
   const removingDiscoveredBlock = opts.removing && actor.kind === "user" && kind === "blocked_by" && (await isDiscoveredBlock(tx, other.id, ticket.id));
-  if (!discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
+  if (!userAdding && !discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
   return { ticket, other, discoveredBlock };
 }
 
