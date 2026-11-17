@@ -817,24 +817,29 @@ describe("From Transcript links", () => {
     expect((await admin.get("/api/tickets/CRONK-2/transcripts")).status).toBe(404);
   });
 
-  it("list, on an Artifact, the Transcripts whose Sessions published a Version of it or commented on it, by its id alone", async () => {
+  it("list, on an Artifact, the Transcripts whose Sessions published a Version of it, commented on it or attached to such a Comment, by its id alone", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const site = await tarGz({ "index.html": "<h1>Limits</h1>" });
     const publisher = await session();
     const limits = (await publisher.upload("/api/projects/CRONK/artifacts?title=Limits", site)).body.artifact;
     const other = (await admin.upload("/api/projects/CRONK/artifacts?title=Other", site)).body.artifact;
     const commenter = await session();
-    expect((await commenter.post(`/api/artifacts/${limits.id}/comments`, { body: "The legend overlaps." })).status).toBe(201);
+    const comment = (await commenter.post(`/api/artifacts/${limits.id}/comments`, { body: "The legend overlaps." })).body.comment;
+    const attacher = await session();
+    expect((await attacher.upload(`/api/comments/${comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain")).status).toBe(201);
     const hook = cronk.client(claude.secret);
     const published = (
       await upload(hook, "chat-1", `## User\n\nChart the limits\n\n## Assistant\n\nAgent Session ${publisher.sessionId}\n\n## Assistant\n\nPublished ${limits.id}\n`)
     ).body.transcript.id;
     cronk.clock.advance(1000);
     const commented = (await upload(hook, "chat-2", chat("Review the chart", commenter.sessionId))).body.transcript.id;
+    cronk.clock.advance(1000);
+    const attached = (await upload(hook, "chat-3", chat("Attach the screenshot", attacher.sessionId))).body.transcript.id;
 
     const res = await admin.get(`/api/artifacts/${limits.id}/transcripts`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.transcripts).toEqual([
+      { id: attached, agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) },
       { id: commented, agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) },
       { id: published, agent: { id: claude.agentId, name: "claude-laptop" }, turn: 3, updatedAt: expect.any(String) },
     ]);
