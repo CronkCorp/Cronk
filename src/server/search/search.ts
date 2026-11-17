@@ -16,7 +16,7 @@ import { searchTranscripts } from "../transcripts/search.js";
 /** One thing a search found, with an excerpt of its text around the match. */
 export interface SearchResult {
   kind: SearchKind;
-  /** The Ticket's, Document's, Decision's or Transcript's title, or the Term's name. */
+  /** The Ticket's, Document's, Artifact's, Decision's or Transcript's title, or the Term's name; for a Comment, of what it is on. */
   title: string;
   /** The text around the match, as written (Markdown), from the body (or the title when the body is empty). */
   excerpt: string;
@@ -27,6 +27,8 @@ export interface SearchResult {
   termId: string | null;
   /** The Decision, by its key: `CRONK-D7`, or `D7` in the Workspace. */
   decisionKey: string | null;
+  /** A Comment's Artifact; null for every other kind. */
+  artifactId: string | null;
   transcriptId: string | null;
   /** The Transcript's turn that matches best (see shared/transcript-turns.ts); null for every other kind. */
   turn: number | null;
@@ -62,6 +64,7 @@ const columns = (c: {
   documentId: string;
   termId: string;
   decisionKey: string;
+  artifactId: string;
   /** SQL for whether it is Protected; NULL for kinds that can't be. */
   protected: string;
   excerptOf: [string, string];
@@ -71,7 +74,8 @@ const columns = (c: {
   boost?: string;
 }) =>
   `SELECT '${c.kind}' AS kind, ${c.title} AS title, ${c.projectKey} AS "projectKey", ${c.ticketKey}::text AS "ticketKey",
-     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${c.decisionKey}::text AS "decisionKey", ${c.protected}::boolean AS protected,
+     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${c.decisionKey}::text AS "decisionKey",
+     ${c.artifactId}::uuid AS "artifactId", ${c.protected}::boolean AS protected,
      ${excerpt(...c.excerptOf)} AS excerpt,
      ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
 
@@ -92,44 +96,51 @@ const DECISION_KEY = decisionKeySql("p", "dc");
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
     kind: "ticket",
-    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", protected: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: keyBoost(TICKET_KEY) })}
+    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: keyBoost(TICKET_KEY) })}
       FROM q, tickets t JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND (to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query OR ${keyMatches(TICKET_KEY)})`,
   },
   {
     kind: "document",
-    sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
+    sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d LEFT JOIN projects p ON p.id = d.project_id
       WHERE d.ticket_id IS NULL AND ${documentReadableSql("d", "q.projects", "q.workspace_id")}
         AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "report",
-    sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", termId: "NULL", decisionKey: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
+    sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
-    sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+    sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
-    sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+    sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
       WHERE ${documentReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
+    // Artifacts are placed like Documents: in a Project, or in the Workspace outside any.
+    kind: "comment",
+    sql: `${columns({ kind: "comment", title: "a.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: "NULL", artifactId: "a.id", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+      FROM q, comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id
+      WHERE ${documentReadableSql("a", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+  },
+  {
     kind: "term",
-    sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", decisionKey: "NULL", protected: "tm.protected", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
+    sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", decisionKey: "NULL", artifactId: "NULL", protected: "tm.protected", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
       FROM q, terms tm LEFT JOIN projects p ON p.id = tm.project_id
       WHERE ${documentReadableSql("tm", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${TERM_TEXT}) @@ q.query`,
   },
   {
     kind: "decision",
-    sql: `${columns({ kind: "decision", title: "dc.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: DECISION_KEY, protected: "dc.protected", excerptOf: ["dc.title", "dc.body"], text: DECISION_TEXT, at: "dc.updated_at", boost: keyBoost(DECISION_KEY) })}
+    sql: `${columns({ kind: "decision", title: "dc.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: DECISION_KEY, artifactId: "NULL", protected: "dc.protected", excerptOf: ["dc.title", "dc.body"], text: DECISION_TEXT, at: "dc.updated_at", boost: keyBoost(DECISION_KEY) })}
       FROM q, decisions dc LEFT JOIN projects p ON p.id = dc.project_id
       WHERE ${documentReadableSql("dc", "q.projects", "q.workspace_id")} AND (to_tsvector(${CONFIG}, ${DECISION_TEXT}) @@ q.query OR ${keyMatches(DECISION_KEY)})`,
   },
@@ -159,8 +170,8 @@ export async function search(
        LIMIT $4`,
       [input.query, places.projectIds, places.workspaceId, input.limit],
     );
-    for (const { kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, protected: isProtected } of rows) {
-      results.push({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, transcriptId: null, turn: null, protected: isProtected });
+    for (const { kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, artifactId, protected: isProtected } of rows) {
+      results.push({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, artifactId, transcriptId: null, turn: null, protected: isProtected });
     }
   }
   // Transcripts are a separate kind, ranked below everything else: they fill what the limit leaves.
@@ -176,6 +187,7 @@ export async function search(
         documentId: null,
         termId: null,
         decisionKey: null,
+        artifactId: null,
         transcriptId: hit.transcriptId,
         turn: hit.turn,
         protected: null,
