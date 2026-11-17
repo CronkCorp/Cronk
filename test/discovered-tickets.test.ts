@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
 
 describe("Discovered Tickets", () => {
   it("files a Ticket an Agent creates while working on another as a Discovered Ticket: in Backlog, undelegated, with its source", async () => {
@@ -84,6 +84,29 @@ describe("A Discovered Ticket filed in another Project than its source", () => {
     expect(named.status).toBe(201);
     expect(named.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
     expect((await admin.get("/api/tickets/OPS-2")).body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+  });
+});
+
+describe("Routing a Discovered Ticket filed in another Project than its source", () => {
+  it("goes to the source's Assignee, and waits in Triage once they can't see its Project", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const bobBot = await registerAgent(bob, "bob-bot");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: bobBot.agentId });
+    const agent = await startSession(cronk, bobBot.secret);
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const seen = await agent.post("/api/projects/OPS/tickets", { title: "Seen by Bob" });
+    expect(seen.body.ticket).toMatchObject({ assignee: { id: bobId }, discovered: { sourceTicket: { key: "CRONK-1" } } });
+
+    // An Agent files only where its Owner can write, and the source's Assignee is its Owner while it holds the Claim,
+    // so the Assignee loses sight of the Project only after filing; the Ticket then waits in Triage.
+    await admin.patch("/api/projects/OPS", { visibility: "private" });
+    expect(await waiting(admin, "/api/triage")).toEqual(["discovered OPS-1"]);
+    expect((await admin.get("/api/tickets/OPS-1")).body.ticket.assignee).toMatchObject({ id: bobId });
   });
 });
 
