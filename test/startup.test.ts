@@ -4,7 +4,10 @@ import { ada, delegatedSetup, startCronk, startInstalledCronk } from "./harness.
 
 /** The bound on closing these tests start Cronk with. */
 const CLOSE_WITHIN_MS = 500;
-/** The time past the bound a close may take: cutting off what still waits takes up to a second, and the rest is for a loaded machine. */
+/**
+ * The time past the bound a close may take: cutting off what still waits takes up to a second, ending the connections still
+ * open a quarter of a second more, and the rest is for a loaded machine.
+ */
 const SLACK_MS = 2_000;
 
 /** Fails unless `work` settles within `ms`, rather than waiting on it for the test's whole timeout. */
@@ -23,13 +26,13 @@ const SENT_BEFORE_STALLING = 32 * 1024 * 1024;
 
 /**
  * An upload body that sends `SENT_BEFORE_STALLING` bytes and then never sends more nor ends, as a very slow client does;
- * `read` resolves once all those bytes have been taken.
+ * `stalled` resolves once all those bytes have been taken.
  */
-function endlessUpload(): { body: Readable; read: Promise<void> } {
+function endlessUpload(): { body: Readable; stalled: Promise<void> } {
   const chunk = Buffer.alloc(1024 * 1024);
   let sent = 0;
   let allRead!: () => void;
-  const read = new Promise<void>((resolve) => (allRead = resolve));
+  const stalled = new Promise<void>((resolve) => (allRead = resolve));
   const body = new Readable({
     read() {
       if (sent >= SENT_BEFORE_STALLING) return allRead();
@@ -37,7 +40,7 @@ function endlessUpload(): { body: Readable; read: Promise<void> } {
       this.push(chunk);
     },
   });
-  return { body, read };
+  return { body, stalled };
 }
 
 describe("starting the application", () => {
@@ -135,7 +138,7 @@ describe("stopping the application", () => {
     const upload = endlessUpload();
     const uploading = admin.send("/api/tickets/CRONK-1/attachments?name=endless.bin", { method: "POST", body: upload.body, headers: { "content-type": "application/octet-stream" } });
     uploading.catch(() => {});
-    await upload.read;
+    await upload.stalled;
 
     await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
 

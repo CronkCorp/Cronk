@@ -27,13 +27,16 @@ export class Database extends pg.Pool {
    * in use to come back, takes no longer. Connections still in use then, and any taken after, are cut off: Postgres ends
    * their sessions, rolling back what they hadn't committed and freeing the locks they held, and their queries fail as on
    * a lost connection, so the work running on them fails and the pool can end. Does nothing once the pool has ended.
+   * Resolves once those connections have been cut off, at most `CUT_OFF_MS` past the bound.
    */
-  cutOffAfter(withinMs: number): void {
-    setTimeout(() => {
-      if (this.ended) return;
-      this.cuttingOff = true;
-      void this.cutOff([...this.inUse]);
-    }, withinMs).unref();
+  cutOffAfter(withinMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        if (this.ended) return resolve();
+        this.cuttingOff = true;
+        void this.cutOff([...this.inUse]).then(resolve);
+      }, withinMs).unref();
+    });
   }
 
   /**
@@ -58,7 +61,7 @@ export class Database extends pg.Pool {
 }
 
 /** The longest cutting off connections takes, past the bound, should Postgres not answer. */
-export const CUT_OFF_MS = 1_000;
+const CUT_OFF_MS = 1_000;
 
 /** What pg knows of a connection but doesn't declare: Postgres's process id for its session, and its socket. */
 function pgInternals(client: pg.PoolClient): { processID: number; connection: { stream: { destroy(): void } } } {

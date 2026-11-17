@@ -5,7 +5,7 @@ import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
 import { HttpError, isReading, requestActor, SIGN_IN_COOKIE, type AppContext } from "./context.js";
 import { forReader } from "./identity/readable-only-in.js";
-import { createDatabase, CUT_OFF_MS, migrate } from "./db/database.js";
+import { createDatabase, migrate } from "./db/database.js";
 import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
 import { conversationRoutes } from "./conversation/routes.js";
@@ -40,6 +40,8 @@ const healthSchema = { type: "object", required: ["status"], properties: { statu
 const OPENAPI_PATH = "/api/openapi.json";
 /** How long closing waits on the database unless told otherwise; see `closeWithinMs`. */
 const DEFAULT_CLOSE_WITHIN_MS = 5_000;
+/** How long closing gives a request cut off from the database to send its answer before ending every connection still open. */
+const ANSWER_CUT_OFF_WITHIN_MS = 250;
 
 export interface AppConfig {
   databaseUrl: string;
@@ -78,7 +80,7 @@ export async function buildApp(opts: {
   /**
    * How long closing may wait on the database, for requests and looks for lapsed Claims still running; 5 seconds by default.
    * What still waits then is cut off, taking at most a second more: its uncommitted work rolls back and a request answers 500.
-   * Connections still open after that second, such as one whose upload never finishes arriving, are ended without an answer.
+   * A quarter of a second later, connections still open, such as one whose upload never finishes arriving, are ended without an answer.
    * So closing finishes within about 6 seconds, inside the 10 seconds `docker stop` gives by default before killing.
    */
   closeWithinMs?: number;
@@ -113,7 +115,7 @@ export async function buildApp(opts: {
   };
 
   let closing = false;
-  let endConnections: NodeJS.Timeout | undefined;
+  let closed = false;
   app.addHook("preClose", async () => {
     closing = true;
     // Open live-update streams would otherwise keep the server from closing.
@@ -121,13 +123,13 @@ export async function buildApp(opts: {
     // Closing waits for requests still running and then for the database; a request or look waiting on the database
     // (on a lock, say) is cut off once the bound is up, rather than waited on forever. Counted from here, as the server
     // waits for its requests before `onClose` runs.
-    const closeWithinMs = opts.closeWithinMs ?? DEFAULT_CLOSE_WITHIN_MS;
-    db.cutOffAfter(closeWithinMs);
     // A request waiting on something else (a body that never finishes arriving, a download its client stops reading, a file
     // store that never answers) would keep the server open as long. Once a request cut off from the database has had its
     // time to answer, every connection still open is ended: its client sees the connection close without an answer, and
     // an upload cut short stores nothing.
-    endConnections = setTimeout(() => app.server.closeAllConnections(), closeWithinMs + CUT_OFF_MS).unref();
+    void db.cutOffAfter(opts.closeWithinMs ?? DEFAULT_CLOSE_WITHIN_MS).then(() => {
+      if (!closed) setTimeout(() => app.server.closeAllConnections(), ANSWER_CUT_OFF_WITHIN_MS).unref();
+    });
   });
   // A connection kept alive after its last answer would hold the server open until its client lets go, so once closing,
   // each answer ends its connection.
@@ -137,7 +139,7 @@ export async function buildApp(opts: {
   const lapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
   opts.onLapseWatch?.(lapses.lookNow);
   app.addHook("onClose", async () => {
-    clearTimeout(endConnections);
+    closed = true;
     // A look still running would otherwise query the pool after it has ended.
     await lapses.stop();
     await Promise.all([db.end(), ctx.files.close()]);
