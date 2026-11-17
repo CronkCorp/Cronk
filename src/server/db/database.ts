@@ -2,35 +2,55 @@ import pg from "pg";
 import type { LiveEvent } from "../live/live-updates.js";
 import { migrations as allMigrations, type Migration } from "./migrations.js";
 
-export type Queryable = pg.Pool | pg.PoolClient;
+export type Queryable = Database | pg.PoolClient;
+
+/** What the server uses of its database: queries, connections for transactions, and closing within a bound. */
+export interface Database {
+  query: pg.Pool["query"];
+  connect(): Promise<pg.PoolClient>;
+  /**
+   * Gives the work using the database `withinMs` from now to finish, so that `end` takes no longer. Connections still in use
+   * then, and any taken after, are cut off: Postgres ends their sessions, rolling back what they hadn't committed and freeing
+   * the locks they held, and their queries fail as on a lost connection. Does nothing once the database has ended.
+   */
+  cutOffAfter(withinMs: number): void;
+  /** Ends every connection, once each connection in use has come back: with no limit unless `cutOffAfter` set one. */
+  end(): Promise<void>;
+}
 
 /**
- * A connection pool that knows which of its connections are in use, so closing it can cut off work
- * that would otherwise keep it open: `end` waits, with no limit, for every connection in use to come back.
+ * The pool, kept apart from the rest of the server, with a note of which of its connections are in use, so closing can cut
+ * off work that would otherwise keep it open: ending the pool waits, with no limit, for every connection in use to come back.
  */
-export class Database extends pg.Pool {
+class PgDatabase implements Database {
+  private readonly pool: pg.Pool;
   private readonly inUse = new Set<pg.PoolClient>();
   /** Set once closing ran out of time: every connection in use is cut off, including any taken after. */
   private cuttingOff = false;
+  readonly query: pg.Pool["query"];
 
-  constructor(config: pg.PoolConfig) {
-    super(config);
-    this.on("acquire", (client) => {
+  constructor(config: pg.PoolConfig, onIdleError: (err: Error) => void) {
+    this.pool = new pg.Pool(config);
+    this.query = this.pool.query.bind(this.pool);
+    this.pool.on("error", onIdleError);
+    this.pool.on("acquire", (client) => {
       this.inUse.add(client);
       if (this.cuttingOff) void this.cutOff([client]);
     });
-    this.on("release", (_err, client) => this.inUse.delete(client));
+    this.pool.on("release", (_err, client) => this.inUse.delete(client));
   }
 
-  /**
-   * Gives the work using the pool `withinMs` from now to finish, so that ending the pool, which waits for every connection
-   * in use to come back, takes no longer. Connections still in use then, and any taken after, are cut off: Postgres ends
-   * their sessions, rolling back what they hadn't committed and freeing the locks they held, and their queries fail as on
-   * a lost connection, so the work running on them fails and the pool can end. Does nothing once the pool has ended.
-   */
+  connect(): Promise<pg.PoolClient> {
+    return this.pool.connect();
+  }
+
+  end(): Promise<void> {
+    return this.pool.end();
+  }
+
   cutOffAfter(withinMs: number): void {
     setTimeout(() => {
-      if (this.ended) return;
+      if (this.pool.ended) return;
       this.cuttingOff = true;
       void this.cutOff([...this.inUse]);
     }, withinMs).unref();
@@ -42,7 +62,7 @@ export class Database extends pg.Pool {
    */
   private async cutOff(clients: pg.PoolClient[]): Promise<void> {
     if (clients.length === 0) return;
-    const admin = new pg.Client({ ...this.options, connectionTimeoutMillis: CUT_OFF_MS / 2, query_timeout: CUT_OFF_MS / 2 });
+    const admin = new pg.Client({ ...this.pool.options, connectionTimeoutMillis: CUT_OFF_MS / 2, query_timeout: CUT_OFF_MS / 2 });
     try {
       await admin.connect();
       // Only connections still in use: one given back meanwhile has ended, and its process id may already be another session's.
@@ -74,9 +94,7 @@ export const UNIQUE_VIOLATION = "23505";
  * new one when needed, and the error goes to `onIdleError` instead of crashing the process.
  */
 export function createDatabase(databaseUrl: string, onIdleError: (err: Error) => void): Database {
-  const pool = new Database({ connectionString: databaseUrl });
-  pool.on("error", onIdleError);
-  return pool;
+  return new PgDatabase({ connectionString: databaseUrl }, onIdleError);
 }
 
 /** A connection inside a transaction, which can also hold work back until the transaction commits. */
@@ -114,7 +132,7 @@ export interface PublishingTransaction extends Transaction {
 export function transaction<T>(db: Database, fn: (tx: Transaction) => Promise<T>): Promise<T>;
 export function transaction<T>(on: LiveDatabase, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T>;
 export async function transaction<T>(on: Database | LiveDatabase, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T> {
-  const { db, live, log } = on instanceof pg.Pool ? { db: on, live: undefined, log: undefined } : on;
+  const { db, live, log } = "db" in on ? on : { db: on, live: undefined, log: undefined };
   const client = await db.connect();
   // The pool listens for a lost connection only while it is idle; the query running when it is lost fails instead.
   let lost: Error | undefined;
