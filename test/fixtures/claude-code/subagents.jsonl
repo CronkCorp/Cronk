@@ -1,0 +1,19 @@
+{"type":"user","message":{"role":"user","content":"Plan CRONK-1 and CRONK-2, and check the build."}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fg","name":"Agent","input":{"description":"Plan CRONK-1","prompt":"Log a plan on CRONK-1."}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_fg","content":[{"type":"text","text":"Planned CRONK-1."}]}]},"toolUseResult":{"status":"completed","agentId":"afg"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bg","name":"Agent","input":{"description":"Plan CRONK-2","prompt":"Log a plan on CRONK-2.","run_in_background":true}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_bg","content":[{"type":"text","text":"Async agent launched successfully.\nagentId: abg"}]}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"abg"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_legacy","name":"Task","input":{"description":"Check the build","prompt":"Run the build."}}]}}
+{"type":"user","message":{"role":"user","content":"Run the build."},"isSidechain":true,"agentId":"alegacy"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_l1","name":"Bash","input":{"command":"npm run build"}}]},"isSidechain":true,"agentId":"alegacy"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_l1","content":"Built."}]},"isSidechain":true,"agentId":"alegacy"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The build passes."}]},"isSidechain":true,"agentId":"alegacy"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_legacy","content":"The build passes."}]},"toolUseResult":{"status":"completed","agentId":"alegacy"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_gone","name":"Agent","input":{"description":"Gone","prompt":"Look around."}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_gone","content":"Looked around."}]},"toolUseResult":{"status":"completed","agentId":"agone"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"CRONK-2 is still being planned."}]}}
+{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>abg</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Both are planned."}]}}
+{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>abg</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>"}}
+{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>astray</task-id>\n<tool-use-id>toolu_elsewhere</tool-use-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}

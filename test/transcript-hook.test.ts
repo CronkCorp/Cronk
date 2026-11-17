@@ -48,6 +48,12 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(await convert(fixture("claude-code-entries.jsonl"))).toBe(await readFile(fixture("claude-code-entries.md"), "utf8"));
   });
 
+  it("puts each subagent's chat in the Assistant's turn where its parent learns it finished, once, nested ones inside their parent's", async () => {
+    // Foreground (at its result), background (at its completion notification), nested, and an older side chain in the
+    // main file; one claimed subagent's file is missing and one file no chat claims.
+    expect(await convert(fixture("subagents.jsonl"))).toBe(await readFile(fixture("subagents.md"), "utf8"));
+  });
+
   it("says how to use it when asked to print without a chat file", async () => {
     const ran = await promisify(execFile)(process.execPath, [HOOK, "--print"]).catch((err) => err);
     expect(ran).toMatchObject({ code: 1, stderr: expect.stringMatching(/--print <chat.jsonl>/) });
