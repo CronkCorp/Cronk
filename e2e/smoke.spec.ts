@@ -1732,14 +1732,20 @@ test("download a Project's Decisions as docs/adr from its register", async ({ pa
   expect(download.suggestedFilename()).toMatch(/^cronk-ADR-adr-.*\.tar\.gz$/);
 });
 
-/** Pastes `files` into the element `target` matches, as the clipboard would hand them over. */
+/** The bytes of a PNG file, enough for its type to be told. */
+const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
+
+/**
+ * Pastes `files` into the element `target` matches, as the clipboard would hand them over. Answers whether the paste's
+ * default was left alone, as `dispatchEvent` does.
+ */
 const pasteFiles = (target: Locator, files: { name: string; type: string; bytes: number[] }[], text?: string) =>
   target.evaluate(
     (el, { files, text }) => {
       const data = new DataTransfer();
       for (const f of files) data.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }));
       if (text !== undefined) data.setData("text/plain", text);
-      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      return el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
     },
     { files, text },
   );
@@ -1757,7 +1763,6 @@ test("paste an image into a Document's editor, and see it in the rendered body a
     el.focus();
     el.setSelectionRange(8, 8);
   });
-  const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
   await pasteFiles(editor, [{ name: "flow.png", type: "image/png", bytes: png }]);
   await expect(editor).toHaveValue(/^Before\.\n!\[flow\.png\]\(\/api\/attachments\/[0-9a-f-]+\/file\)\nAfter\.$/);
   const embedded = (await editor.inputValue()).split("\n")[1]!;
@@ -1828,4 +1833,40 @@ test("insert an attached video from its thumbnail while editing, and play it in 
   await page.getByRole("list", { name: "Versions" }).getByRole("listitem").filter({ hasText: "Version 2" }).getByRole("button", { name: "View" }).click();
   await expect(page.getByLabel("Version 2").locator("video")).toHaveAttribute("src", `/api/attachments/${video}/file`);
   await expect(page.getByLabel("Version 2").getByRole("img", { name: "still.png" })).toBeVisible();
+});
+
+test("paste a spreadsheet's cells into a Ticket's Comment box as text, while a pasted image alone still attaches", async ({ page }) => {
+  await signIn(page);
+  const { ticket } = await (await page.request.post("/api/projects/CRONK/tickets", { data: { title: "Pasted into" } })).json();
+  const attachments = async () => (await (await page.request.get(`/api/tickets/${ticket.key}/attachments`)).json()).attachments as { name: string }[];
+  await page.goto(`/tickets/${ticket.key}`);
+  const box = page.getByLabel("Comment", { exact: true });
+
+  // Text with an image beside it, as a copy from a spreadsheet carries, is the field's to paste: nothing is attached.
+  expect(await pasteFiles(box, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1")).toBe(true);
+  // An image alone, which a Comment box can't take, still attaches to the Ticket, in the box or outside any field.
+  expect(await pasteFiles(box, [{ name: "shot.png", type: "image/png", bytes: png }])).toBe(false);
+  const files = page.getByRole("region", { name: "Attachments" });
+  await expect(files.getByRole("button", { name: "Open shot.png" })).toBeVisible();
+  expect(await pasteFiles(page.locator("body"), [{ name: "page.png", type: "image/png", bytes: png }])).toBe(false);
+  await expect(files.getByRole("button", { name: "Open page.png" })).toBeVisible();
+  expect((await attachments()).map((a) => a.name).sort()).toEqual(["page.png", "shot.png"]);
+});
+
+test("paste a spreadsheet's cells into a Document's passage Comment as text, attaching nothing", async ({ page }) => {
+  await signIn(page);
+  const created = await page.request.post("/api/workspace/documents", { data: { title: "Pasted figures", body: "Sign-ins fell by half." } });
+  const id = (await created.json()).document.id as string;
+  await page.goto(`/documents/${id}`);
+  await page.getByTestId("document-body").evaluate((el) => getSelection()!.selectAllChildren(el.querySelector("p")!));
+  await page.getByRole("button", { name: "Comment on this passage" }).click();
+  const box = page.getByLabel("Comment", { exact: true });
+  await expect(box).toBeFocused();
+
+  expect(await pasteFiles(box, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1")).toBe(true);
+  // An image pasted alone attaches to the Document, so the earlier paste had its chance to as well.
+  expect(await pasteFiles(box, [{ name: "chart.png", type: "image/png", bytes: png }])).toBe(false);
+  await expect(page.getByRole("region", { name: "Attachments" }).getByRole("button", { name: "Open chart.png" })).toBeVisible();
+  const { attachments } = await (await page.request.get(`/api/documents/${id}/attachments`)).json();
+  expect(attachments.map((a: { name: string }) => a.name)).toEqual(["chart.png"]);
 });

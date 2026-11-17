@@ -44,9 +44,11 @@ export type Attaching = ReturnType<typeof useAttach<unknown>>;
 export const attachmentMarkdown = (a: Attachment) => `![${a.name.replace(/[\\[\]]/g, "\\$&")}](${attachmentFileUrl(a.id)})`;
 
 /**
- * Attaches files dropped anywhere on the page, or pasted while no text field holds a selection to paste into, while
- * `enabled`; not those something in the page, such as a Markdown editor, already took. Answers whether files are being
- * dragged over the page, to show where they'll go.
+ * Attaches files dropped anywhere on the page, or pasted anywhere on it, while `enabled`; not those something in the
+ * page, such as a Markdown editor, already took. A paste into an editable field (a text area, a text-type input or
+ * something content-editable) that carries text too, as a copy from a spreadsheet does, is the field's: it pastes the
+ * text and attaches nothing. Files pasted alone attach, in a field or not. Answers whether files are being dragged over
+ * the page, to show where they'll go.
  */
 export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): boolean {
   const [dragging, setDragging] = useState(false);
@@ -74,6 +76,7 @@ export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): 
     const paste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
       if (files.length === 0 || e.defaultPrevented) return;
+      if (e.clipboardData?.types.includes("text/plain") && takesPastedText(e.target)) return;
       e.preventDefault();
       latest.current(files);
     };
@@ -89,6 +92,19 @@ export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): 
     };
   }, [enabled]);
   return dragging;
+}
+
+/** Input types that take typed text, so take a paste's text. */
+const textInputTypes = new Set(["text", "search", "url", "tel", "email", "password"]);
+
+/**
+ * Whether `target` takes a paste's text: a text area or text-type input that isn't read-only, or something
+ * content-editable.
+ */
+function takesPastedText(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return !target.readOnly;
+  if (target instanceof HTMLInputElement) return !target.readOnly && textInputTypes.has(target.type);
+  return target instanceof HTMLElement && target.isContentEditable;
 }
 
 /** The Actor who attached a file, as `<Actor>` shows them. */
