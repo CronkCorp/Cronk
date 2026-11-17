@@ -760,6 +760,18 @@ a.register-row:hover { background: var(--bg); }
 .extra-origin + .extra-origin { border-top: 1px solid var(--border); }
 .extra-origin-name { font-family: var(--font-mono); font-weight: 600; overflow-wrap: anywhere; }
 .embedded-in-head { display: flex; align-items: center; gap: 8px; }
+/* The publish dialog's extra origins: one bordered row per origin, its uses as toggle pills. */
+.publish-extras { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 16px 0 14px; }
+.publish-extras-title { font-size: 14px; font-weight: 600; margin: 0; }
+.publish-extras-hint { font-size: 13px; margin: 0; }
+.publish-extra-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; align-self: stretch; }
+.publish-extra-list:empty { display: none; }
+.publish-extra { display: flex; flex-direction: column; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.publish-extra .field { margin-bottom: 10px; }
+.publish-extra-uses { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.use-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 10px 2px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); cursor: pointer; }
+.use-toggle input { margin: 0; accent-color: var(--accent); }
+.use-toggle:has(input:checked) { border-color: var(--accent); color: var(--accent); }
 
 /* An Artifact embedded in a Document, Report or Comment (docs/ui.md § Artifact): a bordered block, a bar over the sandboxed frame. */
 .artifact-embed { display: flex; flex-direction: column; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }

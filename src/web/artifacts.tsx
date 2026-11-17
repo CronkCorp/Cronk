@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, watchArtifact, type Artifact, type ArtifactVersion, type Attachment, type EmbeddedIn, type Workspace } from "./api.js";
+import { api, ApiError, watchArtifact, type Artifact, type ArtifactVersion, type Attachment, type EmbeddedIn, type ExtraOrigin, type Workspace } from "./api.js";
 import { AttachmentViewer, PageAttachments } from "./attachments.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { ArtifactCommentsDrawer } from "./timeline.js";
@@ -15,6 +15,7 @@ import { RelativeTime } from "./components/time.js";
 import { packFolder } from "./folder-archive.js";
 import { Link, navigate } from "./router.js";
 import { Field, Show, useAction, useCanWrite, useLoad } from "./ui.js";
+import { EXTRA_ORIGIN_USES } from "../shared/values.js";
 
 /** Artifacts: the list of a Project's or the Workspace's, and an Artifact's own page (docs/ui.md § Artifact). */
 
@@ -84,7 +85,7 @@ export function ArtifactEmbed(props: { artifactId: string; version: number | nul
 }
 
 /** The Artifacts of a Project, or of the Workspace without `projectKey`, with Publish for those who may write there. */
-export function ArtifactsPage(props: { projectKey?: string }) {
+export function ArtifactsPage(props: { projectKey?: string; workspace: Workspace | undefined }) {
   const [artifacts] = useLoad(() => api.artifacts(props.projectKey), [props.projectKey]);
   const canWrite = useCanWrite(props.projectKey);
   const [publishing, setPublishing] = useState(false);
@@ -105,8 +106,9 @@ export function ArtifactsPage(props: { projectKey?: string }) {
         open={publishing}
         onOpenChange={setPublishing}
         title="Publish an Artifact"
-        publish={(title, archive) => api.publishArtifact(props.projectKey, title, archive)}
+        publish={(title, archive, extras) => api.publishArtifact(props.projectKey, title, archive, extras)}
         onPublished={(a) => navigate(`/artifacts/${a.id}`)}
+        extrasAllowed={props.workspace?.artifactExtraOriginsAllowed === true}
       />
       <Show state={artifacts}>
         {(list) =>
@@ -280,11 +282,12 @@ function ArtifactView(props: {
         open={publishing}
         onOpenChange={setPublishing}
         title={`Publish Version ${a.version + 1} of ${a.title}`}
-        publish={(_title, archive) => api.publishArtifactVersion(a.id, a.version, archive)}
+        publish={(_title, archive, extras) => api.publishArtifactVersion(a.id, a.version, archive, extras)}
         onPublished={() => {
           navigate(`/artifacts/${a.id}`);
           props.reload();
         }}
+        extrasAllowed={props.workspace?.artifactExtraOriginsAllowed === true}
         untitled
       />
       <ProtectionHistory load={() => api.artifactProtection(a.id)} reloadOn={[a.id, a.protected]} />
@@ -326,7 +329,7 @@ function ExtraOrigins(props: { extras: Artifact["extraOrigins"]; apply: boolean 
           {props.extras.map((e) => (
             <li key={e.origin} className="extra-origin">
               <span className="extra-origin-name">{e.origin}</span>
-              <span className="muted">for {e.uses.map((u) => (u === "connect" ? "network requests" : u)).join(", ")}</span>
+              <span className="muted">for {e.uses.map((u) => USE_LABELS[u]).join(", ")}</span>
               <span>{e.reason}</span>
             </li>
           ))}
@@ -422,24 +425,47 @@ function EmbeddedInList(props: { artifactId: string; version: number }) {
   );
 }
 
-/** Picks a folder holding index.html and publishes it, as a new Artifact titled in the dialog, or as a new Version (`untitled`). */
+/** What each use of an extra origin is called for people; `connect` opens network requests. */
+const USE_LABELS: Record<ExtraOrigin["uses"][number], string> = {
+  scripts: "scripts",
+  styles: "styles",
+  fonts: "fonts",
+  images: "images",
+  media: "media",
+  connect: "network requests",
+};
+
+/** An extra origin as the dialog edits it, keyed so rows keep their fields when one above is removed. */
+interface ExtraOriginRow extends ExtraOrigin {
+  key: number;
+}
+
+/**
+ * Picks a folder holding index.html and publishes it, as a new Artifact titled in the dialog, or as a new Version (`untitled`).
+ * Where the Workspace allows them (`extrasAllowed`), the publish may declare extra origins; they always start empty, never
+ * carried over from an earlier Version, and the API alone judges them.
+ */
 function PublishDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  publish: (title: string, archive: Blob) => Promise<Artifact>;
+  publish: (title: string, archive: Blob, extraOrigins: ExtraOrigin[]) => Promise<Artifact>;
   onPublished: (artifact: Artifact) => void;
+  extrasAllowed: boolean;
   untitled?: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [extras, setExtras] = useState<ExtraOriginRow[]>([]);
+  const [nextKey, setNextKey] = useState(0);
   const [staleError, setStaleError] = useState<unknown>();
   const { run, error, busy } = useAction(
     async () => {
       setStaleError(undefined);
       const archive = await packFolder(files);
       if (!archive) throw new Error("Pick a folder holding index.html first");
-      return props.publish(title.trim(), archive).catch((err: unknown) => {
+      const declared = props.extrasAllowed ? extras.map(({ origin, uses, reason }) => ({ origin, uses, reason })) : [];
+      return props.publish(title.trim(), archive, declared).catch((err: unknown) => {
         setStaleError(err);
         throw err;
       });
@@ -448,9 +474,11 @@ function PublishDialog(props: {
       props.onOpenChange(false);
       setFiles([]);
       setTitle("");
+      setExtras([]);
       props.onPublished(artifact);
     },
   );
+  const change = (key: number, changes: Partial<ExtraOrigin>) => setExtras((rows) => rows.map((r) => (r.key === key ? { ...r, ...changes } : r)));
   const folderName = files[0]?.webkitRelativePath.split("/")[0];
   const stale = staleError instanceof ApiError && staleError.status === 409 && typeof staleError.body.version === "number";
   return (
@@ -476,6 +504,47 @@ function PublishDialog(props: {
           </label>
           <span className="muted">{folderName ? `${folderName}: ${files.length} ${files.length === 1 ? "file" : "files"}` : "No folder chosen"}</span>
         </div>
+        {props.extrasAllowed && (
+          <div className="publish-extras">
+            <h3 className="publish-extras-title">Extra origins</h3>
+            <p className="muted publish-extras-hint">Other sites this Version loads from beyond the Workspace's allow-list, each with what it loads and why.</p>
+            <ul className="publish-extra-list" aria-label="Extra origins">
+              {extras.map((row) => (
+                <li key={row.key} className="publish-extra">
+                  <Field label="Origin" value={row.origin} placeholder="https://cdn.example.com" onChange={(origin) => change(row.key, { origin })} required={false} />
+                  <div className="publish-extra-uses" role="group" aria-label="Loads">
+                    {EXTRA_ORIGIN_USES.map((use) => (
+                      <label key={use} className="use-toggle">
+                        <input
+                          type="checkbox"
+                          checked={row.uses.includes(use)}
+                          onChange={(e) =>
+                            change(row.key, { uses: e.target.checked ? EXTRA_ORIGIN_USES.filter((u) => u === use || row.uses.includes(u)) : row.uses.filter((u) => u !== use) })
+                          }
+                        />
+                        {USE_LABELS[use]}
+                      </label>
+                    ))}
+                  </div>
+                  <Field label="Reason" value={row.reason} onChange={(reason) => change(row.key, { reason })} required={false} />
+                  <div className="actions">
+                    <Button type="button" variant="secondary" onClick={() => setExtras((rows) => rows.filter((r) => r.key !== row.key))}>Remove</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setExtras((rows) => [...rows, { key: nextKey, origin: "", uses: [], reason: "" }]);
+                setNextKey((k) => k + 1);
+              }}
+            >
+              Add origin
+            </Button>
+          </div>
+        )}
         {error && (
           <p className="error" role="alert">
             {stale ? "Someone published a newer Version meanwhile. Reload the Artifact, then publish again." : error}
