@@ -117,7 +117,8 @@ function parseEntry(line) {
 
 /**
  * Uploads the chat a Claude Code hook event names as the Agent's Transcript of it. Cronk refuses a chat in which
- * none of the Agent's Agent Sessions changed anything yet, which is expected, so that isn't reported.
+ * none of the Agent's Agent Sessions changed anything yet with a 422 whose `reason` is `nothing_changed`; that is
+ * expected, so it isn't reported. Every other refusal, any other 422 included, is.
  * @param {{ session_id?: unknown, transcript_path?: unknown }} event
  * @returns {Promise<string | undefined>} what went wrong, if anything did
  */
@@ -135,12 +136,15 @@ async function upload(event) {
     // An unreachable Cronk mustn't hold Claude Code up for long.
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
-  if (response.ok || response.status === 422) return undefined;
+  if (response.ok) return undefined;
   const body = await response.text();
   /** @type {unknown} */
   let error = body;
   try {
-    error = JSON.parse(body).error ?? body;
+    const answer = JSON.parse(body);
+    // Only this reason means the chat changed nothing yet; any other 422 is a refusal to report.
+    if (response.status === 422 && answer?.reason === "nothing_changed") return undefined;
+    error = answer?.error ?? body;
   } catch {
     // Not Cronk's JSON, such as a proxy's error page: report it as it came.
   }

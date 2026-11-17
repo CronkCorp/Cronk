@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUser, type AppContext } from "../context.js";
 import { answer, errors, ref } from "../schemas.js";
 import { listTriage, TRIAGE_KINDS, type TriageItem } from "./triage.js";
-import { pausedTickets } from "./routes.js";
+import { hiddenBlocks, pausedTickets } from "./routes.js";
 
 const timestamp = { type: "string", format: "date-time" } as const;
 
@@ -36,12 +36,13 @@ const unattendedItem = {
   type: "object",
   required: ["kind", "at", "reason", "ticket", "reports"],
   description:
-    "An open Ticket, delegated or In Review, whose Assignee is deactivated or has no access to its Project, so nobody would act on it, with its Reports. " +
-    "It leaves Triage once a User reassigns it to an active User with access there, the Assignee is reactivated or gets access back, " +
-    "or it is no longer delegated or In Review. Its Assignee, Delegate and Changes stay as they were until then.",
+    "An open Ticket, delegated or In Review, or an Agent's Unverified completion, whose Assignee is deactivated or has no access to its Project, " +
+    "so nobody would act on it, with its Reports. It leaves Triage once a User reassigns it to an active User with access there, the Assignee " +
+    "is reactivated or gets access back, or it is neither Unverified nor open and delegated or In Review, as when a User Accepts the completion. " +
+    "Its Assignee, Delegate and Changes stay as they were until then.",
   properties: {
     kind: { type: "string", const: "unattended" },
-    at: { ...timestamp, description: "When it entered its Status." },
+    at: { ...timestamp, description: "When it entered its Status; for an Unverified completion, when it was completed." },
     reason: {
       type: "string",
       enum: ["deactivated", "no_access"],
@@ -54,7 +55,7 @@ const unattendedItem = {
 
 const discoveredItem = {
   type: "object",
-  required: ["kind", "at", "ticket", "reports", "blocks"],
+  required: ["kind", "at", "ticket", "reports", "blocks", "hiddenBlocks"],
   description:
     "A Discovered Ticket in Backlog and undelegated, with no Assignee or one who is deactivated or has no access to its Project. " +
     "A User with Write in its Project takes it by assigning it to themselves, " +
@@ -65,6 +66,7 @@ const discoveredItem = {
     ticket: ref("Ticket"),
     reports: { type: "array", items: ref("Report") },
     blocks: pausedTickets,
+    hiddenBlocks,
   },
 } as const;
 

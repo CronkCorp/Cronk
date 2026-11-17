@@ -313,3 +313,99 @@ describe("Triage's unattended Tickets", () => {
   });
 });
 
+/** As `carolsDelegatedTicket`, with CRONK-1 under Autonomous Delegation and carol-bot having completed it with a Report, leaving it Unverified. */
+async function carolsUnverifiedCompletion() {
+  const setup = await carolsDelegatedTicket();
+  const { cronk, admin, carolBot } = setup;
+  await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+  const agent = await startSession(cronk, carolBot.secret);
+  await agent.post("/api/tickets/CRONK-1/claim");
+  await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+  const completed = await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") });
+  if (completed.body.ticket?.verification !== "unverified") throw new Error(`Completing failed: ${JSON.stringify(completed.body)}`);
+  return setup;
+}
+
+describe("Triage's unattended Unverified completions", () => {
+  it("lists an Unverified completion whose Assignee is deactivated to the Users with Write in its Project, but not as unverified", async () => {
+    const { admin, bob, rita, carolId } = await carolsUnverifiedCompletion();
+    expect(await triageLines(admin)).toEqual([]);
+
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+
+    const { items } = (await bob.get("/api/triage")).body;
+    expect(items).toMatchObject([
+      { kind: "unattended", reason: "deactivated", ticket: { key: "CRONK-1", verification: "unverified", assignee: { id: carolId } }, reports: [{ title: "Done" }] },
+    ]);
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(rita)).toEqual([]);
+    expect(await triageLines(admin, "?kind=unverified")).toEqual([]);
+  });
+
+  it("lists an Unverified completion whose Assignee loses access to its Project, saying why", async () => {
+    const { admin, bob, rita, carolId } = await carolsUnverifiedCompletion();
+    await admin.put(`/api/projects/CRONK/members/${(await bob.get("/api/me")).body.user.id}`, { access: "write" });
+    await admin.put(`/api/projects/CRONK/members/${carolId}`, { access: "write" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect(await triageLines(admin)).toEqual([]);
+
+    await admin.delete(`/api/projects/CRONK/members/${carolId}`);
+
+    expect((await bob.get("/api/triage")).body.items).toMatchObject([{ kind: "unattended", reason: "no_access", ticket: { key: "CRONK-1", verification: "unverified" } }]);
+    expect(await triageLines(admin)).toEqual(["unattended CRONK-1"]);
+    expect(await triageLines(rita)).toEqual([]);
+  });
+
+  it("drops it for everyone once someone Accepts it, and never lists a Verified completion", async () => {
+    const { admin, bob, carolId } = await carolsUnverifiedCompletion();
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1"]);
+
+    expect((await bob.post("/api/tickets/CRONK-1/accept")).status).toBe(200);
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.ticket.verification).toBe("verified");
+    expect(await triageLines(admin)).toEqual([]);
+    expect(await triageLines(bob)).toEqual([]);
+  });
+
+  it("keeps it as an ordinary unattended Ticket once someone Reopens it, as it stays delegated to the same Assignee", async () => {
+    const { admin, bob, carolId } = await carolsUnverifiedCompletion();
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+
+    expect((await bob.post("/api/tickets/CRONK-1/reopen", { comment: "The cache isn't cleared on moves.", dependents: {} })).status).toBe(200);
+
+    expect((await bob.get("/api/triage")).body.items).toMatchObject([
+      { kind: "unattended", reason: "deactivated", ticket: { key: "CRONK-1", verification: null, status: { category: expect.not.stringMatching(/completed|canceled/) } } },
+    ]);
+  });
+
+  it("drops it once it is reassigned to an active User with access, whose Inbox then holds it as Unverified", async () => {
+    const { admin, bob, carolId } = await carolsUnverifiedCompletion();
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    expect((await bob.get("/api/inbox")).body.items).toEqual([]);
+
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId })).status).toBe(200);
+
+    expect(await triageLines(admin)).toEqual([]);
+    expect(await triageLines(bob)).toEqual([]);
+    expect((await bob.get("/api/inbox")).body.items).toMatchObject([{ kind: "unverified", ticket: { key: "CRONK-1", verification: "unverified" }, reports: [{ title: "Done" }] }]);
+  });
+
+  it("drops it once its Assignee is reactivated, and tells Triage", async () => {
+    const { admin, bob, carolId } = await carolsUnverifiedCompletion();
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    const stream = await bob.events("/api/inbox/events?triage=true");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch(`/api/users/${carolId}`, { active: true });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+    expect(await triageLines(bob)).toEqual([]);
+    await admin.patch(`/api/users/${carolId}`, { active: false });
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+    expect(await triageLines(bob)).toEqual(["unattended CRONK-1"]);
+    await bob.post("/api/tickets/CRONK-1/accept");
+    expect(await stream.next()).toMatchObject({ event: "triage" });
+    expect(await triageLines(bob)).toEqual([]);
+  });
+});

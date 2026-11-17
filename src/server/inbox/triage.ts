@@ -18,8 +18,8 @@ import { asTicketItems, ENTERED_STATUS_AT, ticketItems, withBlocks, type Discove
 export type UnattendedReason = "deactivated" | "no_access";
 
 /**
- * An open Ticket, delegated or In Review, whose Assignee is deactivated or can't see its Project, so it waits in an Inbox
- * no one reads until someone reassigns it.
+ * An open Ticket, delegated or In Review, or an Unverified completion, whose Assignee is deactivated or can't see its Project,
+ * so it waits in an Inbox no one reads until someone reassigns it, or, for an Unverified completion, Accepts it.
  */
 export type UnattendedItem = TicketItem<"unattended"> & { reason: UnattendedReason };
 
@@ -72,15 +72,17 @@ async function discovered(db: Queryable, projectIds: string[]): Promise<TicketIt
 }
 
 /**
- * The unattended Tickets in the Projects `projectIds`: open, delegated or In Review, with an Assignee who is deactivated or
- * has no access to the Project (see `noAccessSql`). `at` is when it entered its Status.
+ * The unattended Tickets in the Projects `projectIds`: open and delegated or In Review, or Unverified whatever their Status, with an
+ * Assignee who is deactivated or has no access to the Project (see `noAccessSql`). `at` is when it entered its Status, which for an
+ * Unverified completion is when it was completed.
  */
 async function unattended(db: Queryable, projectIds: string[]): Promise<UnattendedItem[]> {
   const { rows } = await db.query<{ id: string; at: Date; reason: UnattendedReason }>(
     `SELECT t.id, ${ENTERED_STATUS_AT} AS at, CASE WHEN u.deactivated_at IS NOT NULL THEN 'deactivated' ELSE 'no_access' END AS reason
      FROM tickets t JOIN statuses s ON s.id = t.status_id JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id
-     WHERE t.project_id = ANY($1::uuid[]) AND s.category NOT IN ('completed', 'canceled')
-       AND (t.delegate_id IS NOT NULL OR s.category = 'in_review')
+     WHERE t.project_id = ANY($1::uuid[])
+       AND ((s.category NOT IN ('completed', 'canceled') AND (t.delegate_id IS NOT NULL OR s.category = 'in_review'))
+         OR t.verification = 'unverified')
        AND (u.deactivated_at IS NOT NULL OR ${noAccessSql("u", "p")})
      ORDER BY at, p.key, t.number`,
     [projectIds],

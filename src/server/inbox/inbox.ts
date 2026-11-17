@@ -8,7 +8,7 @@ import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { blockingRefsOf, type BlockingRef } from "../work/relations.js";
-import { visibilityFilterFor } from "../work/ticket-reads.js";
+import { projectKeyOf } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -39,7 +39,12 @@ export type UnverifiedItem = TicketItem<"unverified">;
  * A Discovered Ticket waiting for its Assignee to delegate it, keep it in Backlog or cancel it, with the Tickets it blocks
  * that the User can see: what it pauses. `at` is when it was filed.
  */
-export type DiscoveredItem = TicketItem<"discovered"> & { blocks: BlockingRef[] };
+export type DiscoveredItem = TicketItem<"discovered"> & {
+  /** The Tickets it blocks that the viewer can see, each saying whether the viewer may remove the block. */
+  blocks: (BlockingRef & { canRemove: boolean })[];
+  /** How many Tickets it blocks that the viewer can't see. */
+  hiddenBlocks: number;
+};
 
 /** An open question of one of the User's Agents, with the Ticket it is on. `at` is when it was asked. */
 export interface QuestionItem {
@@ -208,14 +213,27 @@ export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
   return asTicketItems(db, kind, rows);
 }
 
-/** Discovered items, each with the Tickets it blocks that `user` can see. */
+/**
+ * Discovered items, each with the Tickets it blocks that `user` can see, saying whether `user` may remove each block, and
+ * how many it blocks that they can't see.
+ */
 export async function withBlocks(db: Queryable, user: User, items: TicketItem<"discovered">[]): Promise<DiscoveredItem[]> {
   if (items.length === 0) return [];
-  const [blocks, visible] = await Promise.all([
+  const [access, blocking] = await Promise.all([
+    visibleProjects(db, userActor(user), await listAllProjects(db, user.workspaceId)).then((projects) => new Map(projects.map((p) => [p.key, p.access]))),
     blockingRefsOf(db, items.map((item) => item.ticket.id), "from"),
-    visibilityFilterFor(db, userActor(user)),
   ]);
-  return items.map((item) => ({ ...item, blocks: visible(blocks.get(item.ticket.id)!) }));
+  const writable = (ticketKey: string) => access.get(projectKeyOf(ticketKey)) === "write";
+  return items.map((item) => {
+    const blocks = blocking.get(item.ticket.id)!;
+    const visible = blocks.filter((b) => access.has(projectKeyOf(b.key)));
+    return {
+      ...item,
+      // As DELETE /api/tickets/:key/relations/blocked_by/:otherKey allows: Write on the blocked Ticket, and on this one too unless an Agent added the block from it.
+      blocks: visible.map((b) => ({ ...b, canRemove: writable(b.key) && (b.block !== null || writable(item.ticket.key)) })),
+      hiddenBlocks: blocks.length - visible.length,
+    };
+  });
 }
 
 /** When the Ticket `t` entered its Status, as SQL. */
@@ -287,6 +305,20 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
      UNION
      ${ASSIGNEES_WAITING_ON(`SELECT t.id FROM tickets t WHERE ${column} = $1`)}`,
     [id, "projectId" in scope],
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Ids of the Owners of the Agents that made the open Project Suggestions whose source Ticket's Assignee is the User
+ * with `userId`: who review those Suggestions while that User is inactive (see `reviewerSql`), so whose Inbox
+ * deactivating or reactivating the User may change. Keep it in step with `reviewerSql`.
+ */
+export async function usersInheritingFrom(db: Queryable, userId: string): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT DISTINCT s.actor_user_id AS id FROM suggestions s JOIN tickets t ON t.id = s.source_ticket_id
+     WHERE s.state = 'open' AND s.project_id IS NOT NULL AND t.assignee_id = $1 AND s.actor_user_id <> $1`,
+    [userId],
   );
   return rows.map((r) => r.id);
 }
