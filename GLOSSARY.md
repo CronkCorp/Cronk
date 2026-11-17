@@ -187,7 +187,7 @@ One continuous connection of an Agent, from connect until it disconnects or stay
 _Avoid_: Run, instance, conversation
 
 **Agent Record**:
-Everything an Agent did across the Workspace, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved. Its Owner sees what they can read now; an Admin sees all of it. Gone once the Agent is removed, though what it did stays on the Tickets and Documents it was on.
+Everything an Agent did across the Workspace, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved. Its Owner sees what they can read now; an Admin sees all of it. It stays readable to them after the Agent is removed, as what it did stays on the Tickets and Documents it was on.
 _Avoid_: Work (reserved for Waiting Work), history, activity log, feed
 
 **Transcript**:

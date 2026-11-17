@@ -158,7 +158,7 @@ export interface Readable {
 /**
  * SQL for whether the Document aliased `document` lies where a `Readable` lets its Actor read, given
  * SQL for its `projectIds` (a uuid[]) and its `workspaceId` (a uuid, NULL when the Workspace isn't readable).
- * Anything else placed like a Document, with a `project_id` (NULL in the Workspace) and a `workspace_id`, such as a Term, is read the same way.
+ * Anything else placed like a Document, with a `project_id` (NULL in the Workspace) and a `workspace_id`, such as a Term or a Decision, is read the same way.
  */
 export const documentReadableSql = (document: string, projectIds: string, workspaceId: string) =>
   `(${document}.project_id = ANY(${projectIds}) OR (${document}.project_id IS NULL AND ${document}.workspace_id = ${workspaceId}))`;

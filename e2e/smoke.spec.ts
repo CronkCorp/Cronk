@@ -774,6 +774,29 @@ test("link a Document to a Ticket from the Ticket's page, then unlink it", async
   await expect(page.getByRole("list", { name: "Timeline" })).toContainText("Ada unlinked the Document “Onboarding”");
 });
 
+// Runs after the tests above, so CRONK-2 "Document sign-in" exists.
+test("see attaching a file and deleting one as change lines, the attached one opening while it is there", async ({ page }) => {
+  await signIn(page);
+  const attach = async (name: string, data: Buffer, type: string) => {
+    const res = await page.request.post(`/api/tickets/CRONK-2/attachments?name=${name}`, { data, headers: { "content-type": type } });
+    expect(res.status()).toBe(201);
+    return (await res.json()).attachment.id as string;
+  };
+  await attach("sign-in-flood.log", Buffer.alloc(220 * 1024, "x"), "text/plain");
+  const gone = await attach("proxy-ip.png", Buffer.from("89504e470d0a1a0a", "hex"), "image/png");
+  expect((await page.request.delete(`/api/attachments/${gone}`)).status()).toBe(204);
+
+  await page.goto("/tickets/CRONK-2");
+  const timeline = page.getByRole("list", { name: "Timeline" });
+  await expect(timeline).toContainText("Ada attached sign-in-flood.log (220 KB)");
+  await expect(timeline).toContainText("Ada attached proxy-ip.png (8 B)");
+  await expect(timeline).toContainText("Ada removed proxy-ip.png");
+  // Only a file still on the Ticket opens; a deleted one is its name alone.
+  await expect(timeline.getByRole("button", { name: "proxy-ip.png" })).toHaveCount(0);
+  await timeline.getByRole("button", { name: "sign-in-flood.log" }).click();
+  await expect(page.getByRole("dialog", { name: "sign-in-flood.log" })).toBeVisible();
+});
+
 // Runs after the test above, so CRONK holds Documents already.
 test("compare two Versions, and merge an edit someone else saved underneath", async ({ page }) => {
   await page.goto("/");

@@ -72,6 +72,15 @@ describe("the OpenAPI description", () => {
     expect(body("/api/workspace", "get", "200")).toEqual({ $ref: "#/components/schemas/Workspace" });
   });
 
+  it("describes removed Agents: how to list them, when they were removed, and that their Agent Record stays readable", async () => {
+    const doc = await openapi();
+    const listParams = doc.paths["/api/agents"].get.parameters as { name: string; in: string; description: string }[];
+    expect(listParams.find((p) => p.name === "removed" && p.in === "query")?.description).toMatch(/removed Agents/);
+    expect(doc.components.schemas.Agent.properties.removedAt.description).toMatch(/removed/);
+    expect(doc.components.schemas.Agent.required).toContain("removedAt");
+    expect(doc.paths["/api/agents/{id}/record"].get.responses["200"].description).toMatch(/after the Agent is removed/);
+  });
+
   it("keeps the old names of the Agent Record and a Ticket's Changes out", async () => {
     const doc = await openapi();
     expect(doc.components.schemas).not.toHaveProperty("AgentWork");

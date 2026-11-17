@@ -67,7 +67,7 @@ export const SHOWN_MEDIA_TYPES = {
   text: ["text/plain"],
 } as const;
 
-export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term"] as const;
+export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term", "decision"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */
@@ -76,6 +76,9 @@ export const MARKDOWN_FILE = /\.(md|markdown)$/i;
 /** The kinds of item a Suggestion can change (ADR 0014). */
 export const SUGGESTION_KINDS = ["document", "term", "decision", "guidance"] as const;
 export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
+
+/** The field of each kind of Suggestion's content that holds its Markdown, which merges section by section. */
+export const SUGGESTION_TEXT_FIELD: Record<SuggestionKind, string> = { document: "body", term: "definition", decision: "body", guidance: "markdown" };
 
 /** Where a Suggestion stands: open until a User accepts or rejects it. */
 export const SUGGESTION_STATES = ["open", "accepted", "rejected"] as const;

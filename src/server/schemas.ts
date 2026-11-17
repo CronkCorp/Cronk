@@ -82,7 +82,8 @@ export type SharedSchemaName =
   | "StaleArtifact"
   | "EmbeddedIn"
   | "AvoidedWord"
-  | "Suggestion";
+  | "Suggestion"
+  | "SuggestionMerge";
 
 /** A reference to a shared schema by name, such as `ref("Ticket")`. */
 export const ref = (name: SharedSchemaName) => ({ $ref: `${name}#` }) as const;
@@ -277,7 +278,11 @@ const conflict = {
 /** Decision keys, in order. */
 const keyList = { type: "array", items: { type: "string" } } as const;
 
+/** A field of a Suggestion's content: text, a list of words (a Term's `avoid`), or null (no group). */
+const fieldValue = { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }] };
+
 /** The sections of a merge, in order; joined, they make the merged `whole`. */
+
 const mergedSections = (whole: string) => ({
   type: "array",
   description: `The merged sections in order, each from one heading to the next; joined, their texts (or the chosen text of each conflict) make the ${whole}.`,
@@ -345,6 +350,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       name: { type: "string" },
       owner: named,
       createdAt: timestamp,
+      removedAt: { ...nullable(timestamp), description: "When it was removed, or null while it is live." },
       sessions: {
         type: "array",
         items: ref("AgentSession"),
@@ -488,6 +494,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification", "kept"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
+          ...["attachment added", "attachment removed"],
         ],
       },
     }),
@@ -521,6 +528,21 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
         }),
       }),
+      {
+        ...object({
+          change: { type: "string", enum: ["attachment added", "attachment removed"] },
+          attachment: {
+            ...object({
+              id,
+              name: { type: "string", description: "Its file name, as attached." },
+              contentType: { type: "string", description: "Its media type, as attached." },
+              size: { type: "integer", description: "Its size in bytes." },
+            }),
+            description: "The Attachment as it was when attached. After `attachment removed` its file is gone, and only this record remains.",
+          },
+        }),
+        description: "An Attachment attached to the Ticket itself, or deleted from it. Attachments in its Comments and Reports record no Change.",
+      },
     ],
   },
   Activity: {
@@ -1052,7 +1074,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           "The User whose Inbox it is in: on a Project item, the source Ticket's Assignee, else the Agent's Owner; null when it is in Triage, as on a Workspace item.",
       },
       state: { type: "string", enum: SUGGESTION_STATES },
-      outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then needs a merge." },
+      outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then merges it with that Version." },
+      newerVersion: {
+        ...nullable(object({ number: { type: "integer" }, actor: recordedActor, at: timestamp })),
+        description: "While it is outdated: the item's current Version, who saved it and when; null otherwise.",
+      },
       acceptedWithEdits: { ...nullable({ type: "boolean" }), description: "Whether the User changed it before accepting it; null unless accepted." },
       resultVersion: { ...nullable({ type: "integer" }), description: "The Version of the item accepting it made; null unless accepted." },
       decidedBy: { ...nullable(named), description: "The User who accepted or rejected it." },
@@ -1060,16 +1086,43 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       reason: { ...nullable({ type: "string" }), description: "Why it was rejected; null unless rejected." },
     }),
   },
+  SuggestionMerge: {
+    description:
+      "An outdated Suggestion's content merged with its item's current Version, with the Version the Suggestion started from as the common ancestor: " +
+      "the Markdown field (a Document's or Decision's `body`, a Term's `definition`, Guidance's `markdown`) section by section, a Term's `avoid` " +
+      "word by word (each side's additions kept, each side's removals holding), and every other field whole. " +
+      "Only conflicts need a User's choice. Nothing is saved.",
+    ...object({
+      onto: { type: "integer", description: "The item's current Version merged onto; accept the settled result with it as `onto`." },
+      current: { ...suggestedContent, description: "What the item holds at `onto`." },
+      content: { ...nullable(suggestedContent), description: "The merged content; null while any field conflicts." },
+      fields: {
+        type: "array",
+        description: "Each field of the item's content, in order.",
+        items: object({
+          field: { type: "string" },
+          value: { ...fieldValue, description: "The merged value; null when it conflicts (and for a group, when there is none)." },
+          conflict: {
+            ...nullable(object({ base: fieldValue, mine: fieldValue, theirs: fieldValue })),
+            description: "For a field that merges whole: the base's, the Suggestion's (`mine`) and the current Version's (`theirs`) values, set when both changed it differently.",
+          },
+          sections: { ...nullable(mergedSections("Markdown")), description: "For the Markdown field: its merged sections; null for a field that merges whole." },
+        }),
+      },
+      conflicts: { type: "integer", description: "How many sections of the Markdown field conflict, plus one for each other field that does." },
+    }),
+  },
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
     ...object({
-      kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, a Comment, or a Term." },
-      title: { type: "string", description: "The title of the Ticket or Document; for a Comment, of the Ticket or Document it is on; for a Term, its name." },
+      kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, a Comment, a Term, or a Decision." },
+      title: { type: "string", description: "The title of the Ticket, Document or Decision; for a Comment, of the Ticket or Document it is on; for a Term, its name." },
       excerpt: { type: "string", description: "The text around the match, as written (Markdown), without markers around the matching words." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
       documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
       termId: { ...nullable(id), description: "The Term; otherwise null." },
+      decisionKey: { ...nullable({ type: "string" }), description: "The Decision, by its key, such as CRONK-D7 (D7 in the Workspace); otherwise null." },
     }),
   },
 };

@@ -48,6 +48,37 @@ describe("Agents", () => {
   });
 });
 
+describe("Removed Agents", () => {
+  it("are listed to their Owner, and every User's to an Admin, marked with when they were removed, but not in the live listing", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const cy = await joinAs(cronk, admin, "cy@example.com");
+    const bobs = (await bob.post("/api/agents", { name: "claude-laptop" })).body.agent;
+    await bob.post("/api/agents", { name: "codex-ci" });
+    const adas = (await admin.post("/api/agents", { name: "claude-desktop" })).body.agent;
+    expect((await bob.get("/api/agents?removed=true")).body.agents).toEqual([]);
+    cronk.clock.advance(60_000);
+    await bob.delete(`/api/agents/${bobs.id}`);
+    await admin.delete(`/api/agents/${adas.id}`);
+
+    const live = await bob.get("/api/agents");
+    expect(live.body.agents).toEqual([expect.objectContaining({ name: "codex-ci", removedAt: null })]);
+    const removed = await bob.get("/api/agents?removed=true");
+    expect(removed.status).toBe(200);
+    expect(removed.body.agents).toEqual([
+      expect.objectContaining({ id: bobs.id, name: "claude-laptop", owner: expect.objectContaining({ name: "bob" }), removedAt: "2026-01-01T09:01:00.000Z", sessions: [] }),
+    ]);
+    expect((await admin.get("/api/agents?removed=true")).body.agents.map((a: { name: string }) => a.name)).toEqual(["claude-desktop"]);
+    expect((await admin.get("/api/agents?removed=true&all=true")).body.agents.map((a: { name: string }) => a.name)).toEqual([
+      "claude-desktop",
+      "claude-laptop",
+    ]);
+    expect((await admin.get("/api/agents?all=true")).body.agents.map((a: { name: string }) => a.name)).toEqual(["codex-ci"]);
+    expect((await cy.get("/api/agents?removed=true")).body.agents).toEqual([]);
+    expect((await cy.get("/api/agents?removed=true&all=true")).status).toBe(403);
+  });
+});
+
 describe("Agent tokens", () => {
   it("are issued full or read-only, act as the Agent, and are refused as soon as they are revoked", async () => {
     const { cronk, admin } = await startInstalledCronk();
