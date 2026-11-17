@@ -181,12 +181,17 @@ const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
-    body: body === undefined ? null : JSON.stringify(body),
-    credentials: "same-origin",
-  });
+  const send = () =>
+    fetch(path, {
+      method,
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? null : JSON.stringify(body),
+      credentials: "same-origin",
+    });
+  // A browser drops requests in flight when the machine's network changes (Chromium's ERR_NETWORK_CHANGED: a laptop
+  // joining another network, a VPN or a container coming up). A read is safe to send again, so it is, once; a write is
+  // not, as it may have gone through. A server that is really down fails the second time too.
+  const res = await send().catch((err: unknown) => (method === "GET" ? send() : Promise.reject(err)));
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
