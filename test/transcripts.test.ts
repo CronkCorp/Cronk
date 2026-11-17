@@ -962,6 +962,38 @@ describe("Upgrading a Transcript stored before scrubbing", () => {
     expect(read.earlier).toEqual([earlier]);
   });
 
+  it("keeps a passage its Owner redacted over a secret redacted in later uploads, so a re-upload continuing the chat replaces its text", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const before = chat("Do it all", sessionId) + `\nMy token ${SECRETS.github} works.\n`;
+    await storedUnscrubbed(cronk, id, before, []);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: `token ${SECRETS.github}` })).status).toBe(200);
+    await cronk.restart();
+
+    const hook = cronk.client(claude.secret);
+    expect((await upload(hook, "chat-1", `${before}\n## Assistant\n\nRotated.\n`)).status).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nMy [redacted] works.\n\n## Assistant\n\nRotated.\n");
+    expect(read.earlier).toEqual([]);
+
+    expect((await upload(hook, "chat-1", `${before}\n## Assistant\n\nRotated.\n`)).status).toBe(200);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject({ markdown: read.markdown, earlier: [] });
+  });
+
+  it("keeps a passage its Owner redacted over a scrub note redacted in later uploads", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const before = chat("Do it all", sessionId) + `\nMy token ${SECRETS.github} works.\n`;
+    await storedUnscrubbed(cronk, id, before, []);
+    await cronk.restart();
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "token [scrubbed: GitHub token]" })).status).toBe(200);
+
+    expect((await upload(cronk.client(claude.secret), "chat-1", `${before}\n## Assistant\n\nRotated.\n`)).status).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nMy [redacted] works.\n\n## Assistant\n\nRotated.\n");
+    expect(read.earlier).toEqual([]);
+  });
+
   it("finds the scrub notes in search, not what they replaced", async () => {
     const { cronk, bob, id } = await transcriptAcrossProjects();
     const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
