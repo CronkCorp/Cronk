@@ -183,3 +183,84 @@ describe("deleting a Term", () => {
     expect((await admin.get("/api/workspace/terms")).body.terms).toEqual([]);
   });
 });
+
+/**
+ * Ada with the Project CRONK and the Protected Term Claim, CRONK's own or the Workspace's, and claude-laptop holding
+ * the Claim on CRONK-1 to suggest changes to it from.
+ */
+async function protectedTerm(place: "/api/projects/CRONK" | "/api/workspace") {
+  const { cronk, admin } = await startInstalledCronk();
+  await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+  const term = (await admin.post(`${place}/terms`, { name: "Claim", definition: "A hold." })).body.term;
+  await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+  await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+  const claude = await agentOf(cronk, admin, "claude-laptop");
+  const adaId = (await admin.get("/api/me")).body.user.id;
+  await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: (await admin.get("/api/agents")).body.agents[0].id });
+  expect((await claude.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  const suggest = async (definition: string): Promise<string> => {
+    const made = await claude.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition }, reasoning: "Better." });
+    expect(made.status).toBe(201);
+    return made.body.suggestion.id;
+  };
+  return { admin, term, suggest };
+}
+
+describe("a Term's Suggestion count", () => {
+  it("counts its open Suggestions, wherever the Term is answered, leaving out accepted and rejected ones", async () => {
+    const { admin, term, suggest } = await protectedTerm("/api/projects/CRONK");
+    const counts = async () => [
+      (await admin.get(`/api/terms/${term.id}`)).body.term.suggestions,
+      (await admin.get("/api/projects/CRONK/terms")).body.terms[0].suggestions,
+    ];
+    expect(await counts()).toEqual([0, 0]);
+
+    const accepted = await suggest("A temporary hold.");
+    const rejected = await suggest("A lock.");
+    await suggest("A lapsing hold.");
+    expect(await counts()).toEqual([3, 3]);
+
+    expect((await admin.post(`/api/suggestions/${rejected}/reject`, { reason: "Not a lock." })).status).toBe(200);
+    expect((await admin.post(`/api/suggestions/${accepted}/accept`)).status).toBe(200);
+    expect(await counts()).toEqual([1, 1]);
+  });
+
+  it("counts a Workspace Term's on the Workspace's Terms too", async () => {
+    const { admin, suggest } = await protectedTerm("/api/workspace");
+    await suggest("A temporary hold.");
+    expect((await admin.get("/api/workspace/terms")).body.terms[0]).toMatchObject({ name: "Claim", suggestions: 1 });
+  });
+});
+
+describe("a Term's mention count", () => {
+  it("counts what mentions it that the reader can read, wherever the Term is answered", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    expect(claim.mentions).toBe(0);
+    await admin.post("/api/projects/CRONK/documents", { title: "Open notes", body: "Each Claim lapses." });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse a Claim" });
+    await admin.post("/api/projects/SECRET/documents", { title: "Secret notes", body: "Each Claim." });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+
+    const counts = async (reader: typeof admin) => [
+      (await reader.get(`/api/terms/${claim.id}`)).body.term.mentions,
+      (await reader.get("/api/workspace/terms")).body.terms[0].mentions,
+      (await reader.get("/api/projects/CRONK/terms")).body.terms[0].mentions,
+    ];
+    expect(await counts(admin)).toEqual([3, 3, 3]);
+    expect(await counts(bob)).toEqual([2, 2, 2]);
+  });
+
+  it("counts every mention, beyond the 50 its mentions list shows", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    for (let i = 1; i <= 51; i++) await admin.post("/api/projects/CRONK/tickets", { title: `Claim ${i}` });
+
+    expect((await admin.get(`/api/terms/${claim.id}/mentions`)).body.mentions).toHaveLength(50);
+    expect((await admin.get(`/api/terms/${claim.id}`)).body.term.mentions).toBe(51);
+  });
+});

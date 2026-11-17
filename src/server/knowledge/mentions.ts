@@ -228,6 +228,35 @@ function mentionsOf(target: MentionTarget): { condition: string; params: string[
 }
 
 /**
+ * Each source of the mentions in the CTE `m`, with its kind, id, key, title, Project key, Ticket key, Document id,
+ * Artifact id, when it last changed, whether it is Protected, its Project and Workspace, and the Term it mentions (if any).
+ */
+const FOUND_SQL = `
+       SELECT 'ticket' AS kind, t.id, ${ticketKeySql("p", "t")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
+              NULL::uuid AS artifact_id, t.updated_at AS at, NULL::boolean AS protected, t.project_id, p.workspace_id, m.mentioned_term_id
+       FROM m JOIN tickets t ON t.id = m.ticket_id JOIN projects p ON p.id = t.project_id
+       UNION ALL
+       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, ${documentProtectedSql("d")}, d.project_id, d.workspace_id, m.mentioned_term_id
+       FROM m JOIN documents d ON d.id = m.document_id LEFT JOIN projects p ON p.id = d.project_id
+         LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
+       UNION ALL
+       SELECT 'comment', c.id, NULL, coalesce(t.title, d.title, x.title), coalesce(tp.key, dp.key, xp.key), ${ticketKeySql("tp", "t")}, c.document_id,
+              c.artifact_id, c.at, NULL, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id), m.mentioned_term_id
+       FROM m JOIN comments c ON c.id = m.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
+         LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
+         LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
+       UNION ALL
+       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.protected, tm.project_id, tm.workspace_id, m.mentioned_term_id
+       FROM m JOIN terms tm ON tm.id = m.term_id LEFT JOIN projects p ON p.id = tm.project_id
+       UNION ALL
+       SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL, NULL,
+              dc.updated_at, dc.protected, dc.project_id, dc.workspace_id, m.mentioned_term_id
+       FROM m JOIN decisions dc ON dc.id = m.decision_id LEFT JOIN projects p ON p.id = dc.project_id
+       UNION ALL
+       SELECT 'activity', a.id, NULL, t.title, p.key, ${ticketKeySql("p", "t")}, NULL, NULL, a.at, NULL, t.project_id, p.workspace_id, m.mentioned_term_id
+       FROM m JOIN activities a ON a.id = m.activity_id JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id`;
+
+/**
  * What mentions a Ticket, a Decision or a Term, most recently changed first (at most 50), leaving out what
  * lies where `readable` doesn't let its reader read.
  */
@@ -237,29 +266,7 @@ export async function listMentions(db: Queryable, target: MentionTarget, readabl
   const { rows } = await db.query<Mention>(
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
-       SELECT 'ticket' AS kind, t.id, ${ticketKeySql("p", "t")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
-              NULL::uuid AS artifact_id, t.updated_at AS at, NULL::boolean AS protected, t.project_id, p.workspace_id
-       FROM m JOIN tickets t ON t.id = m.ticket_id JOIN projects p ON p.id = t.project_id
-       UNION ALL
-       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, ${documentProtectedSql("d")}, d.project_id, d.workspace_id
-       FROM m JOIN documents d ON d.id = m.document_id LEFT JOIN projects p ON p.id = d.project_id
-         LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
-       UNION ALL
-       SELECT 'comment', c.id, NULL, coalesce(t.title, d.title, x.title), coalesce(tp.key, dp.key, xp.key), ${ticketKeySql("tp", "t")}, c.document_id,
-              c.artifact_id, c.at, NULL, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
-       FROM m JOIN comments c ON c.id = m.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
-         LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
-         LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
-       UNION ALL
-       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.protected, tm.project_id, tm.workspace_id
-       FROM m JOIN terms tm ON tm.id = m.term_id LEFT JOIN projects p ON p.id = tm.project_id
-       UNION ALL
-       SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL, NULL,
-              dc.updated_at, dc.protected, dc.project_id, dc.workspace_id
-       FROM m JOIN decisions dc ON dc.id = m.decision_id LEFT JOIN projects p ON p.id = dc.project_id
-       UNION ALL
-       SELECT 'activity', a.id, NULL, t.title, p.key, ${ticketKeySql("p", "t")}, NULL, NULL, a.at, NULL, t.project_id, p.workspace_id
-       FROM m JOIN activities a ON a.id = m.activity_id JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id
+${FOUND_SQL}
      )
      SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
      FROM found f WHERE ${documentReadableSql("f", `$${n + 1}::uuid[]`, `$${n + 2}::uuid`)}
@@ -267,4 +274,20 @@ export async function listMentions(db: Queryable, target: MentionTarget, readabl
     [...params, readable.projectIds, readable.workspaceId],
   );
   return rows;
+}
+
+/**
+ * How many things mention each of these Terms, by id, leaving out what lies where `readable` doesn't let its reader read;
+ * unlike `listMentions`, every one is counted. Terms nothing readable mentions are left out.
+ */
+export async function countTermMentions(db: Queryable, termIds: string[], readable: Readable): Promise<Map<string, number>> {
+  const { rows } = await db.query<{ term_id: string; n: number }>(
+    `WITH m AS (SELECT * FROM mentions m WHERE m.mentioned_term_id = ANY($1::uuid[])),
+     found AS (${FOUND_SQL})
+     SELECT mentioned_term_id AS term_id, count(*)::int AS n
+     FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
+     GROUP BY mentioned_term_id`,
+    [termIds, readable.projectIds, readable.workspaceId],
+  );
+  return new Map(rows.map((r) => [r.term_id, r.n]));
 }
