@@ -6,18 +6,21 @@ import { visibleProjects } from "./access.js";
 /** Where a tagged value may be read: the id of its Project. A symbol, so it is never serialized. */
 const READABLE_IN = Symbol("readableIn");
 
+/** A value `readableOnlyIn` tagged, with the id of the Project it may be read in. */
 type Tagged = { [READABLE_IN]: string };
 
 /**
  * Tags `value`, part of something read elsewhere, as readable only by those who can read the Project `projectId`,
  * as a Discovered Ticket's source Ticket in another Project. `forReader` takes it out of an answer for anyone else:
- * an object property becomes null, an array item is dropped. Returns `value`, tagged.
+ * an object property becomes null, an array item is dropped. Returns `value`, tagged. The tag isn't enumerable, so a
+ * copy (spread, `structuredClone`, a JSON round trip) loses it: tag the value the answer carries, after any copying.
  */
 export function readableOnlyIn<T extends object>(projectId: string, value: T): T {
   Object.defineProperty(value, READABLE_IN, { value: projectId, enumerable: false });
   return value;
 }
 
+/** Whether `readableOnlyIn` tagged `value`. */
 const isTagged = (value: unknown): value is Tagged => typeof value === "object" && value !== null && READABLE_IN in value;
 
 /** Whether `value` is a plain object or an array, which `forReader` looks inside; a Date, a Buffer or a stream isn't. */

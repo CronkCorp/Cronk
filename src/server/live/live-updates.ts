@@ -136,10 +136,12 @@ export class LiveUpdates {
     const res = reply.raw;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
     const writeRaw = ({ event, data, id }: LiveEvent) => res.write(`event: ${event}\n${id === undefined ? "" : `id: ${id}\n`}data: ${JSON.stringify(data)}\n\n`);
-    // Each event as the caller who opened the stream may read it; written only if the stream is still open by then.
+    // Each event as the caller who opened the stream may read it; written only if the stream is still open by then. If it
+    // can't be shaped, the stream ends rather than skip it silently, so the caller reopens it and reads afresh.
     const write = async (event: LiveEvent) => {
-      const data = await this.shape(reply.request, event.data);
-      if (open) writeRaw({ ...event, data });
+      const data = await this.shape(reply.request, event.data).catch(() => undefined);
+      if (data === undefined) end();
+      else if (open) writeRaw({ ...event, data });
     };
 
     // Events are sent one at a time, in order, each after its access check.

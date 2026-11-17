@@ -175,6 +175,8 @@ async function exportActivitiesAndComments(ctx: ExportContext, base: string, tic
 interface PendingDiscoverySource {
   sourceKey: string;
   claimId: string | null;
+  /** Where the Ticket file names it, for refusing a key of a Project the export holds but not of one of its Tickets. */
+  where: string;
 }
 
 /** A relation a Ticket file names, to store once every Ticket it may name is in. */
@@ -227,14 +229,20 @@ export class ImportedTickets {
   }
 
   /**
-   * Links each Discovered Ticket to the Ticket it came from, of any Project, if that Ticket came in with this import. A
-   * Project's export may name a source in a Project it leaves out; that Discovered Ticket comes in without a source, as a
-   * proposed Decision does.
+   * Links each Discovered Ticket to the Ticket it came from, of any Project. A Project's export may name a source in a
+   * Project it leaves out; that Discovered Ticket comes in without a source, as a proposed Decision does. A source in a
+   * Project the export holds must be one of its Tickets.
    */
   async storeDiscoverySources(ctx: ImportContext): Promise<void> {
-    for (const { ticketId, sourceKey, claimId } of this.discoverySources) {
+    const projectOf = (key: string) => key.slice(0, key.lastIndexOf("-"));
+    const projects = new Set([...this.ids.keys()].map(projectOf));
+    for (const { ticketId, sourceKey, claimId, where } of this.discoverySources) {
       const sourceId = this.ids.get(sourceKey.toUpperCase());
-      if (sourceId) await ctx.db.query("UPDATE tickets SET discovered_source_ticket_id = $2, discovered_source_claim_id = $3 WHERE id = $1", [ticketId, sourceId, claimId]);
+      if (!sourceId) {
+        if (projects.has(projectOf(sourceKey.toUpperCase()))) refuse(`${where} names ${sourceKey}, which isn't a Ticket in the export`);
+        continue;
+      }
+      await ctx.db.query("UPDATE tickets SET discovered_source_ticket_id = $2, discovered_source_claim_id = $3 WHERE id = $1", [ticketId, sourceId, claimId]);
     }
   }
 
@@ -363,7 +371,7 @@ async function discoveryIn(ctx: ImportContext, t: File) {
   const by = await ctx.actor({ agent, session }, where);
   if (kept !== undefined && typeof kept !== "boolean") refuse(`${where} kept must be true or false`);
   if (sourceTicket !== undefined && sourceTicket !== null && typeof sourceTicket !== "string") refuse(`${where} sourceTicket must be a Ticket key`);
-  const source = typeof sourceTicket === "string" ? { sourceKey: sourceTicket, claimId: isUuid(sourceClaim) ? sourceClaim : null } : undefined;
+  const source = typeof sourceTicket === "string" ? { sourceKey: sourceTicket, claimId: isUuid(sourceClaim) ? sourceClaim : null, where: `${where} sourceTicket` } : undefined;
   const reasons = new Map<string, string>();
   if (blockReasons !== undefined && blockReasons !== null) {
     if (typeof blockReasons !== "object" || Array.isArray(blockReasons)) refuse(`${where} blockReasons must map Ticket keys to why it blocks them`);

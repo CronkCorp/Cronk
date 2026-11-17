@@ -30,7 +30,7 @@ export function sourceClaimOf(
     projectId === null
       ? `${ticketKey} is in a private Project, so a Workspace ${whole} can't name it: not everyone who reads it may read the Ticket`
       : `${ticketKey} isn't a Ticket of the ${whole}'s Project; ${what} names a source Ticket of its own Project`;
-  return heldSourceClaim(db, actor, key, now, what, fits, misfit);
+  return heldSourceClaim(db, actor, key, now, what, { fits, misfit });
 }
 
 /**
@@ -39,25 +39,27 @@ export function sourceClaimOf(
  * (see `Discovery.sourceTicket`), so unlike `sourceClaimOf` any held Claim fits. None for a User, who may not name one.
  */
 export function discoverySourceClaimOf(db: Queryable, actor: Actor, key: string | undefined, now: Date): Promise<SourceClaim | null> {
-  return heldSourceClaim(db, actor, key, now, "a Discovered Ticket", () => true, () => "");
+  return heldSourceClaim(db, actor, key, now, "a Discovered Ticket");
 }
 
-async function heldSourceClaim(
-  db: Queryable,
-  actor: Actor,
-  key: string | undefined,
-  now: Date,
-  what: string,
-  fits: (claim: SessionClaim) => boolean,
-  misfit: (ticketKey: string) => string,
-): Promise<SourceClaim | null> {
+/** Which held Claims `what` may come from, and why one named that doesn't fit is refused. */
+interface SourceFit {
+  fits: (claim: SessionClaim) => boolean;
+  misfit: (ticketKey: string) => string;
+}
+
+/**
+ * The Claim an Agent makes `what` from: that of the Ticket `key` names, which its Agent Session must hold, or else the one
+ * Claim it holds; with `fit`, only a Claim that fits. None for a User, who may not name one.
+ */
+async function heldSourceClaim(db: Queryable, actor: Actor, key: string | undefined, now: Date, what: string, fit?: SourceFit): Promise<SourceClaim | null> {
   if (actor.kind === "user") {
     if (key !== undefined) throw new HttpError(400, `Only an Agent names the Ticket ${what} came from, as the one it holds the Claim on`);
     return null;
   }
   const held = actor.session ? await listSessionClaims(db, actor.session.id) : [];
   if (key === undefined) {
-    const fitting = held.filter(fits);
+    const fitting = fit ? held.filter(fit.fits) : held;
     if (fitting.length > 1) {
       throw new HttpError(400, `Your Agent Session holds the Claims on ${fitting.map((c) => c.ticketKey).join(", ")}; name the Ticket ${what} came from as \`ticket\``);
     }
@@ -66,6 +68,6 @@ async function heldSourceClaim(
   const ticket = await ticketFor(db, actor, key, "read");
   const claimId = await requireClaimHolder(db, actor, ticket, now, `naming it as the Ticket ${what} came from`);
   const claim = held.find((c) => c.claimId === claimId)!;
-  if (!fits(claim)) throw new HttpError(400, misfit(ticket.key));
+  if (fit && !fit.fits(claim)) throw new HttpError(400, fit.misfit(ticket.key));
   return claim;
 }
