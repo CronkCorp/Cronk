@@ -321,7 +321,8 @@ export interface Cronk {
   /**
    * Starts a look for lapsed Claims, as `lookForLapses` does, and holds it between its reads: after its first query on the
    * Tickets, before its next, until released. So a test can commit a change in the middle of a look. Start Cronk with a long
-   * `lapseCheckMs`, so the look held is the one this starts, and send no other request on the Tickets while it is held.
+   * `lapseCheckMs`, so the look held is the one this starts, send no other request on the Tickets while it is held, and count no
+   * queries (`queries`, `queriesOn`) until it is released.
    */
   holdLookBetweenReads(): Promise<HeldLook>;
   /**
@@ -486,8 +487,7 @@ export async function startCronk(
       const ended = await Promise.race([held.reached.then(() => false), look.then(() => true, () => true)]);
       if (ended) {
         held.release();
-        await look;
-        throw new Error("The look ended without reading the Tickets twice");
+        throw new Error("The look ended without reading the Tickets twice", { cause: await look.then(() => undefined, (err: unknown) => err) });
       }
       return {
         release: async () => {
@@ -716,7 +716,8 @@ export async function projectWithTickets(client: Client, key: string, count: num
 /**
  * Holds back the `nth` query the server sends from now on that `matching` matches, until released; queries before it go
  * through, and so does every query once it is held. `reached` resolves once it is held. The server and this harness share the
- * pg module, and the Pool sends every query through a Client.
+ * pg module, and the Pool sends every query through a Client. Don't count queries (`countQueries`) while one is held: each
+ * replaces the Client's `query` and puts back what it found.
  */
 function holdQuery(matching: RegExp, nth: number): { reached: Promise<void>; release: () => void } {
   const query = pg.Client.prototype.query;
@@ -726,13 +727,13 @@ function holdQuery(matching: RegExp, nth: number): { reached: Promise<void>; rel
   const released = new Promise<void>((resolve) => (release = resolve));
   let seen = 0;
   const holding = function (this: pg.Client, ...args: unknown[]) {
-    const config = args[0] as string | { text?: string };
     const send = () => (query as (...a: unknown[]) => unknown).apply(this, args);
-    if (!matching.test(typeof config === "string" ? config : (config?.text ?? "")) || ++seen < nth) return send();
+    if (!matching.test(queryText(args)) || ++seen < nth) return send();
     pg.Client.prototype.query = query;
     reach();
     // The Pool passes a callback and takes no result; a Client used directly takes a promise.
-    if (typeof args.at(-1) === "function") return void released.then(send);
+    const callback = args.at(-1);
+    if (typeof callback === "function") return void released.then(send).catch((err: unknown) => callback(err));
     return released.then(send);
   } as typeof query;
   pg.Client.prototype.query = holding;
@@ -745,6 +746,12 @@ function holdQuery(matching: RegExp, nth: number): { reached: Promise<void>; rel
   };
 }
 
+/** The SQL text of a `pg.Client.prototype.query` call with these arguments. */
+function queryText(args: unknown[]): string {
+  const config = args[0] as string | { text?: string };
+  return typeof config === "string" ? config : (config?.text ?? "");
+}
+
 /**
  * How many queries the server sends that `matching` matches while `during` runs. The server and this harness share the pg module,
  * and the Pool sends every query through a Client.
@@ -753,8 +760,7 @@ async function countQueries(matching: RegExp, during: () => Promise<unknown>): P
   const query = pg.Client.prototype.query;
   let n = 0;
   pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
-    const config = args[0] as string | { text?: string };
-    if (matching.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
+    if (matching.test(queryText(args))) n++;
     return (query as (...a: unknown[]) => unknown).apply(this, args);
   } as typeof query;
   try {
@@ -767,7 +773,7 @@ async function countQueries(matching: RegExp, during: () => Promise<unknown>): P
 
 /**
  * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
- * delegated to her Agent claude-laptop. `session()` starts a new Agent Session of that Agent.
+ * delegated to her Agent claude-laptop. `session()` starts a new Agent Session of that Agent. `opts` start Cronk, as for `startCronk`.
  */
 export async function delegatedSetup(tickets = 1, opts: Parameters<typeof startCronk>[0] = {}) {
   const { cronk, admin } = await startInstalledCronk("Acme", opts);
