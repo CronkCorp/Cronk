@@ -4,6 +4,7 @@ import { ticketKeySql } from "../work/tickets.js";
 import { documentReadableSql, type Readable } from "../identity/access.js";
 import { recordMentions } from "./mentions.js";
 import { embedsIn, embedsSql, recordEmbeds } from "../files/artifact-embeds.js";
+import { documentProtectedSql } from "./protection.js";
 import type { ArtifactAt } from "../../shared/artifact-embeds.js";
 import type { LinkReason } from "../../shared/values.js";
 import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
@@ -385,6 +386,8 @@ export interface LinkedDocument {
   version: number;
   updatedAt: Date;
   reason: LinkReason;
+  /** Whether Agents may read but not change it: it, or a Document above it, is marked Protected. */
+  protected: boolean;
 }
 
 /**
@@ -398,7 +401,8 @@ export async function listLinkedDocuments(
   readable: Readable,
 ): Promise<LinkedDocument[]> {
   const select = (reason: LinkReason) =>
-    `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason
+    `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason,
+       ${documentProtectedSql("d")} AS protected
      FROM (${SELECT_DOCUMENTS}) d`;
   const isReadable = documentReadableSql("d", "$2::uuid[]", "$3::uuid");
   const reports = await db.query<LinkedDocument>(`${select("report")} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
