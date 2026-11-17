@@ -109,7 +109,7 @@ async function nameTaken(db: Queryable, place: TermPlace, name: string, except: 
   return rows.length > 0;
 }
 
-/** Creates a Term in `place` at Version 1, or refuses if a Term there already has its name. Run inside a transaction. */
+/** Creates a Term in `place` at Version 1, or refuses if a Term there already has its name, and tells whoever watches Terms once `db` commits. */
 export async function insertTerm(
   db: PublishingTransaction,
   input: { place: TermPlace; fields: TermFields; actor: Actor; now: Date },
@@ -243,7 +243,7 @@ async function withOverrides(db: Queryable, workspaceId: string, terms: StoredTe
 
 /**
  * Saves a new Version of a Term with `fields`, unless it would change nothing, or refuses if another
- * Term of its place has the new name. Pass a Term locked with `forUpdate`, inside a transaction.
+ * Term of its place has the new name, and tells whoever watches Terms once `db` commits. Pass a Term locked with `forUpdate`.
  */
 export async function saveTermVersion(
   db: PublishingTransaction,
@@ -290,17 +290,22 @@ export async function findProtectedWorkspaceTerm(db: Queryable, workspaceId: str
   return rows[0] && toTerm(rows[0]);
 }
 
-/** Deletes a Term and its Versions, and what mentions it then mentions any Workspace Term it overrode. Run inside a transaction. */
+/**
+ * Deletes a Term and its Versions, and what mentions it then mentions any Workspace Term it overrode, and tells whoever
+ * watches Terms once `db` commits.
+ */
 export async function deleteTerm(db: PublishingTransaction, workspaceId: string, term: StoredTerm): Promise<void> {
   await db.query("DELETE FROM terms WHERE id = $1", [term.id]);
   termsChanged(db, { workspaceId, projectId: term.projectId });
   if (term.projectId !== null) await recordMentionsOfNames(db, { workspaceId, projectId: term.projectId }, [term.name]);
 }
 
-/** Marks a Term Protected, or unmarks it, by the User `userId` (see `setProtected`), and tells whoever watches Terms once `db` commits. */
+/**
+ * Marks a Term Protected, or unmarks it, by the User `userId` (see `setProtected`), and tells whoever watches Terms once `db`
+ * commits; changes and tells nothing when it already was as asked.
+ */
 export async function setTermProtected(db: PublishingTransaction, workspaceId: string, term: StoredTerm, marked: boolean, userId: string, at: Date): Promise<void> {
-  await setProtected(db, { kind: "term", id: term.id }, marked, userId, at);
-  termsChanged(db, { workspaceId, projectId: term.projectId });
+  if (await setProtected(db, { kind: "term", id: term.id }, marked, userId, at)) termsChanged(db, { workspaceId, projectId: term.projectId });
 }
 
 /**

@@ -403,6 +403,18 @@ describe("The Workspace's Terms' live updates", () => {
     await expectQuiet(stream);
   });
 
+  it("tell nothing of a protection change that changes nothing", async () => {
+    const { admin } = await startInstalledCronk();
+    const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post(`/api/terms/${term.id}/protection`, { protected: false })).status).toBe(200);
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    expect(await stream.next()).toEqual(CHANGED);
+    await expectQuiet(stream);
+  });
+
   it("tell nothing of a create or save that rolls back", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const ticket = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
