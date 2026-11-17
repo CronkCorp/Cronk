@@ -1,6 +1,6 @@
 import type { Actor, RecordedActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { documentReadableSql, readablePlaces } from "../identity/access.js";
+import { placeReadableSql, readablePlaces } from "../identity/access.js";
 import { statusFlags, ticketKeySql, type RecordedChange } from "../work/tickets.js";
 import type { ActivityKind } from "../../shared/values.js";
 
@@ -75,23 +75,23 @@ const SELECTS = [
   `SELECT 'comment', c.at, c.actor_session_id, p.key, NULL, NULL, d.id, d.title, NULL::uuid, NULL, NULL::integer,
      jsonb_build_object('id', c.id, 'body', c.body), c.seq
    FROM comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
-   WHERE c.actor_agent_id = $1 AND ${documentReadableSql("d", "$2", "$3")}`,
+   WHERE c.actor_agent_id = $1 AND ${placeReadableSql("d", "$2", "$3")}`,
   // A Report lies with its Ticket, so whoever can read the Ticket can read it.
   `SELECT 'version', v.at, v.actor_session_id, p.key,
      CASE WHEN t.id IS NULL THEN NULL ELSE ${ticketKeySql("p", "t")} END, t.title, d.id, d.title, NULL::uuid, NULL, NULL::integer,
      jsonb_build_object('number', v.number), v.number::bigint
    FROM document_versions v JOIN documents d ON d.id = v.document_id LEFT JOIN tickets t ON t.id = d.ticket_id
      LEFT JOIN projects p ON p.id = coalesce(t.project_id, d.project_id)
-   WHERE v.actor_agent_id = $1 AND (CASE WHEN t.id IS NULL THEN ${documentReadableSql("d", "$2", "$3")} ELSE t.project_id = ANY($2) END)`,
+   WHERE v.actor_agent_id = $1 AND (CASE WHEN t.id IS NULL THEN ${placeReadableSql("d", "$2", "$3")} ELSE t.project_id = ANY($2) END)`,
   // An Artifact lies where a Document would: in a Project, or in the Workspace outside any.
   `SELECT 'comment', c.at, c.actor_session_id, p.key, NULL, NULL, NULL::uuid, NULL, a.id, a.title, c.artifact_version,
      jsonb_build_object('id', c.id, 'body', c.body), c.seq
    FROM comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id
-   WHERE c.actor_agent_id = $1 AND ${documentReadableSql("a", "$2", "$3")}`,
+   WHERE c.actor_agent_id = $1 AND ${placeReadableSql("a", "$2", "$3")}`,
   `SELECT 'artifact_version', v.at, v.actor_session_id, p.key, NULL, NULL, NULL::uuid, NULL, a.id, a.title, v.number,
      '{}'::jsonb, v.number::bigint
    FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id LEFT JOIN projects p ON p.id = a.project_id
-   WHERE v.actor_agent_id = $1 AND ${documentReadableSql("a", "$2", "$3")}`,
+   WHERE v.actor_agent_id = $1 AND ${placeReadableSql("a", "$2", "$3")}`,
 ];
 
 /**

@@ -156,12 +156,13 @@ export interface Readable {
 }
 
 /**
- * SQL for whether the Document aliased `document` lies where a `Readable` lets its Actor read, given
- * SQL for its `projectIds` (a uuid[]) and its `workspaceId` (a uuid, NULL when the Workspace isn't readable).
- * Anything else placed like a Document, with a `project_id` (NULL in the Workspace) and a `workspace_id`, such as a Term or a Decision, is read the same way.
+ * SQL for whether the place of the row aliased `alias` (its Project, or the Workspace outside any
+ * Project) lies where a `Readable` lets its Actor read, given SQL for its `projectIds` (a uuid[]) and
+ * its `workspaceId` (a uuid, NULL when the Workspace isn't readable). Works for any row with a
+ * `project_id` (NULL in the Workspace) and a `workspace_id`: Documents, Artifacts, Terms, Decisions.
  */
-export const documentReadableSql = (document: string, projectIds: string, workspaceId: string) =>
-  `(${document}.project_id = ANY(${projectIds}) OR (${document}.project_id IS NULL AND ${document}.workspace_id = ${workspaceId}))`;
+export const placeReadableSql = (alias: string, projectIds: string, workspaceId: string) =>
+  `(${alias}.project_id = ANY(${projectIds}) OR (${alias}.project_id IS NULL AND ${alias}.workspace_id = ${workspaceId}))`;
 
 /** Where `actor` may read, for finding things across the Workspace (see `Readable`). */
 export async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {

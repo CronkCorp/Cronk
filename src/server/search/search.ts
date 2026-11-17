@@ -1,6 +1,6 @@
 import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { documentReadableSql, readablePlaces, type Readable } from "../identity/access.js";
+import { placeReadableSql, readablePlaces, type Readable } from "../identity/access.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { documentProtectedSql } from "../knowledge/protection.js";
@@ -104,7 +104,7 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
     kind: "document",
     sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d LEFT JOIN projects p ON p.id = d.project_id
-      WHERE d.ticket_id IS NULL AND ${documentReadableSql("d", "q.projects", "q.workspace_id")}
+      WHERE d.ticket_id IS NULL AND ${placeReadableSql("d", "q.projects", "q.workspace_id")}
         AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
@@ -123,26 +123,26 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
     kind: "comment",
     sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", artifactId: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
-      WHERE ${documentReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+      WHERE ${placeReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     // Artifacts are placed like Documents: in a Project, or in the Workspace outside any.
     kind: "comment",
     sql: `${columns({ kind: "comment", title: "a.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: "NULL", artifactId: "a.id", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id
-      WHERE ${documentReadableSql("a", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
+      WHERE ${placeReadableSql("a", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "term",
     sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", decisionKey: "NULL", artifactId: "NULL", protected: "tm.protected", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
       FROM q, terms tm LEFT JOIN projects p ON p.id = tm.project_id
-      WHERE ${documentReadableSql("tm", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${TERM_TEXT}) @@ q.query`,
+      WHERE ${placeReadableSql("tm", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${TERM_TEXT}) @@ q.query`,
   },
   {
     kind: "decision",
     sql: `${columns({ kind: "decision", title: "dc.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: DECISION_KEY, artifactId: "NULL", protected: "dc.protected", excerptOf: ["dc.title", "dc.body"], text: DECISION_TEXT, at: "dc.updated_at", boost: keyBoost(DECISION_KEY) })}
       FROM q, decisions dc LEFT JOIN projects p ON p.id = dc.project_id
-      WHERE ${documentReadableSql("dc", "q.projects", "q.workspace_id")} AND (to_tsvector(${CONFIG}, ${DECISION_TEXT}) @@ q.query OR ${keyMatches(DECISION_KEY)})`,
+      WHERE ${placeReadableSql("dc", "q.projects", "q.workspace_id")} AND (to_tsvector(${CONFIG}, ${DECISION_TEXT}) @@ q.query OR ${keyMatches(DECISION_KEY)})`,
   },
 ];
 
