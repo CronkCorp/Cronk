@@ -2,7 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ACTIVITY_KINDS, DECISION_STATUSES, EXTRA_ORIGIN_USES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
-import type { AvoidedWord, Welcome } from "../api-types.js";
+import type { AvoidedWord, Transcript, Welcome } from "../api-types.js";
+import { turnsOf } from "../../shared/transcript-turns.js";
 import { formatBytes } from "../files/sizes.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
@@ -764,6 +765,51 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
   });
 
+  registerGroupedTool(server, ctx, {
+    name: "transcripts",
+    description:
+      "Transcripts: the chats that led Agents to change things, uploaded by their clients, each in turns (`## User` and `## Assistant`, numbered from 1). " +
+      "Find them with the search tool, whose Transcript hits carry a transcriptId and the turn that matches.",
+    parameters: {
+      id: z.string().optional().describe("The Transcript's id, such as a search hit's transcriptId (get)"),
+      turn: z.number().int().optional().describe("Only this turn of the Transcript, numbered from 1, such as a search hit's turn (get)"),
+      kind: z.enum(["ticket", "document", "term", "decision"]).optional().describe("What kind of item `item` is; a Report is a document (from)"),
+      item: z.string().optional().describe("The Ticket's or Decision's key, such as CRONK-12 or CRONK-D3, or the Document's, Report's or Term's id (from)"),
+    },
+    actions: {
+      get: {
+        description: "one Transcript with its text; given a turn, only that turn's text, with the number of turns it has",
+        writes: false,
+        run: async (api, a) => {
+          const read = await api("GET", `/api/transcripts/${encodeURIComponent(required(a.id, "an id", "get"))}`);
+          if (read.status >= 400 || a.turn === undefined) return read;
+          const { markdown, earlier: _earlier, ...transcript } = read.body.transcript as Transcript;
+          const turns = turnsOf(markdown);
+          const turn = turns.find((t) => t.n === a.turn);
+          if (turns.length === 0) throw new ToolError("This Transcript has no turns");
+          if (!turn) throw new ToolError(`This Transcript has turns 1 to ${turns.length}, so no turn ${a.turn}`);
+          return { status: 200, body: { transcript: { ...transcript, turns: turns.length, turn } } };
+        },
+      },
+      list: {
+        description: "the Transcripts you may read, most recently uploaded first, without their text",
+        writes: false,
+        run: (api) => api("GET", "/api/transcripts"),
+      },
+      from: {
+        description:
+          "the Transcripts a Ticket, Document (or Report), Term or Decision came from (\"From Transcript\"), most recently uploaded first, " +
+          "each with the turn where the item first appears, or null for none",
+        writes: false,
+        run: (api, a) => {
+          const kind = required(a.kind, "a kind", "from");
+          const item = required(a.item, "an item", "from");
+          return api("GET", `/api/${kind}s/${encodeURIComponent(item)}/transcripts`);
+        },
+      },
+    },
+  });
+
   registerSearchTool(server, ctx);
 }
 
@@ -799,7 +845,8 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
       "any status by its title or body, and a Ticket or Decision key such as CRONK-12 or CRONK-D3 puts that one first. Get a result with the " +
       "tickets or documents tool by its ticketKey or documentId, a Comment's Artifact with the artifacts tool by its artifactId, a Term with " +
       "the terms tool by its termId, or a Decision with the decisions tool by its decisionKey. " +
-      "Transcripts (the chats that led Agents to change things) are found too, after everything else, each by its transcriptId with the turn that matches.",
+      "Transcripts (the chats that led Agents to change things) are found too, after everything else, each by its transcriptId with the turn that matches; " +
+      "read that turn with the transcripts tool's get action, giving it the transcriptId as id and the turn.",
     inputSchema,
     (api, { query: q, kind, project, limit }) =>
       api("GET", `/api/search${query({ q: [q], kind, project, limit: limit === undefined ? undefined : [String(limit)] })}`),
