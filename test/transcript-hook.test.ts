@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -65,6 +65,46 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(await convert(fixture("claude-code-entries.jsonl"))).toBe(await readFile(fixture("claude-code-entries.md"), "utf8"));
   });
 
+  it("puts each subagent's chat in the Assistant's turn where its parent learns it finished, once, nested ones inside their parent's", async () => {
+    // Foreground (at its result), background (at its completion notification), nested, and an older side chain in the
+    // main file; one claimed subagent's file is missing and one file no chat claims.
+    expect(await convert(fixture("subagents.jsonl"))).toBe(await readFile(fixture("subagents.md"), "utf8"));
+  });
+
+  it("converts subagents to the same text every run, and a chat or running background subagent that grows to text that continues it", async () => {
+    const whole = await convert(fixture("subagents.jsonl"));
+    expect(await convert(fixture("subagents.jsonl"))).toBe(whole);
+    const main = (await readFile(fixture("subagents.jsonl"), "utf8")).split("\n");
+    const background = (await readFile(fixture("subagents/subagents/agent-abg.jsonl"), "utf8")).split("\n");
+    // Claude Code tells the main chat a background subagent finished only once its chat is written.
+    const finished = main.findIndex((line) => line.includes("<task-notification>"));
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    for (let n = 1; n <= main.length; n++) {
+      for (let m = n > finished ? background.length : 0; m <= background.length; m++) {
+        const chat = join(dir, `${n}-${m}`);
+        await mkdir(join(chat, "subagents"), { recursive: true });
+        await cp(fixture("subagents/subagents"), join(chat, "subagents"), { recursive: true });
+        await writeFile(join(chat, "subagents", "agent-abg.jsonl"), background.slice(0, m).join("\n"));
+        await writeFile(`${chat}.jsonl`, main.slice(0, n).join("\n"));
+        expect(whole.startsWith(await convert(`${chat}.jsonl`)), `first ${n} lines, background subagent's first ${m}`).toBe(true);
+      }
+    }
+  });
+
+  it("converts the main chat when the subagents' folder or a subagent's file is missing, leaving those subagents out", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    await cp(fixture("subagents.jsonl"), join(dir, "no-folder.jsonl"));
+    expect(await convert(join(dir, "no-folder.jsonl"))).toBe(await readFile(fixture("subagents-without-folder.md"), "utf8"));
+
+    await cp(fixture("subagents.jsonl"), join(dir, "no-file.jsonl"));
+    await cp(fixture("subagents"), join(dir, "no-file"), { recursive: true });
+    await rm(join(dir, "no-file", "subagents", "agent-afg.jsonl"));
+    const withoutFile = await convert(join(dir, "no-file.jsonl"));
+    // The nested subagent goes with the subagent that launched it.
+    expect(withoutFile).not.toMatch(/subagent (afg|anested)/);
+    expect(withoutFile).toMatch(/^`{4}subagent abg$/m);
+  });
+
   it("says how to use it when asked to print without a chat file", async () => {
     const ran = await promisify(execFile)(process.execPath, [HOOK, "--print"]).catch((err) => err);
     expect(ran).toMatchObject({ code: 1, stderr: expect.stringMatching(/--print <chat.jsonl>/) });
@@ -113,6 +153,43 @@ describe("The reference Claude Code Transcript hook", () => {
     const transcript = (await admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript;
     expect(transcript).toMatchObject({ chatId: "claude-chat-1", markdown: await convert(chat), tickets: [{ key: "CRONK-1" }] });
     expect(transcript.markdown).toContain("## User\n\nPick up CRONK-1.\n");
+  });
+
+  it("keeps an upload in which only a subagent's Cronk result names the Agent Session, and links what it changed", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    const call = async (name: string, args: object) => ((await mcp.client.callTool({ name, arguments: { ...args } })) as { content: unknown[] }).content;
+    await call("tickets", { action: "claim", key: "CRONK-1" });
+    const logged = await call("activities", { action: "log", key: "CRONK-1", kind: "plan", body: "Fix the sign-in form." });
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    const jsonl = (entries: object[]) => entries.map((entry) => JSON.stringify(entry) + "\n").join("");
+    // The main chat only launches the subagent; its report doesn't repeat the Agent Session.
+    await writeFile(
+      join(dir, "chat.jsonl"),
+      jsonl([
+        { type: "user", message: { role: "user", content: "Plan CRONK-1." } },
+        { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Agent", input: { prompt: "Log a plan on CRONK-1." } }] } },
+        { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "Planned it." }] }, toolUseResult: { status: "completed", agentId: "a1" } },
+      ]),
+    );
+    await mkdir(join(dir, "chat", "subagents"), { recursive: true });
+    await writeFile(
+      join(dir, "chat", "subagents", "agent-a1.jsonl"),
+      jsonl([
+        { type: "user", isSidechain: true, agentId: "a1", message: { role: "user", content: "Log a plan on CRONK-1." } },
+        { type: "assistant", isSidechain: true, agentId: "a1", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_2", name: "mcp__cronk__activities", input: { action: "log", key: "CRONK-1" } }] } },
+        { type: "user", isSidechain: true, agentId: "a1", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_2", content: logged }] } },
+      ]),
+    );
+
+    const ran = await runHook({ session_id: "claude-chat-1", transcript_path: join(dir, "chat.jsonl"), hook_event_name: "Stop" }, { CRONK_URL: await cronk.url(), CRONK_TOKEN: claude.secret });
+    expect(ran, ran.stderr).toMatchObject({ code: 0 });
+
+    const listed = (await admin.get("/api/transcripts")).body.transcripts;
+    expect(listed).toHaveLength(1);
+    const transcript = (await admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript;
+    expect(transcript).toMatchObject({ chatId: "claude-chat-1", tickets: [{ key: "CRONK-1" }] });
+    expect(transcript.markdown).toMatch(/^`{4}subagent a1$/m);
   });
 
   it("stays quiet about a chat that changed nothing yet, and reports what keeps any other upload out without blocking Claude", async () => {
