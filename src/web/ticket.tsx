@@ -374,22 +374,27 @@ function VerificationField(props: { ticket: Ticket; canWrite: boolean }) {
   const accept = useAction(() => api.accept(props.ticket.key), () => {});
   const [reopening, setReopening] = useState(false);
   const unverified = props.ticket.verification === "unverified";
+  const canVerify = unverified && props.canWrite;
   return (
     <div className="side-field">
       <span className="side-field-label">Verification</span>
-      <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
-      {unverified && props.canWrite && (
-        <>
-          <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
-          <Button variant="secondary" onClick={() => setReopening(true)} disabled={accept.busy}>Reopen…</Button>
-          <ReopenDialog
-            ticket={props.ticket}
-            open={reopening}
-            onOpenChange={setReopening}
-            reopen={(input) => api.reopen(props.ticket.key, input)}
-            onDone={() => {}}
-          />
-        </>
+      <span className="side-field-value side-field-controls">
+        <Chip tone={unverified ? "warn" : "ok"}>{unverified ? "Unverified" : "Verified"}</Chip>
+        {canVerify && (
+          <span className="side-field-actions">
+            <Button variant="secondary" onClick={() => void accept.run()} disabled={accept.busy}>Accept</Button>
+            <Button variant="secondary" onClick={() => setReopening(true)} disabled={accept.busy}>Reopen…</Button>
+          </span>
+        )}
+      </span>
+      {canVerify && (
+        <ReopenDialog
+          ticket={props.ticket}
+          open={reopening}
+          onOpenChange={setReopening}
+          reopen={(input) => api.reopen(props.ticket.key, input)}
+          onDone={() => {}}
+        />
       )}
       {accept.error && <p className="error" role="alert">{accept.error}</p>}
     </div>
