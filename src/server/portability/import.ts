@@ -19,6 +19,7 @@ import { importTranscripts } from "./transcripts.js";
 import { importWorkspaceSettings } from "./workspace.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 import { recordAllEmbeds } from "../files/artifact-embeds.js";
+import type { TermPlace } from "../knowledge/terms.js";
 
 /**
  * Importing an export (see `format.ts`) back: a Workspace export into a Workspace that holds
@@ -38,12 +39,20 @@ export interface Imported {
   renamedIds: RenamedId[];
 }
 
+/** An import's answer, and where it may have given Terms, for the caller to tell their watchers once it commits. */
+export interface ImportResult {
+  imported: Imported;
+  /** The Workspace for a Workspace export, and each Project it created. */
+  termPlaces: TermPlace[];
+}
+
 /**
- * Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction. The
+ * Imports `archived`, an export, into the Workspace `workspaceId`, all of it or nothing. Run inside a transaction, and
+ * tell watchers of the answer's `termPlaces` only once it has committed (ADR 0012). The
  * files of its Attachments go into `files.store`, each key added to `files.stored` as it is, for the caller to remove
  * should the transaction fail.
  */
-export async function importExport(db: Queryable, workspaceId: string, archived: StoredFolder, now: Date, files: ImportedFiles): Promise<Imported> {
+export async function importExport(db: Queryable, workspaceId: string, archived: StoredFolder, now: Date, files: ImportedFiles): Promise<ImportResult> {
   const ctx = new ImportContext(db, workspaceId, unwrapFolder(archived), now, files);
   const scope = readScope(ctx);
   // One import at a time per Workspace, so two can't both find it empty or a key free.
@@ -91,7 +100,11 @@ export async function importExport(db: Queryable, workspaceId: string, archived:
   await recordAllEmbeds(db, workspaceId);
   // Last: they link through the Agent Sessions `people.md` brought in, to everything those changed.
   if (scope === "workspace") await importTranscripts(ctx);
-  return { scope, projects: created, renamedIds: ctx.renamedIds };
+  const termPlaces: TermPlace[] = [
+    ...(scope === "workspace" ? [{ workspaceId, projectId: null }] : []),
+    ...projectIds.map(({ id }) => ({ workspaceId, projectId: id })),
+  ];
+  return { imported: { scope, projects: created, renamedIds: ctx.renamedIds }, termPlaces };
 }
 
 /** What the export's README says it holds; refuses anything but a Cronk export in this format. */
