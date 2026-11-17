@@ -4,6 +4,7 @@ import { documentReadableSql, readablePlaces, type Readable } from "../identity/
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { SearchKind } from "../../shared/values.js";
+import { searchTranscripts } from "../transcripts/search.js";
 
 /**
  * Full-text search over what an Actor may read, with Postgres's own text search (no extra
@@ -14,7 +15,7 @@ import type { SearchKind } from "../../shared/values.js";
 /** One thing a search found, with an excerpt of its text around the match. */
 export interface SearchResult {
   kind: SearchKind;
-  /** The Ticket's, Document's or Decision's title, or the Term's name. */
+  /** The Ticket's, Document's, Decision's or Transcript's title, or the Term's name. */
   title: string;
   /** The text around the match, as written (Markdown), from the body (or the title when the body is empty). */
   excerpt: string;
@@ -25,6 +26,9 @@ export interface SearchResult {
   termId: string | null;
   /** The Decision, by its key: `CRONK-D7`, or `D7` in the Workspace. */
   decisionKey: string | null;
+  transcriptId: string | null;
+  /** The Transcript's turn that matches best (see transcripts/turns.ts); null for every other kind. */
+  turn: number | null;
 }
 
 /** The text-search configuration everything is indexed and searched with. */
@@ -138,21 +142,36 @@ export async function search(
     ? { projectIds: readable.projectIds.filter((id) => input.projectIds!.includes(id)), workspaceId: null }
     : readable;
   const selects = SELECTS.filter((s) => !input.kinds || input.kinds.includes(s.kind)).map((s) => s.sql);
-  const { rows } = await db.query<SearchResult & { rank: number }>(
-    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::uuid AS workspace_id, upper(trim($1)) AS key)
-     SELECT * FROM (${selects.join("\n UNION ALL ")}) found
-     ORDER BY rank DESC, at DESC
-     LIMIT $4`,
-    [input.query, places.projectIds, places.workspaceId, input.limit],
-  );
-  return rows.map(({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey }) => ({
-    kind,
-    title,
-    excerpt,
-    projectKey,
-    ticketKey,
-    documentId,
-    termId,
-    decisionKey,
-  }));
+  const results: SearchResult[] = [];
+  if (selects.length > 0) {
+    const { rows } = await db.query<SearchResult & { rank: number }>(
+      `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query, $2::uuid[] AS projects, $3::uuid AS workspace_id, upper(trim($1)) AS key)
+       SELECT * FROM (${selects.join("\n UNION ALL ")}) found
+       ORDER BY rank DESC, at DESC
+       LIMIT $4`,
+      [input.query, places.projectIds, places.workspaceId, input.limit],
+    );
+    for (const { kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey } of rows) {
+      results.push({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey, transcriptId: null, turn: null });
+    }
+  }
+  // Transcripts are a separate kind, ranked below everything else: they fill what the limit leaves.
+  if (!input.kinds || input.kinds.includes("transcript")) {
+    const hits = await searchTranscripts(db, actor, { query: input.query, limit: input.limit - results.length, projectIds: input.projectIds && places.projectIds });
+    for (const hit of hits) {
+      results.push({
+        kind: "transcript",
+        title: hit.title,
+        excerpt: hit.excerpt,
+        projectKey: null,
+        ticketKey: null,
+        documentId: null,
+        termId: null,
+        decisionKey: null,
+        transcriptId: hit.transcriptId,
+        turn: hit.turn,
+      });
+    }
+  }
+  return results;
 }

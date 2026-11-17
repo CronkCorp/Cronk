@@ -712,3 +712,65 @@ describe("Context on claim", () => {
     expect(JSON.stringify(claimed.body)).not.toContain("tool-result");
   });
 });
+
+describe("Searching Transcripts", () => {
+  it("finds them as their own kind, below everything else, pointing at the best matching turn", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Go" });
+    await admin.post("/api/workspace/documents", { title: "Rollback", body: "We rollback by hand." });
+    const markdown =
+      `## User\n\nThe deploy failed.\n\n## Assistant\n\nAgent Session ${agent.sessionId}\n\n` +
+      "## User\n\nRollback the rollback, then rollback again: rollback, rollback, rollback.\n\n## Assistant\n\nRolled back.\n";
+    const id = (await upload(cronk.client(claude.secret), "chat-1", markdown)).body.transcript.id;
+
+    const found = await admin.get("/api/search?q=rollback");
+    expect(found.status, JSON.stringify(found.body)).toBe(200);
+    expect(found.body.results.map((r: { kind: string }) => r.kind)).toEqual(["document", "transcript"]);
+    const [, hit] = found.body.results;
+    expect(hit).toMatchObject({ kind: "transcript", title: "The deploy failed.", projectKey: null, transcriptId: id, turn: 3 });
+    expect(hit.excerpt).toContain("Rollback the rollback");
+    expect(found.body.results[0]).toMatchObject({ transcriptId: null, turn: null });
+
+    expect((await admin.get("/api/search?q=rollback&kind=transcript")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["transcript"]);
+    expect((await admin.get("/api/search?q=rollback&kind=document")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["document"]);
+    // Only the latest text is searched.
+    await upload(cronk.client(claude.secret), "chat-1", `## Assistant\n\nAgent Session ${agent.sessionId} started over.\n`);
+    expect((await admin.get("/api/search?q=rollback&kind=transcript")).body.results).toEqual([]);
+    expect((await admin.get("/api/search?q=started&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 1 }]);
+  });
+
+  it("finds only those the caller may read, and narrowed to Projects, those whose Sessions changed things there", async () => {
+    const { cronk, admin, bob, carol, carolId, claude, id } = await transcriptAcrossProjects();
+    const ids = async (client: Client, filters = "") =>
+      ((await client.get(`/api/search?q=done&kind=transcript${filters}`)).body.results as { transcriptId: string }[]).map((r) => r.transcriptId);
+    expect(await ids(bob)).toEqual([id]);
+    expect(await ids(admin)).toEqual([id]);
+    expect(await ids(carol)).toEqual([]);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect(await ids(carol)).toEqual([id]);
+    expect(await ids(cronk.client(claude.secret))).toEqual([id]);
+
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    expect(await ids(admin, "&project=SECRET")).toEqual([id]);
+    expect(await ids(admin, "&project=OPS")).toEqual([]);
+  });
+
+  it("finds what a hand redaction left, never the passage", async () => {
+    const { bob, id } = await transcriptAcrossProjects();
+    expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toHaveLength(1);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "Done" })).status).toBe(200);
+    expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
+    expect((await bob.get("/api/search?q=redacted&kind=transcript")).body.results).toHaveLength(1);
+  });
+});
+
+describe("Upgrading an installation", () => {
+  it("makes the Transcripts it already holds searchable", async () => {
+    const { cronk, bob, id } = await transcriptAcrossProjects();
+    await cronk.undoMigration("0042_transcript_turns", "DROP TABLE transcript_turns");
+    await cronk.restart();
+    expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 2 }]);
+  });
+});

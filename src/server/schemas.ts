@@ -1135,14 +1135,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
     ...object({
-      kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, a Comment, a Term, or a Decision." },
-      title: { type: "string", description: "The title of the Ticket, Document or Decision; for a Comment, of the Ticket or Document it is on; for a Term, its name." },
+      kind: {
+        type: "string",
+        enum: SEARCH_KINDS,
+        description: "A Ticket, a Document in a page tree, a Report, a Comment, a Term, a Decision, or a Transcript. Transcripts come after every other kind.",
+      },
+      title: {
+        type: "string",
+        description: "The title of the Ticket, Document, Decision or Transcript; for a Comment, of the Ticket or Document it is on; for a Term, its name.",
+      },
       excerpt: { type: "string", description: "The text around the match, as written (Markdown), without markers around the matching words." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
       documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
       termId: { ...nullable(id), description: "The Term; otherwise null." },
       decisionKey: { ...nullable({ type: "string" }), description: "The Decision, by its key, such as CRONK-D7 (D7 in the Workspace); otherwise null." },
+      transcriptId: { ...nullable(id), description: "The Transcript; otherwise null." },
+      turn: {
+        ...nullable({ type: "integer", minimum: 1 }),
+        description: "The Transcript's turn that matches best, the excerpt's, numbered from 1 as GET /api/transcripts/{id} numbers them; otherwise null.",
+      },
     }),
   },
 };

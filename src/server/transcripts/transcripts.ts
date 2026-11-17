@@ -222,8 +222,27 @@ export async function redactTranscript(db: Queryable, stored: StoredTranscript, 
   const earlier = stored.earlier.map((t) => applyRedaction(t, r));
   if (!markdown.found && !earlier.some((e) => e.found)) return false;
   await db.query("UPDATE transcripts SET markdown = $2, earlier = $3 WHERE id = $1", [stored.id, markdown.text, earlier.map((e) => e.text)]);
+  await storeTurns(db, stored.id, markdown.text);
   await storeRedactions(db, stored.id, [r], at);
   return true;
+}
+
+/** Keeps the turns of the Transcript's latest text, `markdown`, for search, replacing those it had. */
+export async function storeTurns(db: Queryable, transcriptId: string, markdown: string): Promise<void> {
+  await db.query("DELETE FROM transcript_turns WHERE transcript_id = $1", [transcriptId]);
+  const turns = turnsOf(markdown);
+  if (turns.length === 0) return;
+  await db.query("INSERT INTO transcript_turns (transcript_id, n, body) SELECT $1, unnest($2::int[]), unnest($3::text[])", [
+    transcriptId,
+    turns.map((t) => t.n),
+    turns.map((t) => t.text),
+  ]);
+}
+
+/** Keeps the turns of every Transcript, as an upgrade fills them in. */
+export async function storeAllTurns(db: Queryable): Promise<void> {
+  const { rows } = await db.query<{ id: string; markdown: string }>("SELECT id, markdown FROM transcripts");
+  for (const r of rows) await storeTurns(db, r.id, r.markdown);
 }
 
 /** The bytes a Transcript's texts take, as the Workspace's limit counts them. */
@@ -251,6 +270,7 @@ export async function storeTranscript(
     "INSERT INTO transcript_sessions (transcript_id, session_id) SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING",
     [id, upload.sessionIds],
   );
+  if (input.existing?.markdown !== upload.markdown) await storeTurns(db, id, upload.markdown);
   return id;
 }
 
@@ -316,6 +336,33 @@ function placesOf(items: Awaited<ReturnType<typeof changedItems>>): Places {
 }
 
 /**
+ * What the Transcript's Sessions changed, where, and which of those places `actor` can read; undefined if `actor` may not read the
+ * Transcript (see readTranscript).
+ */
+async function accessTo(db: Queryable, actor: Actor, stored: StoredTranscript, opts: { uploader?: boolean } = {}) {
+  if (actingUser(actor).workspaceId !== stored.workspaceId) return undefined;
+  const items = await changedItems(db, stored.sessionIds);
+  const places = placesOf(items);
+  const readable = await readablePlaces(db, actor);
+  const canReadIn = (projectId: string | null) => (projectId === null ? readable.workspaceId !== null : readable.projectIds.includes(projectId));
+  const readsAnyway = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
+  const somewhere = places.projectIds.length > 0 || places.workspace;
+  const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
+  // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
+  if (!readsAnyway && !(somewhere && everywhere)) return undefined;
+  return { items, places, canReadIn };
+}
+
+/**
+ * Whether `actor` may read the Transcript and, when `projectIds` narrows a search to Projects, whether its Sessions changed
+ * something in one of them.
+ */
+export async function findable(db: Queryable, actor: Actor, stored: StoredTranscript, projectIds?: string[]): Promise<boolean> {
+  const access = await accessTo(db, actor, stored);
+  return access !== undefined && (!projectIds || access.places.projectIds.some((p) => projectIds.includes(p)));
+}
+
+/**
  * The Transcript as `actor` may read it, or undefined if they may not: its Owner may, and so may anyone (Agents capped as usual)
  * with Read in every Project its Sessions changed things in, and in the Workspace for what they changed outside any Project.
  * What it lists of those changes leaves out what the reader can't read.
@@ -327,16 +374,9 @@ export async function readTranscript(
   /** Set when answering the Agent that uploaded it, who may always read back what it sent. */
   opts: { uploader?: boolean } = {},
 ): Promise<Transcript | undefined> {
-  const items = await changedItems(db, stored.sessionIds);
-  const places = placesOf(items);
-  const readable = await readablePlaces(db, actor);
-  const canReadIn = (projectId: string | null) => (projectId === null ? readable.workspaceId !== null : readable.projectIds.includes(projectId));
-  const readsAnyway = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
-  const somewhere = places.projectIds.length > 0 || places.workspace;
-  const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
-  if (actingUser(actor).workspaceId !== stored.workspaceId) return undefined;
-  // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
-  if (!readsAnyway && !(somewhere && everywhere)) return undefined;
+  const access = await accessTo(db, actor, stored, opts);
+  if (!access) return undefined;
+  const { items, canReadIn } = access;
   const { rows } = await db.query<{ agent_name: string; owner_name: string }>(
     "SELECT a.name AS agent_name, u.name AS owner_name FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1",
     [stored.agentId],
