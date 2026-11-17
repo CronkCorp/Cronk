@@ -579,7 +579,10 @@ export function workRoutes(ctx: AppContext) {
           let ticket: Ticket;
           const blocked: Ticket[] = [];
           if (actor.kind === "agent") {
-            const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now);
+            // The blocked Tickets first, locked with the source in id order before adding the blocks takes the Workspace's blocking lock.
+            const blocks: { other: Ticket; reason: string }[] = [];
+            for (const { ticketKey, reason } of request.body.blocks ?? []) blocks.push({ other: await otherTicketFor(tx, actor, ticketKey), reason });
+            const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now, { blockedIds: blocks.map((b) => b.other.id) });
             const sourceTicket = source && (await findTicketsByIds(tx, [source.ticketId]))[0]!;
             const created = await insertTicket(tx, {
               ...input,
@@ -589,7 +592,11 @@ export function workRoutes(ctx: AppContext) {
             // Cronk routes it, not the Agent, which may not assign Tickets.
             const assignee = await discoveryAssignee(tx, actor, sourceTicket?.assignee ?? actingUser(actor), project.id);
             ticket = assignee ? await updateTicket(tx, created, { assignee }, { kind: "system" }, now) : created;
-            for (const { ticketKey, reason } of request.body.blocks ?? []) blocked.push(await addDiscoveredBlock(tx, actor, ticket, ticketKey, reason, now));
+            // A new Ticket blocks nothing yet, so these can't close a cycle.
+            for (const { other, reason } of blocks) {
+              await addRelation(tx, actor.owner.workspaceId, { ticket, kind: "blocks", other, actor, now, block: { agentId: actor.agent.id, reason: reason.trim() } });
+              blocked.push(other);
+            }
           } else {
             if (request.body.ticket !== undefined) throw new HttpError(400, "Only an Agent names the Ticket a Discovered Ticket came from, as the one it holds the Claim on");
             if (request.body.blocks !== undefined) throw new HttpError(400, "Only an Agent files a Ticket with blocks, as its Discovered Ticket");
@@ -1124,17 +1131,6 @@ const otherTicketFor = (tx: Queryable, actor: Actor, otherKey: string): Promise<
   ticketFor(tx, actor, otherKey, "read").catch((err: unknown) => {
     throw err instanceof HttpError && err.statusCode === 404 ? new HttpError(400, `No such Ticket ${otherKey}`) : err;
   });
-
-/**
- * Has the Agent's new Discovered Ticket `ticket` block the Ticket `otherKey`, which the Agent need only read, recording why.
- * A missing or hidden `otherKey` answers 400. Returns the blocked Ticket.
- */
-async function addDiscoveredBlock(tx: Queryable, agent: AgentActor, ticket: Ticket, otherKey: string, reason: string, now: Date): Promise<Ticket> {
-  const other = await otherTicketFor(tx, agent, otherKey);
-  // A new Ticket blocks nothing yet, so this can't close a cycle.
-  await addRelation(tx, agent.owner.workspaceId, { ticket, kind: "blocks", other, actor: agent, now, block: { agentId: agent.agent.id, reason: reason.trim() } });
-  return other;
-}
 
 /** The Status with this id among a Project's Statuses. */
 function statusOr404(statuses: Status[], statusId: string): Status {
