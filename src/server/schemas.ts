@@ -57,6 +57,7 @@ export type SharedSchemaName =
   | "VersionSummary"
   | "StaleVersion"
   | "SectionRefused"
+  | "NothingChanged"
   | "Merge"
   | "Guidance"
   | "GuidanceVersion"
@@ -852,6 +853,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   SectionRefused: {
     description: "A section replacement refused because no section, or more than one, has that heading, with the Document's headings to pick from.",
     ...object({ error: { type: "string" }, headings: { type: "array", items: { type: "string" }, description: "Its heading lines, such as `## Setup`, in order." } }, ["headings"]),
+  },
+  NothingChanged: {
+    description:
+      "A Transcript upload refused because the chat names none of the Agent's Agent Sessions that changed anything. " +
+      "Clients match on `reason`, not on the status alone or on the message, which may change.",
+    ...object({ error: { type: "string" }, reason: { type: "string", enum: ["nothing_changed"], description: "Always `nothing_changed`." } }),
   },
   Merge: {
     description: "An edit merged section by section with the current Version. Only conflicts need a User's choice.",

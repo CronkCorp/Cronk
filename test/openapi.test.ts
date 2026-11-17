@@ -113,6 +113,7 @@ describe("the OpenAPI description", () => {
     const staleTermBody = { $ref: "#/components/schemas/StaleTermVersion" };
     const sectionBody = { $ref: "#/components/schemas/SectionRefused" };
     const staleArtifactBody = { $ref: "#/components/schemas/StaleArtifact" };
+    const nothingChangedBody = { $ref: "#/components/schemas/NothingChanged" };
     for (const [label, op] of operations(doc)) {
       const errors = Object.keys(op.responses).filter((code) => /^4\d\d$/.test(code));
       // Every operation that needs a sign-in or token can be refused without one, or for an ended Agent Session.
@@ -126,7 +127,9 @@ describe("the OpenAPI description", () => {
         // A stale save's refusal is the error shape plus the current Version (of a Document, Guidance, a Term or a Decision);
         // a 409 may also be either the stale shape or the plain error, when a route refuses for both reasons;
         // a refused section heading's is the error shape plus the Document's headings.
+        // An uploaded chat that changed nothing is refused with the error shape plus its reason.
         const refusesSections = label === "POST /api/documents/{id}/replace-section" && ["400", "404"].includes(code);
+        const refusesChats = label === "PUT /api/transcripts/by-chat/{chatId}" && code === "422";
         const allowed =
           code === "409"
             ? [
@@ -141,7 +144,9 @@ describe("the OpenAPI description", () => {
               ]
             : refusesSections
               ? [errorBody, sectionBody]
-              : [errorBody];
+              : refusesChats
+                ? [nothingChangedBody]
+                : [errorBody];
         expect(allowed, `${label} ${code}`).toContainEqual(op.responses[code].content["application/json"].schema);
       }
     }
@@ -160,6 +165,18 @@ describe("the OpenAPI description", () => {
     });
     const deleteParams = doc.paths["/api/documents/{id}"].delete.parameters.filter((p: { in: string }) => p.in === "query");
     expect(deleteParams).toEqual([expect.objectContaining({ name: "baseVersion", required: true })]);
+  });
+
+  it("names the reason a Transcript upload that changed nothing is refused with, for hooks to match on", async () => {
+    const doc = await openapi();
+    const upload = doc.paths["/api/transcripts/by-chat/{chatId}"].put;
+    expect(upload.description).toMatch(/422.*`"reason": "nothing_changed"`/s);
+    expect(upload.description).toMatch(/match on that `reason`, not on the status/);
+    expect(upload.responses["422"].content["application/json"].schema).toEqual({ $ref: "#/components/schemas/NothingChanged" });
+    expect(doc.components.schemas.NothingChanged).toMatchObject({
+      required: ["error", "reason"],
+      properties: { error: { type: "string" }, reason: { enum: ["nothing_changed"] } },
+    });
   });
 
   it("says every write an Agent makes needs an Agent Session, and how a script starts and ends one", async () => {

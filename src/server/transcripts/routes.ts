@@ -92,7 +92,8 @@ export function transcriptRoutes(ctx: AppContext) {
             "Uploads the chat `chatId` of the calling Agent's client as a Transcript, with one of the Agent's tokens that isn't read-only; no Agent Session is " +
             "needed. The body is the chat as Markdown in the turn convention (`## User` and `## Assistant` turns, tool calls and results as fenced blocks), " +
             "sent as `text/markdown`. Cronk links it to the Agent's own Agent Sessions whose ids it names, and so to everything they changed; " +
-            "an upload naming none that changed anything is refused with 422, so a hook may upload every chat. Uploading the same chat again " +
+            "an upload naming none that changed anything is refused with 422 and `\"reason\": \"nothing_changed\"` alongside `error`, so a hook may upload " +
+            "every chat and stay quiet about that refusal; match on that `reason`, not on the status alone or on the message, which may change. Uploading the same chat again " +
             "replaces the text when the new one continues it (starts with it), keeps the old text as well when it doesn't, and only ever adds " +
             "Sessions. The Transcript, all its texts together, may hold at most the Workspace's `transcriptMaxBytes`.\n\n" +
             "Known secret patterns are scrubbed before anything is stored, and the originals never are: Cronk's own tokens, private keys, " +
@@ -106,7 +107,8 @@ export function transcriptRoutes(ctx: AppContext) {
           params: pathParams({ chatId: { type: "string", minLength: 1, maxLength: 200, description: "The client's id for the chat, such as Claude Code's `session_id`." } }),
           response: {
             200: answer("The Transcript, created or changed", holding("transcript", "Transcript")),
-            ...errors(400, 401, 403, 410, 413, 422),
+            ...errors(400, 401, 403, 410, 413),
+            422: { description: "The chat names none of the Agent's Agent Sessions that changed anything, so it isn't kept", ...ref("NothingChanged") },
           },
         },
       },
@@ -135,6 +137,7 @@ export function transcriptRoutes(ctx: AppContext) {
             throw new HttpError(
               422,
               "This chat names none of this Agent's Agent Sessions that changed anything, so it isn't kept. Only chats that led to changes are",
+              { reason: "nothing_changed" },
             );
           }
           return storeTranscript(tx, { workspaceId, agentId: actor.agent.id, chatId, existing, upload, at: ctx.clock.now() });

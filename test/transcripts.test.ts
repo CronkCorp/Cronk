@@ -91,7 +91,7 @@ describe("Uploading a Transcript", () => {
     for (const markdown of [chat("Hello"), chat("Hello", idle.sessionId), chat("Hello", codex.sessionId)]) {
       const refused = await upload(hook, "chat-1", markdown);
       expect(refused.status, markdown).toBe(422);
-      expect(refused.body.error).toMatch(/changed anything/);
+      expect(refused.body).toEqual({ error: expect.stringMatching(/changed anything/), reason: "nothing_changed" });
     }
     expect((await upload(cronk.client(other.secret), "chat-1", chat("Hello", codex.sessionId))).status).toBe(200);
   });
