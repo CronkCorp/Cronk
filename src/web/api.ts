@@ -55,6 +55,7 @@ import type {
   StatusCategory,
   SuggestedContent,
   Suggestion,
+  SuggestionMerge,
   Term,
   TermVersion,
   Ticket,
@@ -126,6 +127,7 @@ export type {
   StatusCategory,
   SuggestedContent,
   Suggestion,
+  SuggestionMerge,
   Term,
   TermVersion,
   Ticket,
@@ -511,10 +513,16 @@ export const api = {
 
   /**
    * Accepts a Suggestion: as suggested, credited to its Agent, or with `content` as the User edited it, which credits the new
-   * Version to them if it differs.
+   * Version to them if it differs. An outdated one is merged with its item's current Version, credited to the User; `content`
+   * then holds the merge as they settled it, onto the Version `onto`.
    */
-  acceptSuggestion: (id: string, content?: SuggestedContent) =>
-    request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/accept`, content === undefined ? {} : { content }).then((r) => r.suggestion),
+  acceptSuggestion: (id: string, content?: SuggestedContent, onto?: number) =>
+    request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/accept`, {
+      ...(content !== undefined && { content }),
+      ...(onto !== undefined && { onto }),
+    }).then((r) => r.suggestion),
+  /** An outdated Suggestion's content merged with its item's current Version, for the User to settle; nothing is saved. */
+  mergeSuggestion: (id: string) => request<{ merge: SuggestionMerge }>("POST", `/api/suggestions/${encodeURIComponent(id)}/merge`).then((r) => r.merge),
   /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
   rejectSuggestion: (id: string, reason: string) =>
     request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),

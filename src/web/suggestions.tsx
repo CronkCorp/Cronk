@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import type { RecordedActor, SuggestedContent, Suggestion } from "./api.js";
+import type { Conflict, RecordedActor, SuggestedContent, Suggestion, SuggestionMerge } from "./api.js";
+import type { Fields, Mergeable, MergedField } from "./merge.js";
 import { KindLabel } from "./components/tags.js";
 import { diffLines, type DiffLine } from "./diff.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -175,4 +176,54 @@ export function ContentEditor(props: { kind: Suggestion["item"]["kind"]; value: 
 /** Who a Version made by accepting a Suggestion is credited to, as the note beside the actions says it. */
 export function creditNote(version: number, proposedBy: RecordedActor, edited: boolean): string {
   return edited ? `Version ${version} will be credited to you, linked to this Suggestion.` : `Version ${version} will be credited to ${proposedBy.name}, accepted by you.`;
+}
+
+type Kind = Suggestion["item"]["kind"];
+
+/** The field of each kind's content holding its Markdown, which merges by sections. */
+const MAIN_FIELD: Record<Kind, string> = { document: "body", decision: "body", term: "definition", guidance: "markdown" };
+
+/** The fields besides the title and Markdown that merge whole, by the label the merge shows them under. */
+const OTHER_FIELDS: Record<string, { label: string; combinable: boolean }> = {
+  name: { label: "Name", combinable: false },
+  avoid: { label: "Avoid (comma-separated)", combinable: true },
+  group: { label: "Group", combinable: false },
+};
+
+/** A field's value as the text the User edits: a list of words comma-separated, no group as nothing. */
+const asText = (v: unknown) => (Array.isArray(v) ? v.join(", ") : typeof v === "string" ? v : "");
+
+/** A whole field's conflict as `ResolveMerge` shows one; keeping both of a list keeps every word once. */
+function wholeConflict(c: { base: unknown; mine: unknown; theirs: unknown }): Conflict {
+  const both = Array.isArray(c.mine) && Array.isArray(c.theirs) ? [...new Set([...c.mine, ...c.theirs])].join(", ") : `${asText(c.mine)} ${asText(c.theirs)}`;
+  return { base: asText(c.base), mine: asText(c.mine), theirs: asText(c.theirs), both };
+}
+
+/** The merge of an outdated Suggestion, adapted to what `ResolveMerge` settles: the Suggestion is "mine", the current Version "theirs". */
+export function suggestionMergeable(kind: Kind, merge: SuggestionMerge): Mergeable {
+  const field = (name: string) => merge.fields.find((f) => f.field === name);
+  const title = field("title");
+  const fields: MergedField[] = merge.fields
+    .filter((f) => OTHER_FIELDS[f.field])
+    .map((f) => ({ label: OTHER_FIELDS[f.field]!.label, combinable: OTHER_FIELDS[f.field]!.combinable, text: f.conflict ? null : asText(f.value), conflict: f.conflict && wholeConflict(f.conflict) }));
+  return {
+    ...(title && { title: title.conflict ? null : asText(title.value), titleConflict: title.conflict && wholeConflict(title.conflict) }),
+    fields,
+    sections: field(MAIN_FIELD[kind])!.sections ?? [],
+  };
+}
+
+/** The Suggestion's Markdown, the side of a merge the clean sections are compared to. */
+export const mainText = (kind: Kind, content: SuggestedContent) => asText(content[MAIN_FIELD[kind]]);
+
+/** The content a User settled a merge to, in the shape the kind's Suggestion holds, from what `ResolveMerge` hands back. */
+export function settledContent(kind: Kind, settled: { title: string; body: string; fields: Fields }): SuggestedContent {
+  const content: SuggestedContent = { [MAIN_FIELD[kind]]: settled.body };
+  if (kind === "document" || kind === "decision") content.title = settled.title;
+  for (const [name, { label }] of Object.entries(OTHER_FIELDS)) {
+    const text = settled.fields[label];
+    if (text === undefined) continue;
+    content[name] = name === "avoid" ? text.split(",").map((w) => w.trim()).filter(Boolean) : name === "group" ? text.trim() || null : text;
+  }
+  return content;
 }
