@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, TRANSCRIPT_REFUSAL_REASONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -57,6 +57,7 @@ export type SharedSchemaName =
   | "VersionSummary"
   | "StaleVersion"
   | "SectionRefused"
+  | "TranscriptRefused"
   | "Merge"
   | "Guidance"
   | "GuidanceVersion"
@@ -857,6 +858,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   SectionRefused: {
     description: "A section replacement refused because no section, or more than one, has that heading, with the Document's headings to pick from.",
     ...object({ error: { type: "string" }, headings: { type: "array", items: { type: "string" }, description: "Its heading lines, such as `## Setup`, in order." } }, ["headings"]),
+  },
+  TranscriptRefused: {
+    description:
+      "A Transcript upload refused with a reason clients match on, rather than on the status alone or on the message, which may change: " +
+      "`nothing_changed` when the chat names none of the Agent's Agent Sessions that changed anything.",
+    ...object({ error: { type: "string" }, reason: { type: "string", enum: TRANSCRIPT_REFUSAL_REASONS, description: "Why the upload was refused." } }),
   },
   Merge: {
     description: "An edit merged section by section with the current Version. Only conflicts need a User's choice.",
