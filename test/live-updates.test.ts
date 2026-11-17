@@ -307,6 +307,33 @@ describe("A Document's live updates", () => {
     expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(204);
     expect(await stream.next()).toBeNull();
   });
+
+  it("tell nothing of a write that is refused or rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    const { id } = (await admin.post("/api/projects/DOCS/documents", { title: "Plan", body: "## Goal\n\nv1" })).body.document;
+    await admin.post(`/api/documents/${id}/protection`, { protected: true });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const stream = await admin.events(`/api/documents/${id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.patch(`/api/documents/${id}`, { baseVersion: 7, body: "Stale." })).status).toBe(409);
+    expect((await admin.post(`/api/documents/${id}/replace-section`, { baseVersion: 1, heading: "Nowhere", body: "v2" })).status).toBe(404);
+    expect((await admin.post(`/api/documents/${id}/versions/9/restore`, { baseVersion: 1 })).status).toBe(404);
+    expect((await claude.patch(`/api/documents/${id}`, { baseVersion: 1, body: "Protected." })).status).toBe(403);
+    expect((await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Goal\n\nv1" })).status).toBe(200);
+    // The save writes the new Version, then fails recording what it mentions, as on a database blip.
+    let saving!: Promise<{ status: number }>;
+    await cronk.interruptQueriesOn("mentions", async () => {
+      saving = admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Goal\n\nLost." });
+    });
+    expect((await saving).status).toBe(500);
+    expect((await admin.get(`/api/documents/${id}`)).body.document.version).toBe(1);
+
+    await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Goal\n\nv2" });
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 2 } });
+    await expectQuiet(stream);
+  });
 });
 
 /** The notice a Terms stream sends whenever a Term there may have changed. */
