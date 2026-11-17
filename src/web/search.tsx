@@ -58,10 +58,12 @@ export function SearchBox() {
   );
 }
 
-/** Where a search result opens: its Transcript at the turn that matched, its Decision, its Term, its Document or its Ticket. */
+/** Where a search result opens: its Transcript at the turn that matched, its Artifact, its Decision, its Term, its Document or its Ticket. */
 const resultPath = (r: SearchResult) =>
   r.transcriptId
     ? transcriptAddress(r.transcriptId, r.turn)
+    : r.artifactId
+      ? `/artifacts/${r.artifactId}`
     : r.decisionKey
       ? `/decisions/${r.decisionKey}`
     : r.termId

@@ -133,6 +133,11 @@ const transcriptFields = {
     items: object({ id, title: { type: "string" }, turn: firstTurn }),
     description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
   },
+  artifacts: {
+    type: "array",
+    items: object({ id, title: { type: "string" }, turn: firstTurn }),
+    description: "The Artifacts its Sessions published a Version of, commented on or attached files to Comments on, that the caller can read.",
+  },
   terms: {
     type: "array",
     items: object({ id, name: { type: "string" }, turn: firstTurn }),
@@ -1176,11 +1181,11 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       kind: {
         type: "string",
         enum: SEARCH_KINDS,
-        description: "A Ticket, a Document in a page tree, a Report, a Comment, a Term, a Decision, or a Transcript. Transcripts come after every other kind.",
+        description: "A Ticket, a Document in a page tree, a Report, a Comment (on a Ticket, Document or Artifact), a Term, a Decision, or a Transcript. Transcripts come after every other kind.",
       },
       title: {
         type: "string",
-        description: "The title of the Ticket, Document, Decision or Transcript; for a Comment, of the Ticket or Document it is on; for a Term, its name.",
+        description: "The title of the Ticket, Document, Decision or Transcript; for a Comment, of the Ticket, Document or Artifact it is on; for a Term, its name.",
       },
       excerpt: { type: "string", description: "The text around the match, as written (Markdown), without markers around the matching words." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
@@ -1188,6 +1193,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
       termId: { ...nullable(id), description: "The Term; otherwise null." },
       decisionKey: { ...nullable({ type: "string" }), description: "The Decision, by its key, such as CRONK-D7 (D7 in the Workspace); otherwise null." },
+      artifactId: { ...nullable(id), description: "A Comment's Artifact; otherwise null." },
       transcriptId: { ...nullable(id), description: "The Transcript; otherwise null." },
       turn: {
         ...nullable({ type: "integer", minimum: 1 }),

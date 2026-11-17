@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection } from "./harness.js";
-import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk, tarGz } from "./harness.js";
 
 /** A tool's raw result: whether it is an error, and the text of each content item. */
 async function rawResult(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; texts: string[] }> {
@@ -169,6 +169,14 @@ describe("the MCP endpoint", () => {
     await admin.delete(`/api/agents/${claude.agentId}/tokens/${claude.tokenId}`);
     await expect(mcp.client.ping()).rejects.toMatchObject({ code: 401 });
     expect((await admin.get("/api/agents")).body.agents[0].sessions).toEqual([]);
+  });
+
+  it("takes a prefixed token, and one issued before tokens had a prefix", async () => {
+    const { cronk, claude } = await delegatedSetup();
+    expect(claude.secret).toMatch(/^cronk_at_/);
+    expect((await callTool(await connectMcp(cronk, claude.secret), "tickets", { action: "get", key: "CRONK-1" })).isError).toBe(false);
+    const bare = await cronk.issuedBeforePrefixes(claude.secret);
+    expect((await callTool(await connectMcp(cronk, bare), "tickets", { action: "get", key: "CRONK-1" })).isError).toBe(false);
   });
 
   it("ends an Agent Session it no longer holds, as after a restart, when its client comes back", async () => {
@@ -847,6 +855,19 @@ describe("the search tool", () => {
     expect(search.description).toMatch(/Decisions[\s\S]*decisions tool by its decisionKey/);
     expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["decision"]) } });
   });
+
+  it("finds Comments on Artifacts, and says to get the Artifact with the artifacts tool by its artifactId", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const artifact = (await admin.upload("/api/workspace/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${artifact}/comments`, { body: "Show the threshold as a line." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const found = await callTool(mcp, "search", { query: "threshold", kind: ["comment"] });
+    expect(found.body).toEqual((await admin.get("/api/search?q=threshold&kind=comment")).body);
+    expect(found.body.results).toEqual([expect.objectContaining({ kind: "comment", title: "Limits", projectKey: null, artifactId: artifact })]);
+    const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
+    expect(search.description).toMatch(/Comments[\s\S]*artifacts tool by its artifactId/);
+  });
 });
 
 describe("work waiting for an Agent over MCP", () => {
@@ -962,6 +983,16 @@ describe("the documents tool and a Protected Document", () => {
     const update = await callTool(mcp, "documents", { action: "update", id: document.id, baseVersion: 1, body: "Rewritten." });
     expect(update.isError).toBe(true);
     expect(update.body).toMatch(/^Handbook is Protected: Agents may read it but not change it\. Make a Suggestion/);
+  });
+
+  it("is described as changed through Suggestions, but moved by a User asked in a Comment, as the API refuses a move", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+    const description = (await mcp.client.listTools()).tools.find((t) => t.name === "documents")!.description!;
+
+    expect(description).toMatch(/propose a change to it, or a new Document under it, with the `suggestions` tool/i);
+    expect(description).toMatch(/to move it[^.]*ask a User to make the move instead, in a Comment on the Document you are moving with the `comments` tool/);
+    expect(description).not.toMatch(/move[^.]*`suggestions` tool/);
   });
 });
 

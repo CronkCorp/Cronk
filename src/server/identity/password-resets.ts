@@ -33,7 +33,7 @@ export async function issuePasswordReset(
   if (user.password_hash === NO_PASSWORD) return "not joined";
   if (user.deactivated_at) return "deactivated";
 
-  const token = newToken();
+  const token = newToken("passwordReset");
   const expiresAt = new Date(input.now.getTime() + PASSWORD_RESET_TTL_MS);
   await db.query(
     `INSERT INTO password_resets (user_id, token_hash, issued_by, created_at, expires_at) VALUES ($1, $2, $3, $4, $5)

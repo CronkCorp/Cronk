@@ -229,7 +229,7 @@ export function agentRoutes(ctx: AppContext) {
           params: agentParams,
           body: { type: "object", additionalProperties: false, properties: { readOnly: { type: "boolean" } } },
           response: {
-            201: answer("The new token and its secret, sent as `Authorization: Bearer <secret>`; the secret is only ever returned here", {
+            201: answer("The new token and its secret, which starts with `cronk_at_` and is sent as `Authorization: Bearer <secret>`; the secret is only ever returned here", {
               type: "object",
               required: ["token", "secret"],
               properties: { token: ref("AgentToken"), secret: { type: "string" } },
