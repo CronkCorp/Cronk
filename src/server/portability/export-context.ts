@@ -45,6 +45,8 @@ export class ExportContext {
   readonly emailOf: Map<string, string>;
   /** The path of each Document and Report written so far, by id. */
   readonly documentPaths = new Map<string, string>();
+  /** The path of each Artifact written so far, by id. */
+  readonly artifactPaths = new Map<string, string>();
   private readonly pending: (() => void)[] = [];
 
   private constructor(

@@ -99,7 +99,8 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   left out is imported onto the oldest Version it holds after that one. An import keeps the id unless it is taken.
 - \`transcripts/<n>.md\`: the chats that led Agents to change things (Workspace exports only), numbered in the order they were
   first uploaded. The frontmatter names the Agent and its Agent Sessions by their ids in \`people.md\`, the client's \`chatId\`,
-  the Tickets (by key), Documents (by path) and Terms (by name, after their Project's key) those Sessions changed; the body is the latest text. \`<n>.earlier/\` holds, as
+  the Tickets (by key), Documents (by path), Terms (by name, after their Project's key), Decisions (by key) and Artifacts (by path)
+  those Sessions changed; the body is the latest text. \`<n>.earlier/\` holds, as
   they are and oldest first, earlier texts a later upload didn't continue. Every text is as stored, with known secrets scrubbed and
   the Owner's hand redactions applied; \`redactions\` lists those by length and digests, never the passages, so an import keeps
   redacting later uploads, and an import scrubs whatever secrets a text still holds.

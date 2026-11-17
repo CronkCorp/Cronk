@@ -77,6 +77,37 @@ describe("Uploading a Transcript", () => {
     expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
+  it("links the Artifact its Session published, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const published = await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }));
+    expect(published.status, JSON.stringify(published.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Publish the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({ tickets: [], documents: [], artifacts: [{ id: published.body.artifact.id, title: "Limits" }] });
+  });
+
+  it("links the Artifact its Session only commented on, or attached a file to a Comment on, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact;
+    const agent = await session();
+    const commented = await agent.post(`/api/artifacts/${limits.id}/comments`, { body: "The legend overlaps the bars." });
+    expect(commented.status, JSON.stringify(commented.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Review the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.artifacts).toEqual([{ id: limits.id, title: "Limits", turn: null }]);
+
+    const attacher = await session();
+    const attached = await attacher.upload(`/api/comments/${commented.body.comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain");
+    expect(attached.status, JSON.stringify(attached.body)).toBe(201);
+    const fromAttaching = await upload(cronk.client(claude.secret), "chat-2", chat("Attach the screenshot", attacher.sessionId));
+    expect(fromAttaching.status, JSON.stringify(fromAttaching.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${fromAttaching.body.transcript.id}`)).body.transcript.artifacts).toEqual([{ id: limits.id, title: "Limits", turn: null }]);
+  });
+
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const idle = await session();
@@ -398,6 +429,30 @@ describe("Who may read a Transcript", () => {
     expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
+  it("counts where its Sessions' Artifacts lie, as for every other item", async () => {
+    const { cronk, admin, bob, carol, bobId, carolId, claude } = await transcriptAcrossProjects();
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "Charting it" })).status).toBe(201);
+    const published = await agent.upload("/api/projects/SECRET/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }));
+    expect(published.status, JSON.stringify(published.body)).toBe(201);
+    const uploaded = await upload(cronk.client(claude.secret), "chat-2", chat("Chart the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const id = uploaded.body.transcript.id;
+    const limits = [{ id: published.body.artifact.id, title: "Limits", turn: null }];
+
+    // Carol reads CRONK, but not SECRET, where the Artifact lies.
+    expect((await carol.get(`/api/transcripts/${id}`)).status).toBe(404);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect((await carol.get(`/api/transcripts/${id}`)).body.transcript.artifacts).toEqual(limits);
+    expect((await bob.get(`/api/transcripts/${id}`)).body.transcript.artifacts).toEqual(limits);
+
+    // Its Owner reads it without Read there, without the Artifact.
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    const read = await bob.get(`/api/transcripts/${id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.transcript).toMatchObject({ tickets: [{ key: "CRONK-1" }], artifacts: [] });
+  });
+
   it("outlives its Agent's removal", async () => {
     const { bob, claude, id } = await transcriptAcrossProjects();
     expect((await bob.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
@@ -547,6 +602,7 @@ describe("Exporting and importing Transcripts", () => {
       documents: ["documents/1-handbook.md"],
       terms: [],
       decisions: [],
+      artifacts: [],
     });
     expect(file.body).toBe(rewritten);
     expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId));
@@ -570,6 +626,34 @@ describe("Exporting and importing Transcripts", () => {
       agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
       documents: [{ id: handbook.id, title: "Handbook", turn: null }],
     });
+  });
+
+  it("names the Artifacts its Sessions published or commented on by path, and the import links them again", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const site = await tarGz({ "index.html": "<h1>Chart</h1>" });
+    const chart = (await agent.upload("/api/workspace/artifacts?title=Chart", site)).body.artifact;
+    cronk.clock.advance(60_000);
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", site)).body.artifact;
+    expect((await agent.post(`/api/artifacts/${limits.id}/comments`, { body: "Legend overlaps." })).status).toBe(201);
+    expect((await upload(cronk.client(claude.secret), "chat-1", chat(`Chart it, see ${limits.id}`, agent.sessionId))).status).toBe(200);
+    const original = (await admin.get("/api/transcripts")).body.transcripts[0];
+    expect((await admin.get(`/api/transcripts/${original.id}`)).body.transcript.artifacts).toEqual([
+      { id: chart.id, title: "Chart", turn: null },
+      { id: limits.id, title: "Limits", turn: 1 },
+    ]);
+
+    const archive = await admin.download("/api/export");
+    const files = await untarGz(archive.body);
+    expect(exported(files["transcripts/1.md"]).data.artifacts).toEqual(["artifacts/1-chart.md", "projects/CRONK/artifacts/1-limits.md"]);
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", archive.body)).status).toBe(201);
+    const listed = (await elsewhere.admin.get("/api/transcripts")).body.transcripts;
+    expect((await elsewhere.admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript.artifacts).toEqual([
+      { id: chart.id, title: "Chart", turn: null },
+      { id: limits.id, title: "Limits", turn: 1 },
+    ]);
   });
 
   it("writes the texts as redacted, with what finds the passages again, so the import keeps redacting them", async () => {
