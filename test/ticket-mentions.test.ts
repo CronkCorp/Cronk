@@ -136,7 +136,7 @@ describe("Mentions of Tickets", () => {
     await agent.post("/api/tickets/CRONK-2/activities", { kind: "finding", body: "CRONK-1 holds a Claim, per D1." });
 
     await cronk.undoMigration(
-      "0040_ticket_and_activity_mentions",
+      "0041_ticket_and_activity_mentions",
       `CREATE TABLE document_ticket_mentions (document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE, ticket_key text NOT NULL,
          PRIMARY KEY (document_id, ticket_key));
        DELETE FROM mentions WHERE ticket_key IS NOT NULL OR activity_id IS NOT NULL;

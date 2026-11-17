@@ -406,7 +406,7 @@ export const migrations: Migration[] = [
       );
       CREATE INDEX document_ticket_mentions_key ON document_ticket_mentions (ticket_key);
     `,
-    // 0040_ticket_and_activity_mentions records these in mentions instead, from every source, and drops this table.
+    // 0041_ticket_and_activity_mentions records these in mentions instead, from every source, and drops this table.
   },
   {
     id: "0016_ticket_document_links",
@@ -663,7 +663,7 @@ export const migrations: Migration[] = [
       CREATE INDEX mentions_term ON mentions (term_id);
       CREATE INDEX mentions_decision ON mentions (decision_id);
     `,
-    // 0040_ticket_and_activity_mentions records every mention, from the schema as it is by then.
+    // 0041_ticket_and_activity_mentions records every mention, from the schema as it is by then.
   },
   {
     id: "0027_proposed_decisions",
@@ -978,7 +978,14 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: "0040_ticket_and_activity_mentions",
+    id: "0040_decision_search",
+    sql: `
+      -- Full-text search (search/search.ts) matches this exact expression, as 0014_search's indexes do.
+      CREATE INDEX decisions_search ON decisions USING gin (to_tsvector('english', title || ' ' || body));
+    `,
+  },
+  {
+    id: "0041_ticket_and_activity_mentions",
     sql: `
       -- mentions (0026) also records Ticket keys, kept as written like Decision keys, and Activities as sources.
       -- It replaces document_ticket_mentions (0015), which recorded Ticket keys from Documents only.

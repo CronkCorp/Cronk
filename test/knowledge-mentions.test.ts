@@ -172,8 +172,8 @@ describe("Mentions of Decisions and Terms", () => {
     const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold; see D1." })).body.term;
     await admin.post("/api/projects/CRONK/documents", { title: "Runbook", body: "A Claim follows CRONK-D1." });
 
-    // Mentions are recorded from today's schema once its later changes are in (0040_ticket_and_activity_mentions).
-    await cronk.undoMigration("0040_ticket_and_activity_mentions", "CREATE TABLE document_ticket_mentions (document_id uuid, ticket_key text)");
+    // Mentions are recorded from today's schema once its later changes are in (0041_ticket_and_activity_mentions).
+    await cronk.undoMigration("0041_ticket_and_activity_mentions", "CREATE TABLE document_ticket_mentions (document_id uuid, ticket_key text)");
     await cronk.undoMigration("0026_mentions", "DROP TABLE mentions");
     await cronk.restart();
 
