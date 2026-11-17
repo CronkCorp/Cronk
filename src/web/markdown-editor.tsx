@@ -1,6 +1,13 @@
 import { Button } from "./components/button.js";
-import { useId, useRef } from "react";
+import { useId, useImperativeHandle, useRef, type ClipboardEvent, type DragEvent, type Ref } from "react";
+import { attachmentMarkdown } from "./attachments.js";
+import type { Attachment } from "./api.js";
 import { CronkMarkdown } from "./markdown.js";
+
+/** What a page can do to an open editor: put text at its cursor, in place of the selection, undoably. */
+export interface MarkdownEditorHandle {
+  insert: (text: string) => void;
+}
 
 /** A change a toolbar button makes: the text that replaces [start, end), and what to select afterwards, relative to `start`. */
 interface TextChange {
@@ -44,6 +51,7 @@ type Action = (text: string, start: number, end: number) => TextChange | undefin
 /**
  * A Markdown editor: a textarea with a formatting toolbar beside a live preview, rendered as the
  * Document will read. It only ever edits the Markdown, so what is saved is exactly what it shows.
+ * Given `attach`, files dropped or pasted into it are attached and embedded at the cursor.
  */
 export function MarkdownEditor(props: {
   label: string;
@@ -52,6 +60,9 @@ export function MarkdownEditor(props: {
   disabled?: boolean;
   /** The Project whose Ticket keys a Ticket reference starts with, if any. */
   projectKey?: string | null;
+  /** Attaches files to what is being edited, answering those that attached; without it, files dropped or pasted are left alone. */
+  attach?: (files: File[]) => Promise<Attachment[]>;
+  ref?: Ref<MarkdownEditorHandle>;
 }) {
   const area = useRef<HTMLTextAreaElement>(null);
   const id = useId();
@@ -69,6 +80,31 @@ export function MarkdownEditor(props: {
       el.dispatchEvent(new Event("input", { bubbles: true }));
     }
     el.setSelectionRange(edit.start + edit.select[0], edit.start + edit.select[1]);
+  };
+
+  /** Puts `text` in place of the selection, leaving the cursor after it. */
+  const insert = (text: string) => apply((_, start, end) => ({ start, end, insert: text, select: [text.length, text.length] }));
+  useImperativeHandle(props.ref, () => ({ insert }));
+
+  /** Attaches `files` and embeds those that attached where the cursor then is, one per line, in the order they came. */
+  const attachFiles = async (files: File[]) => {
+    const attached = await props.attach!(files);
+    if (attached.length > 0) insert(attached.map(attachmentMarkdown).join("\n"));
+  };
+  const carriesFiles = (e: DragEvent) => props.attach !== undefined && !props.disabled && e.dataTransfer.types.includes("Files");
+  const onDragOver = (e: DragEvent) => {
+    if (carriesFiles(e)) e.preventDefault();
+  };
+  const onDrop = (e: DragEvent) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    void attachFiles([...e.dataTransfer.files]);
+  };
+  const onPaste = (e: ClipboardEvent) => {
+    const files = [...e.clipboardData.files];
+    if (!props.attach || files.length === 0) return;
+    e.preventDefault();
+    void attachFiles(files);
   };
 
   /** Asks for a Ticket key, starting from the selection or this Project's prefix, and puts it in place of the selection. */
@@ -99,7 +135,17 @@ export function MarkdownEditor(props: {
               </Button>
             ))}
           </div>
-          <textarea id={id} ref={area} disabled={props.disabled} value={props.value} rows={18} onChange={(e) => props.onChange(e.target.value)} />
+          <textarea
+            id={id}
+            ref={area}
+            disabled={props.disabled}
+            value={props.value}
+            rows={18}
+            onChange={(e) => props.onChange(e.target.value)}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            onPaste={onPaste}
+          />
         </div>
       </div>
       <section className="markdown-editor-pane" aria-label="Preview">

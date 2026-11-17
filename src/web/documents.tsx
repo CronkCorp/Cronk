@@ -20,12 +20,12 @@ import {
 } from "./api.js";
 import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
-import { AttachmentThumbnails, AttachmentViewer, PageAttachments, useAttach, usePageDrop, type AttachmentsView } from "./attachments.js";
+import { attachmentMarkdown, AttachmentThumbnails, AttachmentViewer, PageAttachments, useAttach, usePageDrop, type AttachmentsView } from "./attachments.js";
 import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown, highlightIds, MarkdownPlace, type Highlight } from "./markdown.js";
 import { Link, navigate } from "./router.js";
 import { useSelectedPassage, type SelectedPassage } from "./selected-passage.js";
-import { MarkdownEditor } from "./markdown-editor.js";
+import { MarkdownEditor, type MarkdownEditorHandle } from "./markdown-editor.js";
 import { Field, Show, messageOf, useAction, useCanWrite, useLoad, useSubmit } from "./ui.js";
 
 /** The address of a page tree: a Project's, or the Workspace's without a Project key. */
@@ -292,11 +292,13 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   }, []);
   useEffect(() => setComposing(undefined), [d.version]);
   const offer = composing ?? selected;
-  // Its Attachments, and those in its Comments; files dropped or pasted on the page, outside the editor, attach to it.
+  // Its Attachments, and those in its Comments; files dropped or pasted on the page attach to it, and into the editor
+  // are embedded where its cursor is too.
   const [workspace] = useLoad(api.workspace, []);
   const [opened, setOpened] = useState<Attachment>();
   const attaching = useAttach((file) => api.attachToDocument(d.id, file), reloadAttachments);
-  const dragging = usePageDrop(canWrite && panel !== "edit", (files) => void attaching.attach(files));
+  const dragging = usePageDrop(canWrite, (files) => void attaching.attach(files));
+  const editor = useRef<MarkdownEditorHandle>(null);
   const loadedAttachments = attachments.kind === "loaded" ? attachments.value : [];
   const files: AttachmentsView = {
     attachments: loadedAttachments.filter((a) => a.on === "document"),
@@ -309,10 +311,14 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
 
   return (
     <article className="document">
+      <PageAttachments.Provider value={{ attachments: loadedAttachments, onOpen: setOpened }}>
       <Breadcrumb projectKey={d.projectKey} ticketKey={d.ticketKey} />
       {panel === "edit" ? (
         <EditDocument
           document={d}
+          editor={editor}
+          attach={attaching.attach}
+          attachments={<AttachmentThumbnails {...files} onInsert={(a) => editor.current?.insert(attachmentMarkdown(a))} />}
           newerVersion={newer}
           onCancel={() => setPanel("none")}
           onSaved={(saved) => {
@@ -432,7 +438,6 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                 </Popover>
               )}
             </div>
-            <PageAttachments.Provider value={{ attachments: loadedAttachments, onOpen: setOpened }}>
             <Show state={comments}>
               {(all) => (
                 <DocumentMargin
@@ -448,10 +453,10 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                 />
               )}
             </Show>
-            </PageAttachments.Provider>
           </div>
         </>
       )}
+      </PageAttachments.Provider>
       <AttachmentViewer
         attachment={opened}
         canWrite={canWrite}
@@ -470,7 +475,17 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
  * someone saved since, it is refused, and the editor shows their edit and merges it into this one
  * section by section. Sections both changed differently wait for the User to choose or combine.
  */
-function EditDocument(props: { document: Document; newerVersion: number | undefined; onSaved: (d: Document) => void; onCancel: () => void }) {
+function EditDocument(props: {
+  document: Document;
+  /** Where the page reaches the open editor, to insert an Attachment's Markdown. */
+  editor: RefObject<MarkdownEditorHandle | null>;
+  attach: (files: File[]) => Promise<Attachment[]>;
+  /** The Document's Attachments, shown under the editor. */
+  attachments: ReactNode;
+  newerVersion: number | undefined;
+  onSaved: (d: Document) => void;
+  onCancel: () => void;
+}) {
   const id = props.document.id;
   const { draft, setDraft, save, busy, error, notice, resolve, discardMine } = useStaleSave({
     draft: { title: props.document.title, text: props.document.body },
@@ -509,7 +524,10 @@ function EditDocument(props: { document: Document; newerVersion: number | undefi
               onChange={(text) => setDraft((d) => ({ ...d, text }))}
               disabled={busy}
               projectKey={props.document.projectKey}
+              attach={props.attach}
+              ref={props.editor}
             />
+            {props.attachments}
             {error && <p className="error" role="alert">{error}</p>}
             <div className="actions">
               <Button type="submit" disabled={busy}>Save</Button>

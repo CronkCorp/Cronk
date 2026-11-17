@@ -1590,3 +1590,49 @@ test("download a Project's Decisions as docs/adr from its register", async ({ pa
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/^cronk-ADR-adr-.*\.tar\.gz$/);
 });
+
+/** Pastes `files` into the element `target` matches, as the clipboard would hand them over. */
+const pasteFiles = (target: Locator, files: { name: string; type: string; bytes: number[] }[]) =>
+  target.evaluate((el, files) => {
+    const data = new DataTransfer();
+    for (const f of files) data.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }));
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+  }, files);
+
+test("paste an image into a Document's editor, and see it in the rendered body and in the earlier Version", async ({ page }) => {
+  await signIn(page);
+  const created = await page.request.post("/api/workspace/documents", { data: { title: "Sign-in flow", body: "Before.\n\nAfter." } });
+  const id = (await created.json()).document.id as string;
+  await page.goto(`/documents/${id}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+
+  // Pasting a file uploads it and puts its Markdown where the cursor is; Ctrl+Z takes the Markdown out again.
+  const editor = page.getByLabel("Body (Markdown)");
+  await editor.evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    el.setSelectionRange(8, 8);
+  });
+  const png = [...Buffer.from("89504e470d0a1a0a", "hex")];
+  await pasteFiles(editor, [{ name: "flow.png", type: "image/png", bytes: png }]);
+  await expect(editor).toHaveValue(/^Before\.\n!\[flow\.png\]\(\/api\/attachments\/[0-9a-f-]+\/file\)\nAfter\.$/);
+  const embedded = (await editor.inputValue()).split("\n")[1]!;
+  // Attached once, by the editor, not again by the page.
+  await expect(page.getByRole("region", { name: "Attachments" }).getByRole("button", { name: "Open flow.png" })).toHaveCount(1);
+  await page.keyboard.press("Control+z");
+  await expect(editor).toHaveValue("Before.\n\nAfter.");
+  await page.keyboard.press("Control+Shift+z");
+  await expect(editor).toHaveValue(`Before.\n${embedded}\nAfter.`);
+  await page.getByRole("button", { name: "Save" }).click();
+
+  const body = page.getByTestId("document-body");
+  await expect(body.getByRole("img", { name: "flow.png" })).toBeVisible();
+  expect((await (await page.request.get(`/api/documents/${id}/attachments`)).json()).attachments).toHaveLength(1);
+  // Saved again without it, the earlier Version still shows it.
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill("Rewritten.");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(body).toContainText("Rewritten.");
+  await page.getByRole("button", { name: "Versions" }).click();
+  await page.getByRole("list", { name: "Versions" }).getByRole("listitem").filter({ hasText: "Version 2" }).getByRole("button", { name: "View" }).click();
+  await expect(page.getByLabel("Version 2").getByRole("img", { name: "flow.png" })).toBeVisible();
+});
