@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ReopenChoice, type StatusCategory, type Ticket, type TicketDetail } from "../api.js";
+import { api, type DependentChoice, type ReopenChoice, type StatusCategory, type Ticket } from "../api.js";
 import { TextArea, useAction, useLoad } from "../ui.js";
 import { Button } from "./button.js";
 import { Dialog } from "./overlays.js";
@@ -8,23 +8,24 @@ import { StatusPill } from "./tags.js";
 /** Started, In Review or finished: work that went on after its blocker was completed. */
 export const CONTINUED: readonly StatusCategory[] = ["started", "in_review", "completed"];
 
-/** The choices a dependent takes, with their labels, the first being its default; none for work that hasn't continued or can't be reopened. */
-function choicesFor(ticket: Ticket): [ReopenChoice, string][] {
-  if (ticket.status.category === "started") return [["keep", "Keep going"], ["pause", "Pause"]];
-  if (ticket.verification === "unverified") return [["keep", "Keep"], ["reopen", "Reopen too"]];
-  return [];
+/** A choice's label; Keep reads "Keep going" for work in progress. */
+function labelOf(choice: ReopenChoice, d: DependentChoice): string {
+  if (choice === "keep") return d.choices.includes("pause") ? "Keep going" : "Keep";
+  return choice === "pause" ? "Pause" : "Reopen too";
 }
 
 /** What a dependent is, beside its Status: who holds it, whose completion awaits checking, or what Reopening means for it. */
-function stateOf(detail: TicketDetail): string {
-  const t = detail.ticket;
+function stateOf(d: DependentChoice): string {
+  const t = d.ticket;
+  if (d.claim) return `Claimed by ${d.claim.agent.name}`;
+  if (t.verification === "unverified") return `Unverified${t.delegate ? ` · ${t.delegate.name}` : ""}`;
   switch (t.status.category) {
     case "started":
-      return detail.claim ? `Claimed by ${detail.claim.agent.name}` : "not Claimed";
+      return "not Claimed";
     case "in_review":
       return "waits on review, kept";
     case "completed":
-      return t.verification === "unverified" ? `Unverified${t.delegate ? ` · ${t.delegate.name}` : ""}` : "finished, kept";
+      return "finished, kept";
     default:
       return "not started, waits again";
   }
@@ -44,21 +45,18 @@ export function ReopenDialog(props: {
   const { ticket } = props;
   const [reason, setReason] = useState("");
   const [chosen, setChosen] = useState<Record<string, ReopenChoice>>({});
-  // Loaded each time it opens, so the list shows the dependents as they are now.
-  const [dependents] = useLoad(async () => {
-    if (!props.open) return [];
-    const { relations } = await api.ticket(ticket.key);
-    const details = await Promise.all(relations.blocks.map((t) => api.ticket(t.key)));
-    return details.filter((d) => d.ticket.status.category !== "canceled");
-  }, [props.open, ticket.key]);
+  // Loaded each time it opens, so the list shows the dependents as they are now. The server says what each one takes.
+  const [dependents] = useLoad(async (): Promise<DependentChoice[]> => (props.open ? api.reopenChoices(ticket.key) : []), [props.open, ticket.key]);
   useEffect(() => {
     if (props.open) setChosen({});
   }, [props.open]);
   const listed = dependents.kind === "loaded" ? dependents.value : [];
+  // One the User can only read is kept, whatever was clicked.
+  const chosenFor = (d: DependentChoice): ReopenChoice => (d.canChange ? (chosen[d.ticket.key] ?? d.choices[0] ?? "keep") : "keep");
   const continued = listed.filter((d) => CONTINUED.includes(d.ticket.status.category));
   const reopen = useAction(
     () => {
-      const choices = Object.fromEntries(listed.filter((d) => choicesFor(d.ticket).length > 0).map((d) => [d.ticket.key, chosen[d.ticket.key] ?? "keep"]));
+      const choices = Object.fromEntries(listed.filter((d) => d.choices.length > 0).map((d) => [d.ticket.key, chosenFor(d)]));
       return props.reopen({ comment: reason, dependents: choices });
     },
     () => {
@@ -68,6 +66,8 @@ export function ReopenDialog(props: {
     },
   );
   const delegate = ticket.delegate?.name ?? "its Delegate";
+  // Where a Pause would move the dependents the User may pause, each named once.
+  const pausesTo = [...new Set(listed.flatMap((d) => (d.canChange && d.pausesTo ? [d.pausesTo.name] : [])))];
 
   return (
     <Dialog
@@ -91,8 +91,7 @@ export function ReopenDialog(props: {
               {continued.length === 1 ? "1 Ticket already continued on this work" : `${continued.length} Tickets already continued on this work`}
             </div>
             {listed.map((d) => {
-              const choices = choicesFor(d.ticket);
-              const current = chosen[d.ticket.key] ?? "keep";
+              const current = chosenFor(d);
               return (
                 <div key={d.ticket.key} className="reopen-dependent">
                   <div className="reopen-dependent-text">
@@ -105,18 +104,24 @@ export function ReopenDialog(props: {
                       <span className="muted">{`· ${stateOf(d)}`}</span>
                     </div>
                   </div>
-                  {choices.length > 0 && (
-                    <div className="segmented" role="radiogroup" aria-label={`What happens to ${d.ticket.key}`}>
-                      {choices.map(([choice, label]) => (
+                  {d.choices.length > 0 && (
+                    <div
+                      className="segmented"
+                      role="radiogroup"
+                      aria-label={`What happens to ${d.ticket.key}`}
+                      title={d.canChange ? undefined : `You can only read ${d.ticket.key}'s Project, so it is kept`}
+                    >
+                      {d.choices.map((choice) => (
                         <button
                           key={choice}
                           type="button"
                           role="radio"
                           aria-checked={current === choice}
+                          disabled={!d.canChange && choice !== "keep"}
                           className={current === choice ? "segment active" : "segment"}
                           onClick={() => setChosen({ ...chosen, [d.ticket.key]: choice })}
                         >
-                          {label}
+                          {labelOf(choice, d)}
                         </button>
                       ))}
                     </div>
@@ -127,7 +132,7 @@ export function ReopenDialog(props: {
           </div>
         )}
         <p className="muted reopen-note">
-          {`${listed.some((d) => d.ticket.status.category === "started") ? "Pause releases the Claim and moves it back to Unstarted. " : ""}The Agents of the dependents you can change are told ${ticket.key} was Reopened.`}
+          {`${pausesTo.length > 0 ? `Pause releases the Claim and moves it back to ${pausesTo.join(" or ")}. ` : ""}The Agents of the dependents you can change are told ${ticket.key} was Reopened.`}
         </p>
         {reopen.error && <p className="error" role="alert">{reopen.error}</p>}
         <div className="actions dialog-actions">
