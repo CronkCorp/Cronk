@@ -18,7 +18,7 @@ import {
   roleSchema,
   userIdParam,
 } from "../schemas.js";
-import { waitingItemsChanged } from "../inbox/inbox.js";
+import { usersInheritingFrom, waitingItemsChanged } from "../inbox/inbox.js";
 import { getWorkspace, insertWorkspace } from "../workspace/workspaces.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireAdmin, requireWorkspaceAccess } from "./access.js";
@@ -324,8 +324,11 @@ export function identityRoutes(ctx: AppContext) {
         // Deactivating ended their Agents' Sessions, so the Claims those held lapsed.
         await claimsEnded(ctx, updated.endedClaims.ticketIds);
         // A new role can show or hide private Projects, and so the items in them; deactivating a User sends what
-        // they review to Triage, and reactivating them takes it back.
-        if (request.body.role !== undefined || request.body.active !== undefined) waitingItemsChanged(ctx.live, [updated.user.id]);
+        // they review to Triage, or to the Owners of the Agents that suggested it, and reactivating them takes it back.
+        if (request.body.role !== undefined || request.body.active !== undefined) {
+          const inheriting = request.body.active !== undefined ? await usersInheritingFrom(ctx.db, updated.user.id) : [];
+          waitingItemsChanged(ctx.live, [updated.user.id, ...inheriting]);
+        }
         return { user: publicUser(updated.user) };
       },
     );
