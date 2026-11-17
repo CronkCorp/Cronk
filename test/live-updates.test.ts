@@ -308,6 +308,24 @@ describe("A Document's live updates", () => {
     expect(await stream.next()).toBeNull();
   });
 
+  it("tell of the new Version an accepted Suggestion makes", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    const { id } = (await admin.post("/api/projects/DOCS/documents", { title: "Limits", body: "Five." })).body.document;
+    await admin.post(`/api/documents/${id}/protection`, { protected: true });
+    await admin.post("/api/projects/DOCS/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/DOCS-1/claim");
+    const made = await claude.post("/api/suggestions", { item: { kind: "document", id }, baseVersion: 1, content: { body: "Six." }, reasoning: "More." });
+    expect(made.status).toBe(201);
+    const stream = await admin.events(`/api/documents/${id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`)).status).toBe(200);
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 2 } });
+    await expectQuiet(stream);
+  });
+
   it("tell nothing of a write that is refused or rolls back", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
