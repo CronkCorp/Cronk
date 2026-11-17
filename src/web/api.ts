@@ -280,8 +280,8 @@ export const api = {
     upload<{ documents: DocumentTreeEntry[] }>(`${scopePath(projectKey)}/documents/import`, file).then((r) => r.documents),
   /** A Transcript, with its text, for its Owner and those with Read everywhere its Agent Sessions changed things. */
   transcript: (id: string) => request<{ transcript: Transcript }>("GET", `/api/transcripts/${encodeURIComponent(id)}`).then((r) => r.transcript),
-  /** The Transcripts an item came from ("From Transcript"): a Ticket or Decision by key, a Document or Term by id. */
-  transcriptsOf: (kind: "tickets" | "documents" | "terms" | "decisions", keyOrId: string) =>
+  /** The Transcripts an item came from ("From Transcript"): a Ticket or Decision by key, a Document, Term or Artifact by id. */
+  transcriptsOf: (kind: "tickets" | "documents" | "terms" | "decisions" | "artifacts", keyOrId: string) =>
     request<{ transcripts: TranscriptLink[] }>("GET", `/api/${kind}/${encodeURIComponent(keyOrId)}/transcripts`).then((r) => r.transcripts),
   /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
   search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>

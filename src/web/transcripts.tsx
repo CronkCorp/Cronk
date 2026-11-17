@@ -153,8 +153,8 @@ export function FromTranscripts(props: { links: TranscriptLink[]; heading: "h3" 
   );
 }
 
-/** FromTranscripts for an item the page doesn't already have the links of: a Document, Term or Decision. */
-export function LoadFromTranscripts(props: { kind: "documents" | "terms" | "decisions"; keyOrId: string; heading: "h3" | "h4"; reloadOn?: unknown }) {
+/** FromTranscripts for an item the page doesn't already have the links of: a Document, Term, Decision or Artifact. */
+export function LoadFromTranscripts(props: { kind: "documents" | "terms" | "decisions" | "artifacts"; keyOrId: string; heading: "h3" | "h4"; reloadOn?: unknown }) {
   const [links] = useLoad(() => api.transcriptsOf(props.kind, props.keyOrId), [props.kind, props.keyOrId, props.reloadOn]);
   return links.kind === "loaded" ? <FromTranscripts links={links.value} heading={props.heading} /> : null;
 }
