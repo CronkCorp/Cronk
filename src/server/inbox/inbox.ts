@@ -272,6 +272,20 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
   return rows.map((r) => r.id);
 }
 
+/**
+ * Ids of the Owners of the Agents that made the open Project Suggestions whose source Ticket's Assignee is the User
+ * with `userId`: who review those Suggestions while that User is inactive (see `reviewerSql`), so whose Inbox
+ * deactivating or reactivating the User may change. Keep it in step with `reviewerSql`.
+ */
+export async function usersInheritingFrom(db: Queryable, userId: string): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT DISTINCT s.actor_user_id AS id FROM suggestions s JOIN tickets t ON t.id = s.source_ticket_id
+     WHERE s.state = 'open' AND s.project_id IS NOT NULL AND t.assignee_id = $1 AND s.actor_user_id <> $1`,
+    [userId],
+  );
+  return rows.map((r) => r.id);
+}
+
 /** Ids of the Projects, archived or not, `user` can see; only those with one of `keys`, if given. */
 async function visibleProjectIds(db: Queryable, user: User, keys?: string[]): Promise<string[]> {
   const wanted = keys?.length ? new Set(keys.map((k) => k.toUpperCase())) : undefined;
