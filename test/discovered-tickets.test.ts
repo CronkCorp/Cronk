@@ -311,4 +311,44 @@ describe("A Report", () => {
       { key: "CRONK-4", title: "Slow query", status: expect.objectContaining({ category: "backlog" }) },
     ]);
   });
+
+  it("lists those filed in other Projects to each reader who can read their Project", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/OPS", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/CRONK/tickets", { title: "Stale cache" });
+    await agent.post("/api/projects/OPS/tickets", { title: "Deploy is flaky" });
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed." });
+
+    const listed = async (reader: typeof admin) => (await reader.get("/api/tickets/CRONK-1/reports")).body.reports[0].discovered.map((t: any) => t.key);
+    expect(await listed(admin)).toEqual(["CRONK-2", "OPS-1"]);
+    expect(await listed(bob)).toEqual(["CRONK-2"]);
+  });
+
+  it("pushed live lists those filed in other Projects only to watchers who can read their Project", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/OPS", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/OPS/tickets", { title: "Deploy is flaky" });
+    const bobs = await bob.events("/api/tickets/CRONK-1/events");
+    const adas = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await bobs.next())?.event).toBe("ready");
+    expect((await adas.next())?.event).toBe("ready");
+
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed." });
+
+    const pushed = async (stream: typeof bobs) => {
+      for (let event = await stream.next(); event; event = await stream.next()) if (event.event === "report") return event.data.report.discovered.map((t: any) => t.key);
+    };
+    expect(await pushed(adas)).toEqual(["OPS-1"]);
+    expect(await pushed(bobs)).toEqual([]);
+    bobs.close();
+    adas.close();
+  });
 });

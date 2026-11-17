@@ -1,4 +1,4 @@
-import type { FastifyReply } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 
 /** One change pushed to watchers: an event name and its JSON data. */
 export interface LiveEvent {
@@ -41,6 +41,8 @@ export class LiveUpdates {
   private readonly pending = new Map<string, Set<bigint>>();
   /** How often each open stream's heartbeat runs on its own, or `null` if it runs only through `heartbeat`. */
   private readonly heartbeatMs: number | null;
+  /** Shapes an event's data for the stream opened by `request`, as its answers are; as is until `shapeDataWith` is called. */
+  private shape: (request: FastifyRequest, data: object) => Promise<object> = async (_request, data) => data;
 
   /**
    * `heartbeatMs` is how often each open stream's heartbeat runs on its own, every 25 seconds by
@@ -48,6 +50,14 @@ export class LiveUpdates {
    */
   constructor(opts: { heartbeatMs?: number | null } = {}) {
     this.heartbeatMs = opts.heartbeatMs === undefined ? HEARTBEAT_MS : opts.heartbeatMs;
+  }
+
+  /**
+   * Shapes each event's data for the stream it is sent on with `shape`, given the request that opened the stream,
+   * so a watcher is told no more than the same caller's answers would tell them.
+   */
+  shapeDataWith(shape: (request: FastifyRequest, data: object) => Promise<object>): void {
+    this.shape = shape;
   }
 
   /**
@@ -125,7 +135,12 @@ export class LiveUpdates {
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
-    const write = ({ event, data, id }: LiveEvent) => res.write(`event: ${event}\n${id === undefined ? "" : `id: ${id}\n`}data: ${JSON.stringify(data)}\n\n`);
+    const writeRaw = ({ event, data, id }: LiveEvent) => res.write(`event: ${event}\n${id === undefined ? "" : `id: ${id}\n`}data: ${JSON.stringify(data)}\n\n`);
+    // Each event as the caller who opened the stream may read it; written only if the stream is still open by then.
+    const write = async (event: LiveEvent) => {
+      const data = await this.shape(reply.request, event.data);
+      if (open) writeRaw({ ...event, data });
+    };
 
     // Events are sent one at a time, in order, each after its access check.
     let queue = Promise.resolve();
@@ -160,7 +175,7 @@ export class LiveUpdates {
     const unsubscribes = topics.map((t) =>
       this.subscribe(t, (event) => {
         if (held) held.push(event);
-        else checked(async () => fresh(event) && (await admitted(event)) && write(event));
+        else checked(async () => fresh(event) && (await admitted(event)) && (await write(event)));
       }),
     );
     const unsubscribe = () => unsubscribes.forEach((u) => u());
@@ -173,7 +188,7 @@ export class LiveUpdates {
     this.heartbeats.add(beat);
     res.on("close", end);
     if (!catchUp) {
-      write({ event: "ready", data: {} });
+      writeRaw({ event: "ready", data: {} });
       return;
     }
     queue = (async () => {
@@ -190,14 +205,14 @@ export class LiveUpdates {
             sent.add(event.id);
             if (BigInt(event.id) > furthest) furthest = BigInt(event.id);
           }
-          write(event);
+          await write(event);
           return true;
         };
         for (const event of missed) if (!(await send(event))) return end();
         // Then what was published meanwhile, including while these are being sent.
         for (let event = held!.shift(); event; event = held!.shift()) if ((await admitted(event)) && !(await send(event))) return end();
         held = null;
-        if (open) write({ event: "ready", id: String(furthest), data: {} });
+        if (open) writeRaw({ event: "ready", id: String(furthest), data: {} });
       } catch {
         end();
       }

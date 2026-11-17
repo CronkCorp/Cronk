@@ -567,18 +567,21 @@ export function listSubTickets(db: Queryable, ticketId: string): Promise<TicketR
   return listTicketRefs(db, "t.parent_id = $1", [ticketId]);
 }
 
-/** The Discovered Tickets filed during each of these Claims, from the Claim's Ticket, in key order, as a map from Claim id. */
-export async function listDiscoveredIn(db: Queryable, claimIds: string[]): Promise<Map<string, TicketRef[]>> {
+/**
+ * The Discovered Tickets filed during each of these Claims, from the Claim's Ticket, of any Project, in key order, as a
+ * map from Claim id; each with its Project's id, so a reader is shown only those of Projects they can read.
+ */
+export async function listDiscoveredIn(db: Queryable, claimIds: string[]): Promise<Map<string, (TicketRef & { projectId: string })[]>> {
   const { rows } = await db.query<{ id: string; claim_id: string }>(
     `SELECT t.id, t.discovered_source_claim_id AS claim_id FROM tickets t JOIN projects p ON p.id = t.project_id
      WHERE t.discovered_source_claim_id = ANY($1::uuid[]) ORDER BY p.key, t.number`,
     [claimIds],
   );
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
-  const byClaim = new Map<string, TicketRef[]>();
+  const byClaim = new Map<string, (TicketRef & { projectId: string })[]>();
   rows.forEach((row, i) => {
-    const { key, title, status } = tickets[i]!;
-    byClaim.set(row.claim_id, [...(byClaim.get(row.claim_id) ?? []), { key, title, status }]);
+    const { key, title, status, projectId } = tickets[i]!;
+    byClaim.set(row.claim_id, [...(byClaim.get(row.claim_id) ?? []), { key, title, status, projectId }]);
   });
   return byClaim;
 }

@@ -124,6 +124,7 @@ export async function buildApp(opts: {
   });
   // No answer carries what its reader can't read, such as a Discovered Ticket's source in a Project they can't (see `readableOnlyIn`).
   app.addHook("preSerialization", async (request, _reply, payload) => forReader(db, requestActor(request), payload));
+  ctx.live.shapeDataWith((request, data) => forReader(db, requestActor(request), data));
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ ...err.details, error: err.message });

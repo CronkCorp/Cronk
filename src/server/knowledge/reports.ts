@@ -1,5 +1,6 @@
 import { actingUser, type AgentActor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
+import { readableOnlyIn } from "../identity/readable-only-in.js";
 import { listDiscoveredIn, ticketKeySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { findDocument, insertDocumentRow, insertVersion, type Document } from "./documents.js";
 import { listDecisionsProposedIn, type DecisionRef } from "./decisions.js";
@@ -67,7 +68,7 @@ const toReport = (row: ReportRow, decisions: DecisionRef[], discovered: TicketRe
 
 /**
  * The rows as Reports, each with the Decisions proposed during its Claim, of its Ticket's Project or the Workspace,
- * and the Discovered Tickets filed from its Ticket then.
+ * and the Discovered Tickets filed from its Ticket then, in any Project.
  */
 async function toReports(db: Queryable, rows: ReportRow[]): Promise<Report[]> {
   const proposed = await listDecisionsProposedIn(db, rows.map((r) => r.claim_id));
@@ -76,7 +77,8 @@ async function toReports(db: Queryable, rows: ReportRow[]): Promise<Report[]> {
     toReport(
       row,
       (proposed.get(row.claim_id) ?? []).filter((d) => d.projectId === null || d.projectId === row.project_id).map(({ projectId: _, ...ref }) => ref),
-      discovered.get(row.claim_id) ?? [],
+      // One filed in another Project is listed only to those who can read it there.
+      (discovered.get(row.claim_id) ?? []).map(({ projectId, ...ref }) => (projectId === row.project_id ? ref : readableOnlyIn(projectId, ref))),
     ),
   );
 }
