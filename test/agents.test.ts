@@ -103,6 +103,22 @@ describe("Agent tokens", () => {
     expect((await admin.get(`/api/agents/${agent.id}/tokens`)).body.tokens).toHaveLength(1);
   });
 
+  it("carry the cronk_at_ prefix, so secret scanners can spot one", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const agent = (await admin.post("/api/agents", { name: "claude-laptop" })).body.agent;
+    const { secret } = (await admin.post(`/api/agents/${agent.id}/tokens`, {})).body;
+    expect(secret).toMatch(/^cronk_at_[A-Za-z0-9_-]{43}$/);
+    expect((await cronk.client(secret).get("/api/me")).body.agent.name).toBe("claude-laptop");
+  });
+
+  it("still work when issued before tokens had a prefix", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const agent = (await admin.post("/api/agents", { name: "claude-laptop" })).body.agent;
+    const bare = await cronk.issuedBeforePrefixes((await admin.post(`/api/agents/${agent.id}/tokens`, {})).body.secret);
+    expect(bare).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect((await cronk.client(bare).get("/api/me")).body.agent.name).toBe("claude-laptop");
+  });
+
   it("are refused once their Agent is removed", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const agent = (await admin.post("/api/agents", { name: "claude-laptop" })).body.agent;
