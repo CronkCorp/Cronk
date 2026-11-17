@@ -870,7 +870,7 @@ test("compare two Versions, and merge an edit someone else saved underneath", as
 });
 
 // Runs after the tests above, so CRONK exists.
-test("see the board, a Ticket and a Document follow changes made elsewhere", async ({ page }) => {
+test("see the board, a Ticket, a Document and a Decision follow changes made elsewhere", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Email").fill(ada.email);
   await page.getByLabel("Password").fill(ada.password);
@@ -918,6 +918,21 @@ test("see the board, a Ticket and a Document follow changes made elsewhere", asy
   await expect(savedMeanwhile).toContainText("Ada saved Version 3 while you were editing Version 2");
   await savedMeanwhile.getByText("See what they changed").click();
   await expect(savedMeanwhile).toContainText("+ Third.");
+  await expect(page.getByLabel("Body (Markdown)")).toHaveValue("Second.");
+
+  // A Decision's page shows a Version saved elsewhere, and while editing announces it instead of replacing the draft.
+  const { decision } = await (await page.request.post("/api/projects/CRONK/decisions", { data: { title: "Live decision", body: "First." } })).json();
+  await page.goto(`/decisions/${decision.key}`);
+  await expect(page.getByTestId("decision-body")).toContainText("First.");
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  await page.request.patch(`/api/decisions/${decision.key}`, { data: { baseVersion: 1, body: "Second." } });
+  await expect(page.getByTestId("decision-body")).toContainText("Second.");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.request.patch(`/api/decisions/${decision.key}`, { data: { baseVersion: 2, body: "Third." } });
+  const decisionSavedMeanwhile = page.getByRole("status");
+  await expect(decisionSavedMeanwhile).toContainText("Ada saved Version 3 while you were editing Version 2");
+  await decisionSavedMeanwhile.getByText("See what they changed").click();
+  await expect(decisionSavedMeanwhile).toContainText("+ Third.");
   await expect(page.getByLabel("Body (Markdown)")).toHaveValue("Second.");
 });
 
