@@ -1,5 +1,6 @@
 import { actorColumns, toRecordedActor, type Actor, type StoredActor, type RecordedActor, type RecordedActorRow } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, type PublishingTransaction, type Queryable } from "../db/database.js";
+import { documentTopic } from "../live/topics.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { readableClause, type Readable } from "../identity/access.js";
 import { recordMentions } from "./mentions.js";
@@ -285,11 +286,11 @@ export async function listVersions(db: Queryable, documentId: string): Promise<O
 }
 
 /**
- * Saves a new Version of a Document, unless it would change nothing (and isn't a restore).
- * Pass a Document locked with `forUpdate` whose Version the save was based on, inside a transaction.
+ * Saves a new Version of a Document, unless it would change nothing (and isn't a restore), and tells the
+ * Document's watchers of it once `db` commits. Pass a Document locked with `forUpdate` whose Version the save was based on.
  */
 export async function saveVersion(
-  db: Queryable,
+  db: PublishingTransaction,
   document: Document,
   save: { title: string; body: string; actor: Actor | StoredActor; now: Date; restoredFrom?: number },
 ): Promise<Document> {
@@ -303,6 +304,7 @@ export async function saveVersion(
     number,
     save.now,
   ]);
+  db.publish(documentTopic(document.id), { event: "version", data: { version: number } });
   await recordMentions(db, { kind: "document", id: document.id });
   const embeds = await recordEmbeds(db, { kind: "document", id: document.id });
   return { ...document, title: save.title, body: save.body, version: number, embeds, updatedAt: save.now };

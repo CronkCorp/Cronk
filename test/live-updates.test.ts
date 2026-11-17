@@ -307,6 +307,51 @@ describe("A Document's live updates", () => {
     expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(204);
     expect(await stream.next()).toBeNull();
   });
+
+  it("tell of the new Version an accepted Suggestion makes", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    const { id } = (await admin.post("/api/projects/DOCS/documents", { title: "Limits", body: "Five." })).body.document;
+    await admin.post(`/api/documents/${id}/protection`, { protected: true });
+    await admin.post("/api/projects/DOCS/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/DOCS-1/claim");
+    const made = await claude.post("/api/suggestions", { item: { kind: "document", id }, baseVersion: 1, content: { body: "Six." }, reasoning: "More." });
+    expect(made.status).toBe(201);
+    const stream = await admin.events(`/api/documents/${id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`)).status).toBe(200);
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 2 } });
+    await expectQuiet(stream);
+  });
+
+  it("tell nothing of a write that is refused or rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    const { id } = (await admin.post("/api/projects/DOCS/documents", { title: "Plan", body: "## Goal\n\nv1" })).body.document;
+    await admin.post(`/api/documents/${id}/protection`, { protected: true });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const stream = await admin.events(`/api/documents/${id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.patch(`/api/documents/${id}`, { baseVersion: 7, body: "Stale." })).status).toBe(409);
+    expect((await admin.post(`/api/documents/${id}/replace-section`, { baseVersion: 1, heading: "Nowhere", body: "v2" })).status).toBe(404);
+    expect((await admin.post(`/api/documents/${id}/versions/9/restore`, { baseVersion: 1 })).status).toBe(404);
+    expect((await claude.patch(`/api/documents/${id}`, { baseVersion: 1, body: "Protected." })).status).toBe(403);
+    expect((await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Goal\n\nv1" })).status).toBe(200);
+    // The save writes the new Version, then fails recording what it mentions, as on a database blip.
+    let saving!: Promise<{ status: number }>;
+    await cronk.interruptQueriesOn("mentions", async () => {
+      saving = admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Goal\n\nLost." });
+    });
+    expect((await saving).status).toBe(500);
+    expect((await admin.get(`/api/documents/${id}`)).body.document.version).toBe(1);
+
+    await admin.patch(`/api/documents/${id}`, { baseVersion: 1, body: "## Goal\n\nv2" });
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 2 } });
+    await expectQuiet(stream);
+  });
 });
 
 /** The notice a Terms stream sends whenever a Term there may have changed. */
@@ -352,6 +397,42 @@ describe("The Workspace's Terms' live updates", () => {
     expect((await admin.delete(`/api/terms/${ticket.id}?baseVersion=7`)).status).toBe(409);
     expect((await claude.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "Protected." })).status).toBe(403);
     expect((await claude.post(`/api/terms/${ticket.id}/protection`, { protected: false })).status).toBe(403);
+
+    await admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "A unit of tracked work." });
+    expect(await stream.next()).toEqual(CHANGED);
+    await expectQuiet(stream);
+  });
+
+  it("tell nothing of a protection change that changes nothing", async () => {
+    const { admin } = await startInstalledCronk();
+    const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post(`/api/terms/${term.id}/protection`, { protected: false })).status).toBe(200);
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    expect(await stream.next()).toEqual(CHANGED);
+    await expectQuiet(stream);
+  });
+
+  it("tell nothing of a create or save that rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const ticket = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term;
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    // Each writes the Term's new Version, then fails recording what it mentions, as on a database blip.
+    let creating!: Promise<{ status: number }>;
+    let saving!: Promise<{ status: number }>;
+    await cronk.interruptQueriesOn("mentions", async () => {
+      creating = admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." });
+    });
+    await cronk.interruptQueriesOn("mentions", async () => {
+      saving = admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "Lost." });
+    });
+    expect((await creating).status).toBe(500);
+    expect((await saving).status).toBe(500);
+    expect((await admin.get("/api/workspace/terms")).body.terms).toEqual([expect.objectContaining({ name: "Ticket", version: 1 })]);
 
     await admin.patch(`/api/terms/${ticket.id}`, { baseVersion: 1, definition: "A unit of tracked work." });
     expect(await stream.next()).toEqual(CHANGED);
