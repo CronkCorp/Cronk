@@ -190,8 +190,8 @@ describe("Searching", () => {
 
 describe("Search access", () => {
   /**
-   * A Ticket, a Document, a Report, a Term, a Decision and Comments in SECRET, and a Workspace Document with a Comment, a Workspace Term
-   * and a Workspace Decision, all about the comet.
+   * A Ticket, a Document, a Report, an Artifact, a Term, a Decision and Comments in SECRET, and a Workspace Document and a Workspace Artifact
+   * each with a Comment, a Workspace Term and a Workspace Decision, all about the comet.
    */
   async function cometEverywhere() {
     const { cronk, admin } = await startInstalledCronk();
@@ -213,6 +213,10 @@ describe("Search access", () => {
     await admin.post("/api/workspace/terms", { name: "Tail", definition: "What a comet trails.", avoid: ["coma"] });
     await admin.post("/api/projects/SECRET/decisions", { title: "Watch the comet nightly" });
     await admin.post("/api/workspace/decisions", { title: "Telescopes", body: "Point them at the comet." });
+    const chart = (await admin.upload("/api/projects/SECRET/artifacts?title=Orbit", await tarGz({ "index.html": "<h1>Orbit</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${chart}/comments`, { body: "Plot the comet's perihelion." });
+    const sky = (await admin.upload("/api/workspace/artifacts?title=Sky map", await tarGz({ "index.html": "<h1>Sky</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${sky}/comments`, { body: "Where is the comet tonight?" });
     return { cronk, admin };
   }
   const places = async (client: Client) =>
@@ -223,6 +227,8 @@ describe("Search access", () => {
     "comment SECRET",
     "comment SECRET",
     "comment SECRET",
+    "comment SECRET",
+    "comment null",
     "comment null",
     "decision SECRET",
     "decision null",
@@ -233,7 +239,7 @@ describe("Search access", () => {
     "term null",
     "ticket SECRET",
   ];
-  const workspaceOnly = ["comment null", "decision null", "document null", "term null"];
+  const workspaceOnly = ["comment null", "comment null", "decision null", "document null", "term null"];
 
   it("leaves out a private Project's Tickets, Documents, Reports, Comments, Terms and Decisions for Members not in it", async () => {
     const { cronk, admin } = await cometEverywhere();
