@@ -190,6 +190,7 @@ The Project page is shown in `docs/ui/frame.png`.
   - **Footer:** the Agent's API tokens in one line ("2 tokens: full, read-only") with "Manage tokens", which opens a dialog that issues and revokes them. A new token's secret is shown once in that dialog, with a copy button, together with Cronk's MCP address, a ready-made command to connect Claude Code, and the commands a script runs to change things within an Agent Session (reads need none).
   - **"Show what it did"** below the Agent Sessions opens what the Agent did across the Workspace, newest first: its Changes, Activities, Comments and saved Versions, each with when, its Agent Session and a link to the Ticket or Document.
 - **Admins** also see "Everyone else's Agents" below, as rows of Agent, Owner and liveness, read-only.
+- **Removed Agents** comes last, collapsed behind a "Removed Agents (n)" toggle and hidden when there are none: the User's own, and for an Admin every User's. Each is a card with its avatar, its name ("for <Owner>" when it isn't the User's own), when it was removed, and "Show what it did". It has no Rename, Remove, tokens or Agent Sessions.
 
 ### Inbox and Triage in Phase 2
 
