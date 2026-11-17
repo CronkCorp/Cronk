@@ -391,6 +391,8 @@ export async function startCronk(
     importMaxBytes?: number;
     /** How often it looks for lapsed Claims, 50 ms unless set; set it long to keep those looks out of `queries`. */
     lapseCheckMs?: number;
+    /** How long closing it may wait on the database before cutting off what still waits; the server's default unless set. */
+    closeWithinMs?: number;
   } = {},
 ): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
@@ -415,6 +417,7 @@ export async function startCronk(
       clock,
       live: (live = new HoldableLiveUpdates()),
       lapseCheckMs: opts.lapseCheckMs ?? 50,
+      ...(opts.closeWithinMs !== undefined && { closeWithinMs: opts.closeWithinMs }),
       onLapseWatch: (lookNow) => (lookForLapses = lookNow),
     });
 

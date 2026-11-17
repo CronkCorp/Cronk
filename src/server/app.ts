@@ -38,6 +38,8 @@ import { cachedSerializers } from "./serializers.js";
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
 /** Where the OpenAPI description is served; it takes any query string. */
 const OPENAPI_PATH = "/api/openapi.json";
+/** How long closing waits on the database unless told otherwise; see `closeWithinMs`. */
+const DEFAULT_CLOSE_WITHIN_MS = 5_000;
 
 export interface AppConfig {
   databaseUrl: string;
@@ -73,6 +75,12 @@ export async function buildApp(opts: {
   live?: LiveUpdates;
   /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
   lapseCheckMs?: number;
+  /**
+   * How long closing may wait on the database, for requests and looks for lapsed Claims still running; 5 seconds by default.
+   * What still waits then is cut off, taking at most a second more: its uncommitted work rolls back and a request answers 500.
+   * So closing finishes within about 6 seconds, inside the 10 seconds `docker stop` gives by default before killing.
+   */
+  closeWithinMs?: number;
   /** Called once with a function that looks for lapsed Claims at once and resolves when that look is done; tests use it to know a look happened. */
   onLapseWatch?: (lookNow: () => Promise<void>) => void;
 }): Promise<FastifyInstance> {
@@ -103,8 +111,21 @@ export async function buildApp(opts: {
     artifactsUrl: opts.config.artifactsUrl,
   };
 
-  // Open live-update streams would otherwise keep the server from closing.
-  app.addHook("preClose", async () => ctx.live.close());
+  let closing = false;
+  app.addHook("preClose", async () => {
+    closing = true;
+    // Open live-update streams would otherwise keep the server from closing.
+    ctx.live.close();
+    // Closing waits for requests still running and then for the database; a request or look waiting on the database
+    // (on a lock, say) is cut off once the bound is up, rather than waited on forever. Counted from here, as the server
+    // waits for its requests before `onClose` runs.
+    db.cutOffAfter(opts.closeWithinMs ?? DEFAULT_CLOSE_WITHIN_MS);
+  });
+  // A connection kept alive after its last answer would hold the server open until its client lets go, so once closing,
+  // each answer ends its connection.
+  app.addHook("onSend", async (_request, reply) => {
+    if (closing) reply.header("connection", "close");
+  });
   const lapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
   opts.onLapseWatch?.(lapses.lookNow);
   app.addHook("onClose", async () => {
