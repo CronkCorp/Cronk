@@ -153,8 +153,8 @@ interface RecordsBranch {
 }
 
 /**
- * The Attachments branch of RECORDS, reading `attachments` under the alias `x`. An Attachment on a Comment is on what the Comment
- * is on, looked up by the Comment's id.
+ * The Attachments branch of RECORDS, reading `attachments` aliased `x`, the one place that alias is named. An Attachment on a
+ * Comment is on what the Comment is on, looked up by the Comment's id.
  */
 const attachmentsBranch = (x: string): RecordsBranch => {
   /** SQL for the `column` of the Comment the Attachment is on, if any. */
