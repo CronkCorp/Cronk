@@ -531,13 +531,13 @@ export const api = {
   /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
   rejectSuggestion: (id: string, reason: string) =>
     request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),
+  /** What a Reopen of an Unverified completion would ask about each Ticket it blocks: its choices, whether the User may change it, where a Pause moves it. */
+  reopenChoices: (key: string) =>
+    request<{ dependents: DependentChoice[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/reopen`).then((r) => r.dependents),
   /**
    * Reopens an Agent's Unverified completion back to its Delegate in a Started Status, with a Comment saying why, and a choice
    * for each Ticket it blocks that already continued on the work.
    */
-  /** What a Reopen of an Unverified completion would ask about each Ticket it blocks: its choices, whether the User may change it, where a Pause moves it. */
-  reopenChoices: (key: string) =>
-    request<{ dependents: DependentChoice[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/reopen`).then((r) => r.dependents),
   reopen: (key: string, input: { comment: string; dependents: Record<string, ReopenChoice> }) =>
     request<{ ticket: Ticket; comment: Comment }>("POST", `/api/tickets/${encodeURIComponent(key)}/reopen`, input),
 

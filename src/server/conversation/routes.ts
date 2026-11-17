@@ -4,7 +4,8 @@ import { HttpError, requireActor, requireUser, type AppContext } from "../contex
 import { userActor } from "../actor.js";
 import { findStatusToMoveInto, listStatuses, type Status } from "../work/projects.js";
 import { updateTicket, type Ticket } from "../work/tickets.js";
-import { checkChoices, dependentChoices, dependentNote, dependentsOf, pauseTarget, REOPEN_CHOICES, type Dependent, type ReopenChoice } from "../work/reopen.js";
+import { checkChoices, dependentChoices, dependentNote, dependentsOf, pauseTarget, type Dependent } from "../work/reopen.js";
+import { REOPEN_CHOICES, type ReopenChoice } from "../../shared/values.js";
 import { clearClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
 import { answer, artifactIdParam, documentIdParam, errors, listing, pathParams, ref, savedHolding, ticketKeyParam } from "../schemas.js";

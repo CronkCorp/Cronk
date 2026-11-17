@@ -17,15 +17,13 @@ function labelOf(choice: ReopenChoice, d: DependentChoice): string {
 /** What a dependent is, beside its Status: who holds it, whose completion awaits checking, or what Reopening means for it. */
 function stateOf(d: DependentChoice): string {
   const t = d.ticket;
-  if (d.claim) return `Claimed by ${d.claim.agent.name}`;
-  if (t.verification === "unverified") return `Unverified${t.delegate ? ` · ${t.delegate.name}` : ""}`;
   switch (t.status.category) {
     case "started":
-      return "not Claimed";
+      return d.claim ? `Claimed by ${d.claim.agent.name}` : "not Claimed";
     case "in_review":
       return "waits on review, kept";
     case "completed":
-      return "finished, kept";
+      return t.verification === "unverified" ? `Unverified${t.delegate ? ` · ${t.delegate.name}` : ""}` : "finished, kept";
     default:
       return "not started, waits again";
   }

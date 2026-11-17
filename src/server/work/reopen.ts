@@ -13,7 +13,6 @@ import { findTicketsByIds, lockTicketsByIds, type AgentRef, type Ticket } from "
  * work takes the User's choice, and every one with a Delegate is told, through a Comment that waits for its Agent.
  */
 
-export { REOPEN_CHOICES, type ReopenChoice } from "../../shared/values.js";
 
 /** A Ticket the Reopened one blocks, locked, with the caller's access to its Project. */
 export interface Dependent {
@@ -54,7 +53,7 @@ export interface DependentChoice {
   ticket: Pick<Ticket, "key" | "title" | "status" | "verification" | "delegate">;
   /** Its live Claim, if any. */
   claim: { agent: AgentRef } | null;
-  /** What the caller may choose for it, the first being the default; `[]` for one that hasn't continued on the work. */
+  /** What the Reopen accepts for it, the first being the default; `[]` for one that hasn't continued on the work. Without `canChange`, only `keep`. */
   choices: readonly ReopenChoice[];
   /** Whether the caller has Write in its Project; without it, only `keep` is accepted. */
   canChange: boolean;
