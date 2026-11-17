@@ -1592,12 +1592,16 @@ test("download a Project's Decisions as docs/adr from its register", async ({ pa
 });
 
 /** Pastes `files` into the element `target` matches, as the clipboard would hand them over. */
-const pasteFiles = (target: Locator, files: { name: string; type: string; bytes: number[] }[]) =>
-  target.evaluate((el, files) => {
-    const data = new DataTransfer();
-    for (const f of files) data.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }));
-    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
-  }, files);
+const pasteFiles = (target: Locator, files: { name: string; type: string; bytes: number[] }[], text?: string) =>
+  target.evaluate(
+    (el, { files, text }) => {
+      const data = new DataTransfer();
+      for (const f of files) data.items.add(new File([new Uint8Array(f.bytes)], f.name, { type: f.type }));
+      if (text !== undefined) data.setData("text/plain", text);
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    },
+    { files, text },
+  );
 
 test("paste an image into a Document's editor, and see it in the rendered body and in the earlier Version", async ({ page }) => {
   await signIn(page);
@@ -1622,6 +1626,8 @@ test("paste an image into a Document's editor, and see it in the rendered body a
   await expect(editor).toHaveValue("Before.\n\nAfter.");
   await page.keyboard.press("Control+Shift+z");
   await expect(editor).toHaveValue(`Before.\n${embedded}\nAfter.`);
+  // A paste that carries text too, as a copy from a spreadsheet does, is the text's to paste: nothing is attached.
+  await pasteFiles(editor, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1");
   await page.getByRole("button", { name: "Save" }).click();
 
   const body = page.getByTestId("document-body");

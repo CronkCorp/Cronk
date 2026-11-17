@@ -6,6 +6,7 @@ import { CronkMarkdown } from "./markdown.js";
 
 /** What a page can do to an open editor: put text at its cursor, in place of the selection, undoably. */
 export interface MarkdownEditorHandle {
+  /** Puts `text` in place of the selection, leaving the cursor after it, as one edit Ctrl+Z undoes. */
   insert: (text: string) => void;
 }
 
@@ -91,18 +92,30 @@ export function MarkdownEditor(props: {
     const attached = await props.attach!(files);
     if (attached.length > 0) insert(attached.map(attachmentMarkdown).join("\n"));
   };
+  /** Whether a drag carries files this editor takes: it can attach them and isn't disabled. */
   const carriesFiles = (e: DragEvent) => props.attach !== undefined && !props.disabled && e.dataTransfer.types.includes("Files");
+  /** Lets files be dropped here, so the browser doesn't open them instead. */
   const onDragOver = (e: DragEvent) => {
     if (carriesFiles(e)) e.preventDefault();
   };
+  /** Attaches and embeds dropped files, claiming the drop so the page doesn't attach them again. */
   const onDrop = (e: DragEvent) => {
     if (!carriesFiles(e)) return;
     e.preventDefault();
     void attachFiles([...e.dataTransfer.files]);
   };
+  /**
+   * Attaches and embeds pasted files, claiming the paste so the page doesn't attach them again. A paste that also
+   * carries text, as a copy from a word processor or spreadsheet does, pastes only the text, as it always has.
+   */
   const onPaste = (e: ClipboardEvent) => {
     const files = [...e.clipboardData.files];
     if (!props.attach || files.length === 0) return;
+    if (e.clipboardData.types.includes("text/plain")) {
+      // The text goes into the editor; keep the page from taking the files and the text with them.
+      e.stopPropagation();
+      return;
+    }
     e.preventDefault();
     void attachFiles(files);
   };
