@@ -1,7 +1,8 @@
 import { actorColumns, toRecordedActor, type Actor, type StoredActor, type RecordedActor, type RecordedActorRow } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, type PublishingTransaction, type Queryable } from "../db/database.js";
+import { documentTopic } from "../live/topics.js";
 import { ticketKeySql } from "../work/tickets.js";
-import { placeReadableSql, type Readable } from "../identity/access.js";
+import { readableClause, type Readable } from "../identity/access.js";
 import { recordMentions } from "./mentions.js";
 import { embedsIn, embedsSql, recordEmbeds } from "../files/artifact-embeds.js";
 import { documentProtectedSql } from "./protection.js";
@@ -285,11 +286,11 @@ export async function listVersions(db: Queryable, documentId: string): Promise<O
 }
 
 /**
- * Saves a new Version of a Document, unless it would change nothing (and isn't a restore).
- * Pass a Document locked with `forUpdate` whose Version the save was based on, inside a transaction.
+ * Saves a new Version of a Document, unless it would change nothing (and isn't a restore), and tells the
+ * Document's watchers of it once `db` commits. Pass a Document locked with `forUpdate` whose Version the save was based on.
  */
 export async function saveVersion(
-  db: Queryable,
+  db: PublishingTransaction,
   document: Document,
   save: { title: string; body: string; actor: Actor | StoredActor; now: Date; restoredFrom?: number },
 ): Promise<Document> {
@@ -303,6 +304,7 @@ export async function saveVersion(
     number,
     save.now,
   ]);
+  db.publish(documentTopic(document.id), { event: "version", data: { version: number } });
   await recordMentions(db, { kind: "document", id: document.id });
   const embeds = await recordEmbeds(db, { kind: "document", id: document.id });
   return { ...document, title: save.title, body: save.body, version: number, embeds, updatedAt: save.now };
@@ -404,13 +406,13 @@ export async function listLinkedDocuments(
     `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason,
        ${documentProtectedSql("d")} AS protected
      FROM (${SELECT_DOCUMENTS}) d`;
-  const isReadable = placeReadableSql("d", "$2::uuid[]", "$3::uuid");
+  const readableWhere = readableClause("d", readable, 2);
   const reports = await db.query<LinkedDocument>(`${select("report")} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
   const linked = await db.query<LinkedDocument>(
     `${select("linked")} JOIN ticket_document_links l ON l.document_id = d.id AND l.ticket_id = $1
-     WHERE d.ticket_id IS DISTINCT FROM $1 AND ${isReadable}
+     WHERE d.ticket_id IS DISTINCT FROM $1 AND ${readableWhere.sql}
      ORDER BY l.seq`,
-    [ticket.id, readable.projectIds, readable.workspaceId],
+    [ticket.id, ...readableWhere.params],
   );
   return [...reports.rows, ...linked.rows];
 }

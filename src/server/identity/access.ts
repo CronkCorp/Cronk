@@ -164,6 +164,16 @@ export interface Readable {
 export const placeReadableSql = (alias: string, projectIds: string, workspaceId: string) =>
   `(${alias}.project_id = ANY(${projectIds}) OR (${alias}.project_id IS NULL AND ${alias}.workspace_id = ${workspaceId}))`;
 
+/**
+ * `placeReadableSql` for `readable` bound as query parameters: `sql` reads its Project ids as
+ * `$firstParam` and its Workspace's id as the parameter after, and `params` holds those two values,
+ * to bind at those positions. Keeps the positions and the values from falling out of step.
+ */
+export const readableClause = (alias: string, readable: Readable, firstParam: number) => ({
+  sql: placeReadableSql(alias, `$${firstParam}::uuid[]`, `$${firstParam + 1}::uuid`),
+  params: [readable.projectIds, readable.workspaceId] as const,
+});
+
 /** Where `actor` may read, for finding things across the Workspace (see `Readable`). */
 export async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {
   const workspaceId = actingUser(actor).workspaceId;

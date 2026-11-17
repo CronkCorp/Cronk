@@ -1,7 +1,9 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, type Publisher, type PublishingTransaction, type Queryable } from "../db/database.js";
+import { projectTermsTopic, termsTopic } from "../live/topics.js";
 import type { Readable } from "../identity/access.js";
 import { countTermMentions, recordMentions, recordMentionsOfNames } from "./mentions.js";
+import { setProtected } from "./protection.js";
 import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
 /**
@@ -107,9 +109,9 @@ async function nameTaken(db: Queryable, place: TermPlace, name: string, except: 
   return rows.length > 0;
 }
 
-/** Creates a Term in `place` at Version 1, or refuses if a Term there already has its name. Run inside a transaction. */
+/** Creates a Term in `place` at Version 1, or refuses if a Term there already has its name, and tells whoever watches Terms once `db` commits. */
 export async function insertTerm(
-  db: Queryable,
+  db: PublishingTransaction,
   input: { place: TermPlace; fields: TermFields; actor: Actor; now: Date },
 ): Promise<StoredTerm | "name taken"> {
   const fields = tidyFields(input.fields);
@@ -117,6 +119,7 @@ export async function insertTerm(
   if (await nameTaken(db, input.place, fields.name, null)) return "name taken";
   const id = await insertTermRow(db, { ...input.place, ...fields, version: 1, createdAt: input.now, updatedAt: input.now });
   await insertTermVersion(db, id, { number: 1, ...fields, at: input.now, actor: input.actor });
+  termsChanged(db, input.place);
   await recordMentions(db, { kind: "term", id });
   await recordMentionsOfNames(db, input.place, [fields.name]);
   return (await findTerm(db, input.place.workspaceId, id))!;
@@ -240,10 +243,10 @@ async function withOverrides(db: Queryable, workspaceId: string, terms: StoredTe
 
 /**
  * Saves a new Version of a Term with `fields`, unless it would change nothing, or refuses if another
- * Term of its place has the new name. Pass a Term locked with `forUpdate`, inside a transaction.
+ * Term of its place has the new name, and tells whoever watches Terms once `db` commits. Pass a Term locked with `forUpdate`.
  */
 export async function saveTermVersion(
-  db: Queryable,
+  db: PublishingTransaction,
   workspaceId: string,
   term: StoredTerm,
   save: { fields: TermFields; actor: Actor | StoredActor; now: Date },
@@ -272,6 +275,7 @@ export async function saveTermVersion(
     number,
     save.now,
   ]);
+  termsChanged(db, place);
   await recordMentions(db, { kind: "term", id: term.id });
   if (fields.name !== term.name) await recordMentionsOfNames(db, place, [term.name, fields.name]);
   return { ...term, ...fields, version: number, updatedAt: save.now };
@@ -286,10 +290,33 @@ export async function findProtectedWorkspaceTerm(db: Queryable, workspaceId: str
   return rows[0] && toTerm(rows[0]);
 }
 
-/** Deletes a Term and its Versions, and what mentions it then mentions any Workspace Term it overrode. Run inside a transaction. */
-export async function deleteTerm(db: Queryable, workspaceId: string, term: StoredTerm): Promise<void> {
+/**
+ * Deletes a Term and its Versions, and what mentions it then mentions any Workspace Term it overrode, and tells whoever
+ * watches Terms once `db` commits.
+ */
+export async function deleteTerm(db: PublishingTransaction, workspaceId: string, term: StoredTerm): Promise<void> {
   await db.query("DELETE FROM terms WHERE id = $1", [term.id]);
+  termsChanged(db, { workspaceId, projectId: term.projectId });
   if (term.projectId !== null) await recordMentionsOfNames(db, { workspaceId, projectId: term.projectId }, [term.name]);
+}
+
+/**
+ * Marks a Term Protected, or unmarks it, by the User `userId` (see `setProtected`), and tells whoever watches Terms once `db`
+ * commits; changes and tells nothing when it already was as asked.
+ */
+export async function setTermProtected(db: PublishingTransaction, workspaceId: string, term: StoredTerm, marked: boolean, userId: string, at: Date): Promise<void> {
+  if (await setProtected(db, { kind: "term", id: term.id }, marked, userId, at)) termsChanged(db, { workspaceId, projectId: term.projectId });
+}
+
+/**
+ * Tells whoever watches Terms that one in `place` was created or changed: that place's watchers and, for a Project
+ * Term, the Workspace's, whose Terms are answered with their overrides. Give it a transaction's handle to tell them once
+ * it commits, or a `Publisher` once the change is committed.
+ */
+export function termsChanged(live: Publisher, place: TermPlace): void {
+  const event = { event: "changed", data: {} };
+  live.publish(termsTopic(place.workspaceId, place.projectId), event);
+  if (place.projectId !== null) live.publish(projectTermsTopic(place.workspaceId), { ...event, projectId: place.projectId });
 }
 
 /** One saved state of a Term, with the Actor who saved it. */

@@ -273,7 +273,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { document, assignee, avoidedWords } = await transaction(ctx.db, async (tx) => {
+        const { document, assignee, avoidedWords } = await transaction(ctx, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, current, current.title);
           await requireClaimToChangeReport(tx, actor, current);
@@ -288,7 +288,6 @@ export function knowledgeRoutes(ctx: AppContext) {
           return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
         waitingItemsChanged(ctx.live, [assignee]);
-        if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document, avoidedWords };
       },
     );
@@ -334,7 +333,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { document, assignee, avoidedWords } = await transaction(ctx.db, async (tx) => {
+        const { document, assignee, avoidedWords } = await transaction(ctx, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, current, current.title);
           await requireClaimToChangeReport(tx, actor, current);
@@ -346,7 +345,6 @@ export function knowledgeRoutes(ctx: AppContext) {
           return { document: saved, assignee: await reportAssignee(tx, actor, current), avoidedWords };
         });
         waitingItemsChanged(ctx.live, [assignee]);
-        if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document, avoidedWords };
       },
     );
@@ -551,7 +549,7 @@ export function knowledgeRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const { document, assignee } = await transaction(ctx.db, async (tx) => {
+        const { document, assignee } = await transaction(ctx, async (tx) => {
           const current = await documentFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, current, current.title);
           await requireClaimToChangeReport(tx, actor, current);
@@ -561,16 +559,11 @@ export function knowledgeRoutes(ctx: AppContext) {
           return { document: saved, assignee: await reportAssignee(tx, actor, current) };
         });
         waitingItemsChanged(ctx.live, [assignee]);
-        if (document.version !== request.body.baseVersion) versionSaved(ctx, document);
         return { document };
       },
     );
   };
 }
-
-/** Tells the Document's watchers of its new Version. Call once it is committed. */
-const versionSaved = (ctx: AppContext, document: Document) =>
-  ctx.live.publish(documentTopic(document.id), { event: "version", data: { version: document.version } });
 
 /** The page tree of a Project in the Actor's Workspace, or the Workspace's own with a null `projectId`. */
 const treeFor = (actor: Actor, projectId: string | null): Tree => ({ workspaceId: actingUser(actor).workspaceId, projectId });

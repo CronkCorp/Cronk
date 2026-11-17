@@ -3,14 +3,14 @@ import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectTermsTopic, termsTopic } from "../live/topics.js";
-import type { LiveEvent, LiveUpdates } from "../live/live-updates.js";
+import type { LiveEvent } from "../live/live-updates.js";
 import { canRead, projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { answer, errors, holding, listing, noContent, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref, termIdParam } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
 import { listMentions } from "./mentions.js";
-import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
+import { listProtectionMarkings, requireUnprotected } from "./protection.js";
 import {
   answeredTerms,
   deleteTerm,
@@ -21,6 +21,7 @@ import {
   listTerms,
   listTermVersions,
   saveTermVersion,
+  setTermProtected,
   type StoredTerm,
   type Term,
   type TermFields,
@@ -113,9 +114,8 @@ export function termRoutes(ctx: AppContext) {
     const create = async (actor: Actor, place: TermPlace, input: NewTerm) => {
       await requireNotReplacingProtected(ctx.db, actor, place.projectId, input.name);
       const fields: TermFields = { name: input.name, definition: input.definition, avoid: input.avoid ?? [], group: input.group ?? null };
-      const created = await transaction(ctx.db, (tx) => insertTerm(tx, { place, fields, actor, now: ctx.clock.now() }));
+      const created = await transaction(ctx, (tx) => insertTerm(tx, { place, fields, actor, now: ctx.clock.now() }));
       if (created === "name taken") throw nameTaken(input.name);
-      termsChanged(ctx.live, place);
       return answerTerm(actor, created);
     };
 
@@ -328,7 +328,7 @@ export function termRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { baseVersion: base, ...edit } = request.body;
-        const saved = await transaction(ctx.db, async (tx) => {
+        const saved = await transaction(ctx, async (tx) => {
           const current = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, current, current.name);
           if (edit.name !== undefined) await requireNotReplacingProtected(tx, actor, current.projectId, edit.name);
@@ -343,7 +343,6 @@ export function termRoutes(ctx: AppContext) {
           if (saved === "name taken") throw nameTaken(fields.name);
           return saved;
         });
-        termsChanged(ctx.live, placeOf(actor, saved.projectId));
         return { term: await answerTerm(actor, saved) };
       },
     );
@@ -363,15 +362,13 @@ export function termRoutes(ctx: AppContext) {
       },
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
-        const deleted = await transaction(ctx.db, async (tx) => {
+        await transaction(ctx, async (tx) => {
           const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUnprotected(actor, term, term.name, "delete it");
           requireUserActor(actor, "delete a Term");
           await requireCurrent(tx, term, request.query.baseVersion, "delete");
           await deleteTerm(tx, actingUser(actor).workspaceId, term);
-          return term;
         });
-        termsChanged(ctx.live, placeOf(actor, deleted.projectId));
         return reply.code(204).send();
       },
     );
@@ -387,13 +384,12 @@ export function termRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const term = await transaction(ctx.db, async (tx) => {
+        const term = await transaction(ctx, async (tx) => {
           const term = await termFor(tx, actor, request.params.id, "write", { forUpdate: true });
           requireUserActor(actor, "mark a Term Protected or unmark it");
-          await setProtected(tx, { kind: "term", id: term.id }, request.body.protected, actor.user.id, ctx.clock.now());
+          await setTermProtected(tx, actingUser(actor).workspaceId, term, request.body.protected, actor.user.id, ctx.clock.now());
           return { ...term, protected: request.body.protected };
         });
-        termsChanged(ctx.live, placeOf(actor, term.projectId));
         return { term: await answerTerm(actor, term) };
       },
     );
@@ -454,16 +450,6 @@ async function requireCurrent(db: Queryable, term: StoredTerm, base: number, wri
   if (base === term.version) return;
   const current = (await listTermVersions(db, term.id))[0]!;
   throw new HttpError(409, `This ${write} is based on Version ${base}, but the Term is at Version ${term.version}; ${AFTER_STALE[write]}`, { current });
-}
-
-/**
- * Tells whoever watches Terms that one in `place` was created or changed: that place's watchers and, for a Project
- * Term, the Workspace's, whose Terms are answered with their overrides. Call it only once the change is committed.
- */
-export function termsChanged(live: LiveUpdates, place: TermPlace): void {
-  const event = { event: "changed", data: {} };
-  live.publish(termsTopic(place.workspaceId, place.projectId), event);
-  if (place.projectId !== null) live.publish(projectTermsTopic(place.workspaceId), { ...event, projectId: place.projectId });
 }
 
 /** Where Terms belong for `actor`: a Project of their Workspace, or the Workspace itself when `projectId` is null. */

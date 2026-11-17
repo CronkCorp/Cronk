@@ -1281,14 +1281,16 @@ describe("the transcripts tool", () => {
     expect(await callTool(mcp, "transcripts", { action: "get", id, turn: 1 })).toEqual({ isError: true, body: "This Transcript has no turns" });
   });
 
-  it("lists the Transcripts, and those a Ticket, Document, Term or Decision came from, as the API does", async () => {
+  it("lists the Transcripts, and those a Ticket, Document, Term, Decision or Artifact came from, as the API does", async () => {
     let doc = "";
     let term = "";
+    let artifact = "";
     const { admin, mcp, id } = await uploadedTranscript({
       alsoChange: async (agent) => {
         doc = (await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" })).body.document.id;
         term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
         await agent.post("/api/workspace/decisions", { title: "Compose for installs" });
+        artifact = (await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
       },
     });
 
@@ -1300,6 +1302,7 @@ describe("the transcripts tool", () => {
       [{ kind: "document", itemId: doc }, `/api/documents/${doc}/transcripts`],
       [{ kind: "term", itemId: term }, `/api/terms/${term}/transcripts`],
       [{ kind: "decision", key: "D1" }, "/api/decisions/D1/transcripts"],
+      [{ kind: "artifact", itemId: artifact }, `/api/artifacts/${artifact}/transcripts`],
     ] as const) {
       const from = await callTool(mcp, "transcripts", { action: "from", ...args });
       expect({ args, body: from.body }).toEqual({ args, body: (await admin.get(url)).body });
@@ -1309,19 +1312,7 @@ describe("the transcripts tool", () => {
     expect(await callTool(mcp, "transcripts", { action: "from", key: "CRONK-1" })).toEqual({ isError: true, body: "The from action needs a kind" });
     expect(await callTool(mcp, "transcripts", { action: "from", kind: "ticket", itemId: doc })).toEqual({ isError: true, body: "The from action needs a key" });
     expect(await callTool(mcp, "transcripts", { action: "from", kind: "term", key: "CRONK-1" })).toEqual({ isError: true, body: "The from action needs an itemId" });
-  });
-
-  it("lists the Transcripts an Artifact came from, as the API does", async () => {
-    let artifact = "";
-    const { admin, mcp, id } = await uploadedTranscript({
-      alsoChange: async (agent) => {
-        artifact = (await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
-      },
-    });
-
-    const from = await callTool(mcp, "transcripts", { action: "from", kind: "artifact", itemId: artifact });
-    expect(from).toEqual({ isError: false, body: (await admin.get(`/api/artifacts/${artifact}/transcripts`)).body });
-    expect(from.body.transcripts).toEqual([expect.objectContaining({ id })]);
+    expect(await callTool(mcp, "transcripts", { action: "from", kind: "artifact" })).toEqual({ isError: true, body: "The from action needs an itemId" });
   });
 
   it("answers a Transcript the Agent may not read as no such Transcript, and leaves it out of list and from", async () => {
@@ -1339,7 +1330,7 @@ describe("the transcripts tool", () => {
     expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toEqual([expect.objectContaining({ id })]);
   });
 
-  it("is offered to a read-only token with all its actions, and it and the search tool name each other", async () => {
+  it("is offered to a read-only token with all its actions, names Artifacts among the kinds, and it and the search tool name each other", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const mcp = await connectMcp(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
     const { tools } = await mcp.client.listTools();
@@ -1347,6 +1338,9 @@ describe("the transcripts tool", () => {
     const transcripts = tools.find((t) => t.name === "transcripts")!;
     expect(transcripts.inputSchema.properties?.action).toMatchObject({ enum: ["get", "list", "from"] });
     expect(transcripts.description).toMatch(/search tool/);
+    expect(transcripts.description).toMatch(/`from`: the Transcripts a Ticket, Document \(or Report\), Term, Decision or Artifact came from/);
+    expect(transcripts.inputSchema.properties?.kind).toMatchObject({ enum: expect.arrayContaining(["artifact"]), description: expect.stringMatching(/Decision or Artifact/) });
+    expect(transcripts.inputSchema.properties?.itemId).toMatchObject({ description: expect.stringMatching(/Artifact's id/) });
     expect(tools.find((t) => t.name === "search")!.description).toMatch(/transcripts tool's get action[\s\S]*turn/);
   });
 });
