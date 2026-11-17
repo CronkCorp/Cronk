@@ -25,15 +25,15 @@ async function expectWithin(ms: number, work: Promise<unknown>): Promise<void> {
 async function restartWhileWaiting<T>(cronk: Cronk, wait: () => Promise<T>): Promise<{ waiting: Promise<T>; held: HeldLock }> {
   const held = await cronk.holdTable("tickets");
   const waiting = wait();
-  // Cut off by the close, so it fails before the test awaits it.
+  // What is cut off may fail rather than answer, before the test awaits it; that must not go unhandled meanwhile.
   waiting.catch(() => {});
   await held.waiters(1);
 
   await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
 
   const health = await cronk.client().send("/api/health");
-  health.resume();
-  expect(health.statusCode).toBe(200);
+  const body = JSON.parse(Buffer.concat(await health.toArray()).toString());
+  expect({ status: health.statusCode, body }).toEqual({ status: 200, body: { status: "ok" } });
   return { waiting, held };
 }
 
