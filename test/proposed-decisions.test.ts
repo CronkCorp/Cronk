@@ -435,4 +435,19 @@ describe("a proposed Decision whose reviewer is deactivated", () => {
     expect((await owners.next())?.event).toBe("changed");
     expect(await inboxLines(carol)).toEqual([]);
   });
+
+  it("on the Workspace, with no source Ticket, goes to Triage for every User once its Owner is deactivated", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const carols = await agentOf(cronk, carol, "carol-bot");
+    await carols.post("/api/workspace/decisions", { title: "Compose for installs" });
+    expect(await inboxLines(carol)).toEqual(["decision D1"]);
+    expect(await triageLines(bob)).toEqual([]);
+
+    await admin.patch(`/api/users/${(await carol.get("/api/me")).body.user.id}`, { active: false });
+
+    expect(await triageLines(bob)).toEqual(["decision D1"]);
+    expect(await triageLines(admin, "?project=CRONK")).toEqual([]);
+  });
 });
