@@ -309,6 +309,31 @@ describe("A Document's live updates", () => {
     expect(await stream.next()).toBeNull();
   });
 
+  it("stay open through a delete that is refused or rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
+    const { id } = (await admin.post("/api/projects/DOCS/documents", { title: "Plan", body: "v1" })).body.document;
+    const child = (await admin.post("/api/projects/DOCS/documents", { title: "Step", body: "v1", parentId: id })).body.document;
+    const stream = await admin.events(`/api/documents/${id}/events`);
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.delete(`/api/documents/${id}?baseVersion=7`)).status).toBe(409);
+    expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(409);
+    expect((await admin.delete(`/api/documents/${child.id}?baseVersion=1`)).status).toBe(204);
+    // The delete removes the Document, then fails removing its Versions with it, as on a database blip.
+    let deleting!: Promise<{ status: number }>;
+    await cronk.interruptQueriesOn("document_versions", async () => {
+      deleting = admin.delete(`/api/documents/${id}?baseVersion=1`);
+    });
+    expect((await deleting).status).toBe(500);
+    expect((await admin.get(`/api/documents/${id}`)).status).toBe(200);
+
+    await admin.post(`/api/documents/${id}/comments`, { body: "Still here." });
+    expect(await stream.next()).toEqual({ event: "comment", data: { comment: expect.objectContaining({ body: "Still here." }) } });
+    expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(204);
+    expect(await stream.next()).toBeNull();
+  });
+
   it("tell of the new Version an accepted Suggestion makes", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Docs", key: "DOCS" });
