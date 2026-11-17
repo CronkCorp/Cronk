@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, watchArtifact, type Artifact, type ArtifactVersion, type Attachment, type EmbeddedIn, type ExtraOrigin, type Workspace } from "./api.js";
 import { AttachmentViewer, PageAttachments } from "./attachments.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
@@ -18,6 +18,12 @@ import { Field, Show, useAction, useCanWrite, useLoad } from "./ui.js";
 import { EXTRA_ORIGIN_USES } from "../shared/values.js";
 
 /** Artifacts: the list of a Project's or the Workspace's, and an Artifact's own page (docs/ui.md § Artifact). */
+
+/**
+ * Whether a publish may declare extra origins: only once the Workspace is known to allow them. (A Version's declared
+ * extras, by contrast, show as applied until the Workspace is known not to.)
+ */
+const extrasDeclarable = (workspace: Workspace | undefined) => workspace?.artifactExtraOriginsAllowed === true;
 
 /** The address of an Artifacts list: a Project's, or the Workspace's without a Project key. */
 const listAddress = (projectKey: string | null | undefined) => (projectKey ? `/projects/${projectKey}/artifacts` : "/artifacts");
@@ -108,7 +114,7 @@ export function ArtifactsPage(props: { projectKey?: string; workspace: Workspace
         title="Publish an Artifact"
         publish={(title, archive, extras) => api.publishArtifact(props.projectKey, title, archive, extras)}
         onPublished={(a) => navigate(`/artifacts/${a.id}`)}
-        extrasAllowed={props.workspace?.artifactExtraOriginsAllowed === true}
+        extrasAllowed={extrasDeclarable(props.workspace)}
       />
       <Show state={artifacts}>
         {(list) =>
@@ -287,7 +293,7 @@ function ArtifactView(props: {
           navigate(`/artifacts/${a.id}`);
           props.reload();
         }}
-        extrasAllowed={props.workspace?.artifactExtraOriginsAllowed === true}
+        extrasAllowed={extrasDeclarable(props.workspace)}
         untitled
       />
       <ProtectionHistory load={() => api.artifactProtection(a.id)} reloadOn={[a.id, a.protected]} />
@@ -296,7 +302,7 @@ function ArtifactView(props: {
 }
 
 /** What a page may load, as the note under the frame says it: the Workspace's allow-list and the Version's extras in force. */
-function servingNote(allowed: string[] | undefined, extras: Artifact["extraOrigins"]): string {
+function servingNote(allowed: string[] | undefined, extras: ExtraOrigin[]): string {
   const hosts = (origins: string[]) => origins.map((o) => o.replace(/^https:\/\//, "")).join(", ");
   const from = allowed === undefined ? "the Workspace's allow-list" : allowed.length === 0 ? "nowhere else" : hosts(allowed);
   const requests = extras.filter((e) => e.uses.includes("connect")).map((e) => e.origin);
@@ -308,7 +314,7 @@ function servingNote(allowed: string[] | undefined, extras: Artifact["extraOrigi
 }
 
 /** The extra origins the shown Version declared, as a `--warn` pill that opens each with what it loads and why. */
-function ExtraOrigins(props: { extras: Artifact["extraOrigins"]; apply: boolean }) {
+function ExtraOrigins(props: { extras: ExtraOrigin[]; apply: boolean }) {
   const count = props.extras.length;
   return (
     <Popover
@@ -440,6 +446,46 @@ interface ExtraOriginRow extends ExtraOrigin {
   key: number;
 }
 
+/** `uses` with `use` turned on or off, kept in the order the uses are always listed in. */
+const toggleUse = (uses: ExtraOrigin["uses"], use: ExtraOrigin["uses"][number], on: boolean) =>
+  EXTRA_ORIGIN_USES.filter((u) => (u === use ? on : uses.includes(u)));
+
+/** The publish dialog's extra-origin rows, each an origin, what it loads and why, with Add origin and Remove. */
+function ExtraOriginsEditor(props: { rows: ExtraOriginRow[]; onChange: (rows: ExtraOriginRow[]) => void }) {
+  const nextKey = useRef(0);
+  const change = (key: number, changes: Partial<ExtraOrigin>) => props.onChange(props.rows.map((r) => (r.key === key ? { ...r, ...changes } : r)));
+  return (
+    <div className="publish-extras">
+      <h3 className="publish-extras-title">Extra origins</h3>
+      <p className="muted hint publish-extras-hint">Other sites this Version loads from beyond the Workspace's allow-list, each with what it loads and why.</p>
+      <ul className="publish-extra-list" aria-label="Extra origins">
+        {props.rows.map((row, i) => (
+          <li key={row.key} className="publish-extra" aria-label={`Extra origin ${i + 1}`}>
+            <Field label="Origin" value={row.origin} placeholder="https://cdn.example.com" onChange={(origin) => change(row.key, { origin })} required={false} />
+            <div className="publish-extra-uses" role="group" aria-label="Loads">
+              {EXTRA_ORIGIN_USES.map((use) => (
+                <label key={use} className="use-toggle">
+                  <input type="checkbox" checked={row.uses.includes(use)} onChange={(e) => change(row.key, { uses: toggleUse(row.uses, use, e.target.checked) })} />
+                  {USE_LABELS[use]}
+                </label>
+              ))}
+            </div>
+            <Field label="Reason" value={row.reason} onChange={(reason) => change(row.key, { reason })} required={false} />
+            <div className="actions">
+              <Button type="button" variant="secondary" aria-label={`Remove extra origin ${i + 1}`} onClick={() => props.onChange(props.rows.filter((r) => r.key !== row.key))}>
+                Remove
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <Button type="button" variant="secondary" onClick={() => props.onChange([...props.rows, { key: nextKey.current++, origin: "", uses: [], reason: "" }])}>
+        Add origin
+      </Button>
+    </div>
+  );
+}
+
 /**
  * Picks a folder holding index.html and publishes it, as a new Artifact titled in the dialog, or as a new Version (`untitled`).
  * Where the Workspace allows them (`extrasAllowed`), the publish may declare extra origins; they always start empty, never
@@ -457,7 +503,6 @@ function PublishDialog(props: {
   const [title, setTitle] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [extras, setExtras] = useState<ExtraOriginRow[]>([]);
-  const [nextKey, setNextKey] = useState(0);
   const [staleError, setStaleError] = useState<unknown>();
   const { run, error, busy } = useAction(
     async () => {
@@ -478,7 +523,6 @@ function PublishDialog(props: {
       props.onPublished(artifact);
     },
   );
-  const change = (key: number, changes: Partial<ExtraOrigin>) => setExtras((rows) => rows.map((r) => (r.key === key ? { ...r, ...changes } : r)));
   const folderName = files[0]?.webkitRelativePath.split("/")[0];
   const stale = staleError instanceof ApiError && staleError.status === 409 && typeof staleError.body.version === "number";
   return (
@@ -504,47 +548,7 @@ function PublishDialog(props: {
           </label>
           <span className="muted">{folderName ? `${folderName}: ${files.length} ${files.length === 1 ? "file" : "files"}` : "No folder chosen"}</span>
         </div>
-        {props.extrasAllowed && (
-          <div className="publish-extras">
-            <h3 className="publish-extras-title">Extra origins</h3>
-            <p className="muted publish-extras-hint">Other sites this Version loads from beyond the Workspace's allow-list, each with what it loads and why.</p>
-            <ul className="publish-extra-list" aria-label="Extra origins">
-              {extras.map((row) => (
-                <li key={row.key} className="publish-extra">
-                  <Field label="Origin" value={row.origin} placeholder="https://cdn.example.com" onChange={(origin) => change(row.key, { origin })} required={false} />
-                  <div className="publish-extra-uses" role="group" aria-label="Loads">
-                    {EXTRA_ORIGIN_USES.map((use) => (
-                      <label key={use} className="use-toggle">
-                        <input
-                          type="checkbox"
-                          checked={row.uses.includes(use)}
-                          onChange={(e) =>
-                            change(row.key, { uses: e.target.checked ? EXTRA_ORIGIN_USES.filter((u) => u === use || row.uses.includes(u)) : row.uses.filter((u) => u !== use) })
-                          }
-                        />
-                        {USE_LABELS[use]}
-                      </label>
-                    ))}
-                  </div>
-                  <Field label="Reason" value={row.reason} onChange={(reason) => change(row.key, { reason })} required={false} />
-                  <div className="actions">
-                    <Button type="button" variant="secondary" onClick={() => setExtras((rows) => rows.filter((r) => r.key !== row.key))}>Remove</Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setExtras((rows) => [...rows, { key: nextKey, origin: "", uses: [], reason: "" }]);
-                setNextKey((k) => k + 1);
-              }}
-            >
-              Add origin
-            </Button>
-          </div>
-        )}
+        {props.extrasAllowed && <ExtraOriginsEditor rows={extras} onChange={setExtras} />}
         {error && (
           <p className="error" role="alert">
             {stale ? "Someone published a newer Version meanwhile. Reload the Artifact, then publish again." : error}

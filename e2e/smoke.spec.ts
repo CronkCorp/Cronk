@@ -1596,16 +1596,16 @@ test("declare an extra origin when publishing an Artifact from the dialog, and s
 
     // A malformed origin is refused by the API; its message shows and the row stays as typed.
     const row = rows.first();
-    await row.getByLabel("Origin").fill("cdn.example.com");
+    await row.getByRole("textbox", { name: "Origin" }).fill("cdn.example.com");
     await row.getByRole("checkbox", { name: "scripts" }).check();
     await row.getByRole("checkbox", { name: "network requests" }).check();
-    await row.getByLabel("Reason").fill("Loads the charting library");
+    await row.getByRole("textbox", { name: "Reason" }).fill("Loads the charting library");
     await dialog.getByRole("button", { name: "Publish" }).click();
     await expect(dialog.getByRole("alert")).toContainText("must be a bare http or https origin");
-    await expect(row.getByLabel("Origin")).toHaveValue("cdn.example.com");
+    await expect(row.getByRole("textbox", { name: "Origin" })).toHaveValue("cdn.example.com");
     await expect(row.getByRole("checkbox", { name: "scripts" })).toBeChecked();
 
-    await row.getByLabel("Origin").fill("https://cdn.example.com");
+    await row.getByRole("textbox", { name: "Origin" }).fill("https://cdn.example.com");
     await dialog.getByRole("button", { name: "Publish" }).click();
     await expect(page.getByRole("heading", { name: "Charts" })).toBeVisible();
     await page.getByRole("button", { name: /1 extra origin/ }).click();
