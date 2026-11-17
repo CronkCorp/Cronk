@@ -2,14 +2,15 @@ import { Button } from "./components/button.js";
 import { Chip } from "./components/tags.js";
 import { Banner } from "./components/banner.js";
 import { Actor, type ActorLike } from "./components/actor.js";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { staleVersionOf, type Conflict, type MergedSection } from "./api.js";
 import { diffLines } from "./diff.js";
-import { TextArea, messageOf } from "./ui.js";
+import { Show, TextArea, messageOf, useLoad } from "./ui.js";
 
 /**
  * Settling a save refused because someone saved since: what changed between two Versions, and the
  * choice for each part both edits changed. Documents, Decisions and Guidance share it, as they share the merge.
+ * Before a save, Documents and Decisions also share watching for a newer Version and the banner warning of it.
  */
 
 /**
@@ -401,5 +402,66 @@ export function VersionDiff(props: { before: { title?: string; body: string; fie
         <p className="muted">The bodies are the same.</p>
       )}
     </div>
+  );
+}
+
+/**
+ * Watches for a newer Version than the one shown, as a record's live stream tells it. Feed the
+ * stream's `version` events to `saw`, and call `catchUp` when the stream (re)connects to fetch the
+ * `current` record for what was saved meanwhile. `newer` is that Version while it is ahead of
+ * `version`; the record is reloaded at once unless the page is `editing`, so a read-only page
+ * follows along and an edit keeps its draft.
+ */
+export function useNewerVersion(options: { version: number; editing: boolean; onReload: () => void; current: () => Promise<{ version: number }> }): {
+  newer: number | undefined;
+  saw: (version: number) => void;
+  catchUp: () => void;
+} {
+  const [latest, setLatest] = useState(options.version);
+  const current = useRef(options.current);
+  current.current = options.current;
+  const saw = useCallback((version: number) => setLatest((v) => Math.max(v, version)), []);
+  const catchUp = useCallback(() => void current.current().then((record) => saw(record.version), () => {}), [saw]);
+  // Someone else's Version is shown at once, unless it would pull the record out from under an edit.
+  const newer = latest > options.version ? latest : undefined;
+  useEffect(() => {
+    if (newer !== undefined && !options.editing) options.onReload();
+  }, [newer, options.editing]);
+  return { newer, saw, catchUp };
+}
+
+/**
+ * Warns, while a record is being edited, that someone saved a newer `version` meanwhile: who, and
+ * what they changed since the Version the edit `started` from. Saving then merges it in. `of` names
+ * the record, `load` fetches one of its Versions, and `show` gives a Version as the diff shows it.
+ */
+export function SavedMeanwhile<V extends { number: number; actor: ActorLike }>(props: {
+  of: string;
+  started: number;
+  version: number;
+  load: (version: number) => Promise<V>;
+  show: (v: V) => { title?: string; body: string; fields?: Fields };
+}) {
+  const { of, started, version } = props;
+  const [versions] = useLoad(() => Promise.all([props.load(started), props.load(version)]), [of, started, version]);
+  return (
+    <Banner tone="warn" role="status">
+      <Show state={versions}>
+        {([base, theirs]) => (
+          <>
+            <p>
+              <strong>
+                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
+              </strong>{" "}
+              Saving merges their changes into yours.
+            </p>
+            <details>
+              <summary>See what they changed</summary>
+              <VersionDiff before={props.show(base)} after={props.show(theirs)} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
+            </details>
+          </>
+        )}
+      </Show>
+    </Banner>
   );
 }
