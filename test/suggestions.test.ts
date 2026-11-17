@@ -146,6 +146,118 @@ describe("accepting an outdated Suggestion", () => {
       suggestion: { id: suggestion.id, acceptedWithEdits: true, acceptedBy: { id: ada.id } },
     });
   });
+
+  it("asks for the sections both changed, merging the rest, and takes the User's settled content onto that Version", async () => {
+    const { admin, agent, documentId } = await sectionedDocument();
+    const suggestion = await suggestBody(agent, documentId, "## Limits\n\nFifty per IP.\n\n## Why\n\nThe proxy passes client IPs through now.\n", 2);
+    await admin.patch(`/api/documents/${documentId}`, { baseVersion: 2, title: "Sign-in rate limits", body: "## Limits\n\nFive per minute, sliding.\n\n## Why\n\nThe proxy hides client IPs.\n" });
+
+    const refused = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/Version 3.*body conflicting/);
+
+    const merged = await admin.post(`/api/suggestions/${suggestion.id}/merge`);
+    expect(merged.status).toBe(200);
+    expect(merged.body.merge).toEqual({
+      onto: 3,
+      current: { title: "Sign-in rate limits", body: "## Limits\n\nFive per minute, sliding.\n\n## Why\n\nThe proxy hides client IPs.\n" },
+      content: null,
+      fields: [
+        { field: "title", value: "Sign-in rate limits", conflict: null, sections: null },
+        {
+          field: "body",
+          value: null,
+          conflict: null,
+          sections: [
+            {
+              heading: "## Limits",
+              text: null,
+              conflict: {
+                base: "## Limits\n\nFive per minute.\n\n",
+                mine: "## Limits\n\nFifty per IP.\n\n",
+                theirs: "## Limits\n\nFive per minute, sliding.\n\n",
+                both: "## Limits\n\nFifty per IP.\n\nFive per minute, sliding.\n\n",
+              },
+            },
+            { heading: "## Why", text: "## Why\n\nThe proxy passes client IPs through now.\n", conflict: null },
+          ],
+        },
+      ],
+      conflicts: 1,
+    });
+
+    const settled = "## Limits\n\nFive per minute, sliding, and fifty per IP.\n\n## Why\n\nThe proxy passes client IPs through now.\n";
+    // Settling needs the Version it was settled onto, and that Version must still be current.
+    expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled } })).status).toBe(400);
+    expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled }, onto: 2 })).status).toBe(409);
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled }, onto: 3 });
+
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.suggestion).toMatchObject({ state: "accepted", acceptedWithEdits: true, resultVersion: 4 });
+    expect((await admin.get(`/api/documents/${documentId}`)).body.document).toMatchObject({ version: 4, title: "Sign-in rate limits", body: settled });
+    expect((await admin.get(`/api/documents/${documentId}/versions/4`)).body.version).toMatchObject({ actor: { kind: "user" }, suggestion: { id: suggestion.id } });
+  });
+
+  it("on a Term, takes each field from the side that changed it, and asks for a field both changed", async () => {
+    const { admin, agent } = await protectedDocument();
+    const { term } = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold.", avoid: ["Lock"] })).body;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    const made = await agent.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition: "A temporary hold.", group: "Work" }, reasoning: "Say it ends." });
+    await admin.patch(`/api/terms/${term.id}`, { baseVersion: 1, avoid: ["Lock", "Lease"], group: "Coordination" });
+
+    const merged = (await admin.post(`/api/suggestions/${made.body.suggestion.id}/merge`)).body.merge;
+    expect(merged).toMatchObject({
+      onto: 2,
+      content: null,
+      conflicts: 1,
+      fields: [
+        { field: "name", value: "Claim", conflict: null },
+        { field: "definition", value: "A temporary hold.", conflict: null },
+        { field: "avoid", value: ["Lock", "Lease"], conflict: null },
+        { field: "group", value: null, conflict: { base: null, mine: "Work", theirs: "Coordination" } },
+      ],
+    });
+    const refused = await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/group conflicting/);
+
+    await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`, { content: { group: "Coordination" }, onto: 2 });
+
+    expect((await admin.get(`/api/terms/${term.id}`)).body.term).toMatchObject({ definition: "A temporary hold.", avoid: ["Lock", "Lease"], group: "Coordination", version: 3 });
+    expect((await admin.get(`/api/terms/${term.id}/versions`)).body.versions[0]).toMatchObject({ actor: { kind: "user" }, suggestion: { id: made.body.suggestion.id, acceptedWithEdits: true } });
+  });
+
+  it("on Guidance and a Decision, merges their Markdown by sections and their other fields whole", async () => {
+    const { admin, agent } = await protectedDocument();
+    await admin.put("/api/projects/CRONK/guidance", { markdown: "## Tools\n\nUse npm.\n\n## Style\n\nBe brief.\n", baseVersion: 0 });
+    const guidance = await agent.post("/api/suggestions", { item: { kind: "guidance", project: "CRONK" }, baseVersion: 1, content: { markdown: "## Tools\n\nUse pnpm.\n\n## Style\n\nBe brief.\n" }, reasoning: "We moved." });
+    await admin.put("/api/projects/CRONK/guidance", { markdown: "## Tools\n\nUse npm.\n\n## Style\n\nBe brief and kind.\n", baseVersion: 1 });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres", body: "## Why\n\nIt is boring.\n" });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    const decision = await agent.post("/api/suggestions", { item: { kind: "decision", key: "CRONK-D1" }, baseVersion: 2, content: { group: "Storage" }, reasoning: "Group it." });
+    await admin.patch("/api/decisions/CRONK-D1", { baseVersion: 2, body: "## Why\n\nIt is boring and well known.\n" });
+
+    expect((await admin.post(`/api/suggestions/${guidance.body.suggestion.id}/accept`)).status).toBe(200);
+    expect((await admin.post(`/api/suggestions/${decision.body.suggestion.id}/accept`)).status).toBe(200);
+
+    expect((await admin.get("/api/projects/CRONK/guidance")).body.guidance).toEqual({ markdown: "## Tools\n\nUse pnpm.\n\n## Style\n\nBe brief and kind.\n", version: 3 });
+    expect((await admin.get("/api/decisions/CRONK-D1")).body.decision).toMatchObject({ title: "Postgres", body: "## Why\n\nIt is boring and well known.\n", group: "Storage", status: "accepted", version: 4 });
+  });
+
+  it("refuses a merge settled onto a Version that is no longer current, leaving the Suggestion open", async () => {
+    const { admin, agent, documentId } = await sectionedDocument();
+    const suggestion = await suggestBody(agent, documentId, "## Limits\n\nFifty per IP.\n\n## Why\n\nThe proxy hides client IPs.\n", 2);
+    await admin.patch(`/api/documents/${documentId}`, { baseVersion: 2, body: "## Limits\n\nSix per minute.\n\n## Why\n\nThe proxy hides client IPs.\n" });
+    const onto = (await admin.post(`/api/suggestions/${suggestion.id}/merge`)).body.merge.onto;
+    await admin.patch(`/api/documents/${documentId}`, { baseVersion: 3, body: "## Limits\n\nSeven per minute.\n\n## Why\n\nThe proxy hides client IPs.\n" });
+
+    const refused = await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: "## Limits\n\nSix per minute, fifty per IP.\n" }, onto });
+
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/Version 4 now, not Version 3/);
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({ state: "open", outdated: true, newerVersion: { number: 4 } });
+    expect((await admin.get(`/api/documents/${documentId}`)).body.document.version).toBe(4);
+  });
 });
 
 describe("rejecting a Suggestion", () => {
