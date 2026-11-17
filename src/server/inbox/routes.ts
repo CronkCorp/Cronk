@@ -74,13 +74,36 @@ const suggestionItem = {
 /** What a Discovered Ticket in the Inbox or Triage pauses. */
 export const pausedTickets = {
   type: "array",
-  items: ref("BlockingRef"),
+  items: {
+    allOf: [
+      ref("BlockingRef"),
+      {
+        type: "object",
+        required: ["canRemove"],
+        properties: {
+          canRemove: {
+            type: "boolean",
+            description:
+              "Whether the User may remove the block (DELETE /api/tickets/{key}/relations/blocked_by/{otherKey} from the paused Ticket): Write on the paused Ticket, " +
+              "and on this one too for a block a User added.",
+          },
+        },
+      },
+    ],
+  },
   description: "The Tickets it blocks that the User can see, in key order, each with the Agent that added the block and why: what it pauses until finished or the block is removed.",
+} as const;
+
+/** How many Tickets a Discovered Ticket in the Inbox or Triage pauses that the User can't see. */
+export const hiddenBlocks = {
+  type: "integer",
+  minimum: 0,
+  description: "How many Tickets it blocks that the User can't see, which `blocks` leaves out.",
 } as const;
 
 const discoveredItem = {
   type: "object",
-  required: ["kind", "at", "ticket", "reports", "blocks"],
+  required: ["kind", "at", "ticket", "reports", "blocks", "hiddenBlocks"],
   description:
     "A Discovered Ticket the User is Assignee of, in Backlog and undelegated, waiting for them to delegate it, keep it in Backlog (POST /api/tickets/{key}/keep) " +
     "or cancel it. Its `discovered` marker says which Agent filed it and from which Ticket. `reports` is empty.",
@@ -90,6 +113,7 @@ const discoveredItem = {
     ticket: ref("Ticket"),
     reports: { type: "array", items: ref("Report") },
     blocks: pausedTickets,
+    hiddenBlocks,
   },
 } as const;
 

@@ -5,6 +5,7 @@ import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
 import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
+import { termsChanged } from "../knowledge/term-routes.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
@@ -198,7 +199,9 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           isMarkdown: isExportMarkdown,
           limit: (path, markdown) => streamedFileLimit(path, markdown, workspace),
         });
-        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
+        const { imported, termPlaces } = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
+        // Committed now: Terms pages already open learn of the imported Terms, which may override Workspace Terms.
+        for (const place of termPlaces) termsChanged(ctx.live, place);
         return reply.code(201).send(imported);
       } catch (err) {
         await removeFiles(request, ctx, stored);
