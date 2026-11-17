@@ -62,10 +62,16 @@ async function startMinio(): Promise<{ server: S3Server | null; container?: Star
     };
   } catch (err) {
     const reason = (err as Error).message;
-    if (process.env.CI) {
+    if (inCi()) {
       throw new Error(`No MinIO could be started, and in CI the S3-compatible storage tests must run, not be skipped: ${reason}`, { cause: err });
     }
     console.warn(`No MinIO could be started, so the S3-compatible storage tests are skipped: ${reason}`);
     return { server: null };
   }
+}
+
+/** Whether this run is in CI: CI is set to anything but "false" or "0", as CI services set it to "true". */
+function inCi() {
+  const ci = process.env.CI;
+  return ci !== undefined && ci !== "" && ci !== "false" && ci !== "0";
 }
