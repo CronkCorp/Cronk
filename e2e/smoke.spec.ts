@@ -1757,7 +1757,7 @@ test("paste an image into a Document's editor, and see it in the rendered body a
   await page.goto(`/documents/${id}`);
   await page.getByRole("button", { name: "Edit" }).click();
 
-  // Pasting a file uploads it and puts its Markdown where the cursor is; Ctrl+Z takes the Markdown out again.
+  // Pasting a file uploads it and puts its Markdown where the cursor is; undo (Ctrl/Cmd+Z) takes the Markdown out again.
   const editor = page.getByLabel("Body (Markdown)");
   await editor.evaluate((el: HTMLTextAreaElement) => {
     el.focus();
@@ -1768,9 +1768,9 @@ test("paste an image into a Document's editor, and see it in the rendered body a
   const embedded = (await editor.inputValue()).split("\n")[1]!;
   // Attached once, by the editor, not again by the page.
   await expect(page.getByRole("region", { name: "Attachments" }).getByRole("button", { name: "Open flow.png" })).toHaveCount(1);
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press("ControlOrMeta+z");
   await expect(editor).toHaveValue("Before.\n\nAfter.");
-  await page.keyboard.press("Control+Shift+z");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(editor).toHaveValue(`Before.\n${embedded}\nAfter.`);
   // A paste that carries text too, as a copy from a spreadsheet does, is the text's to paste: nothing is attached.
   await pasteFiles(editor, [{ name: "cells.png", type: "image/png", bytes: png }], "A1\tB1");
