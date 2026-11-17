@@ -48,7 +48,8 @@ const decisionItem = {
   type: "object",
   required: ["kind", "at", "decision", "ticket"],
   description:
-    "A Decision an Agent proposed, which the User reviews: they are Assignee of the Ticket it came from, or, with none, the proposing Agent's Owner. " +
+    "A Decision an Agent proposed, which the User reviews: they are Assignee of the Ticket it came from, or, with none or while that Assignee " +
+    "is deactivated, the proposing Agent's Owner. " +
     "It stays until a User accepts or rejects it; rejecting needs a reason, which reaches the Agent.",
   properties: {
     kind: { type: "string", const: "decision" },

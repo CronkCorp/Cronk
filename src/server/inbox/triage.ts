@@ -5,7 +5,18 @@ import { userActor } from "../actor.js";
 import { isWaitingDiscoverySql } from "../work/tickets.js";
 import { listAllProjects } from "../work/projects.js";
 import { findSuggestionsByIds, reviewerSql } from "../knowledge/suggestions.js";
-import { asTicketItems, ENTERED_STATUS_AT, ticketItems, withBlocks, type DiscoveredItem, type SuggestionInboxItem, type TicketItem, type UnverifiedItem } from "./inbox.js";
+import {
+  asTicketItems,
+  decisionItems,
+  ENTERED_STATUS_AT,
+  ticketItems,
+  withBlocks,
+  type DecisionItem,
+  type DiscoveredItem,
+  type SuggestionInboxItem,
+  type TicketItem,
+  type UnverifiedItem,
+} from "./inbox.js";
 
 /**
  * Triage: the shared list of waiting items with no clear User to go to. Each User sees the items they could
@@ -24,10 +35,10 @@ export type UnattendedReason = "deactivated" | "no_access";
 export type UnattendedItem = TicketItem<"unattended"> & { reason: UnattendedReason };
 
 /** One item in Triage. */
-export type TriageItem = UnverifiedItem | UnattendedItem | SuggestionInboxItem | DiscoveredItem;
+export type TriageItem = UnverifiedItem | UnattendedItem | DecisionItem | SuggestionInboxItem | DiscoveredItem;
 
 /** The kinds of Triage item, which Triage filters by. */
-export const TRIAGE_KINDS = ["unverified", "unattended", "suggestion", "discovered"] as const;
+export const TRIAGE_KINDS = ["unverified", "unattended", "decision", "suggestion", "discovered"] as const;
 
 /** Narrows Triage: an item matches when, for every field given, it has one of that field's values. */
 export interface TriageFilter {
@@ -44,6 +55,7 @@ export async function listTriage(db: Queryable, user: User, filter: TriageFilter
   const items = [
     ...(wants("unverified") ? await unverified(db, projectIds) : []),
     ...(wants("unattended") ? await unattended(db, projectIds) : []),
+    ...(wants("decision") ? await decisions(db, user, projectIds, inWorkspace) : []),
     ...(wants("suggestion") ? await suggestions(db, user, projectIds, inWorkspace) : []),
     ...(wants("discovered") ? await withBlocks(db, user, await discovered(db, projectIds)) : []),
   ];
@@ -88,6 +100,14 @@ async function unattended(db: Queryable, projectIds: string[]): Promise<Unattend
     [projectIds],
   );
   return asTicketItems(db, "unattended", rows);
+}
+
+/**
+ * The proposed Decisions Agents made that nobody reviews (see `decisionReviewerSql`): in the Projects `projectIds`, and, with
+ * `inWorkspace`, the Workspace's, which every User may change.
+ */
+function decisions(db: Queryable, user: User, projectIds: string[], inWorkspace: boolean): Promise<DecisionItem[]> {
+  return decisionItems(db, { workspaceId: user.workspaceId, reviewerId: null, projectIds, inWorkspace });
 }
 
 /**

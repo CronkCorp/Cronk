@@ -14,7 +14,7 @@ export interface TriageAddress {
 }
 
 /** The kinds Triage holds, by the names its chips give them, in the Inbox's order. */
-const TRIAGE_KIND_NAMES = kindNames<TriageKind>({ unverified: true, unattended: true, suggestion: true, discovered: true });
+const TRIAGE_KIND_NAMES = kindNames<TriageKind>({ unverified: true, unattended: true, suggestion: true, discovered: true, decision: true });
 
 /** Triage's groups, in the order they are shown: the Inbox's groups that hold its kinds. */
 const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.kind in TRIAGE_KIND_NAMES);
@@ -69,7 +69,8 @@ export function TriagePage(props: { address: TriageAddress; me: User }) {
               heading: "Nothing in Triage",
               hint:
                 "Agents' Unverified completions with no Assignee, Discovered Tickets, and delegated or In Review Tickets and Unverified completions " +
-                "whose Assignee is missing, deactivated or can't see their Project, and Suggestions nobody reviews, such as those on Workspace items, show up here.",
+                "whose Assignee is missing, deactivated or can't see their Project, Suggestions nobody reviews, such as those on Workspace items, " +
+                "and Agents' proposed Decisions whose reviewers are all deactivated show up here.",
             }}
             keysHint="J / K moves through the list, C Accepts or takes it, S reopens or rejects."
             me={props.me}
