@@ -199,7 +199,7 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           },
           isMarkdown: isExportMarkdown,
           limit: (path, markdown) => streamedFileLimit(path, markdown, workspace),
-          maxBytes: ctx.importMaxBytes,
+          importMaxBytes: ctx.importMaxBytes,
         });
         const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
         return reply.code(201).send(imported);

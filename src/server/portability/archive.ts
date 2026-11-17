@@ -312,7 +312,7 @@ export interface Unpacking {
   /** The most bytes the file at `path` may take, given the Markdown files unpacked so far, and what it is, for refusing it. */
   limit(path: string, markdown: StoredFolder): { maxBytes: number; of: string };
   /** The most bytes the whole import may write, to local disk and the store together, before it is refused. */
-  maxBytes: number;
+  importMaxBytes: number;
 }
 
 /**
@@ -321,10 +321,10 @@ export interface Unpacking {
  * arrives, capped at the size `unpacking.limit` allows, and stands in the folder as a `StoredFile`. The archive limits count only the Markdown files.
  * A gzipped or plain tar archive is read as it streams; a zip archive, whose directory is at its end, is written
  * to a temporary file on local disk first and read from there. Everything written, that file and every file in the store,
- * counts towards `unpacking.maxBytes`: past it, the import stops reading and is refused with a 413.
+ * counts towards `unpacking.importMaxBytes`: past it, the import stops reading and is refused with a 413.
  */
 export async function unpackFolderStream(body: Readable, unpacking: Unpacking): Promise<StoredFolder> {
-  const written = new WrittenBytes(unpacking.maxBytes);
+  const written = new WrittenBytes(unpacking.importMaxBytes);
   const [head, rest] = await peek(body, 4);
   if (signedAt(head, 0, ZIP_LOCAL) || signedAt(head, 0, ZIP_END)) {
     const dir = await mkdtemp(join(tmpdir(), "cronk-import-"));
