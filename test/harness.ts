@@ -374,11 +374,11 @@ async function pollUntil(done: () => Promise<boolean>, failure: string | (() => 
 }
 
 /** The connections whose queries wait on a lock, in the database named by parameter `$1`. */
-const LOCK_WAITERS = "FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'";
+const LOCK_WAITERS_FROM = "FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'";
 
 /** How many queries on database `dbName` are waiting on a lock, asked through `client`. */
 async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
-  const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int AS n ${LOCK_WAITERS}`, [dbName]);
+  const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int AS n ${LOCK_WAITERS_FROM}`, [dbName]);
   return rows[0]!.n;
 }
 
@@ -480,7 +480,7 @@ export async function startCronk(
             await cause();
             // Terminates the connections whose queries wait on a lock, once there are any.
             const terminated = async () =>
-              (await watcher.query<{ n: number }>(`SELECT count(pg_terminate_backend(pid))::int AS n ${LOCK_WAITERS}`, [dbName])).rows[0]!.n > 0;
+              (await watcher.query<{ n: number }>(`SELECT count(pg_terminate_backend(pid))::int AS n ${LOCK_WAITERS_FROM}`, [dbName])).rows[0]!.n > 0;
             await pollUntil(terminated, `No query waited on ${table}`);
           });
         } finally {
