@@ -173,6 +173,7 @@ describe("A Project's live updates", () => {
     // The server has looked since the clock moved and found the Claim still live, so only the lower threshold lapses it.
     await cronk.lookForLapses();
     expect((await admin.patch("/api/workspace", { silenceThresholdSeconds: 60 })).status).toBe(200);
+    await cronk.lookForLapses();
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
   });
 

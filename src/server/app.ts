@@ -73,7 +73,7 @@ export async function buildApp(opts: {
   live?: LiveUpdates;
   /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
   lapseCheckMs?: number;
-  /** Given, is handed a function that looks for lapsed Claims at once and resolves when done, for tests to choose when a look happens. */
+  /** Called once with a function that looks for lapsed Claims at once and resolves when that look is done; tests use it to know a look happened. */
   onLapseWatch?: (lookNow: () => Promise<void>) => void;
 }): Promise<FastifyInstance> {
   const app = Fastify({

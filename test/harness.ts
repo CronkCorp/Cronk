@@ -315,7 +315,7 @@ export interface Cronk {
   heartbeat(): Promise<void>;
   /**
    * Looks for lapsed Claims now, as the server does every `lapseCheckMs`, after any look already running, and waits until
-   * it is done; so a test knows the server has looked since the clock last moved, and its watchers have been told.
+   * it is done (failing if that look fails); so a test knows the server has looked since the clock last moved, and its watchers have been told.
    */
   lookForLapses(): Promise<void>;
   /**

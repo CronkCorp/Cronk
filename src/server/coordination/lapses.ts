@@ -34,17 +34,15 @@ export function watchSilence(ctx: AppContext, intervalMs: number): { stop: () =>
     for (const owner of ownersWithChangedSessions(last.sessions, sessions)) ctx.live.publish(agentsTopic(owner), { event: "changed", data: {} });
     last = { at: now, live, sessions };
   };
-  // One look at a time, each from where the last left off.
+  // One look at a time, each from where the last left off. A look that fails rejects, so `lookNow` doesn't pass for a look made.
   const lookAfterAny = async (): Promise<void> => {
-    while (looking) await looking;
-    // A failed look (a database blip) is tried again next time, from the same Claims and Sessions.
-    looking = look()
-      .catch(() => {})
-      .finally(() => (looking = null));
+    while (looking) await looking.catch(() => {});
+    looking = look().finally(() => (looking = null));
     await looking;
   };
   const timer = setInterval(() => {
-    if (!looking) void lookAfterAny();
+    // A failed look (a database blip) is tried again next time, from the same Claims and Sessions.
+    if (!looking) lookAfterAny().catch(() => {});
   }, intervalMs).unref();
   return { stop: () => clearInterval(timer), lookNow: lookAfterAny };
 }
