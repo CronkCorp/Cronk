@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 /**
  * @typedef {{ type: string, text?: string, content?: string | Block[], name?: string, id?: string, tool_use_id?: string, input?: unknown, is_error?: boolean }} Block
- * @typedef {{ type?: string, isSidechain?: boolean, isMeta?: boolean, isCompactSummary?: boolean, agentId?: string, toolUseResult?: unknown, message?: { role?: string, content?: string | Block[] } }} Entry
+ * @typedef {{ type?: string, isSidechain?: boolean, isMeta?: boolean, isCompactSummary?: boolean, agentId?: string, toolUseResult?: unknown, attachment?: { type?: string, prompt?: unknown }, message?: { role?: string, content?: string | Block[] } }} Entry
  * @typedef {{ chat: string, toolUseId?: string }} Subagent a subagent's chat file, and the id of the tool call that launched it
  * @typedef {{ chats: Map<string, Entry[]>, agentByToolUse: Map<string, string>, placed: Set<string> }} SubagentPlacement
  *   the subagents' chats by agentId, the agentIds their meta files give the tool calls that launched them, and those already placed
@@ -71,7 +71,14 @@ function chatMarkdown(entries, subagents) {
     subagents.placed.add(agentId);
     append("Assistant", fenced(`subagent ${agentId}`, chatMarkdown(chat, subagents)));
   };
+  /** Places the background subagent whose completion `text` notifies, if this chat launched it. @param {string} text */
+  const placeCompleted = (text) => {
+    const completed = completedSubagent(text);
+    if (completed && toolUses.has(completed.toolUseId)) placeSubagent(completed.agentId);
+  };
   for (const entry of entries) {
+    // A completion that arrives while Claude is busy is queued as an attachment rather than written as a user entry.
+    if (entry.attachment?.type === "queued_command" && typeof entry.attachment.prompt === "string") placeCompleted(entry.attachment.prompt);
     // Left out: what Claude Code adds itself, such as the summary that continues a compacted chat.
     if (!entry.message || entry.isMeta || entry.isCompactSummary) continue;
     const blocks = typeof entry.message.content === "string" ? [{ type: "text", text: entry.message.content }] : (entry.message.content ?? []);
@@ -79,8 +86,7 @@ function chatMarkdown(entries, subagents) {
     if (!role) continue;
     for (const block of blocks) {
       if (block.type === "text") {
-        const completed = role === "User" ? completedSubagent(block.text ?? "") : undefined;
-        if (completed && toolUses.has(completed.toolUseId)) placeSubagent(completed.agentId);
+        if (role === "User") placeCompleted(block.text ?? "");
         const text = role === "User" ? typedByUser(block.text ?? "") : block.text;
         if (text) append(role, text);
       } else if (block.type === "image") append(role, IMAGE);
@@ -102,7 +108,7 @@ function chatMarkdown(entries, subagents) {
 }
 
 /**
- * The background subagent whose completion a user entry's `text` notifies, if it's such a notification.
+ * The background subagent whose completion `text` notifies, if it's Claude Code's `<task-notification>` for one.
  * @param {string} text
  * @returns {{ agentId: string, toolUseId: string } | undefined}
  */

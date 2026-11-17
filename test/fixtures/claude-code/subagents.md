@@ -76,6 +76,19 @@ Async agent launched successfully.
 agentId: abg
 ```
 
+```tool-call Agent
+{
+  "description": "Plan CRONK-3",
+  "prompt": "Log a plan on CRONK-3.",
+  "run_in_background": true
+}
+```
+
+```tool-result
+Async agent launched successfully.
+agentId: abg2
+```
+
 ```tool-call Task
 {
   "description": "Check the build",
@@ -143,5 +156,15 @@ Planned CRONK-2.
 ````
 
 Both are planned.
+
+```subagent abg2
+## User
+
+Log a plan on CRONK-3.
+
+## Assistant
+
+Planned CRONK-3.
+```
 
 Done.
