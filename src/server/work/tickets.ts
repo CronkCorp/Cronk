@@ -3,6 +3,7 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory, Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
+import { readableOnlyIn } from "../identity/readable-only-in.js";
 
 /** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
 export const ticketKeySql = (project: string, ticket: string) => `${project}.key || '-' || ${ticket}.number`;
@@ -74,8 +75,9 @@ export interface Ticket {
 }
 
 /**
- * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket of
- * its Project it was working on then, holding its Claim, if any. `kept` records a User's Keep in Backlog.
+ * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket, of
+ * any Project, it was working on then, holding its Claim, if any; one of another Project is tagged `readableOnlyIn` it,
+ * so only readers of that Project see it. `kept` records a User's Keep in Backlog.
  */
 export interface Discovery {
   agent: AgentRef;
@@ -107,11 +109,20 @@ interface TicketRow {
   discovered_by_agent_id: string | null;
   discovered_by_agent_name: string | null;
   discovered_session_id: string | null;
+  source_project_id: string | null;
+  source_project_key: string | null;
   source_number: number | null;
   source_title: string | null;
   discovery_kept: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+/** A Discovered Ticket's source Ticket; one of another Project only for those who can read that Project. */
+function sourceTicketOf(row: TicketRow): TicketName | null {
+  if (row.source_number === null) return null;
+  const source = { key: `${row.source_project_key}-${row.source_number}`, title: row.source_title! };
+  return row.source_project_id === row.project_id ? source : readableOnlyIn(row.source_project_id!, source);
 }
 
 const toTicket = (row: TicketRow): Ticket => ({
@@ -136,7 +147,7 @@ const toTicket = (row: TicketRow): Ticket => ({
       : {
           agent: { id: row.discovered_by_agent_id, name: row.discovered_by_agent_name! },
           session: row.discovered_session_id === null ? null : { id: row.discovered_session_id },
-          sourceTicket: row.source_number === null ? null : { key: `${row.project_key}-${row.source_number}`, title: row.source_title! },
+          sourceTicket: sourceTicketOf(row),
           kept: row.discovery_kept,
         },
   createdAt: row.created_at,
@@ -147,10 +158,10 @@ const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
          a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title,
-         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.number AS source_number, st.title AS source_title, t.discovery_kept
+         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.project_id AS source_project_id, sp.key AS source_project_key, st.number AS source_number, st.title AS source_title, t.discovery_kept
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
   LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id
-  LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id`;
+  LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id`;
 
 /**
  * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated and not kept there.
@@ -180,7 +191,7 @@ export async function keepDiscovery(db: Queryable, ticket: Ticket, actor: Actor,
 export interface NewDiscovery {
   agentId: string;
   sessionId: string | null;
-  /** The Ticket it came from and the Claim on it, of the same Project; null for none. */
+  /** The Ticket it came from and the Claim on it, of any Project; null for none. */
   source: { ticketId: string; claimId: string } | null;
 }
 
@@ -557,18 +568,24 @@ export function listSubTickets(db: Queryable, ticketId: string): Promise<TicketR
   return listTicketRefs(db, "t.parent_id = $1", [ticketId]);
 }
 
-/** The Discovered Tickets filed during each of these Claims, from the Claim's Ticket, in key order, as a map from Claim id. */
-export async function listDiscoveredIn(db: Queryable, claimIds: string[]): Promise<Map<string, TicketRef[]>> {
+/** A Ticket as listed, with the id of its Project. */
+export type PlacedTicketRef = TicketRef & { projectId: string };
+
+/**
+ * The Discovered Tickets filed during each of these Claims, from the Claim's Ticket, of any Project, in key order, as a
+ * map from Claim id; each with its Project's id, so a reader is shown only those of Projects they can read.
+ */
+export async function listDiscoveredIn(db: Queryable, claimIds: string[]): Promise<Map<string, PlacedTicketRef[]>> {
   const { rows } = await db.query<{ id: string; claim_id: string }>(
     `SELECT t.id, t.discovered_source_claim_id AS claim_id FROM tickets t JOIN projects p ON p.id = t.project_id
      WHERE t.discovered_source_claim_id = ANY($1::uuid[]) ORDER BY p.key, t.number`,
     [claimIds],
   );
   const tickets = await findTicketsByIds(db, rows.map((r) => r.id));
-  const byClaim = new Map<string, TicketRef[]>();
+  const byClaim = new Map<string, PlacedTicketRef[]>();
   rows.forEach((row, i) => {
-    const { key, title, status } = tickets[i]!;
-    byClaim.set(row.claim_id, [...(byClaim.get(row.claim_id) ?? []), { key, title, status }]);
+    const { key, title, status, projectId } = tickets[i]!;
+    byClaim.set(row.claim_id, [...(byClaim.get(row.claim_id) ?? []), { key, title, status, projectId }]);
   });
   return byClaim;
 }

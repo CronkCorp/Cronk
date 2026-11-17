@@ -127,7 +127,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       source: z
         .string()
         .optional()
-        .describe("The key of the Ticket of the same Project you hold the Claim on that you found it while working on; needed only when you hold more than one there (file)"),
+        .describe("The key of the Ticket, of any Project, you hold the Claim on that you found it while working on; needed only when you hold more than one Claim (file)"),
       labels: z.array(z.string()).optional().describe("The Ticket's new Labels, replacing all of its current ones (edit)"),
       parent: z.string().optional().describe("The key of the Ticket's new parent in the same Project, or `none` to make it a top-level Ticket (edit)"),
       relation: z.enum(RELATION_KINDS).optional().describe("How the Ticket relates to the other, read from the Ticket's side (relate, unrelate)"),

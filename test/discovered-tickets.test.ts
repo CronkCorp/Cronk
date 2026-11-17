@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, tarGz } from "./harness.js";
 
 describe("Discovered Tickets", () => {
   it("files a Ticket an Agent creates while working on another as a Discovered Ticket: in Backlog, undelegated, with its source", async () => {
@@ -45,7 +45,7 @@ describe("Discovered Tickets", () => {
 });
 
 describe("A Discovered Ticket's source", () => {
-  it("is the Ticket the Agent names, which must be one of the same Project whose Claim it holds", async () => {
+  it("is the Ticket the Agent names, of any Project, whose Claim it holds", async () => {
     const { admin, adaId, claude, session } = await delegatedSetup(2);
     await admin.post("/api/projects", { name: "Ops", key: "OPS" });
     await admin.post("/api/projects/OPS/tickets", { title: "Deploy" });
@@ -59,8 +59,9 @@ describe("A Discovered Ticket's source", () => {
     expect((await agent.post("/api/projects/CRONK/tickets", { title: "Found" })).status).toBe(400);
     const named = await agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "cronk-2" });
     expect(named.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-2", title: "Ticket 2" });
-    // Its Claim on OPS-1 doesn't fit a CRONK Ticket, so naming it is refused.
-    expect((await agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "OPS-1" })).status).toBe(400);
+    // Its Claim on OPS-1 is one it holds too, so it can name it from another Project.
+    const across = await agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "OPS-1" });
+    expect(across.body.ticket.discovered.sourceTicket).toEqual({ key: "OPS-1", title: "Deploy" });
     await agent.delete("/api/tickets/CRONK-1/claim");
     expect((await agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "CRONK-1" })).status).toBe(409);
     // A User names no source.
@@ -86,6 +87,95 @@ describe("A Discovered Ticket's source", () => {
     const filed = await filing;
     expect(filed.status).toBe(201);
     expect(filed.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-2", title: "Ticket 2" });
+  });
+});
+
+describe("A Discovered Ticket filed in another Project than its source", () => {
+  it("records the Ticket whose Claim the Agent holds as its source, inferred or named", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const inferred = await agent.post("/api/projects/OPS/tickets", { title: "Deploy is flaky" });
+    const named = await agent.post("/api/projects/OPS/tickets", { title: "Logs are noisy", ticket: "CRONK-1" });
+
+    expect(inferred.status).toBe(201);
+    expect(inferred.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+    expect(named.status).toBe(201);
+    expect(named.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+    expect((await admin.get("/api/tickets/OPS-2")).body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+  });
+});
+
+describe("A source Ticket in another Project", () => {
+  it("is still refused for a Decision, a Suggestion and an Artifact, unlike for a Discovered Ticket", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const { document } = (await admin.post("/api/projects/OPS/documents", { title: "Runbook", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const ownProject = (res: { status: number; body: { error?: string } }) => res.status === 400 && /of its own Project/.test(res.body.error ?? "");
+    expect(ownProject(await agent.post("/api/projects/OPS/decisions", { title: "Deploy on Fridays", ticket: "CRONK-1" }))).toBe(true);
+    const suggested = await agent.post("/api/suggestions", { item: { kind: "document", id: document.id }, baseVersion: 1, content: { body: "v2" }, reasoning: "Better.", ticket: "CRONK-1" });
+    expect(ownProject(suggested)).toBe(true);
+    expect(ownProject(await agent.upload("/api/projects/OPS/artifacts?title=Page&ticket=CRONK-1", await tarGz({ "index.html": "<p>hi</p>" })))).toBe(true);
+    expect((await agent.post("/api/projects/OPS/tickets", { title: "Found", ticket: "CRONK-1" })).status).toBe(201);
+  });
+});
+
+describe("A Discovered Ticket's source in a Project its reader can't read", () => {
+  it("shows as null on the Ticket's reads and Inbox and Triage items, and in full to a reader who can read it", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/OPS/tickets", { title: "Found" });
+    const source = { key: "CRONK-1", title: "Ticket 1" };
+
+    expect((await admin.get("/api/tickets/OPS-1")).body.ticket.discovered.sourceTicket).toEqual(source);
+    const read = (await bob.get("/api/tickets/OPS-1")).body.ticket.discovered;
+    expect(read).toMatchObject({ agent: { name: "claude-laptop" }, sourceTicket: null });
+    expect((await bob.get("/api/projects/OPS/tickets")).body.tickets[0].discovered.sourceTicket).toBeNull();
+    expect(JSON.stringify((await bob.get("/api/tickets/OPS-1")).body)).not.toContain("CRONK-1");
+
+    await admin.patch("/api/tickets/OPS-1", { assigneeId: null });
+    const triage = (await bob.get("/api/triage")).body.items;
+    expect(triage[0].ticket).toMatchObject({ key: "OPS-1", discovered: { sourceTicket: null } });
+    expect((await admin.get("/api/triage")).body.items[0].ticket.discovered.sourceTicket).toEqual(source);
+
+    await bob.patch("/api/tickets/OPS-1", { assigneeId: bobId });
+    const inbox = (await bob.get("/api/inbox?kind=discovered")).body.items;
+    expect(inbox[0].ticket).toMatchObject({ key: "OPS-1", discovered: { sourceTicket: null } });
+    expect(JSON.stringify(inbox)).not.toContain("CRONK-1");
+  });
+});
+
+describe("Routing a Discovered Ticket filed in another Project than its source", () => {
+  it("goes to the source's Assignee, and waits in Triage once they can't see its Project", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const bobBot = await registerAgent(bob, "bob-bot");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId, delegateId: bobBot.agentId });
+    const agent = await startSession(cronk, bobBot.secret);
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const seen = await agent.post("/api/projects/OPS/tickets", { title: "Seen by Bob" });
+    expect(seen.body.ticket).toMatchObject({ assignee: { id: bobId }, discovered: { sourceTicket: { key: "CRONK-1" } } });
+
+    // An Agent files only where its Owner can write, and the source's Assignee is its Owner while it holds the Claim,
+    // so the Assignee loses sight of the Project only after filing; the Ticket then waits in Triage.
+    await admin.patch("/api/projects/OPS", { visibility: "private" });
+    expect(await waiting(admin, "/api/triage")).toEqual(["discovered OPS-1"]);
+    expect((await admin.get("/api/tickets/OPS-1")).body.ticket.assignee).toMatchObject({ id: bobId });
   });
 });
 
@@ -259,5 +349,45 @@ describe("A Report", () => {
       { key: "CRONK-3", title: "Stale cache", status: expect.objectContaining({ category: "backlog" }) },
       { key: "CRONK-4", title: "Slow query", status: expect.objectContaining({ category: "backlog" }) },
     ]);
+  });
+
+  it("lists those filed in other Projects to each reader who can read their Project", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/OPS", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/CRONK/tickets", { title: "Stale cache" });
+    await agent.post("/api/projects/OPS/tickets", { title: "Deploy is flaky" });
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed." });
+
+    const listed = async (reader: typeof admin) => (await reader.get("/api/tickets/CRONK-1/reports")).body.reports[0].discovered.map((t: any) => t.key);
+    expect(await listed(admin)).toEqual(["CRONK-2", "OPS-1"]);
+    expect(await listed(bob)).toEqual(["CRONK-2"]);
+  });
+
+  it("pushed live lists those filed in other Projects only to watchers who can read their Project", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/OPS", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/OPS/tickets", { title: "Deploy is flaky" });
+    const bobs = await bob.events("/api/tickets/CRONK-1/events");
+    const adas = await admin.events("/api/tickets/CRONK-1/events");
+    expect((await bobs.next())?.event).toBe("ready");
+    expect((await adas.next())?.event).toBe("ready");
+
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed." });
+
+    const pushed = async (stream: typeof bobs) => {
+      for (let event = await stream.next(); event; event = await stream.next()) if (event.event === "report") return event.data.report.discovered.map((t: any) => t.key);
+    };
+    expect(await pushed(adas)).toEqual(["OPS-1"]);
+    expect(await pushed(bobs)).toEqual([]);
+    bobs.close();
+    adas.close();
   });
 });

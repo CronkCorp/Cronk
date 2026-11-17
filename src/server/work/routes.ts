@@ -67,7 +67,7 @@ import {
 import { findAgent } from "../identity/agents.js";
 import { clearClaim, isOwnDiscoveryAwaitingDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
-import { sourceClaimOf } from "../coordination/sources.js";
+import { discoverySourceClaimOf } from "../coordination/sources.js";
 import { shownRelations, ticketDetail, ticketDetailSchema, ticketFor, visibleChanges } from "./ticket-reads.js";
 import { assigneesWaitingOn, waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
@@ -539,7 +539,7 @@ export function workRoutes(ctx: AppContext) {
                 maxLength: 30,
                 description:
                   "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds, which the Discovered Ticket came from; " +
-                  "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It must be of the same Project. " +
+                  "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It may be of any Project; only those who can read that Project see it as the source. " +
                   "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
               },
               blocks: {
@@ -579,7 +579,7 @@ export function workRoutes(ctx: AppContext) {
           let ticket: Ticket;
           const blocked: Ticket[] = [];
           if (actor.kind === "agent") {
-            const source = await sourceClaimOf(tx, actor, project.id, request.body.ticket, now, "a Discovered Ticket");
+            const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now);
             const sourceTicket = source && (await findTicketsByIds(tx, [source.ticketId]))[0]!;
             const created = await insertTicket(tx, {
               ...input,

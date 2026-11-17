@@ -65,6 +65,18 @@ export const bearerToken = (request: FastifyRequest): string | undefined =>
  * stream of a Ticket re-checks who is watching: being told of others' changes isn't the Agent's own call.
  */
 export async function requireActor(ctx: AppContext, request: FastifyRequest, opts: { refreshSession?: boolean; outsideSession?: boolean } = {}): Promise<Actor> {
+  const actor = await resolveActor(ctx, request, opts);
+  actors.set(request, actor);
+  return actor;
+}
+
+/** The Actor `requireActor` found making each request, for shaping its answer to what they may read. */
+const actors = new WeakMap<FastifyRequest, Actor>();
+
+/** Who `requireActor` found making the request, if it was called for it. */
+export const requestActor = (request: FastifyRequest): Actor | undefined => actors.get(request);
+
+async function resolveActor(ctx: AppContext, request: FastifyRequest, opts: { refreshSession?: boolean; outsideSession?: boolean }): Promise<Actor> {
   const bearer = bearerToken(request);
   if (bearer) {
     const found = await agentForToken(ctx.db, bearer);
