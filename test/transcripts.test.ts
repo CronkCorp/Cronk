@@ -1095,13 +1095,12 @@ describe("Upgrading an installation", () => {
     expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 2 }]);
   });
 
-  it("indexes the changes Agent Sessions already made, and who may read each Transcript stays the same", async () => {
+  it("keeps who may read each Transcript the same once the changes Agent Sessions made are indexed", async () => {
     const { cronk, admin, bob, carol, handbook, id } = await transcriptAcrossProjects();
     await cronk.undoMigration(
       "0046_session_record_indexes",
-      ["ticket_changes", "activities", "comments", "document_versions", "attachments", "term_versions", "decision_versions", "artifact_versions"]
-        .map((table) => `DROP INDEX ${table}_actor_session;`)
-        .join(" "),
+      `DROP INDEX ticket_changes_actor_session, activities_actor_session, comments_actor_session, document_versions_actor_session,
+         attachments_actor_session, term_versions_actor_session, decision_versions_actor_session, artifact_versions_actor_session`,
     );
     await cronk.restart();
     const items = { tickets: [{ key: "CRONK-1" }, { key: "SECRET-1" }], documents: [{ id: handbook, title: "Handbook" }] };
