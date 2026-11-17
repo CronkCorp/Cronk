@@ -7,11 +7,11 @@ import { transaction, type Queryable } from "../db/database.js";
 import { projectFor, readablePlaces, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "../knowledge/protection.js";
 import { ARCHIVE_TYPES, archiveBody, unpackFolder, unwrapFolder, bytesOf, type Folder } from "../portability/archive.js";
-import { answer, artifactIdParam, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
+import { answer, artifactIdParam, embeds, errors, holding, listing, pathParams, projectKeyParam, protectionBody, protectionHistoryAnswer, ref } from "../schemas.js";
 import { findProjectById } from "../work/projects.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { cronkOrigin, frameUrl } from "./artifact-host.js";
-import { listEmbeddedIn, recordEmbedsNaming } from "./artifact-embeds.js";
+import { embedsIn, listEmbeddedIn, recordEmbedsNaming } from "./artifact-embeds.js";
 import { formatBytes } from "./sizes.js";
 import { EXTRA_ORIGIN_USES } from "../../shared/values.js";
 import { parseExtraOrigins, type ExtraOrigin } from "./origins.js";
@@ -254,6 +254,30 @@ export function artifactRoutes(ctx: AppContext) {
       const artifacts = await listArtifacts(ctx.db, { workspaceId: actingUser(actor).workspaceId, projectId: null });
       return { artifacts: await Promise.all(artifacts.map((a) => shown(request, a))) };
     });
+
+    // Answers for any Markdown, but what it answers is which Artifacts embed, so it sits with them.
+    app.post<{ Body: { body: string } }>(
+      "/api/markdown/embeds",
+      {
+        schema: {
+          description:
+            "What a draft Markdown body would embed, as saving it as a Document, Report or Comment would answer in `embeds`, for an editor's preview. " +
+            "Records nothing.",
+          body: {
+            type: "object",
+            required: ["body"],
+            additionalProperties: false,
+            properties: { body: { type: "string", maxLength: 1_000_000, description: "The draft Markdown." } },
+          },
+          response: { 200: answer("The Artifacts the body would embed", { type: "object", required: ["embeds"], properties: { embeds: embeds("the body") } }), ...errors(400, 401, 403, 410) },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        await requireWorkspaceAccess(ctx.db, actor, "read");
+        return { embeds: await embedsIn(ctx.db, actingUser(actor).workspaceId, request.body.body) };
+      },
+    );
 
     app.get<{ Params: { id: string } }>(
       "/api/artifacts/:id",
