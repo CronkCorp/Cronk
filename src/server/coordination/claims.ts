@@ -273,6 +273,15 @@ export async function isOwnDiscoveryAwaitingDelegation(db: Queryable, agent: Age
 }
 
 /**
+ * Whether `ticket` will never again be the Agent's own Discovered Ticket awaiting delegation, read without locking it: it isn't
+ * the Agent's Discovered Ticket, or a User delegated it once, neither of which changes back. A finished one may yet be moved
+ * back out of its finished Status, so it may await delegation again and isn't counted.
+ */
+export async function neverAgainOwnDiscoveryAwaitingDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
+  return ticket.discovered?.agent.id !== agent.agent.id || (await wasEverDelegated(db, ticket.id));
+}
+
+/**
  * Refuses an Agent's change to a Ticket's fields, linked Documents or Attachments as `requireClaimHolder`
  * does, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet. Pass a Ticket
  * locked with `forUpdate`, so the Claim or Delegation can't change before the change commits.
