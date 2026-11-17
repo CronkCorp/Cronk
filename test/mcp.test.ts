@@ -1339,8 +1339,8 @@ describe("the transcripts tool", () => {
     expect(transcripts.inputSchema.properties?.action).toMatchObject({ enum: ["get", "list", "from"] });
     expect(transcripts.description).toMatch(/search tool/);
     expect(transcripts.description).toMatch(/`from`: the Transcripts a Ticket, Document \(or Report\), Term, Decision or Artifact came from/);
-    expect(transcripts.inputSchema.properties?.kind).toMatchObject({ enum: expect.arrayContaining(["artifact"]) });
-    expect(transcripts.inputSchema.properties?.itemId).toMatchObject({ description: "The Document's, Report's, Term's or Artifact's id (from)" });
+    expect(transcripts.inputSchema.properties?.kind).toMatchObject({ enum: expect.arrayContaining(["artifact"]), description: expect.stringMatching(/Decision or Artifact/) });
+    expect(transcripts.inputSchema.properties?.itemId).toMatchObject({ description: expect.stringMatching(/Artifact's id/) });
     expect(tools.find((t) => t.name === "search")!.description).toMatch(/transcripts tool's get action[\s\S]*turn/);
   });
 });
