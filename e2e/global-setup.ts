@@ -22,8 +22,10 @@ export default async function globalSetup() {
   const container = await new PostgreSqlContainer("postgres:17-alpine").start();
   await mkdir("test-results", { recursive: true });
   const log = createWriteStream(SERVER_LOG);
-  const start = () =>
-    spawn(process.execPath, ["--import", "tsx", "src/server/main.ts"], {
+  // The log is evidence, not a reason to fail the run: losing it only goes to the console.
+  log.on("error", (err) => console.error(`Could not write ${SERVER_LOG}: ${err.message}`));
+  const start = (): Server => {
+    const running = spawn(process.execPath, ["--import", "tsx", "src/server/main.ts"], {
       env: {
         ...process.env,
         DATABASE_URL: container.getConnectionUri(),
@@ -33,50 +35,63 @@ export default async function globalSetup() {
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
-
-  let stopping = false;
-  let server = start();
-  const watch = (running: ChildProcess) => {
     running.stdout!.pipe(log, { end: false });
     running.stderr!.pipe(log, { end: false });
     // Errors also reach the console, so a run that fails shows why the server did.
     running.stderr!.pipe(process.stderr, { end: false });
+    // "close" comes once the process has exited and its output has all reached the log.
+    const closed = new Promise<void>((resolve) => running.once("close", () => resolve()));
+    return { process: running, closed };
   };
-  watch(server);
 
+  let stopping = false;
+  let server = start();
   let exited = false;
-  server.once("exit", () => (exited = true));
+  void server.closed.then(() => (exited = true));
   const healthy = await waitFor(`http://${E2E_HOST}:${E2E_PORT}/api/health`, 30_000, () => exited);
   if (!healthy) {
-    server.kill();
+    await stop(server);
+    log.end();
     await container.stop();
     throw new Error(`${exited ? "Cronk exited during startup" : "Cronk did not become healthy within 30 seconds"}; see ${SERVER_LOG}`);
   }
 
   let restarts = 0;
-  const restartOnExit = (running: ChildProcess) =>
-    running.once("exit", (code, signal) => {
-      if (stopping || restarts++ === MAX_RESTARTS) return;
-      console.error(
-        `\nCronk exited during the smoke tests (${signal ?? `code ${code}`}); the test running then fails. ` +
-          `Starting it again on the same database. Its log is in ${SERVER_LOG}.\n`,
-      );
+  const restartOnExit = (running: Server) =>
+    running.process.once("exit", async (code, signal) => {
+      if (stopping) return;
+      const exit = `Cronk exited during the smoke tests (${signal ?? `code ${code}`}); the test running then fails. Its log is in ${SERVER_LOG}.`;
+      if (restarts++ === MAX_RESTARTS) return console.error(`\n${exit} It has exited ${restarts} times, so it is not started again.\n`);
+      // Another process may have taken the port meanwhile; the tests must not go on against it.
+      const free = await assertPortFree(E2E_PORT).then(() => true, (err: Error) => (console.error(`\n${exit} ${err.message}\n`), false));
+      if (!free || stopping) return;
+      console.error(`\n${exit} Starting it again on the same database.\n`);
       server = start();
-      watch(server);
       restartOnExit(server);
     });
   restartOnExit(server);
 
   return async () => {
     stopping = true;
-    if (server.exitCode === null && server.signalCode === null) {
-      const stopped = new Promise((resolve) => server.once("exit", resolve));
-      server.kill("SIGTERM");
-      await stopped;
-    }
+    await stop(server);
     log.end();
     await container.stop();
   };
+}
+
+interface Server {
+  process: ChildProcess;
+  /** Settles once the process has exited and its output has all been read. */
+  closed: Promise<void>;
+}
+
+/** Stops `server` (if it still runs) with SIGTERM, or SIGKILL if it has not gone within 10 seconds, and waits until it has. */
+async function stop(server: Server): Promise<void> {
+  const running = server.process.exitCode === null && server.process.signalCode === null;
+  if (running) server.process.kill("SIGTERM");
+  const killing = running ? setTimeout(() => server.process.kill("SIGKILL"), 10_000) : undefined;
+  await server.closed;
+  clearTimeout(killing);
 }
 
 /**
