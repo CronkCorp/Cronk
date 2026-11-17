@@ -2,7 +2,7 @@ import type { Actor } from "../actor.js";
 import { actingUser } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { readablePlaces, type Readable } from "../identity/access.js";
-import { transcriptChangedInSql, transcriptReadableSql } from "./transcripts.js";
+import { readerParams, transcriptChangedInSql, transcriptReadableSql } from "./transcripts.js";
 import { titleOf, turnsOf } from "../../shared/transcript-turns.js";
 
 /**
@@ -61,9 +61,7 @@ export async function searchTranscripts(
     [
       input.query,
       actingUser(actor).workspaceId,
-      readable.projectIds,
-      readable.workspaceId,
-      actor.kind === "user" ? actor.user.id : null,
+      ...readerParams(actor, readable),
       input.projectIds ?? null,
       input.limit,
     ],

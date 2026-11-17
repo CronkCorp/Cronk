@@ -906,14 +906,15 @@ describe("Searching Transcripts", () => {
 const QUIET = { lapseCheckMs: 3_600_000 };
 
 describe("Who may read Transcripts, decided for many at once", () => {
+  /** Whether `client` reads the Transcript `id` and finds it in search. */
+  const finds = async (client: Client, id: string) => ({
+    read: (await client.get(`/api/transcripts/${id}`)).status === 200,
+    search: ((await client.get("/api/search?q=done&kind=transcript")).body.results as { transcriptId: string }[]).some((r) => r.transcriptId === id),
+  });
   /** Whether `client` reads the Transcript `id`, finds it in search and sees it among the Transcripts `ticket` came from. */
   const views = async (client: Client, id: string, ticket: string) => {
     const links = await client.get(`/api/tickets/${ticket}/transcripts`);
-    return {
-      read: (await client.get(`/api/transcripts/${id}`)).status === 200,
-      search: ((await client.get("/api/search?q=done&kind=transcript")).body.results as { transcriptId: string }[]).some((r) => r.transcriptId === id),
-      links: links.status === 200 && (links.body.transcripts as { id: string }[]).some((t) => t.id === id),
-    };
+    return { ...(await finds(client, id)), links: links.status === 200 && (links.body.transcripts as { id: string }[]).some((t) => t.id === id) };
   };
   const seen = { read: true, search: true, links: true };
   const unseen = { read: false, search: false, links: false };
@@ -944,20 +945,16 @@ describe("Who may read Transcripts, decided for many at once", () => {
     expect(await views(bob, id, "SECRET-1")).toEqual(seen);
   });
 
-  it("is found by its Owner only once nothing its Sessions changed is left", async () => {
+  it("is found only by its Owner once nothing its Sessions changed is left", async () => {
     const { cronk, admin, bob, claude } = await transcriptAcrossProjects();
     const agent = await startSession(cronk, claude.secret);
     const notes = (await agent.post("/api/workspace/documents", { title: "Notes", body: "Kept" })).body.document.id;
     const id = (await upload(cronk.client(claude.secret), "chat-2", chat("Note it", agent.sessionId))).body.transcript.id;
-    const finds = async (client: Client) => ({
-      read: (await client.get(`/api/transcripts/${id}`)).status === 200,
-      search: ((await client.get("/api/search?q=done&kind=transcript")).body.results as { transcriptId: string }[]).some((r) => r.transcriptId === id),
-    });
-    expect(await finds(admin)).toEqual({ read: true, search: true });
+    expect(await finds(admin, id)).toEqual({ read: true, search: true });
 
     expect((await admin.delete(`/api/documents/${notes}?baseVersion=1`)).status).toBe(204);
-    expect(await finds(admin)).toEqual({ read: false, search: false });
-    expect(await finds(bob)).toEqual({ read: true, search: true });
+    expect(await finds(admin, id)).toEqual({ read: false, search: false });
+    expect(await finds(bob, id)).toEqual({ read: true, search: true });
   });
 
   it("lets search find them in a fixed number of queries, however many match", async () => {

@@ -1,6 +1,6 @@
 import { actingUser, type Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
-import { readablePlaces } from "../identity/access.js";
+import { readablePlaces, type Readable } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
@@ -160,7 +160,7 @@ const RECORDS = `
  * the item's `project_id`, NULL for the Workspace outside any Project, a Report's being its Ticket's. Derived from the current rows,
  * so an item that changes place counts where it lies now. The places `changedItems` gives, for many Transcripts at once.
  */
-export const transcriptPlacesSql = (tr: string) => `
+const transcriptPlacesSql = (tr: string) => `
   SELECT place.project_id
   FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
   LEFT JOIN tickets t ON t.id = r.ticket_id
@@ -187,6 +187,13 @@ export const transcriptReadableSql = (tr: string, ownerId: string, projectIds: s
   `(${ownerId} = ${userId} OR coalesce((
      SELECT bool_and(coalesce(p.project_id = ANY(${projectIds}), ${workspaceId} IS NOT NULL)) FROM (${transcriptPlacesSql(tr)}) p
    ), false))`;
+
+/** The parameters `transcriptReadableSql` takes for `actor` reading where `readable` says: its Projects, its Workspace, its User. */
+export const readerParams = (actor: Actor, readable: Readable): [string[], string | null, string | null] => [
+  readable.projectIds,
+  readable.workspaceId,
+  actor.kind === "user" ? actor.user.id : null,
+];
 
 /** SQL for whether the Sessions of the Transcript aliased `tr` changed something in one of the Projects `projectIds` (a uuid[]). */
 export const transcriptChangedInSql = (tr: string, projectIds: string) =>
@@ -502,7 +509,7 @@ export async function transcriptLinks(db: Queryable, actor: Actor, item: LinkedI
        SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
        AND ${transcriptReadableSql("tr", "a.owner_id", "$3::uuid[]", "$4::uuid", "$5::uuid")}
      ORDER BY ${ORDERS.newest}`,
-    [actingUser(actor).workspaceId, item.id, readable.projectIds, readable.workspaceId, actor.kind === "user" ? actor.user.id : null],
+    [actingUser(actor).workspaceId, item.id, ...readerParams(actor, readable)],
   );
   // Found as readTranscript finds each item's turn.
   const named = item.key ? [item.key, item.id] : [item.id];
