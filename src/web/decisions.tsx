@@ -205,7 +205,11 @@ function DecisionPage(props: { decisionKey: string; onChanged: () => void }) {
           <DecisionView
             decision={d}
             startEditing={editing}
-            onReload={reload}
+            onReload={() => {
+              // The register row above it shows the title and status too.
+              reload();
+              props.onChanged();
+            }}
             onChanged={(changed) => {
               setDecision(changed);
               props.onChanged();
