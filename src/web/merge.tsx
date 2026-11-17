@@ -406,10 +406,10 @@ export function VersionDiff(props: { before: { title?: string; body: string; fie
 }
 
 /**
- * Watches for a newer Version than the one shown, as a record's live stream tells it. Feed the
+ * Watches for a newer Version than the one shown, as a Document's or Decision's live stream tells it. Feed the
  * stream's `version` events to `saw`, and call `catchUp` when the stream (re)connects to fetch the
- * `current` record for what was saved meanwhile. `newer` is that Version while it is ahead of
- * `version`; the record is reloaded at once unless the page is `editing`, so a read-only page
+ * `current` one for what was saved meanwhile. `newer` is that Version while it is ahead of
+ * `version`; it is reloaded at once unless the page is `editing`, so a read-only page
  * follows along and an edit keeps its draft.
  */
 export function useNewerVersion(options: { version: number; editing: boolean; onReload: () => void; current: () => Promise<{ version: number }> }): {
@@ -422,7 +422,7 @@ export function useNewerVersion(options: { version: number; editing: boolean; on
   current.current = options.current;
   const saw = useCallback((version: number) => setLatest((v) => Math.max(v, version)), []);
   const catchUp = useCallback(() => void current.current().then((record) => saw(record.version), () => {}), [saw]);
-  // Someone else's Version is shown at once, unless it would pull the record out from under an edit.
+  // Someone else's Version is shown at once, unless it would pull the page out from under an edit.
   const newer = latest > options.version ? latest : undefined;
   useEffect(() => {
     if (newer !== undefined && !options.editing) options.onReload();
@@ -431,9 +431,9 @@ export function useNewerVersion(options: { version: number; editing: boolean; on
 }
 
 /**
- * Warns, while a record is being edited, that someone saved a newer `version` meanwhile: who, and
+ * Warns, while a Document or Decision is being edited, that someone saved a newer `version` meanwhile: who, and
  * what they changed since the Version the edit `started` from. Saving then merges it in. `of` names
- * the record, `load` fetches one of its Versions, and `show` gives a Version as the diff shows it.
+ * it, `load` fetches one of its Versions, and `show` gives a Version as the diff shows it.
  */
 export function SavedMeanwhile<V extends { number: number; actor: ActorLike }>(props: {
   of: string;
