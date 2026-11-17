@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actingUser } from "../actor.js";
 import { HttpError, requireActor, requireUser, type AppContext } from "../context.js";
-import { snapshot, transaction, type Queryable } from "../db/database.js";
+import { readConsistently, transaction, type Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireWorkspaceAccess } from "../identity/access.js";
 import { termsChanged } from "../knowledge/terms.js";
 import { answer, errors, listing, pathParams, projectKeyParam, ref } from "../schemas.js";
@@ -137,7 +137,7 @@ function decisionExportRoutes(app: FastifyInstance, ctx: AppContext) {
  */
 async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, build: (tx: Queryable, now: Date) => Promise<StoredFolder>) {
   const now = ctx.clock.now();
-  const folder = await snapshot(ctx.db, (tx) => build(tx, now));
+  const folder = await readConsistently(ctx.db, (tx) => build(tx, now));
   await checkStoredFiles(folder, ctx.files).catch((err: unknown) => {
     // A file the records name but the store lacks, or holds at another size, is for an operator to look into; other errors are logged as any are.
     if (err instanceof HttpError) reply.log.error(err);
