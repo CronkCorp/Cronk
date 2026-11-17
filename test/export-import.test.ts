@@ -307,6 +307,12 @@ async function snapshot(admin: Client): Promise<unknown> {
   return JSON.parse(JSON.stringify(raw).replace(UUID, (id) => ids.get(id) ?? (ids.set(id, `#${ids.size + 1}`), `#${ids.size}`)));
 }
 
+/**
+ * The options of a test built on `busyWorkspace`. Making it takes some 150 requests, a few seconds alone but several
+ * times that while the full suite runs on a slower machine, past the default 30 s (#335).
+ */
+const BUSY_WORKSPACE_TEST = { timeout: 120_000 };
+
 /** A Workspace with some of everything in it, made by Ada, Grace and Ada's Agent claude-laptop. */
 async function busyWorkspace() {
   const { cronk, admin, session, claude } = await delegatedSetup(3);
@@ -483,7 +489,7 @@ async function busyWorkspace() {
 }
 
 describe("importing an export", () => {
-  it("recreates the same data in a fresh installation, Versions and all", async () => {
+  it("recreates the same data in a fresh installation, Versions and all", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const exported = await before.admin.download("/api/export");
     expect(exported.status).toBe(200);
@@ -524,7 +530,7 @@ describe("importing an export", () => {
 });
 
 describe("importing a Project export", () => {
-  it("adds the Project, matching Users by email and Agents by Owner and name", async () => {
+  it("adds the Project, matching Users by email and Agents by Owner and name", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const exported = await before.admin.download("/api/projects/CRONK/export");
     const [exportedLaptop] = (await before.admin.get("/api/agents?all=true")).body.agents;
@@ -595,7 +601,7 @@ describe("importing a Project export", () => {
     expect((await elsewhere.admin.get("/api/users")).body.users).toHaveLength(1);
   });
 
-  it("is refused when the key is taken, and a Workspace export is refused once the Workspace holds anything", async () => {
+  it("is refused when the key is taken, and a Workspace export is refused once the Workspace holds anything", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const project = (await before.admin.download("/api/projects/CRONK/export")).body;
     const workspace = (await before.admin.download("/api/export")).body;
@@ -611,7 +617,7 @@ describe("importing a Project export", () => {
     expect((await admin.get("/api/users")).body.users).toHaveLength(1);
   });
 
-  it("is only for Admins, and only for Cronk exports", async () => {
+  it("is only for Admins, and only for Cronk exports", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const project = (await before.admin.download("/api/projects/CRONK/export")).body;
 
@@ -699,7 +705,7 @@ describe("Agent and Agent Session ids across an import", () => {
 });
 
 describe("a Ticket's history in an export", () => {
-  it("is refused when a change in it isn't one Cronk records", async () => {
+  it("is refused when a change in it isn't one Cronk records", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
     const path = "projects/CRONK/tickets/CRONK-1.history.md";
@@ -722,7 +728,7 @@ describe("a Ticket's history in an export", () => {
 });
 
 describe("an export without Versions", () => {
-  it("imports each Document and Report at a single Version holding what it says now, by whoever first wrote it", async () => {
+  it("imports each Document and Report at a single Version holding what it says now, by whoever first wrote it", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const exported = await before.admin.download("/api/export?versions=false");
     const files = await untarGz(exported.body);
@@ -793,7 +799,7 @@ describe("Discovered Tickets in an export", () => {
 });
 
 describe("Terms in an export", () => {
-  it("are written as GLOSSARY.md per place, and beside it a terms.md holding them whole", async () => {
+  it("are written as GLOSSARY.md per place, and beside it a terms.md holding them whole", BUSY_WORKSPACE_TEST, async () => {
     const { admin } = await busyWorkspace();
     const files = await untarGz((await admin.download("/api/export")).body);
 
@@ -821,7 +827,7 @@ describe("Terms in an export", () => {
     ]);
   });
 
-  it("downloads a place's GLOSSARY.md on its own", async () => {
+  it("downloads a place's GLOSSARY.md on its own", BUSY_WORKSPACE_TEST, async () => {
     const { admin } = await busyWorkspace();
 
     const res = await admin.download("/api/projects/CRONK/terms/glossary");
@@ -832,7 +838,7 @@ describe("Terms in an export", () => {
     expect((await admin.download("/api/workspace/terms/glossary")).body.toString()).toMatch(/^# Acme Labs glossary/);
   });
 
-  it("without Versions import each Term at a single Version holding what it says now", async () => {
+  it("without Versions import each Term at a single Version holding what it says now", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const exported = await before.admin.download("/api/export?versions=false");
 
@@ -847,7 +853,7 @@ describe("Terms in an export", () => {
 });
 
 describe("Suggestions in an export", () => {
-  it("are written in the frontmatter of the items they belong to", async () => {
+  it("are written in the frontmatter of the items they belong to", BUSY_WORKSPACE_TEST, async () => {
     const { admin, suggestions } = await busyWorkspace();
     const files = await untarGz((await admin.download("/api/export")).body);
 
@@ -956,7 +962,7 @@ describe("Suggestions of new Documents in an export", () => {
 });
 
 describe("Protected marks in an export", () => {
-  it("are written in the frontmatter of the items they belong to, with who marked and unmarked them", async () => {
+  it("are written in the frontmatter of the items they belong to, with who marked and unmarked them", BUSY_WORKSPACE_TEST, async () => {
     const { admin } = await busyWorkspace();
     const files = await untarGz((await admin.download("/api/export")).body);
     const ada = "ada@example.com";
@@ -972,7 +978,7 @@ describe("Protected marks in an export", () => {
     expect(accepted).toMatchObject({ protected: true, protection: [{ protected: true, at: "2026-01-01T09:07:00.000Z", by: "grace@example.com" }] });
   });
 
-  it("leave an accepted Decision Protected when an older export, from before them, says nothing of them", async () => {
+  it("leave an accepted Decision Protected when an older export, from before them, says nothing of them", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
     for (const path of Object.keys(files).filter((p) => p.includes("/docs/adr/") && !p.includes(".versions/"))) {
@@ -993,7 +999,7 @@ describe("Protected marks in an export", () => {
 });
 
 describe("an export taken apart and archived again", () => {
-  it("imports with its folder around it, as `tar czf` of the extracted folder makes", async () => {
+  it("imports with its folder around it, as `tar czf` of the extracted folder makes", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
     files["projects/CRONK/tickets/CRONK-2.md"] = files["projects/CRONK/tickets/CRONK-2.md"]!.replace("title: Ticket 2", "title: Edited by hand");
@@ -1017,7 +1023,7 @@ function editedExport(files: Record<string, string>, path: string, edit: (data: 
 }
 
 describe("an export edited by hand", () => {
-  it("is refused when it says what Cronk can't hold, naming the file", async () => {
+  it("is refused when it says what Cronk can't hold, naming the file", BUSY_WORKSPACE_TEST, async () => {
     const before = await busyWorkspace();
     const files = await untarGz((await before.admin.download("/api/export")).body);
     const edited = (path: string, edit: (data: any) => void, rename?: string) => editedExport(files, path, edit, rename);
