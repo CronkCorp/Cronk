@@ -187,7 +187,7 @@ describe("Scrubbing secrets on upload", () => {
     // What each was stays readable, and so do the Agent Session ids that link it.
     expect(read.markdown).toContain("- [scrubbed: GitHub token]\n");
     expect(read.markdown).toContain("- [scrubbed: AWS access key]\n");
-    expect(read.markdown).toContain("- Cronk: [scrubbed: token]\n");
+    expect(read.markdown).toContain("- Cronk: [scrubbed: Cronk Token]\n");
     expect(read.markdown).toContain(`curl -H "Authorization: Bearer [scrubbed]" -H 'authorization: Basic [scrubbed]' $CRONK/api/me`);
     expect(read.markdown).toContain('{ "Authorization": "token [scrubbed]" }');
     expect(read.markdown).toContain("```\n[scrubbed: private key]\n```");
@@ -224,6 +224,56 @@ describe("Scrubbing secrets on upload", () => {
     const uploaded = await upload(cronk.client(claude.secret), "chat-1", untouched);
     expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
     expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown).toBe(untouched);
+  });
+
+  it("scrubs Cronk's own secrets by their prefix, whatever their random part, and leaves the result alone when scrubbed again", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    const noDigit = "AbCdEfGhIjKlMnOpQrStUvWxYz-_abcdefghijklmno";
+    const allDigits = "1234567890123456789012345678901234567890123";
+    const secrets =
+      "\n## User\n\n" +
+      `- agent: ${claude.secret}\n` +
+      `- agent with no digit: cronk_at_${noDigit}\n` +
+      `- sign-in: cookie cronk_sign_in=cronk_si_${allDigits};\n` +
+      `- invitation: https://cronk.example/invitations/cronk_inv_${noDigit}\n` +
+      `- reset: "cronk_pr_${noDigit}"\n` +
+      `- too short to be one: cronk_at_${noDigit.slice(1)}\n`;
+    const markdown = chat("Fix CRONK-1", agent.sessionId) + secrets;
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", markdown);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const scrubbed = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown;
+    expect(scrubbed).toBe(
+      chat("Fix CRONK-1", agent.sessionId) +
+        "\n## User\n\n" +
+        "- agent: [scrubbed: Cronk Token]\n" +
+        "- agent with no digit: [scrubbed: Cronk Token]\n" +
+        "- sign-in: cookie cronk_sign_in=[scrubbed: Cronk sign-in];\n" +
+        "- invitation: https://cronk.example/invitations/[scrubbed: Cronk Invitation]\n" +
+        '- reset: "[scrubbed: Cronk Password reset link]"\n' +
+        `- too short to be one: cronk_at_${noDigit.slice(1)}\n`,
+    );
+
+    // Scrubbing the scrubbed text changes nothing.
+    const again = await upload(cronk.client(claude.secret), "chat-2", scrubbed);
+    expect((await admin.get(`/api/transcripts/${again.body.transcript.id}`)).body.transcript.markdown).toBe(scrubbed);
+  });
+
+  it("still scrubs an Agent Token issued before tokens had a prefix", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    const bare = await cronk.issuedBeforePrefixes(claude.secret);
+    // A bare token is matched by its random look, so this one is made to mix digits, capitals and small letters.
+    const shown = "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V";
+    const uploaded = await upload(cronk.client(bare), "chat-1", chat("Hi", agent.sessionId) + `\nOld token: ${shown}\n`);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown;
+    expect(read).toBe(chat("Hi", agent.sessionId) + "\nOld token: [scrubbed: token]\n");
   });
 
   it("counts the scrubbed text against the Workspace's limit", async () => {
