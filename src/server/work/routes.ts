@@ -65,7 +65,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, isOwnDiscoveryAwaitingDelegation, neverAgainOwnDiscoveryAwaitingDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
+import { clearClaim, isOwnDiscoveryAwaitingDelegation, mayAwaitOwnDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { discoverySourceClaimOf } from "../coordination/sources.js";
 import { shownRelations, ticketDetail, ticketDetailSchema, ticketFor, visibleChanges } from "./ticket-reads.js";
@@ -1113,15 +1113,17 @@ async function relationEnds(
   const unlocked = await ticketFor(tx, actor, key, "write");
   const other = await otherTicketFor(tx, actor, otherKey);
   if (other.id === unlocked.id) throw new HttpError(400, "A Ticket can't be related to itself");
-  // A User adding a Relation needs Write in the other Project too, and so does an Agent unless it adds a block from its own
-  // Discovered Ticket awaiting delegation. Whether it does is settled under the lock, but a Ticket that will never again await
-  // delegation settles it here. This 403 comes before an Agent's 409 for a missing Claim, which only the lock can tell.
-  const otherWritable =
-    !opts.removing &&
-    (actor.kind === "user" || kind !== "blocks" || (await neverAgainOwnDiscoveryAwaitingDelegation(tx, actor, unlocked)));
-  if (otherWritable) await ticketFor(tx, actor, otherKey, "write");
+  // A User adding a Relation needs Write in the other Project too; an Agent's need depends on its Ticket, read under the lock.
+  const userAdding = actor.kind === "user" && !opts.removing;
+  if (userAdding) await ticketFor(tx, actor, otherKey, "write");
   // Before an Agent's Ticket is locked, as the block's row then waits on both Tickets (see lockBlocking).
   const locking = isBlocking(kind) && !opts.removing;
+  // An Agent's blocking Relation that can never be a block from its own Discovered Ticket awaiting delegation needs Write on the
+  // other Ticket whatever the lock finds, so it is refused before waiting for the lock, ahead of a 409 for a missing Claim.
+  // Checked again under the lock below, as access may change while waiting.
+  if (locking && actor.kind === "agent" && (kind !== "blocks" || !(await mayAwaitOwnDelegation(tx, actor, unlocked)))) {
+    await ticketFor(tx, actor, otherKey, "write");
+  }
   if (locking) await lockBlocking(tx, actingUser(actor).workspaceId);
   // Read again once the lock is held, as the Ticket may have changed while waiting for it.
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
@@ -1135,7 +1137,7 @@ async function relationEnds(
   }
   // A User removes a block from a Discovered Ticket with Write on the blocked Ticket alone, as the Agent added it reading that one only.
   const removingDiscoveredBlock = opts.removing && actor.kind === "user" && kind === "blocked_by" && (await isDiscoveredBlock(tx, other.id, ticket.id));
-  if (!otherWritable && !discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
+  if (!userAdding && !discoveredBlock && !removingDiscoveredBlock) await ticketFor(tx, actor, otherKey, "write");
   return { ticket, other, discoveredBlock };
 }
 

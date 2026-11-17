@@ -267,18 +267,17 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
  * the Delegate's to work on under a Claim, even if the Delegation is later taken away.
  */
 export async function isOwnDiscoveryAwaitingDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
-  if (ticket.discovered?.agent.id !== agent.agent.id || ticket.delegate !== null) return false;
-  if (FINISHED_CATEGORIES.includes(ticket.status.category)) return false;
-  return !(await wasEverDelegated(db, ticket.id));
+  if (ticket.delegate !== null || FINISHED_CATEGORIES.includes(ticket.status.category)) return false;
+  return mayAwaitOwnDelegation(db, agent, ticket);
 }
 
 /**
- * Whether `ticket` will never again be the Agent's own Discovered Ticket awaiting delegation, read without locking it: it isn't
- * the Agent's Discovered Ticket, or a User delegated it once, neither of which changes back. A finished one may yet be moved
- * back out of its finished Status, so it may await delegation again and isn't counted.
+ * Whether `ticket` is, or may yet become, the Agent's own Discovered Ticket awaiting delegation: it is the Agent's Discovered
+ * Ticket and no User ever delegated it. Once false it stays false, as neither changes back, so it may be read without
+ * locking the Ticket. A finished one may be moved back out of its finished Status, and so await delegation again.
  */
-export async function neverAgainOwnDiscoveryAwaitingDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
-  return ticket.discovered?.agent.id !== agent.agent.id || (await wasEverDelegated(db, ticket.id));
+export async function mayAwaitOwnDelegation(db: Queryable, agent: AgentActor, ticket: Ticket): Promise<boolean> {
+  return ticket.discovered?.agent.id === agent.agent.id && !(await wasEverDelegated(db, ticket.id));
 }
 
 /**
