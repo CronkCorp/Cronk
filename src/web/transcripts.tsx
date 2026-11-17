@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { turnsOf } from "../shared/transcript-turns.js";
+import type { LinkedCollection } from "../shared/from-transcript.js";
 import { api, type Transcript, type TranscriptLink } from "./api.js";
 import { Actor, agentActor, userActor } from "./components/actor.js";
 import { KindLabel } from "./components/tags.js";
@@ -155,7 +156,7 @@ export function FromTranscripts(props: { links: TranscriptLink[]; heading: "h3" 
 }
 
 /** FromTranscripts for an item the page doesn't already have the links of: a Document, Term, Decision or Artifact. */
-export function LoadFromTranscripts(props: { kind: "documents" | "terms" | "decisions" | "artifacts"; keyOrId: string; heading: "h3" | "h4"; reloadOn?: unknown }) {
-  const [links] = useLoad(() => api.transcriptsOf(props.kind, props.keyOrId), [props.kind, props.keyOrId, props.reloadOn]);
+export function LoadFromTranscripts(props: { collection: Exclude<LinkedCollection, "tickets">; keyOrId: string; heading: "h3" | "h4"; reloadOn?: unknown }) {
+  const [links] = useLoad(() => api.transcriptsOf(props.collection, props.keyOrId), [props.collection, props.keyOrId, props.reloadOn]);
   return links.kind === "loaded" ? <FromTranscripts links={links.value} heading={props.heading} /> : null;
 }

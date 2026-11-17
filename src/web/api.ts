@@ -1,6 +1,7 @@
 /** A thin client for the Cronk HTTP API. The UI holds no rules; the API decides. */
 
 import type { ArtifactAt } from "../shared/artifact-embeds.js";
+import type { LinkedCollection } from "../shared/from-transcript.js";
 import type {
   Access,
   Activity,
@@ -281,8 +282,8 @@ export const api = {
   /** A Transcript, with its text, for its Owner and those with Read everywhere its Agent Sessions changed things. */
   transcript: (id: string) => request<{ transcript: Transcript }>("GET", `/api/transcripts/${encodeURIComponent(id)}`).then((r) => r.transcript),
   /** The Transcripts an item came from ("From Transcript"): a Ticket or Decision by key, a Document, Term or Artifact by id. */
-  transcriptsOf: (kind: "tickets" | "documents" | "terms" | "decisions" | "artifacts", keyOrId: string) =>
-    request<{ transcripts: TranscriptLink[] }>("GET", `/api/${kind}/${encodeURIComponent(keyOrId)}/transcripts`).then((r) => r.transcripts),
+  transcriptsOf: (collection: LinkedCollection, keyOrId: string) =>
+    request<{ transcripts: TranscriptLink[] }>("GET", `/api/${collection}/${encodeURIComponent(keyOrId)}/transcripts`).then((r) => r.transcripts),
   /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
   search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
     request<{ results: SearchResult[] }>(
