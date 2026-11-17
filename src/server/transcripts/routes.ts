@@ -29,6 +29,7 @@ import {
 } from "./transcripts.js";
 import { redactionOf } from "./redact.js";
 import type { TranscriptRefusalReason } from "../../shared/values.js";
+import { LINKED_KINDS, type LinkedKind } from "../../shared/from-transcript.js";
 
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
@@ -39,52 +40,43 @@ const tooBig = (size: number, limit: number) => new HttpError(413, `This Transcr
 const transcriptParams = pathParams({ id: { type: "string", format: "uuid", description: "The Transcript's id." } });
 
 /**
- * The items a Transcript may lead to, each with its address under `/api` and how a reader finds it there: the item's
- * `/transcripts` route lists the Transcripts it came from ("From Transcript").
+ * How a reader finds each kind of item a Transcript may lead to, which the item's `/transcripts` route lists the Transcripts
+ * it came from by ("From Transcript"); its address under `/api` is the kind's in LINKED_KINDS. Typed over those kinds, so
+ * a kind added there without its entry here is a type error.
  */
-const LINKED: { path: string; name: string; param: "key" | "id"; params: ReturnType<typeof pathParams>; find: (ctx: AppContext, actor: Actor, param: string) => Promise<LinkedItem> }[] = [
-  {
-    path: "/api/tickets/:key/transcripts",
-    param: "key",
+const LINKED: Record<LinkedKind, { name: string; params: ReturnType<typeof pathParams>; find: (ctx: AppContext, actor: Actor, param: string) => Promise<Omit<LinkedItem, "kind">> }> = {
+  ticket: {
     name: "Ticket",
     params: pathParams({ key: ticketKeyParam }),
     find: async (ctx, actor, key) => {
       const ticket = await ticketFor(ctx.db, actor, key, "read");
-      return { kind: "ticket", id: ticket.id, key: ticket.key };
+      return { id: ticket.id, key: ticket.key };
     },
   },
-  {
-    path: "/api/documents/:id/transcripts",
-    param: "id",
+  document: {
     name: "Document or Report",
     params: pathParams({ id: documentIdParam }),
-    find: async (ctx, actor, id) => ({ kind: "document", id: (await documentFor(ctx.db, actor, id, "read")).id }),
+    find: async (ctx, actor, id) => ({ id: (await documentFor(ctx.db, actor, id, "read")).id }),
   },
-  {
-    path: "/api/terms/:id/transcripts",
-    param: "id",
+  term: {
     name: "Term",
     params: pathParams({ id: termIdParam }),
-    find: async (ctx, actor, id) => ({ kind: "term", id: (await termFor(ctx.db, actor, id, "read")).id }),
+    find: async (ctx, actor, id) => ({ id: (await termFor(ctx.db, actor, id, "read")).id }),
   },
-  {
-    path: "/api/decisions/:key/transcripts",
-    param: "key",
+  decision: {
     name: "Decision",
     params: pathParams({ key: decisionKeyParam }),
     find: async (ctx, actor, key) => {
       const decision = await decisionFor(ctx.db, actor, key, "read");
-      return { kind: "decision", id: decision.id, key: decision.key };
+      return { id: decision.id, key: decision.key };
     },
   },
-  {
-    path: "/api/artifacts/:id/transcripts",
-    param: "id",
+  artifact: {
     name: "Artifact",
     params: pathParams({ id: artifactIdParam }),
-    find: async (ctx, actor, id) => ({ kind: "artifact", id: (await artifactFor(ctx.db, actor, id, "read")).id }),
+    find: async (ctx, actor, id) => ({ id: (await artifactFor(ctx.db, actor, id, "read")).id }),
   },
-];
+};
 
 /** Transcripts (ADR 0013): uploading a chat from the client side, reading it, and its Owner deleting it. */
 export function transcriptRoutes(ctx: AppContext) {
@@ -160,9 +152,10 @@ export function transcriptRoutes(ctx: AppContext) {
       },
     );
 
-    for (const linked of LINKED) {
+    for (const [kind, linked] of Object.entries(LINKED) as [LinkedKind, (typeof LINKED)[LinkedKind]][]) {
+      const { collection, by } = LINKED_KINDS[kind];
       app.get<{ Params: Record<string, string> }>(
-        linked.path,
+        `/api/${collection}/:${by}/transcripts`,
         {
           schema: {
             description:
@@ -175,7 +168,7 @@ export function transcriptRoutes(ctx: AppContext) {
         },
         async (request) => {
           const actor = await requireActor(ctx, request);
-          return { transcripts: await transcriptLinks(ctx.db, actor, await linked.find(ctx, actor, request.params[linked.param]!)) };
+          return { transcripts: await transcriptLinks(ctx.db, actor, { kind, ...(await linked.find(ctx, actor, request.params[by]!)) }) };
         },
       );
     }
