@@ -36,12 +36,13 @@ const unattendedItem = {
   type: "object",
   required: ["kind", "at", "reason", "ticket", "reports"],
   description:
-    "An open Ticket, delegated or In Review, whose Assignee is deactivated or has no access to its Project, so nobody would act on it, with its Reports. " +
-    "It leaves Triage once a User reassigns it to an active User with access there, the Assignee is reactivated or gets access back, " +
-    "or it is no longer delegated or In Review. Its Assignee, Delegate and Changes stay as they were until then.",
+    "An open Ticket, delegated or In Review, or an Agent's Unverified completion, whose Assignee is deactivated or has no access to its Project, " +
+    "so nobody would act on it, with its Reports. It leaves Triage once a User reassigns it to an active User with access there, the Assignee " +
+    "is reactivated or gets access back, or it is neither Unverified nor open and delegated or In Review, as when a User Accepts the completion. " +
+    "Its Assignee, Delegate and Changes stay as they were until then.",
   properties: {
     kind: { type: "string", const: "unattended" },
-    at: { ...timestamp, description: "When it entered its Status." },
+    at: { ...timestamp, description: "When it entered its Status; for an Unverified completion, when it was completed." },
     reason: {
       type: "string",
       enum: ["deactivated", "no_access"],

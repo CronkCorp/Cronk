@@ -6,7 +6,7 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type User } from "./api.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type Ticket, type User } from "./api.js";
 import { ContentEditor, contentText, creditNote, Diff, mainText, mergeCreditNote, Reasoning, settledContent, suggestionMergeable, useDiffView } from "./suggestions.js";
 import { conflictCount, ResolveMerge } from "./merge.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
@@ -701,12 +701,7 @@ function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
   const { ticket, reports } = props.item;
   const [detail] = useLoad(() => api.ticket(ticket.key), [ticket.key]);
   const continued = detail.kind === "loaded" ? detail.value.relations.blocks.filter((t) => CONTINUED.includes(t.status.category)) : [];
-  const accept = useAction(() => props.acting(() => api.accept(ticket.key)), props.onDone);
-  const [reopening, setReopening] = useState(false);
-  const runAccept = () => {
-    if (!accept.busy) void accept.run();
-  };
-  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept, sendBack: () => setReopening(true) });
+  const verify = useVerifyActions(props, ticket);
 
   return (
     <div className="inbox-detail-body">
@@ -728,21 +723,48 @@ function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
       ) : (
         <p className="muted">No Report.</p>
       )}
-      {accept.error && <p className="error" role="alert">{accept.error}</p>}
+      {verify.error && <p className="error" role="alert">{verify.error}</p>}
       <div className="actions">
-        <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
-        <Button variant="secondary" onClick={() => setReopening(true)} disabled={props.resolved}>Reopen…</Button>
+        {verify.buttons}
         <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
       </div>
+      {verify.dialog}
+    </div>
+  );
+}
+
+/**
+ * Accept (primary) and Reopen…, with its dialog, for an Unverified completion, and the keys that run them (Complete and
+ * Send back's), which a detail pane places among its actions. With `ticket` undefined, as for a Ticket that isn't
+ * Unverified, it offers nothing.
+ */
+function useVerifyActions(props: DetailProps<WaitingItem>, ticket: Ticket | undefined) {
+  const key = ticket?.key ?? "";
+  const accept = useAction(() => props.acting(() => api.accept(key)), props.onDone);
+  const [reopening, setReopening] = useState(false);
+  const runAccept = () => {
+    if (!accept.busy) void accept.run();
+  };
+  useDetailKeys(props.keys, props.resolved || !ticket ? {} : { complete: runAccept, sendBack: () => setReopening(true) });
+  if (!ticket) return { error: undefined, buttons: null, dialog: null };
+  return {
+    error: accept.error,
+    buttons: (
+      <>
+        <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+        <Button variant="secondary" onClick={() => setReopening(true)} disabled={props.resolved}>Reopen…</Button>
+      </>
+    ),
+    dialog: (
       <ReopenDialog
         ticket={ticket}
         open={reopening}
         onOpenChange={setReopening}
-        reopen={(input) => props.acting(() => api.reopen(ticket.key, input))}
+        reopen={(input) => props.acting(() => api.reopen(key, input))}
         onDone={props.onDone}
       />
-    </div>
-  );
+    ),
+  };
 }
 
 /** Why nobody would act on an unattended Ticket: its Assignee is deactivated, or can't see its Project. */
@@ -752,9 +774,10 @@ function unattendedBecause(item: UnattendedItem): string {
 }
 
 /**
- * A delegated or In Review Ticket whose Assignee is deactivated or can't see its Project: why it is in Triage, its Status, Delegate
- * and Reports, and Reassign to… (primary), which offers the active Users, and a link to the Ticket. Reassigning it to someone who
- * can see the Project takes it out of Triage; one who can't is refused, saying so.
+ * A delegated or In Review Ticket, or an Unverified completion, whose Assignee is deactivated or can't see its Project: why it is in
+ * Triage, its Status, Delegate and Reports, and Reassign to… (primary), which offers the active Users, and a link to the Ticket.
+ * Reassigning it to someone who can see the Project takes it out of Triage; one who can't is refused, saying so. An Unverified
+ * completion also offers Accept (primary in its place), which takes it out of Triage, and Reopen…, as in its own detail pane.
  */
 function UnattendedDetail(props: DetailProps<UnattendedItem>) {
   const { ticket, reports } = props.item;
@@ -763,14 +786,14 @@ function UnattendedDetail(props: DetailProps<UnattendedItem>) {
   const active = users.kind === "loaded" ? users.value.filter((u) => u.active && u.id !== ticket.assignee?.id) : [];
   // The signed-in User first, as the one most likely to take it.
   const candidates = [...active.filter((u) => u.id === props.me.id), ...active.filter((u) => u.id !== props.me.id)];
-  useDetailKeys(props.keys, {});
+  const verify = useVerifyActions(props, ticket.verification === "unverified" ? ticket : undefined);
 
   return (
     <div className="inbox-detail-body">
       <DetailHead item={props.item} />
       {props.resolved && <ResolvedElsewhere />}
       <Banner tone="warn" role="status">
-        <p>{`${unattendedBecause(props.item)}, so nobody would act on this Ticket. Reassign it to someone who can.`}</p>
+        <p>{`${unattendedBecause(props.item)}, so nobody would act on this Ticket. ${verify.buttons ? "Accept it, or reassign" : "Reassign"} it to someone who can.`}</p>
       </Banner>
       <div className="inbox-detail-who">
         <StatusPill status={ticket.status} />
@@ -783,16 +806,22 @@ function UnattendedDetail(props: DetailProps<UnattendedItem>) {
       ) : (
         <p className="muted">No Report.</p>
       )}
-      {reassign.error && <p className="error" role="alert">{reassign.error}</p>}
+      {(verify.error ?? reassign.error) && <p className="error" role="alert">{verify.error ?? reassign.error}</p>}
       <div className="actions">
+        {verify.buttons}
         <Menu
           label="Reassign to"
-          trigger={<Button disabled={props.resolved || reassign.busy}>Reassign to…</Button>}
+          trigger={
+            <Button variant={verify.buttons ? "secondary" : undefined} disabled={props.resolved || reassign.busy}>
+              Reassign to…
+            </Button>
+          }
           items={candidates.map((u) => ({ label: u.id === props.me.id ? `${u.name} (you)` : u.name, onSelect: () => void reassign.run(u.id) }))}
         />
         <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
         {ticket.delegate && <span className="muted small">{`Its Delegate, ${ticket.delegate.name}, stays only if it goes to ${ticket.delegate.name}'s Owner.`}</span>}
       </div>
+      {verify.dialog}
     </div>
   );
 }
