@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, type Client } from "./harness.js";
 
 describe("Autonomous Delegation", () => {
   it("is off on a Ticket until a User turns it on, recorded as a Change", async () => {
@@ -98,9 +98,9 @@ describe("A Project's Autonomous Delegation default", () => {
   });
 });
 
-/** The id of the CRONK Status in `category`. */
-async function statusIn(admin: Client, category: string): Promise<string> {
-  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
+/** The id of the Status in `category` of `project` (CRONK unless named). */
+async function statusIn(admin: Client, category: string, project = "CRONK"): Promise<string> {
+  return ((await admin.get(`/api/projects/${project}`)).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
 }
 
 describe("An Agent's completion under Autonomous Delegation", () => {
@@ -496,3 +496,73 @@ interface WaitingItem {
   ticket: { key: string };
   comment: { body: string };
 }
+
+describe("What a Reopen would ask about its dependents", () => {
+  it("lists each dependent that isn't Canceled, with its choices, whether the caller can change it, and where a Pause moves it", async () => {
+    const { admin } = await continuedSetup(7);
+    await admin.patch("/api/tickets/CRONK-7", { statusId: await statusIn(admin, "canceled") });
+
+    const asked = await admin.get("/api/tickets/CRONK-1/reopen");
+    expect(asked.status).toBe(200);
+    const todo = { name: "Todo", category: "unstarted" };
+    const claimed = { agent: { name: "claude-laptop" } };
+    const unverified = { status: { category: "completed" }, verification: "unverified", delegate: { name: "claude-laptop" } };
+    expect(asked.body.dependents).toMatchObject([
+      { ticket: { key: "CRONK-2", title: "Ticket 2", status: { category: "started" } }, claim: claimed, choices: ["keep", "pause"], canChange: true, pausesTo: todo },
+      { ticket: { key: "CRONK-3", status: { category: "started" } }, claim: claimed, choices: ["keep", "pause"], canChange: true, pausesTo: todo },
+      { ticket: { key: "CRONK-4", ...unverified }, claim: null, choices: ["keep", "reopen"], canChange: true },
+      { ticket: { key: "CRONK-5", ...unverified }, claim: null, choices: ["keep", "reopen"], canChange: true },
+      { ticket: { key: "CRONK-6", status: { category: "backlog" } }, claim: null, choices: [], canChange: true },
+    ]);
+    expect(asked.body.dependents).toHaveLength(5);
+    for (const d of asked.body.dependents.slice(2)) expect(d).not.toHaveProperty("pausesTo");
+  });
+
+  it("leaves out dependents the caller can't see, and lets them only keep those they can only read", async () => {
+    const { cronk, admin, adaId, claude, agent } = await continuedSetup();
+    for (const key of ["OPS", "SECRET"]) {
+      await projectWithTickets(admin, key, 1);
+      await admin.patch(`/api/tickets/${key}-1`, { assigneeId: adaId, delegateId: claude.agentId });
+      await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: `${key}-1` });
+    }
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    for (const key of ["OPS-1", "SECRET-1"]) {
+      await agent.post(`/api/tickets/${key}/claim`);
+      await agent.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "started", key.split("-")[0]) });
+    }
+    const rita = await joinAs(cronk, admin, "rita@example.com");
+    await admin.put(`/api/projects/OPS/members/${(await rita.get("/api/me")).body.user.id}`, { access: "read" });
+
+    const asked = (await rita.get("/api/tickets/CRONK-1/reopen")).body.dependents;
+    expect(asked.map((d: { ticket: { key: string } }) => d.ticket.key)).toEqual(["CRONK-2", "CRONK-3", "CRONK-4", "CRONK-5", "OPS-1"]);
+    expect(asked[0]).toMatchObject({ choices: ["keep", "pause"], canChange: true });
+    expect(asked[4]).toMatchObject({ choices: ["keep", "pause"], canChange: false, pausesTo: { category: "unstarted" } });
+    // Keeping the one she can only read, as the dialog submits it, Reopens without a refusal.
+    const reopened = await rita.post("/api/tickets/CRONK-1/reopen", {
+      comment: "Not right.",
+      dependents: { "CRONK-2": "pause", "CRONK-3": "keep", "CRONK-4": "keep", "CRONK-5": "reopen", "OPS-1": "keep" },
+    });
+    expect(reopened.status).toBe(200);
+  });
+
+  it("is for Users who can read the Ticket, and only for an Unverified completion", async () => {
+    const { cronk, admin, agent } = await continuedSetup();
+    expect((await agent.get("/api/tickets/CRONK-1/reopen")).status).toBe(403);
+    const rita = await joinAs(cronk, admin, "rita@example.com");
+    await admin.put(`/api/projects/CRONK/members/${(await rita.get("/api/me")).body.user.id}`, { access: "read" });
+    const asked = (await rita.get("/api/tickets/CRONK-1/reopen")).body.dependents as { canChange: boolean }[];
+    expect(asked.map((d) => d.canChange)).toEqual([false, false, false, false]);
+    const started = await admin.get("/api/tickets/CRONK-2/reopen");
+    expect(started.status).toBe(409);
+    expect(started.body.error).toMatch(/isn't an Unverified completion/);
+    await admin.post("/api/tickets/CRONK-1/accept");
+    expect((await admin.get("/api/tickets/CRONK-1/reopen")).status).toBe(409);
+  });
+
+  it("names the Status a Pause actually moves the dependent into", async () => {
+    const { admin } = await continuedSetup();
+    const asked = (await admin.get("/api/tickets/CRONK-1/reopen")).body.dependents;
+    await admin.post("/api/tickets/CRONK-1/reopen", { comment: "Not right.", dependents: { "CRONK-2": "pause", "CRONK-3": "keep", "CRONK-4": "keep", "CRONK-5": "keep" } });
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.status).toEqual(asked[0].pausesTo);
+  });
+});
