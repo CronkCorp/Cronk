@@ -371,7 +371,7 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
             <span>Version {d.version}, <RelativeTime at={d.updatedAt} /></span>
           </div>
           <MentionedIn load={() => api.decisionMentions(d.key)} deps={[d.key, d.version]} what="its key" compact />
-          <LoadFromTranscripts kind="decisions" keyOrId={d.key} heading="h4" reloadOn={d.version} />
+          <LoadFromTranscripts collection="decisions" keyOrId={d.key} heading="h4" reloadOn={d.version} />
           <div className="side-group">
             <h4>Protected</h4>
             <span>{d.protected ? "Yes: Agents may read it but not edit it" : <span className="muted">No</span>}</span>

@@ -37,17 +37,20 @@ const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
 /** The refusal of an upload that would make the Transcript hold `size` bytes, over the Workspace's `limit`. */
 const tooBig = (size: number, limit: number) => new HttpError(413, `This Transcript would hold ${size} bytes; the Workspace allows at most ${limit}`);
 
+/** The schema of one path parameter, as pathParams takes it. */
+type PathParam = Parameters<typeof pathParams>[0][string];
+
 const transcriptParams = pathParams({ id: { type: "string", format: "uuid", description: "The Transcript's id." } });
 
 /**
  * How a reader finds each kind of item a Transcript may lead to, which the item's `/transcripts` route lists the Transcripts
- * it came from by ("From Transcript"); its address under `/api` is the kind's in LINKED_KINDS. Typed over those kinds, so
- * a kind added there without its entry here is a type error.
+ * it came from by ("From Transcript"), and the schema of the key or id that names it; its address under `/api` is the kind's
+ * in LINKED_KINDS. Typed over those kinds, so a kind added there without its entry here is a type error.
  */
-const LINKED: Record<LinkedKind, { name: string; params: ReturnType<typeof pathParams>; find: (ctx: AppContext, actor: Actor, param: string) => Promise<Omit<LinkedItem, "kind">> }> = {
+const LINKED: Record<LinkedKind, { name: string; param: PathParam; find: (ctx: AppContext, actor: Actor, param: string) => Promise<Omit<LinkedItem, "kind">> }> = {
   ticket: {
     name: "Ticket",
-    params: pathParams({ key: ticketKeyParam }),
+    param: ticketKeyParam,
     find: async (ctx, actor, key) => {
       const ticket = await ticketFor(ctx.db, actor, key, "read");
       return { id: ticket.id, key: ticket.key };
@@ -55,17 +58,17 @@ const LINKED: Record<LinkedKind, { name: string; params: ReturnType<typeof pathP
   },
   document: {
     name: "Document or Report",
-    params: pathParams({ id: documentIdParam }),
+    param: documentIdParam,
     find: async (ctx, actor, id) => ({ id: (await documentFor(ctx.db, actor, id, "read")).id }),
   },
   term: {
     name: "Term",
-    params: pathParams({ id: termIdParam }),
+    param: termIdParam,
     find: async (ctx, actor, id) => ({ id: (await termFor(ctx.db, actor, id, "read")).id }),
   },
   decision: {
     name: "Decision",
-    params: pathParams({ key: decisionKeyParam }),
+    param: decisionKeyParam,
     find: async (ctx, actor, key) => {
       const decision = await decisionFor(ctx.db, actor, key, "read");
       return { id: decision.id, key: decision.key };
@@ -73,7 +76,7 @@ const LINKED: Record<LinkedKind, { name: string; params: ReturnType<typeof pathP
   },
   artifact: {
     name: "Artifact",
-    params: pathParams({ id: artifactIdParam }),
+    param: artifactIdParam,
     find: async (ctx, actor, id) => ({ id: (await artifactFor(ctx.db, actor, id, "read")).id }),
   },
 };
@@ -162,7 +165,7 @@ export function transcriptRoutes(ctx: AppContext) {
               `The Transcripts the ${linked.name} came from ("From Transcript"): those linked to an Agent Session that changed it, and that the caller ` +
               "may read (see GET /api/transcripts/{id}), most recently uploaded first, without their text. Each names the turn where the item's key " +
               "or id first appears, or none, for the top.",
-            params: linked.params,
+            params: pathParams({ [by]: linked.param }),
             response: { 200: answer("The Transcripts", listing("transcripts", ref("TranscriptLink"))), ...errors(400, 401, 403, 404, 410) },
           },
         },

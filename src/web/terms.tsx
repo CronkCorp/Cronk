@@ -355,7 +355,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
             {t.group && <>Group: {t.group} · </>}
             {placeName(t.projectKey)} · Version {t.version}, <RelativeTime at={t.updatedAt} />
           </p>
-          <LoadFromTranscripts kind="terms" keyOrId={t.id} heading="h4" reloadOn={t.version} />
+          <LoadFromTranscripts collection="terms" keyOrId={t.id} heading="h4" reloadOn={t.version} />
         </section>
       )}
       <MentionedIn load={() => api.termMentions(t.id)} deps={[t.id, t.version]} what="the Term's name" />
