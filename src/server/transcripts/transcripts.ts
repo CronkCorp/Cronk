@@ -250,23 +250,26 @@ export const textToKeep = (markdown: string, redactions: Redaction[]): string =>
 
 /** The Transcript's hand redactions, in the order they were made. */
 export async function redactionsOf(db: Queryable, transcriptId: string): Promise<Redaction[]> {
-  const { rows } = await db.query<{ length: number; fingerprint: string; digest: string }>(
+  const { rows } = await db.query<RedactionRow>(
     "SELECT length, fingerprint, digest FROM transcript_redactions WHERE transcript_id = $1 ORDER BY seq",
     [transcriptId],
   );
-  return rows.map((r) => ({ length: r.length, fingerprint: Number(r.fingerprint), digest: r.digest }));
+  return rows.map(toRedaction);
 }
+
+type RedactionRow = { length: number; fingerprint: string; digest: string };
+const toRedaction = (r: RedactionRow): Redaction => ({ length: r.length, fingerprint: Number(r.fingerprint), digest: r.digest });
 
 /** The hand redactions of each Transcript `transcriptIds`, by the Transcript's id, in the order they were made. One query. */
 export async function redactionsPerTranscript(db: Queryable, transcriptIds: string[]): Promise<(id: string) => Redaction[]> {
-  const { rows } = await db.query<{ transcript_id: string; length: number; fingerprint: string; digest: string }>(
+  const { rows } = await db.query<RedactionRow & { transcript_id: string }>(
     "SELECT transcript_id, length, fingerprint, digest FROM transcript_redactions WHERE transcript_id = ANY($1::uuid[]) ORDER BY transcript_id, seq",
     [transcriptIds],
   );
   const byTranscript = new Map<string, Redaction[]>();
   for (const r of rows) {
     if (!byTranscript.has(r.transcript_id)) byTranscript.set(r.transcript_id, []);
-    byTranscript.get(r.transcript_id)!.push({ length: r.length, fingerprint: Number(r.fingerprint), digest: r.digest });
+    byTranscript.get(r.transcript_id)!.push(toRedaction(r));
   }
   return (id) => byTranscript.get(id) ?? [];
 }
@@ -566,9 +569,9 @@ export async function readableTranscripts(db: Queryable, actor: Actor): Promise<
      ORDER BY ${ORDERS.newest}`,
     [actingUser(actor).workspaceId, ...readerParams(actor, readable)],
   );
-  const items = await changedItemsPerGroup(db, TRANSCRIPT_GROUPS, rows.map((r) => r.id));
+  const changedItemsOf = await changedItemsPerTranscript(db, rows.map((r) => r.id));
   const canReadIn = readsIn(readable);
-  return rows.map((row) => transcriptAsRead(toStored(row), { agent: row.agent_name, owner: row.owner_name }, items.get(row.id) ?? noChanges(), canReadIn));
+  return rows.map((row) => transcriptAsRead(toStored(row), { agent: row.agent_name, owner: row.owner_name }, changedItemsOf(row.id), canReadIn));
 }
 
 /** An item a Transcript may have led to: a Ticket, Document (or Report), Term, Decision or Artifact, by its id, and its key if it has one. */

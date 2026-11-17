@@ -31,13 +31,13 @@ import type { ImportContext } from "./import-context.js";
 export async function exportTranscripts(ctx: ExportContext): Promise<void> {
   const transcripts = await listTranscripts(ctx.db, ctx.scope.workspaceId, "oldest");
   const ids = transcripts.map((t) => t.id);
-  const changedBy = await changedItemsPerTranscript(ctx.db, ids);
-  const redactionsOfTranscript = await redactionsPerTranscript(ctx.db, ids);
+  const changedItemsOf = await changedItemsPerTranscript(ctx.db, ids);
+  const redactionsOfEach = await redactionsPerTranscript(ctx.db, ids);
   for (const [i, t] of transcripts.entries()) {
     const n = i + 1;
     for (const id of t.sessionIds) ctx.usedSessions.add(id);
-    const items = changedBy(t.id);
-    const redactions = redactionsOfTranscript(t.id);
+    const items = changedItemsOf(t.id);
+    const redactions = redactionsOfEach(t.id);
     ctx.add(
       `transcripts/${n}.md`,
       {
