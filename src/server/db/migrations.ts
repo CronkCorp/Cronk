@@ -12,7 +12,7 @@ import { scrubAllStored, storeAllTurns } from "../transcripts/transcripts.js";
 export interface Migration {
   id: string;
   sql: string;
-  /** Fills what the SQL created from existing data, when SQL alone can't, in the same transaction. */
+  /** Fills what the SQL created from existing data, or rewrites existing data, when SQL alone can't, in the same transaction. */
   backfill?: (db: Queryable) => Promise<void>;
 }
 

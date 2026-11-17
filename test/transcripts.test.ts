@@ -838,22 +838,30 @@ describe("Upgrading a Transcript stored before scrubbing", () => {
     expect((await bob.get("/api/search?q=scrubbed&kind=transcript")).body.results).toMatchObject([{ transcriptId: id }]);
   });
 
-  it("changes nothing when run again, nor in a Transcript uploaded since scrubbing", async () => {
-    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+  it("changes nothing when run again", async () => {
+    const { cronk, admin, bob, id } = await transcriptAcrossProjects();
     const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
     await storedUnscrubbed(cronk, id, chat("Do it all", sessionId) + `\nMy token: ${SECRETS.github}\n`, [chat("Start", sessionId) + `\n${SECRETS.aws}\n`]);
     await cronk.restart();
     const upgraded = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
-    // Uploaded since: scrubbed and redacted on upload, its scrub notes and redactions left as they are.
-    const since = await upload(cronk.client(claude.secret), "chat-2", chat("Later", sessionId) + `\nKey ${SECRETS.slack}, code 4711-ALPHA.\n`);
-    expect(since.status, JSON.stringify(since.body)).toBe(200);
-    const sinceId = since.body.transcript.id;
-    expect((await bob.post(`/api/transcripts/${sinceId}/redactions`, { passage: "4711-ALPHA" })).status).toBe(200);
-    const uploaded = (await admin.get(`/api/transcripts/${sinceId}`)).body.transcript;
 
     await cronk.undoMigration("0044_scrub_stored_transcripts", "SELECT 1");
     await cronk.restart();
     expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toEqual(upgraded);
-    expect((await admin.get(`/api/transcripts/${sinceId}`)).body.transcript).toEqual(uploaded);
+  });
+
+  it("leaves a Transcript uploaded since scrubbing as it is, its scrub notes and redactions too", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const hook = cronk.client(claude.secret);
+    await upload(hook, "chat-1", chat("Do it all", sessionId) + `\nKey ${SECRETS.slack}, code 4711-ALPHA.\n`);
+    await upload(hook, "chat-1", chat("Again", sessionId) + `\nKey ${SECRETS.github}.\n`);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "4711-ALPHA" })).status).toBe(200);
+    const uploaded = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(uploaded.earlier).toHaveLength(1);
+
+    await cronk.undoMigration("0044_scrub_stored_transcripts", "SELECT 1");
+    await cronk.restart();
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toEqual(uploaded);
   });
 });
