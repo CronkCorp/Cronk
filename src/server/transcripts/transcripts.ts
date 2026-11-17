@@ -6,6 +6,7 @@ import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
 import { scrubSecrets } from "./scrub.js";
 import { firstTurnNaming, titleOf, turnsOf } from "../../shared/transcript-turns.js";
+import type { LinkedKind } from "../../shared/from-transcript.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -549,7 +550,7 @@ export async function readableTranscripts(db: Queryable, actor: Actor): Promise<
 }
 
 /** An item a Transcript may have led to: a Ticket, Document (or Report), Term, Decision or Artifact, by its id, and its key if it has one. */
-export type LinkedItem = { kind: "ticket" | "document" | "term" | "decision" | "artifact"; id: string; key?: string };
+export type LinkedItem = { kind: LinkedKind; id: string; key?: string };
 
 /**
  * A Transcript as an item it led to links to it ("From Transcript"): without its text, not even its title, so context on claim
