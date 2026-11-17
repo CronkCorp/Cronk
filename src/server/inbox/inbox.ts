@@ -308,9 +308,9 @@ async function assigneesWaitingOn(db: Queryable, ticketIds: string[]): Promise<s
  * blocking any of them, whose items show their titles and Statuses. Pass the result to `waitingItemsChanged` once the
  * change is committed; inside a transaction, look it up with the transaction so it sees the change.
  */
-export async function usersShownTickets(db: Queryable, tickets: { id: string; assignee?: { id: string } | null }[]): Promise<string[]> {
+export async function usersShownTickets(db: Queryable, tickets: Pick<Ticket, "id" | "assignee">[]): Promise<string[]> {
   const assignees = tickets.flatMap((t) => (t.assignee ? [t.assignee.id] : []));
-  return [...new Set([...assignees, ...(await assigneesWaitingOn(db, tickets.map((t) => t.id)))])];
+  return [...assignees, ...(await assigneesWaitingOn(db, tickets.map((t) => t.id)))];
 }
 
 /**

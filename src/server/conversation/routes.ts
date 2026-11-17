@@ -223,7 +223,7 @@ export function conversationRoutes(ctx: AppContext) {
           ({ ticket, posted, shownTo }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
-            // The Discovered Tickets blocking it show its Status.
+            // Its Assignee, and the Discovered Tickets blocking it, which show its Status.
             waitingItemsChanged(ctx.live, shownTo);
             ticketsChanged(ctx.live, [ticket]);
           },
@@ -355,7 +355,7 @@ export function conversationRoutes(ctx: AppContext) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
               pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
             }
-            // The Discovered Tickets blocking the Tickets moved show their Status.
+            // The Assignees of the Tickets moved, and the Discovered Tickets blocking them, which show their Status.
             waitingItemsChanged(ctx.live, shownTo);
             ticketsChanged(ctx.live, [...changed, ...blockedAgain]);
           },

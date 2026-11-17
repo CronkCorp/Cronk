@@ -915,6 +915,7 @@ export function workRoutes(ctx: AppContext) {
         // Discovered Tickets blocking it: keep `shown` in step with what `withBlocks` lists of each Ticket blocked.
         if (ticket !== before) {
           const shown = ticket.title !== before.title || ticket.status.id !== before.status.id;
+          // Unshown, only the previous and current Assignee are told, without looking up the Discovered Tickets blocking it.
           waitingItemsChanged(ctx.live, [before.assignee?.id, ...(shown ? await usersShownTickets(ctx.db, [ticket]) : [ticket.assignee?.id])]);
           // The Tickets it blocks show its Status, and may now be unblocked.
           // Its parents list their Sub-Tickets, and Sub-Tickets may have followed its Autonomous Delegation.
