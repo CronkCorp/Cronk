@@ -1,19 +1,18 @@
 import { actingUser, type Actor } from "../actor.js";
 import { HttpError } from "../context.js";
+import type { ReopenChoice } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { visibleProjects, type Access } from "../identity/access.js";
 import { ticketsBlockedBy } from "../coordination/ready.js";
-import { listAllProjects } from "./projects.js";
-import { findTicketsByIds, lockTicketsByIds, type Ticket } from "./tickets.js";
+import { findLiveClaim } from "../coordination/claims.js";
+import { findStatusToMoveInto, listAllProjects, listStatuses, type Status } from "./projects.js";
+import { findTicketsByIds, lockTicketsByIds, type AgentRef, type Ticket } from "./tickets.js";
 
 /**
  * Reopening an Agent's Unverified completion reaches the Tickets it blocks: each one that already continued on the
  * work takes the User's choice, and every one with a Delegate is told, through a Comment that waits for its Agent.
  */
 
-/** What a Reopen does to a Ticket it blocks that already continued on the work. */
-export const REOPEN_CHOICES = ["keep", "pause", "reopen"] as const;
-export type ReopenChoice = (typeof REOPEN_CHOICES)[number];
 
 /** A Ticket the Reopened one blocks, locked, with the caller's access to its Project. */
 export interface Dependent {
@@ -34,10 +33,54 @@ export async function dependentsOf(db: Queryable, actor: Actor, ticket: Ticket, 
 }
 
 /** The choices a dependent takes: `pause` or keep for Started work, `reopen` or keep for an Unverified completion, none otherwise. */
-function choicesFor(ticket: Ticket): readonly ReopenChoice[] {
+export function choicesFor(ticket: Ticket): readonly ReopenChoice[] {
   if (ticket.status.category === "started") return ["keep", "pause"];
   if (ticket.verification === "unverified") return ["keep", "reopen"];
   return [];
+}
+
+/**
+ * The Status a Pause moves `ticket` into: its Project's first Unstarted Status, locked against removal when `lock` is set.
+ * Every Status Category keeps at least one Status, so there is always one, unless it is removed meanwhile.
+ */
+export async function pauseTarget(db: Queryable, ticket: Ticket, { lock = true } = {}): Promise<Status | undefined> {
+  const first = (await listStatuses(db, ticket.projectId)).find((s) => s.category === "unstarted");
+  return first && (lock ? await findStatusToMoveInto(db, ticket.projectId, first.id) : first);
+}
+
+/** A dependent as a Reopen would ask about it: what it is, what it takes, and whether the caller may change it. */
+export interface DependentChoice {
+  ticket: Pick<Ticket, "key" | "title" | "status" | "verification" | "delegate">;
+  /** Its live Claim, if any. */
+  claim: { agent: AgentRef } | null;
+  /** What the Reopen accepts for it, the first being the default; `[]` for one that hasn't continued on the work. Without `canChange`, only `keep`. */
+  choices: readonly ReopenChoice[];
+  /** Whether the caller has Write in its Project; without it, only `keep` is accepted. */
+  canChange: boolean;
+  /** Only for a Started one: the Status a Pause moves it into. */
+  pausesTo?: Status;
+}
+
+/**
+ * What a Reopen of `ticket` would ask `actor` about each dependent they can see that isn't Canceled, in key order, with
+ * the same rule the Reopen itself checks. Reads only; nothing is locked.
+ */
+export async function dependentChoices(db: Queryable, actor: Actor, ticket: Ticket, now: Date): Promise<DependentChoice[]> {
+  const dependents = (await dependentsOf(db, actor, ticket, { lock: false })).filter((d) => d.ticket.status.category !== "canceled");
+  dependents.sort((a, b) => a.ticket.projectKey.localeCompare(b.ticket.projectKey) || a.ticket.number - b.ticket.number);
+  return Promise.all(
+    dependents.map(async ({ ticket: t, access }) => {
+      const claim = await findLiveClaim(db, t.id, now);
+      const pausesTo = t.status.category === "started" ? await pauseTarget(db, t, { lock: false }) : undefined;
+      return {
+        ticket: { key: t.key, title: t.title, status: t.status, verification: t.verification, delegate: t.delegate },
+        claim: claim ? { agent: claim.agent } : null,
+        choices: choicesFor(t),
+        canChange: access === "write",
+        ...(pausesTo && { pausesTo }),
+      };
+    }),
+  );
 }
 
 /**

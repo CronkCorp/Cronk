@@ -151,6 +151,7 @@ a.link:hover { text-decoration: underline; }
 .segment + .segment { border-left: 1px solid var(--border); }
 .segment:hover { background: var(--surface-2); }
 .segment.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.segment:disabled { opacity: 0.5; cursor: not-allowed; background: var(--surface); }
 .panel.wide { max-width: none; margin-bottom: 16px; }
 .panel { margin-bottom: 16px; }
 

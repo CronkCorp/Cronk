@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, resendOnNetworkChange, test, type Locator } from "./fixtures.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -215,7 +215,7 @@ test("invite a Member, who joins from the link and loses sight of the Project on
   await page.getByRole("button", { name: "Invite" }).click();
   const link = await page.getByLabel("Invitation link").inputValue();
 
-  const bobContext = await browser.newContext();
+  const bobContext = resendOnNetworkChange(await browser.newContext());
   const bob = await bobContext.newPage();
   await bob.goto(link);
   await expect(bob.getByRole("heading", { name: "Join Acme" })).toBeVisible();
@@ -238,10 +238,7 @@ test("invite a Member, who joins from the link and loses sight of the Project on
 
 // Runs after the tests above, so Ada and the CRONK Project exist.
 test("register an Agent, issue it a token, and see its change in a Ticket's history", async ({ page, request }) => {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(ada.email);
-  await page.getByLabel("Password").fill(ada.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signIn(page);
 
   await page.getByRole("link", { name: "Agents" }).click();
   // Registering happens in a dialog opened from the page head.
@@ -1180,7 +1177,8 @@ test("answer a blocking question in the timeline, where only Comments and questi
   await write("activities", { kind: "question", body: "Per email or per IP?", blocking: true });
   const question = timeline.getByRole("listitem").filter({ hasText: "Per email or per IP?" });
   await expect(question).toContainText("Blocking question");
-  expect(await page.evaluate(() => window.scrollY)).toBe(120);
+  // Polled: the page may still be laying out what arrived, and settles where the User was reading.
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(120);
 
   // A Plan offers no Reply; a Report is a card with its headings scaled down and a link to open it.
   const plan = timeline.getByRole("listitem").filter({ hasText: "Count failed sign-ins." });
