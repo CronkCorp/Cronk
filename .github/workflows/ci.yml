@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # GitHub's merge queue runs the required checks on each merge group.
+  merge_group:
 
 jobs:
   # The API tests, split by file across runners so they run side by side. Each shard starts its own Postgres.
