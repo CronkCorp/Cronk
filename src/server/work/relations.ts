@@ -1,7 +1,10 @@
 import type { Actor } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { holdsLockUntilCommit, lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "../../shared/values.js";
 import { findTicketById, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
+
+// The check `lockBlocking` makes of the lock order costs a query or two per block, so it runs in development and tests only.
+const CHECK_LOCK_ORDER = process.env.NODE_ENV !== "production";
 
 
 const inverse: Record<RelationKind, RelationKind> = { blocks: "blocked_by", blocked_by: "blocks", relates_to: "relates_to" };
@@ -102,27 +105,24 @@ export const isBlocking = (kind: RelationKind): boolean => kind !== "relates_to"
  */
 export async function lockBlocking(db: Queryable, workspaceId: string): Promise<void> {
   const name = `ticket-blocking:${workspaceId}`;
-  if (checkLockOrder) await requireNoTicketLockBefore(db, name);
+  if (CHECK_LOCK_ORDER) await requireBlockingLockFirst(db, name);
   await lockUntilCommit(db, name);
 }
 
-const checkLockOrder = process.env.NODE_ENV !== "production";
-
 /**
- * Throws if the transaction holds a lock on a Ticket row (a row lock, or a write) but not yet the lock `name`. Postgres
- * records a transaction's row locks on a table as its RowShareLock, and its writes as its RowExclusiveLock, on that table.
+ * Throws if the transaction locked or wrote a Ticket row but doesn't yet hold the blocking lock `name`. Postgres keeps a
+ * transaction's row locks on a table as its RowShareLock on it (a foreign key's key-share lock too), and its writes as its
+ * RowExclusiveLock, until the transaction or savepoint ends. Cautious: a lock or write that matched no row, or the insert
+ * of a Ticket no other transaction can see yet, counts too.
  */
-async function requireNoTicketLockBefore(db: Queryable, name: string): Promise<void> {
-  const { rows } = await db.query<{ held: boolean; ticket_locked: boolean }>(
-    `WITH own AS (SELECT * FROM pg_locks WHERE pid = pg_backend_pid() AND granted), k AS (SELECT hashtextextended($1, 0) AS key)
-     SELECT
-       EXISTS (SELECT 1 FROM own, k WHERE locktype = 'advisory' AND objsubid = 1
-               AND classid::bigint = (k.key >> 32) & 4294967295 AND objid::bigint = k.key & 4294967295) AS held,
-       EXISTS (SELECT 1 FROM own WHERE locktype = 'relation' AND relation = 'tickets'::regclass
-               AND mode IN ('RowShareLock', 'RowExclusiveLock')) AS ticket_locked`,
-    [name],
+async function requireBlockingLockFirst(db: Queryable, name: string): Promise<void> {
+  if (await holdsLockUntilCommit(db, name)) return;
+  const { rowCount } = await db.query(
+    `SELECT 1 FROM pg_locks
+     WHERE pid = pg_backend_pid() AND granted AND locktype = 'relation' AND relation = 'tickets'::regclass
+       AND mode IN ('RowShareLock', 'RowExclusiveLock')`,
   );
-  if (!rows[0]!.held && rows[0]!.ticket_locked) {
+  if (rowCount !== 0) {
     const err = new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
     // Printed too, as a request answers only "Something went wrong" and tests run without a logger.
     console.error(err);
