@@ -379,6 +379,30 @@ describe("Who may read a Transcript", () => {
     expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
+  it("counts where its Sessions' Artifacts lie, as for every other item", async () => {
+    const { cronk, admin, bob, carol, bobId, carolId, claude } = await transcriptAcrossProjects();
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "Charting it" })).status).toBe(201);
+    const published = await agent.upload("/api/projects/SECRET/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }));
+    expect(published.status, JSON.stringify(published.body)).toBe(201);
+    const uploaded = await upload(cronk.client(claude.secret), "chat-2", chat("Chart the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const id = uploaded.body.transcript.id;
+    const limits = [{ id: published.body.artifact.id, title: "Limits", turn: null }];
+
+    // Carol reads CRONK, but not SECRET, where the Artifact lies.
+    expect((await carol.get(`/api/transcripts/${id}`)).status).toBe(404);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect((await carol.get(`/api/transcripts/${id}`)).body.transcript.artifacts).toEqual(limits);
+    expect((await bob.get(`/api/transcripts/${id}`)).body.transcript.artifacts).toEqual(limits);
+
+    // Its Owner reads it without Read there, without the Artifact.
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    const read = await bob.get(`/api/transcripts/${id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.transcript).toMatchObject({ tickets: [{ key: "CRONK-1" }], artifacts: [] });
+  });
+
   it("outlives its Agent's removal", async () => {
     const { bob, claude, id } = await transcriptAcrossProjects();
     expect((await bob.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
