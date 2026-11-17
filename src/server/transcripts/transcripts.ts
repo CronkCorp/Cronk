@@ -504,15 +504,49 @@ export async function changedItemsPerTranscript(db: Queryable, transcriptIds: st
   return (id) => items.get(id) ?? noChanges();
 }
 
-/** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
+/** Finds the turn that first names one of an item's keys or ids (see shared/transcript-turns.ts). */
+type TurnNaming = (...keyOrId: string[]) => number | null;
+
+/**
+ * How a Transcript lists each item it changed, of each LinkedKind, by the kind's collection, given the turn that first names it.
+ * Typed over those collections, so a kind added to LINKED_KINDS without its entry here is a type error, and so is one without its
+ * list in ChangedItems or in Transcript. placesOf walks the same collections, so where every kind's items lie counts towards who
+ * may read the Transcript.
+ */
+const LISTED: { [C in LinkedCollection]: (item: ChangedItems[C][number], turn: TurnNaming) => Transcript[C][number] } = {
+  tickets: (t, turn) => ({ key: t.key, title: t.title, turn: turn(t.key, t.id) }),
+  documents: (d, turn) => ({ id: d.id, title: d.title, turn: turn(d.id) }),
+  terms: (t, turn) => ({ id: t.id, name: t.name, turn: turn(t.id) }),
+  decisions: (d, turn) => ({ key: d.key, title: d.title, turn: turn(d.key, d.id) }),
+  artifacts: (a, turn) => ({ id: a.id, title: a.title, turn: turn(a.id) }),
+};
+
+/** The collections of the LinkedKinds, in LISTED's order. */
+const COLLECTIONS = Object.keys(LISTED) as LinkedCollection[];
+
+/**
+ * Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. Walks every kind's
+ * list (see LISTED); Tickets always lie in a Project, the other kinds' items may lie in the Workspace.
+ */
 function placesOf(items: ChangedItems): Places {
-  const projectIds = new Set<string>(items.tickets.map((t) => t.project_id));
+  const projectIds = new Set<string>();
   let workspace = false;
-  for (const item of [...items.documents, ...items.terms, ...items.decisions, ...items.artifacts]) {
-    if (item.project_id === null) workspace = true;
-    else projectIds.add(item.project_id);
+  for (const collection of COLLECTIONS) {
+    for (const item of items[collection]) {
+      if (item.project_id === null) workspace = true;
+      else projectIds.add(item.project_id);
+    }
   }
   return { projectIds: [...projectIds], workspace };
+}
+
+/** Of each kind's changed `items`, those a reader who `canReadIn` a place can read, each as the Transcript lists it (see LISTED). */
+function listedAsRead(items: ChangedItems, canReadIn: (projectId: string | null) => boolean, turn: TurnNaming) {
+  const listed = <C extends LinkedCollection>(collection: C): Transcript[C][number][] => {
+    const asListed = LISTED[collection] as (item: ChangedItems[C][number], turn: TurnNaming) => Transcript[C][number];
+    return (items[collection] as ChangedItems[C][number][]).filter((i) => canReadIn(i.project_id)).map((i) => asListed(i, turn));
+  };
+  return Object.fromEntries(COLLECTIONS.map((c) => [c, listed(c)])) as { [C in LinkedCollection]: Transcript[C] };
 }
 
 /**
@@ -561,7 +595,7 @@ function transcriptAsRead(
   canReadIn: (projectId: string | null) => boolean,
 ): Transcript {
   const turns = turnsOf(stored.markdown);
-  const turn = (...keyOrId: string[]) => firstTurnNaming(turns, keyOrId);
+  const turn: TurnNaming = (...keyOrId) => firstTurnNaming(turns, keyOrId);
   return {
     id: stored.id,
     title: titleOf(turns, stored.chatId),
@@ -570,11 +604,7 @@ function transcriptAsRead(
     markdown: stored.markdown,
     earlier: stored.earlier,
     sessions: stored.sessionIds.map((id) => ({ id })),
-    tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title, turn: turn(t.key, t.id) })),
-    documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title, turn: turn(d.id) })),
-    terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name, turn: turn(t.id) })),
-    decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title, turn: turn(d.key, d.id) })),
-    artifacts: items.artifacts.filter((a) => canReadIn(a.project_id)).map((a) => ({ id: a.id, title: a.title, turn: turn(a.id) })),
+    ...listedAsRead(items, canReadIn, turn),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };
