@@ -486,8 +486,8 @@ export async function listTranscripts(db: Queryable, workspaceId: string, order:
   return rows.map(toStored);
 }
 
-/** An item a Transcript may have led to: a Ticket, Document (or Report), Term or Decision, by its id, and its key if it has one. */
-export type LinkedItem = { kind: "ticket" | "document" | "term" | "decision"; id: string; key?: string };
+/** An item a Transcript may have led to: a Ticket, Document (or Report), Term, Decision or Artifact, by its id, and its key if it has one. */
+export type LinkedItem = { kind: "ticket" | "document" | "term" | "decision" | "artifact"; id: string; key?: string };
 
 /**
  * A Transcript as an item it led to links to it ("From Transcript"): without its text, not even its title, so context on claim
