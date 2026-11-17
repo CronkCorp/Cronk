@@ -137,7 +137,7 @@ A Document an Actor linked to a Ticket from the Ticket's side, so it is one clic
 _Avoid_: Relation (reserved for Ticket to Ticket), attachment, reference
 
 **Version**:
-One saved state of a Document, Artifact or Guidance, recording which Actor produced it.
+One saved state of a Document, Decision, Term, Artifact or Guidance, recording which Actor produced it.
 _Avoid_: Revision, snapshot, history entry
 
 **Artifact**:

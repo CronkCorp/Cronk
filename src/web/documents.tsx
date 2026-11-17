@@ -2,7 +2,6 @@ import { ConfirmDialog, Popover } from "./components/overlays.js";
 import { Button, buttonClass } from "./components/button.js";
 import { Chip, ProtectedMark } from "./components/tags.js";
 import { ProtectionHistory } from "./components/protection.js";
-import { Banner } from "./components/banner.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { RelativeTime } from "./components/time.js";
 import { Actor } from "./components/actor.js";
@@ -18,7 +17,7 @@ import {
   type Version,
   watchDocument,
 } from "./api.js";
-import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
+import { DiscardMine, ResolveMerge, SavedMeanwhile, StaleSaveNotice, VersionDiff, useNewerVersion, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
 import { LoadFromTranscripts } from "./transcripts.js";
 import { attachmentMarkdown, AttachmentThumbnails, AttachmentViewer, PageAttachments, useAttach, usePageDrop, type AttachmentsView } from "./attachments.js";
@@ -211,11 +210,11 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   const d = props.document;
   const canWrite = useCanWrite(d.projectKey);
   const [panel, setPanel] = useState<Panel>(props.startEditing ? "edit" : "none");
-  // The newest Version anyone saved, as the Document's stream tells it, and how often its Comments changed.
-  const [latest, setLatest] = useState(d.version);
+  // How often the Document's Comments changed, as its stream tells it.
   const [commentsGeneration, setCommentsGeneration] = useState(0);
   const [attachments, reloadAttachments] = useLoad(() => api.documentAttachments(d.id), [d.id]);
   const [live, onLive] = useLiveState();
+  const { newer, saw, catchUp } = useNewerVersion({ version: d.version, editing: panel === "edit", onReload: props.onReload, current: () => api.document(d.id) });
   useEffect(
     () =>
       watchDocument(d.id, {
@@ -224,21 +223,16 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
         ready: () => {
           setCommentsGeneration((g) => g + 1);
           reloadAttachments();
-          api.document(d.id).then((current) => setLatest((v) => Math.max(v, current.version)), () => {});
+          catchUp();
         },
         on: {
           comment: () => setCommentsGeneration((g) => g + 1),
-          version: ({ version }) => setLatest((v) => Math.max(v, version)),
+          version: ({ version }) => saw(version),
           attachments: () => reloadAttachments(),
         },
       }),
     [d.id],
   );
-  // Someone else's Version is shown at once, unless it would pull the Document out from under an edit.
-  const newer = latest > d.version ? latest : undefined;
-  useEffect(() => {
-    if (newer !== undefined && panel !== "edit") props.onReload();
-  }, [newer, panel]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const remove = useAction(
     async () => {
@@ -511,7 +505,9 @@ function EditDocument(props: {
       <div className="page-head">
         <h1>{props.document.title}</h1>
       </div>
-      {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile document={props.document} version={props.newerVersion} />}
+      {props.newerVersion !== undefined && !notice && !resolve && (
+        <SavedMeanwhile of={props.document.id} started={props.document.version} version={props.newerVersion} load={(n) => api.version(props.document.id, n)} show={(v) => v} />
+      )}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
@@ -541,35 +537,6 @@ function EditDocument(props: {
         </section>
       )}
     </>
-  );
-}
-
-/**
- * Warns, while a Document is being edited, that someone saved a newer Version meanwhile: who,
- * and what they changed since the Version the edit started from. Saving then merges it in.
- */
-function SavedMeanwhile(props: { document: Document; version: number }) {
-  const { id, version: started } = props.document;
-  const [versions] = useLoad(() => Promise.all([api.version(id, started), api.version(id, props.version)]), [id, started, props.version]);
-  return (
-    <Banner tone="warn" role="status">
-      <Show state={versions}>
-        {([base, theirs]) => (
-          <>
-            <p>
-              <strong>
-                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
-              </strong>{" "}
-              Saving merges their changes into yours.
-            </p>
-            <details>
-              <summary>See what they changed</summary>
-              <VersionDiff before={base} after={theirs} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
-            </details>
-          </>
-        )}
-      </Show>
-    </Banner>
   );
 }
 

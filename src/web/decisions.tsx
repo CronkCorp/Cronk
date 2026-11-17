@@ -10,7 +10,7 @@ import { ProtectionHistory } from "./components/protection.js";
 import { RelativeTime } from "./components/time.js";
 import { DECISION_STATUSES } from "../shared/values.js";
 import { api, decisionsExportUrl, watchDecision, type Decision, type DecisionStatus, type DecisionSummary, type DecisionVersion, type FieldConflict } from "./api.js";
-import { DiscardMine, ResolveMerge, StaleSaveNotice, useStaleSave, VersionDiff, type Draft, type MergedField } from "./merge.js";
+import { DiscardMine, ResolveMerge, SavedMeanwhile, StaleSaveNotice, useNewerVersion, useStaleSave, type Draft, type MergedField } from "./merge.js";
 import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
 import { MentionedIn } from "./mentions.js";
 import { LoadFromTranscripts } from "./transcripts.js";
@@ -225,24 +225,18 @@ function DecisionView(props: { decision: Decision; startEditing: boolean; onChan
   const d = props.decision;
   const canWrite = useCanWrite(d.projectKey);
   const [editing, setEditing] = useState(props.startEditing);
-  // The newest Version anyone saved, as the Decision's stream tells it.
-  const [latest, setLatest] = useState(d.version);
   const [live, onLive] = useLiveState();
+  const { newer, saw, catchUp } = useNewerVersion({ version: d.version, editing, onReload: props.onReload, current: () => api.decision(d.key) });
   useEffect(
     () =>
       watchDecision(d.key, {
         onLive,
         // On (re)connecting, catch up on what was saved meanwhile.
-        ready: () => void api.decision(d.key).then((current) => setLatest((v) => Math.max(v, current.version)), () => {}),
-        on: { version: ({ version }) => setLatest((v) => Math.max(v, version)) },
+        ready: catchUp,
+        on: { version: ({ version }) => saw(version) },
       }),
     [d.key],
   );
-  // Someone else's Version is shown at once, unless it would pull the Decision out from under an edit.
-  const newer = latest > d.version ? latest : undefined;
-  useEffect(() => {
-    if (newer !== undefined && !editing) props.onReload();
-  }, [newer, editing]);
   const status = useAction((to: DecisionStatus) => api.setDecisionStatus(d.key, to), props.onChanged);
   // Rejecting needs a reason, typed into a box the Reject action opens.
   const [rejecting, setRejecting] = useState(false);
@@ -446,7 +440,9 @@ function EditDecision(props: { decision: Decision; newerVersion: number | undefi
   const setField = (label: string) => (value: string) => setDraft((dr) => ({ ...dr, fields: { ...dr.fields, [label]: value } }));
   return (
     <>
-      {props.newerVersion !== undefined && !notice && !resolve && <SavedMeanwhile decision={d} version={props.newerVersion} />}
+      {props.newerVersion !== undefined && !notice && !resolve && (
+        <SavedMeanwhile of={d.key} started={d.version} version={props.newerVersion} load={(n) => api.decisionVersion(d.key, n)} show={saved} />
+      )}
       {notice && <StaleSaveNotice {...notice} />}
       {resolve ? (
         <ResolveMerge {...resolve} />
@@ -475,31 +471,3 @@ function EditDecision(props: { decision: Decision; newerVersion: number | undefi
 /** A Decision Version as a diff or a merge shows it: its title, body, and other fields as the editor's. */
 const saved = (v: DecisionVersion) => ({ number: v.number, title: v.title, body: v.body, fields: fieldsOf(v) });
 
-/**
- * Warns, while a Decision is being edited, that someone saved a newer Version meanwhile: who, and
- * what they changed since the Version the edit started from. Saving then merges it in.
- */
-function SavedMeanwhile(props: { decision: Decision; version: number }) {
-  const { key, version: started } = props.decision;
-  const [versions] = useLoad(() => Promise.all([api.decisionVersion(key, started), api.decisionVersion(key, props.version)]), [key, started, props.version]);
-  return (
-    <Banner tone="warn" role="status">
-      <Show state={versions}>
-        {([base, theirs]) => (
-          <>
-            <p>
-              <strong>
-                <Actor actor={theirs.actor} /> saved Version {theirs.number} while you were editing Version {base.number}.
-              </strong>{" "}
-              Saving merges their changes into yours.
-            </p>
-            <details>
-              <summary>See what they changed</summary>
-              <VersionDiff before={saved(base)} after={saved(theirs)} label={`Their changes, Version ${base.number} to ${theirs.number}`} />
-            </details>
-          </>
-        )}
-      </Show>
-    </Banner>
-  );
-}
