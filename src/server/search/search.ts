@@ -64,18 +64,21 @@ const columns = (c: {
      ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
 
 /** Whether the Ticket aliased `t` in the Project aliased `p` has the key the search is for, typed in any case. */
-const KEY_MATCHES = `upper(${ticketKeySql("p", "t")}) = q.key`;
+const TICKET_KEY_MATCHES = `upper(${ticketKeySql("p", "t")}) = q.key`;
+
+/** Whether the Decision aliased `dc`, whose Project (if any) is aliased `p`, has the key the search is for, typed in any case. */
+const DECISION_KEY_MATCHES = `upper(${decisionKeySql("p", "dc")}) = q.key`;
 
 /**
- * One SELECT per kind, with what each finds. They read the query as `q.query` (and as a Ticket key, upper-cased, as `q.key`), the readable
+ * One SELECT per kind, with what each finds. They read the query as `q.query` (and as a Ticket or Decision key, upper-cased, as `q.key`), the readable
  * Project ids as `q.projects` and the Workspace's id, when it is readable outside any Project, as `q.workspace_id`.
  */
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
     kind: "ticket",
-    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${KEY_MATCHES} THEN 1000 ELSE 0 END` })}
+    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${TICKET_KEY_MATCHES} THEN 1000 ELSE 0 END` })}
       FROM q, tickets t JOIN projects p ON p.id = t.project_id
-      WHERE t.project_id = ANY(q.projects) AND (to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query OR ${KEY_MATCHES})`,
+      WHERE t.project_id = ANY(q.projects) AND (to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query OR ${TICKET_KEY_MATCHES})`,
   },
   {
     kind: "document",
@@ -110,9 +113,9 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
   },
   {
     kind: "decision",
-    sql: `${columns({ kind: "decision", title: "dc.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: decisionKeySql("p", "dc"), excerptOf: ["dc.title", "dc.body"], text: DECISION_TEXT, at: "dc.updated_at" })}
+    sql: `${columns({ kind: "decision", title: "dc.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: decisionKeySql("p", "dc"), excerptOf: ["dc.title", "dc.body"], text: DECISION_TEXT, at: "dc.updated_at", boost: `CASE WHEN ${DECISION_KEY_MATCHES} THEN 1000 ELSE 0 END` })}
       FROM q, decisions dc LEFT JOIN projects p ON p.id = dc.project_id
-      WHERE ${documentReadableSql("dc", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${DECISION_TEXT}) @@ q.query`,
+      WHERE ${documentReadableSql("dc", "q.projects", "q.workspace_id")} AND (to_tsvector(${CONFIG}, ${DECISION_TEXT}) @@ q.query OR ${DECISION_KEY_MATCHES})`,
   },
 ];
 

@@ -119,6 +119,21 @@ describe("Searching", () => {
     expect((await admin.get("/api/search?q=database&kind=document")).body.results).toEqual([]);
   });
 
+  it("finds a Decision by its key, in any case, first", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres for storage" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Search in Postgres", body: "Builds on CRONK-D1. CRONK-D1 keeps it all in one place, as D1 does." });
+    await admin.post("/api/workspace/decisions", { title: "Self-hosted only", body: "See CRONK-D1." });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Follow CRONK-D1", description: "As CRONK-D1 and D1 say." });
+    const keys = async (q: string) => ((await admin.get(`/api/search?q=${q}`)).body.results as { decisionKey: string | null }[]).map((r) => r.decisionKey);
+
+    expect((await keys("cronk-d1"))[0]).toBe("CRONK-D1");
+    expect((await keys("%20d1%20"))[0]).toBe("D1");
+    expect(await keys("CRONK-D9")).toEqual([]);
+    expect((await admin.get("/api/search?q=CRONK-D1&kind=term")).body.results).toEqual([]);
+  });
+
   it("narrows to the kinds and Projects asked for, refusing a Project the caller can't see", async () => {
     const { admin } = await startInstalledCronk();
     for (const key of ["CRONK", "OPS"]) {
