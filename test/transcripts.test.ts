@@ -685,9 +685,7 @@ describe("Exporting and importing Transcripts", () => {
   });
 
   it("exports them in a fixed number of queries, however many there are", async () => {
-    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects({ lapseCheckMs: 3_600_000 });
-    const agent = await startSession(cronk, claude.secret);
-    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "More" })).status).toBe(201);
+    const { cronk, admin, bob, claude, handbook, id } = await transcriptAcrossProjects(QUIET);
     const hook = cronk.client(claude.secret);
     expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "Do it all" })).status).toBe(200);
     const exporting = async () => ({
@@ -696,15 +694,29 @@ describe("Exporting and importing Transcripts", () => {
     });
     const withOne = await exporting();
 
+    // Each in a Session of its own that only edits the Handbook, so the export can't mix up what each changed.
     for (let i = 2; i <= 6; i++) {
+      const agent = await startSession(cronk, claude.secret);
+      expect((await agent.patch(`/api/documents/${handbook}`, { baseVersion: i - 1, body: `Welcome ${i}` })).status).toBe(200);
       const uploaded = await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId));
       expect(uploaded.status).toBe(200);
       const redacted = await bob.post(`/api/transcripts/${uploaded.body.transcript.id}/redactions`, { passage: `Again ${i}` });
       expect(redacted.status).toBe(200);
     }
     const files = await untarGz((await admin.download("/api/export")).body);
-    expect(Object.keys(files).filter((p) => /^transcripts\/\d+\.md$/.test(p))).toHaveLength(6);
-    expect(exported(files["transcripts/6.md"]).data.redactions).toHaveLength(1);
+    const byChat = new Map(
+      Object.keys(files)
+        .filter((p) => /^transcripts\/\d+\.md$/.test(p))
+        .map((p) => exported(files[p]).data)
+        .map((data) => [data.chatId, data]),
+    );
+    expect(byChat.size).toBe(6);
+    expect(byChat.get("chat-1")).toMatchObject({ tickets: ["CRONK-1", "SECRET-1"], documents: ["documents/1-handbook.md"] });
+    for (let i = 2; i <= 6; i++) {
+      expect(byChat.get(`chat-${i}`)).toMatchObject({ tickets: [], documents: ["documents/1-handbook.md"] });
+      expect(byChat.get(`chat-${i}`).sessions).toHaveLength(1);
+      expect(byChat.get(`chat-${i}`).redactions).toHaveLength(1);
+    }
     expect(await exporting()).toEqual(withOne);
   });
 
