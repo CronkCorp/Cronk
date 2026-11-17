@@ -101,7 +101,7 @@ export async function transaction<T>(on: Database | LiveDatabase, fn: (tx: Publi
 
 /**
  * Runs `fn` in a read-only, repeatable-read transaction, so everything it reads is one snapshot of the database:
- * rows that change while it runs read as they were when it began.
+ * rows that change while it runs read as they were at its first read.
  */
 export function snapshot<T>(db: Database, fn: (tx: Transaction) => Promise<T>): Promise<T> {
   return transaction(db, async (tx) => {
