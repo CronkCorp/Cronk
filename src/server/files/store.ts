@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -25,6 +25,8 @@ export interface FileStore {
   put(key: string, bytes: Readable | Buffer, opts?: { maxBytes?: number }): Promise<number>;
   /** The bytes stored under `key`, or only `range` of them; a key with no file throws. */
   get(key: string, range?: ByteRange): Readable;
+  /** How many bytes the file under `key` holds, or null when there is no file there; asks only for its metadata, never its bytes. */
+  size(key: string): Promise<number | null>;
   /** Moves the file under `from` to `to`, replacing any file there; moving a key with no file throws. */
   move(from: string, to: string): Promise<void>;
   /** Removes the file under `key`; removing one that isn't there does nothing. */
@@ -96,6 +98,14 @@ export class LocalDiskStore implements FileStore {
 
   get(key: string, range?: ByteRange): Readable {
     return createReadStream(this.path(key), range ? { start: range.start, end: range.end } : {});
+  }
+
+  async size(key: string): Promise<number | null> {
+    const stats = await stat(this.path(key)).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT" || err.code === "ENOTDIR") return null;
+      throw err;
+    });
+    return stats?.isFile() ? stats.size : null;
   }
 
   async move(from: string, to: string): Promise<void> {
