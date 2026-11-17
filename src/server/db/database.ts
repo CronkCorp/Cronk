@@ -12,8 +12,9 @@ export interface Database {
    * Gives the work using the database `withinMs` from now to finish, so that `end` takes no longer. Connections still in use
    * then, and any taken after, are cut off: Postgres ends their sessions, rolling back what they hadn't committed and freeing
    * the locks they held, and their queries fail as on a lost connection. Does nothing once the database has ended.
+   * Resolves once those connections have been cut off, at most a second past the bound.
    */
-  cutOffAfter(withinMs: number): void;
+  cutOffAfter(withinMs: number): Promise<void>;
   /** Ends every connection, once each connection in use has come back: with no limit unless `cutOffAfter` set one. */
   end(): Promise<void>;
 }
@@ -45,12 +46,14 @@ class PgDatabase implements Database {
     return this.pool.end();
   }
 
-  cutOffAfter(withinMs: number): void {
-    setTimeout(() => {
-      if (this.pool.ended) return;
-      this.cuttingOff = true;
-      void this.cutOff([...this.inUse]);
-    }, withinMs).unref();
+  cutOffAfter(withinMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        if (this.pool.ended) return resolve();
+        this.cuttingOff = true;
+        void this.cutOff([...this.inUse]).then(resolve);
+      }, withinMs).unref();
+    });
   }
 
   /**
