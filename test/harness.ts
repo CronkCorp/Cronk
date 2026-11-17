@@ -288,6 +288,8 @@ export interface Cronk {
   holdRow(table: string, id: string): Promise<HeldLock>;
   /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
   holdTable(table: string): Promise<HeldLock>;
+  /** How many queries naming `table` the server sends while `during` runs; to tell a fixed number of queries from one per item. */
+  queriesOn(table: string, during: () => Promise<unknown>): Promise<number>;
   /**
    * Holds back every live update the server pushes from now on, as if each change committed
    * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
@@ -426,6 +428,23 @@ export async function startCronk(opts: { publicUrl?: string; storage?: StorageCo
     },
     holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
     holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
+    queriesOn: async (table, during) => {
+      // The server and this harness share the pg module, and the Pool sends every query through a Client.
+      const naming = new RegExp(`\\b${table}\\b`);
+      const query = pg.Client.prototype.query;
+      let n = 0;
+      pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
+        const config = args[0] as string | { text?: string };
+        if (naming.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
+        return (query as (...a: unknown[]) => unknown).apply(this, args);
+      } as typeof query;
+      try {
+        await during();
+      } finally {
+        pg.Client.prototype.query = query;
+      }
+      return n;
+    },
     holdPushes: () => {
       const release = live.hold();
       onTestFinished(release);
