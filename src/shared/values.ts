@@ -17,6 +17,10 @@ export const WORKABLE_CATEGORIES: readonly StatusCategory[] = ["backlog", "unsta
 export const VERIFICATIONS = ["unverified", "verified"] as const;
 export type Verification = (typeof VERIFICATIONS)[number];
 
+/** How a User sees a Diff: one column of changes, or the two Versions side by side. Unified until they choose. */
+export const DIFF_VIEWS = ["unified", "split"] as const;
+export type DiffView = (typeof DIFF_VIEWS)[number];
+
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];

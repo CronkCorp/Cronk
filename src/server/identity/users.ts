@@ -1,5 +1,6 @@
 import { endAgentSessionsOfOwner, type ClaimHolders } from "../coordination/agent-sessions.js";
 import type { Queryable } from "../db/database.js";
+import type { DiffView } from "../../shared/values.js";
 import { endSignIns } from "./sign-ins.js";
 
 export type Role = "admin" | "member";
@@ -14,11 +15,13 @@ export interface User {
   active: boolean;
   /** False for a User an import brought in who hasn't accepted an invitation, so has no password yet. */
   joined: boolean;
+  /** How they see a Diff, as they last chose it. */
+  diffView: DiffView;
 }
 
 /** The shape of a User the API returns. */
 export function publicUser(user: User) {
-  return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active, joined: user.joined };
+  return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active, joined: user.joined, diffView: user.diffView };
 }
 
 export interface UserRow {
@@ -29,6 +32,7 @@ export interface UserRow {
   role: Role;
   password_hash: string;
   deactivated_at: Date | null;
+  diff_view: DiffView;
 }
 
 /**
@@ -63,6 +67,7 @@ export function toUser(row: UserRow): User {
     role: row.role,
     active: row.deactivated_at === null,
     joined: row.password_hash !== NO_PASSWORD,
+    diffView: row.diff_view,
   };
 }
 
@@ -120,6 +125,12 @@ export async function claimUserWithoutPassword(
   if (!rows[0]) return undefined;
   if (input.role === "admin") await db.query("DELETE FROM project_members WHERE user_id = $1", [rows[0].id]);
   return toUser(rows[0]);
+}
+
+/** Sets how the User sees a Diff. Returns the changed User, or undefined if there is no such User. */
+export async function setDiffView(db: Queryable, id: string, diffView: DiffView): Promise<User | undefined> {
+  const { rows } = await db.query<UserRow>("UPDATE users SET diff_view = $2 WHERE id = $1 RETURNING *", [id, diffView]);
+  return rows[0] && toUser(rows[0]);
 }
 
 export async function findUserById(db: Queryable, id: string): Promise<User | undefined> {

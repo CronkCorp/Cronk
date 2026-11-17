@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { actingUser } from "../actor.js";
 import { claimsEnded, tellReadyAfter } from "../coordination/ready.js";
+import type { DiffView } from "../../shared/values.js";
 import { HttpError, requireActor, requireUser, SIGN_IN_COOKIE, setSignInCookie, type AppContext } from "../context.js";
 import { transaction, UNIQUE_VIOLATION } from "../db/database.js";
 import {
   answer,
+  diffViewSchema,
   errors,
   holding,
   listing,
@@ -30,7 +32,7 @@ import {
 } from "./invitations.js";
 import { issuePasswordReset, usePasswordReset, userForPasswordReset, type ResetRefusal } from "./password-resets.js";
 import { createSignIn, deleteSignIn, endSignIns } from "./sign-ins.js";
-import { claimUserWithoutPassword, countUsers, findUserByEmail, findUserById, insertUser, listUsers, passwordHashOf, publicUser, setPasswordHash, updateUser, type Role } from "./users.js";
+import { claimUserWithoutPassword, countUsers, findUserByEmail, findUserById, insertUser, listUsers, passwordHashOf, publicUser, setDiffView, setPasswordHash, updateUser, type Role } from "./users.js";
 
 // Fixed lock id so two concurrent setup requests can't both create an Admin.
 const SETUP_LOCK = 0x7365747570;
@@ -447,6 +449,23 @@ export function identityRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         if (actor.kind === "user") return { user: publicUser(actor.user) };
         return { agent: publicAgent(actor.agent, actor.owner), readOnly: actor.readOnly };
+      },
+    );
+
+    // The signed-in User's own preferences; only their Diff view so far.
+    app.patch<{ Body: { diffView: DiffView } }>(
+      "/api/me",
+      {
+        schema: {
+          body: { type: "object", required: ["diffView"], additionalProperties: false, properties: { diffView: diffViewSchema } },
+          response: { 200: answer("The User, with the change", userAnswer), ...errors(400, 401, 403, 410) },
+        },
+      },
+      async (request) => {
+        const user = await requireUser(ctx, request);
+        // requireUser found them signed in, so they exist.
+        const changed = await setDiffView(ctx.db, user.id, request.body.diffView);
+        return { user: publicUser(changed!) };
       },
     );
   };

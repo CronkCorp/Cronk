@@ -1004,4 +1004,11 @@ export const migrations: Migration[] = [
     `,
     backfill: (db) => recordAllMentions(db),
   },
+  {
+    id: "0042_user_diff_view",
+    sql: `
+      -- The Diff view each User last chose (identity/users.ts), so it follows them across browsers. Unified until they choose.
+      ALTER TABLE users ADD COLUMN diff_view text NOT NULL DEFAULT 'unified' CHECK (diff_view IN ('unified', 'split'));
+    `,
+  },
 ];
