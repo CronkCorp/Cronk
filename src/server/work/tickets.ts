@@ -75,8 +75,9 @@ export interface Ticket {
 }
 
 /**
- * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket of
- * its Project it was working on then, holding its Claim, if any. `kept` records a User's Keep in Backlog.
+ * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket, of
+ * any Project, it was working on then, holding its Claim, if any; one of another Project is tagged `readableOnlyIn` it,
+ * so only readers of that Project see it. `kept` records a User's Keep in Backlog.
  */
 export interface Discovery {
   agent: AgentRef;
@@ -190,7 +191,7 @@ export async function keepDiscovery(db: Queryable, ticket: Ticket, actor: Actor,
 export interface NewDiscovery {
   agentId: string;
   sessionId: string | null;
-  /** The Ticket it came from and the Claim on it, of the same Project; null for none. */
+  /** The Ticket it came from and the Claim on it, of any Project; null for none. */
   source: { ticketId: string; claimId: string } | null;
 }
 

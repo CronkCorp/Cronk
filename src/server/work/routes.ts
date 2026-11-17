@@ -539,7 +539,7 @@ export function workRoutes(ctx: AppContext) {
                 maxLength: 30,
                 description:
                   "For an Agent: the key of the Ticket it is working on, whose Claim its Agent Session holds, which the Discovered Ticket came from; " +
-                  "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It must be of the same Project. " +
+                  "its Assignee gets the Discovered Ticket, and the Reports of that Claim list it. It may be of any Project; only those who can read that Project see it as the source. " +
                   "Left out, the Ticket of the one such Claim the Agent Session holds; needed when it holds several.",
               },
               blocks: {

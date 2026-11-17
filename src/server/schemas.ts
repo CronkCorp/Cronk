@@ -466,7 +466,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         object({
           agent: { ...named, description: "The Agent that filed it." },
           session: { ...nullable(object({ id })), description: "The Agent Session it was filed in." },
-          sourceTicket: { ...nullable(ticketName), description: "The Ticket of the same Project the Agent was working on, holding its Claim; null for none." },
+          sourceTicket: {
+            ...nullable(ticketName),
+            description: "The Ticket, of any Project, the Agent was working on, holding its Claim; null for none, or when the caller can't read that Ticket's Project.",
+          },
           kept: { type: "boolean", description: "Whether a User chose Keep in Backlog for it, which takes it out of the Inbox." },
         }),
       ),

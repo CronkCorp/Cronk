@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, tarGz } from "./harness.js";
 
 describe("Discovered Tickets", () => {
   it("files a Ticket an Agent creates while working on another as a Discovered Ticket: in Backlog, undelegated, with its source", async () => {
@@ -84,6 +84,24 @@ describe("A Discovered Ticket filed in another Project than its source", () => {
     expect(named.status).toBe(201);
     expect(named.body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
     expect((await admin.get("/api/tickets/OPS-2")).body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+  });
+});
+
+describe("A source Ticket in another Project", () => {
+  it("is still refused for a Decision, a Suggestion and an Artifact, unlike for a Discovered Ticket", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const { document } = (await admin.post("/api/projects/OPS/documents", { title: "Runbook", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const ownProject = (res: { status: number; body: { error?: string } }) => res.status === 400 && /of its own Project/.test(res.body.error ?? "");
+    expect(ownProject(await agent.post("/api/projects/OPS/decisions", { title: "Deploy on Fridays", ticket: "CRONK-1" }))).toBe(true);
+    const suggested = await agent.post("/api/suggestions", { item: { kind: "document", id: document.id }, baseVersion: 1, content: { body: "v2" }, reasoning: "Better.", ticket: "CRONK-1" });
+    expect(ownProject(suggested)).toBe(true);
+    expect(ownProject(await agent.upload("/api/projects/OPS/artifacts?title=Page&ticket=CRONK-1", await tarGz({ "index.html": "<p>hi</p>" })))).toBe(true);
+    expect((await agent.post("/api/projects/OPS/tickets", { title: "Found", ticket: "CRONK-1" })).status).toBe(201);
   });
 });
 

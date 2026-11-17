@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection } from "./harness.js";
-import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk, tarGz } from "./harness.js";
+import { connectMcp, delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, tarGz } from "./harness.js";
 
 /** A tool's raw result: whether it is an error, and the text of each content item. */
 async function rawResult(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; texts: string[] }> {
@@ -290,6 +290,21 @@ describe("the tickets tool's Discovered Tickets", () => {
     expect((await callTool(mcp, "tickets", { action: "edit", key: "CRONK-3", title: "Stale cache after deploy" })).body.ticket.title).toBe("Stale cache after deploy");
     await admin.patch("/api/tickets/CRONK-3", { delegateId: claude.agentId });
     expect((await callTool(mcp, "tickets", { action: "edit", key: "CRONK-3", title: "Again" })).isError).toBe(true);
+  });
+
+  it("files one in another Project than its source, whose source an Agent that can't read that Project gets as null", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const mcp = await connectMcp(cronk, claude.secret);
+    await callTool(mcp, "tickets", { action: "claim", key: "CRONK-1" });
+
+    const filed = await callTool(mcp, "tickets", { action: "file", project: "OPS", title: "Deploy is flaky", source: "CRONK-1" });
+    expect(filed.body.ticket).toMatchObject({ key: "OPS-1", discovered: { sourceTicket: { key: "CRONK-1", title: "Ticket 1" } } });
+
+    const bobs = await connectMcp(cronk, (await registerAgent(bob, "bob-bot")).secret);
+    expect((await callTool(bobs, "tickets", { action: "get", key: "OPS-1" })).body.ticket.discovered).toMatchObject({ agent: { name: "claude-laptop" }, sourceTicket: null });
   });
 
   it("blocks other Tickets from the Agent's Discovered Ticket, when filing it or later, saying why", async () => {
