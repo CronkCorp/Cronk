@@ -1572,6 +1572,86 @@ test("comment on an Artifact's Version from the drawer beside it, and see a repl
   // The button closes the drawer.
   await page.getByRole("button", { name: "Comments 2" }).click();
   await expect(drawer).toBeHidden();
+
+  // A search finds the Comment, and its result opens the Artifact.
+  await page.getByRole("searchbox", { name: "Search" }).fill("limit line");
+  await page.getByRole("searchbox", { name: "Search" }).press("Enter");
+  await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /On Limits/ }).click();
+  await expect(page).toHaveURL(`/artifacts/${artifact.id}`);
+});
+
+// Runs after the tests above, so Ada exists; the Workspace allows extra origins, as a fresh one does.
+test("declare an extra origin when publishing an Artifact from the dialog, and see it on the Artifact's page", async ({ page }) => {
+  const picked = await mkdtemp(join(tmpdir(), "cronk-artifact-"));
+  try {
+    await writeFile(join(picked, "index.html"), "<h1>Charts</h1>");
+    await signIn(page);
+    await page.goto("/artifacts");
+    await page.getByRole("button", { name: "Publish Artifact" }).click();
+    const dialog = page.getByRole("dialog", { name: "Publish an Artifact" });
+    await dialog.getByLabel("Title").fill("Charts");
+    await dialog.getByLabel("Choose folder…").setInputFiles(picked);
+
+    // A row can be added and removed again.
+    const rows = dialog.getByRole("list", { name: "Extra origins" }).getByRole("listitem");
+    await dialog.getByRole("button", { name: "Add origin" }).click();
+    await dialog.getByRole("button", { name: "Add origin" }).click();
+    await expect(rows).toHaveCount(2);
+    await rows.nth(1).getByRole("button", { name: "Remove" }).click();
+    await expect(rows).toHaveCount(1);
+
+    // A malformed origin is refused by the API; its message shows and the row stays as typed.
+    const row = rows.first();
+    await row.getByRole("textbox", { name: "Origin" }).fill("cdn.example.com");
+    await row.getByRole("checkbox", { name: "scripts" }).check();
+    await row.getByRole("checkbox", { name: "network requests" }).check();
+    await row.getByRole("textbox", { name: "Reason" }).fill("Loads the charting library");
+    await dialog.getByRole("button", { name: "Publish" }).click();
+    await expect(dialog.getByRole("alert")).toContainText("must be a bare http or https origin");
+    await expect(row.getByRole("textbox", { name: "Origin" })).toHaveValue("cdn.example.com");
+    await expect(row.getByRole("checkbox", { name: "scripts" })).toBeChecked();
+
+    await row.getByRole("textbox", { name: "Origin" }).fill("https://cdn.example.com");
+    await dialog.getByRole("button", { name: "Publish" }).click();
+    await expect(page.getByRole("heading", { name: "Charts" })).toBeVisible();
+    await page.getByRole("button", { name: /1 extra origin/ }).click();
+    const declared = page.getByRole("list", { name: "Extra origins" });
+    await expect(declared).toContainText("https://cdn.example.com");
+    await expect(declared).toContainText("for scripts, network requests");
+    await expect(declared).toContainText("Loads the charting library");
+    await page.keyboard.press("Escape");
+
+    // A new Version's dialog starts empty although the shown Version declared one; published so, it declares none.
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: "Publish new Version…" }).click();
+    const next = page.getByRole("dialog", { name: "Publish Version 2 of Charts" });
+    await expect(next.getByRole("button", { name: "Add origin" })).toBeVisible();
+    await expect(next.getByRole("list", { name: "Extra origins" }).getByRole("listitem")).toHaveCount(0);
+    await next.getByLabel("Choose folder…").setInputFiles(picked);
+    const sent = page.waitForRequest((r) => r.method() === "POST" && /\/api\/artifacts\/[^/]+\/versions/.test(r.url()));
+    await next.getByRole("button", { name: "Publish" }).click();
+    expect(new URL((await sent).url()).searchParams.has("extraOrigins")).toBe(false);
+    await expect(next).toBeHidden();
+    await expect(page.getByRole("button", { name: /Version 2/ }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /extra origin/ })).toHaveCount(0);
+
+    // Where the Workspace doesn't allow extra origins, the section is gone and publishing still works.
+    await page.request.patch("/api/workspace", { data: { artifactExtraOriginsAllowed: false } });
+    try {
+      await page.goto("/artifacts");
+      await page.getByRole("button", { name: "Publish Artifact" }).click();
+      await expect(dialog.getByLabel("Title")).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Add origin" })).toHaveCount(0);
+      await dialog.getByLabel("Title").fill("Plain charts");
+      await dialog.getByLabel("Choose folder…").setInputFiles(picked);
+      await dialog.getByRole("button", { name: "Publish" }).click();
+      await expect(page.getByRole("heading", { name: "Plain charts" })).toBeVisible();
+    } finally {
+      await page.request.patch("/api/workspace", { data: { artifactExtraOriginsAllowed: true } });
+    }
+  } finally {
+    await rm(picked, { recursive: true, force: true });
+  }
 });
 
 test("preview an Artifact embedded in a Document while editing it, but only a link in a Decision", async ({ page }) => {

@@ -189,6 +189,13 @@ const decisionPath = (key: string) => `/api/decisions/${encodeURIComponent(key)}
 const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;
 
+/** An extra origin a publish declares: what the Version may load from it, and why. */
+export type ExtraOrigin = Artifact["extraOrigins"][number];
+
+/** A publish's query: `params`, plus the declared extra origins as JSON when there are any. */
+const publishQuery = (params: Record<string, string>, extraOrigins: ExtraOrigin[]) =>
+  new URLSearchParams({ ...params, ...(extraOrigins.length > 0 && { extraOrigins: JSON.stringify(extraOrigins) }) });
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const send = () =>
     fetch(path, {
@@ -351,11 +358,13 @@ export const api = {
   /** What a draft Markdown body would embed, as saving it as a Document, Report or Comment would answer; records nothing. */
   draftEmbeds: (body: string) => request<{ embeds: ArtifactAt[] }>("POST", "/api/markdown/embeds", { body }).then((r) => r.embeds),
   /** Publishes a folder, packed as an archive, as a new Artifact. */
-  publishArtifact: (projectKey: string | undefined, title: string, archive: Blob) =>
-    upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${new URLSearchParams({ title })}`, archive, "application/gzip").then((r) => r.artifact),
+  publishArtifact: (projectKey: string | undefined, title: string, archive: Blob, extraOrigins: ExtraOrigin[] = []) =>
+    upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${publishQuery({ title }, extraOrigins)}`, archive, "application/gzip").then(
+      (r) => r.artifact,
+    ),
   /** Publishes a folder as the Artifact's next Version; refused with a 409 if a later Version than `baseVersion` was published meanwhile. */
-  publishArtifactVersion: (id: string, baseVersion: number, archive: Blob) =>
-    upload<{ artifact: Artifact }>(`${artifactPath(id)}/versions?${new URLSearchParams({ baseVersion: String(baseVersion) })}`, archive, "application/gzip").then(
+  publishArtifactVersion: (id: string, baseVersion: number, archive: Blob, extraOrigins: ExtraOrigin[] = []) =>
+    upload<{ artifact: Artifact }>(`${artifactPath(id)}/versions?${publishQuery({ baseVersion: String(baseVersion) }, extraOrigins)}`, archive, "application/gzip").then(
       (r) => r.artifact,
     ),
   protectArtifact: (id: string, value: boolean) =>

@@ -122,7 +122,7 @@ export async function issueAgentToken(
   db: Queryable,
   input: { agent: Agent; readOnly: boolean; now: Date },
 ): Promise<{ token: AgentToken; secret: string }> {
-  const secret = newToken();
+  const secret = newToken("agentToken");
   const { rows } = await db.query<AgentTokenRow>(
     "INSERT INTO agent_tokens (agent_id, token_hash, read_only, created_at) VALUES ($1, $2, $3, $4) RETURNING *",
     [input.agent.id, hashToken(secret), input.readOnly, input.now],
