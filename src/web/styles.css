@@ -235,11 +235,10 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .side-field-label { width: 76px; flex: none; color: var(--muted); font-size: 12px; }
 /* A row whose controls don't fit beside the label wraps them under it: a chip keeps its words on one line, and the
    value takes the rest of the line, wrapping its own text, before anything moves down. */
-.side-field > .chip { flex: none; white-space: nowrap; }
+.side-field > .chip, .side-field-controls > .chip { flex: none; white-space: nowrap; }
 .side-field-value { flex: 1; min-width: 0; max-width: max-content; }
 /* A value made of controls (a chip and its actions) wraps them within the value column, the actions as one group. */
 .side-field-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.side-field-controls > .chip { flex: none; white-space: nowrap; }
 .side-field-actions { display: flex; flex: none; gap: 8px; }
 .side-panel .side-field > .error { flex-basis: 100%; margin: 0; }
 .picker-trigger { flex: 1; min-width: 0; display: flex; align-items: center; min-height: 28px; padding: 4px 8px; margin-left: -8px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
