@@ -1572,6 +1572,12 @@ test("comment on an Artifact's Version from the drawer beside it, and see a repl
   // The button closes the drawer.
   await page.getByRole("button", { name: "Comments 2" }).click();
   await expect(drawer).toBeHidden();
+
+  // A search finds the Comment, and its result opens the Artifact.
+  await page.getByRole("searchbox", { name: "Search" }).fill("limit line");
+  await page.getByRole("searchbox", { name: "Search" }).press("Enter");
+  await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /On Limits/ }).first().click();
+  await expect(page).toHaveURL(`/artifacts/${artifact.id}`);
 });
 
 /** A gzipped tar archive holding `files`, path to text, as publishing an Artifact takes. */
