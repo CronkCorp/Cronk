@@ -1046,4 +1046,20 @@ export const migrations: Migration[] = [
       CREATE UNIQUE INDEX ticket_relations_id ON ticket_relations (id);
     `,
   },
+  {
+    id: "0046_session_record_indexes",
+    sql: `
+      -- The records of what each Agent Session changed, by that Session, which deciding who may read a Transcript looks up
+      -- (transcripts/transcripts.ts, RECORDS), so it costs time in proportion to that Transcript's Sessions, not to every change
+      -- in the Workspace. Partial: most records are Users' changes, made in no Session.
+      CREATE INDEX ticket_changes_actor_session ON ticket_changes (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX activities_actor_session ON activities (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX comments_actor_session ON comments (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX document_versions_actor_session ON document_versions (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX attachments_actor_session ON attachments (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX term_versions_actor_session ON term_versions (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX decision_versions_actor_session ON decision_versions (actor_session_id) WHERE actor_session_id IS NOT NULL;
+      CREATE INDEX artifact_versions_actor_session ON artifact_versions (actor_session_id) WHERE actor_session_id IS NOT NULL;
+    `,
+  },
 ];
