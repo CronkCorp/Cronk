@@ -210,7 +210,7 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
  * Everything an Admin can read through the API about the Workspace, with ids replaced by the
  * order they first appear in, so two installations holding the same data read the same.
  */
-async function snapshot(admin: Client): Promise<unknown> {
+async function everythingAdminReads(admin: Client): Promise<unknown> {
   const get = async (path: string) => {
     const res = await admin.get(path);
     if (res.status !== 200) throw new Error(`GET ${path} answered ${res.status}: ${JSON.stringify(res.body)}`);
@@ -498,7 +498,7 @@ describe("importing an export", () => {
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"], renamedIds: [] });
-    // Agents keep their ids, which the snapshot below can't tell apart.
+    // Agents keep their ids, which the comparison below can't tell apart.
     const agentIds = async (client: Client) => (await client.get("/api/agents?all=true")).body.agents.map((a: { id: string }) => a.id);
     expect(await agentIds(admin)).toEqual(await agentIds(before.admin));
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
@@ -509,10 +509,10 @@ describe("importing an export", () => {
     expect(reopenings.map((c: { from: { name: string }; to: { name: string } }) => [c.from.name, c.to.name])).toEqual([["Done", "In Progress"]]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
-    const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
+    const expected = JSON.parse(JSON.stringify(await everythingAdminReads(before.admin)), (_key, value) =>
       value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
-    expect(await snapshot(admin)).toEqual(expected);
+    expect(await everythingAdminReads(admin)).toEqual(expected);
     // Suggestions keep their ids, as Agents may have noted them, and all they hold.
     const own = ({ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason, item, reviewer }: any) => ({
       ...{ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason },
