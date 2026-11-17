@@ -730,6 +730,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         enum: LINK_REASONS,
         description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
       },
+      protected: { type: "boolean", description: protectedDescription("it, or a Document above it, is marked Protected (a Report counts only its own mark)") },
     }),
   },
   EmbeddedIn: {
@@ -759,6 +760,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
       artifactId: { ...nullable(id), description: "For a Comment on an Artifact: the Artifact's id." },
       at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
+      protected: {
+        ...nullable({ type: "boolean" }),
+        description: `${protectedDescription("a Document, or one above it, is marked Protected; a Term or Decision is marked itself")} Null for a Ticket or Comment.`,
+      },
     }),
   },
   DocumentTreeEntry: {
@@ -1070,6 +1075,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
       documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
       termId: { ...nullable(id), description: "The Term; otherwise null." },
+      protected: {
+        ...nullable({ type: "boolean" }),
+        description: `${protectedDescription(
+          "a Document, or one above it, is marked Protected; a Report or Term is marked itself",
+        )} Null for a Ticket or Comment.`,
+      },
     }),
   },
 };

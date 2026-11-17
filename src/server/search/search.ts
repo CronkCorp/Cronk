@@ -2,6 +2,7 @@ import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { documentReadableSql, readablePlaces, type Readable } from "../identity/access.js";
 import { ticketKeySql } from "../work/tickets.js";
+import { documentProtectedSql } from "../knowledge/protection.js";
 import type { SearchKind } from "../../shared/values.js";
 
 /**
@@ -22,6 +23,11 @@ export interface SearchResult {
   ticketKey: string | null;
   documentId: string | null;
   termId: string | null;
+  /**
+   * Whether Agents may read but not change it: for a Document or Report, it (or, for a Document, one above it)
+   * is marked Protected; for a Term, it is marked. Null for a Ticket or Comment.
+   */
+  protected: boolean | null;
 }
 
 /** The text-search configuration everything is indexed and searched with. */
@@ -47,6 +53,8 @@ const columns = (c: {
   ticketKey: string;
   documentId: string;
   termId: string;
+  /** SQL for whether it is Protected; NULL for kinds that can't be. */
+  protected: string;
   excerptOf: [string, string];
   text: string;
   at: string;
@@ -54,7 +62,7 @@ const columns = (c: {
   boost?: string;
 }) =>
   `SELECT '${c.kind}' AS kind, ${c.title} AS title, ${c.projectKey} AS "projectKey", ${c.ticketKey}::text AS "ticketKey",
-     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${excerpt(...c.excerptOf)} AS excerpt,
+     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${c.protected}::boolean AS protected, ${excerpt(...c.excerptOf)} AS excerpt,
      ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
 
 /** Whether the Ticket aliased `t` in the Project aliased `p` has the key the search is for, typed in any case. */
@@ -67,38 +75,38 @@ const KEY_MATCHES = `upper(${ticketKeySql("p", "t")}) = q.key`;
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
     kind: "ticket",
-    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${KEY_MATCHES} THEN 1000 ELSE 0 END` })}
+    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", protected: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${KEY_MATCHES} THEN 1000 ELSE 0 END` })}
       FROM q, tickets t JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND (to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query OR ${KEY_MATCHES})`,
   },
   {
     kind: "document",
-    sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
+    sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d LEFT JOIN projects p ON p.id = d.project_id
       WHERE d.ticket_id IS NULL AND ${documentReadableSql("d", "q.projects", "q.workspace_id")}
         AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "report",
-    sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", termId: "NULL", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
+    sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", termId: "NULL", protected: documentProtectedSql("d"), excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
-    sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+    sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
-    sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+    sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
       WHERE ${documentReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "term",
-    sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
+    sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", protected: "tm.protected", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
       FROM q, terms tm LEFT JOIN projects p ON p.id = tm.project_id
       WHERE ${documentReadableSql("tm", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${TERM_TEXT}) @@ q.query`,
   },
@@ -126,5 +134,14 @@ export async function search(
      LIMIT $4`,
     [input.query, places.projectIds, places.workspaceId, input.limit],
   );
-  return rows.map(({ kind, title, excerpt, projectKey, ticketKey, documentId, termId }) => ({ kind, title, excerpt, projectKey, ticketKey, documentId, termId }));
+  return rows.map(({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, protected: isProtected }) => ({
+    kind,
+    title,
+    excerpt,
+    projectKey,
+    ticketKey,
+    documentId,
+    termId,
+    protected: isProtected,
+  }));
 }

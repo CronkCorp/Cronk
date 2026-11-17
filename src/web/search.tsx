@@ -1,4 +1,4 @@
-import { Chip } from "./components/tags.js";
+import { Chip, ProtectedMark } from "./components/tags.js";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { SEARCH_KINDS } from "../shared/values.js";
 import { api, type SearchKind, type SearchResult } from "./api.js";
@@ -93,7 +93,10 @@ export function SearchPage(props: { filter: SearchFilter }) {
                     <div className="search-result-head">
                       <Chip>{KIND_NAMES[r.kind]}</Chip>
                       {r.ticketKey && <span className="key">{r.ticketKey}</span>}
-                      <span className="grow">{r.kind === "comment" ? `On ${r.title}` : r.title}</span>
+                      <span className="grow">
+                        {r.kind === "comment" ? `On ${r.title}` : r.title}
+                        {r.protected && <> <ProtectedMark compact /></>}
+                      </span>
                       <span className="muted">{r.projectKey ?? "Workspace"}</span>
                     </div>
                     <p className="muted search-excerpt">{r.excerpt}</p>

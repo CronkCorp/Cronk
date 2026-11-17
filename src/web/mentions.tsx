@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Mention } from "./api.js";
-import { Chip } from "./components/tags.js";
+import { Chip, ProtectedMark } from "./components/tags.js";
 import { Link } from "./router.js";
 import { Show, useLoad } from "./ui.js";
 
@@ -46,7 +46,8 @@ function MentionRow(props: { mention: Mention }) {
   return (
     <li>
       {(m.kind === "ticket" || m.kind === "decision") && <span className="key">{m.key}</span>}
-      <Link to={addressOf(m)} className="link">{m.title}</Link> <span className="muted">{whereItIs(m)}</span> <Chip>{KIND_NAMES[m.kind]}</Chip>
+      <Link to={addressOf(m)} className="link">{m.title}</Link> {m.protected && <><ProtectedMark compact /> </>}
+      <span className="muted">{whereItIs(m)}</span> <Chip>{KIND_NAMES[m.kind]}</Chip>
     </li>
   );
 }

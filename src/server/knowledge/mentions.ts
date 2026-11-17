@@ -6,6 +6,7 @@ import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowle
 import type { MentionKind } from "../../shared/values.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "./decisions.js";
+import { documentProtectedSql } from "./protection.js";
 
 /**
  * What mentions each Decision and Term: the Tickets, Documents, Comments, Terms and Decisions whose
@@ -187,6 +188,11 @@ export interface Mention {
   artifactId: string | null;
   /** When it last changed; for a Comment, when it was posted. */
   at: Date;
+  /**
+   * Whether Agents may read but not change it: for a Document, it (or one above it in its page tree) is
+   * marked Protected; for a Term or Decision, it is marked. Null for a Ticket or Comment.
+   */
+  protected: boolean | null;
 }
 
 /** How many mentions a Decision or Term lists. */
@@ -202,27 +208,27 @@ export async function listMentions(db: Queryable, target: { decisionKey: string 
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
        SELECT 'ticket' AS kind, t.id, ${ticketKeySql("p", "t")} AS key, t.title, p.key AS project_key, NULL AS ticket_key, NULL::uuid AS document_id,
-              NULL::uuid AS artifact_id, t.updated_at AS at, t.project_id, p.workspace_id
+              NULL::uuid AS artifact_id, t.updated_at AS at, NULL::boolean AS protected, t.project_id, p.workspace_id
        FROM m JOIN tickets t ON t.id = m.ticket_id JOIN projects p ON p.id = t.project_id
        UNION ALL
-       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, d.project_id, d.workspace_id
+       SELECT 'document', d.id, NULL, d.title, p.key, ${ticketKeySql("tp", "tt")}, NULL, NULL, d.updated_at, ${documentProtectedSql("d")}, d.project_id, d.workspace_id
        FROM m JOIN documents d ON d.id = m.document_id LEFT JOIN projects p ON p.id = d.project_id
          LEFT JOIN tickets tt ON tt.id = d.ticket_id LEFT JOIN projects tp ON tp.id = tt.project_id
        UNION ALL
        SELECT 'comment', c.id, NULL, coalesce(t.title, d.title, x.title), coalesce(tp.key, dp.key, xp.key), ${ticketKeySql("tp", "t")}, c.document_id,
-              c.artifact_id, c.at, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
+              c.artifact_id, c.at, NULL, coalesce(t.project_id, d.project_id, x.project_id), coalesce(tp.workspace_id, d.workspace_id, x.workspace_id)
        FROM m JOIN comments c ON c.id = m.comment_id LEFT JOIN tickets t ON t.id = c.ticket_id LEFT JOIN projects tp ON tp.id = t.project_id
          LEFT JOIN documents d ON d.id = c.document_id LEFT JOIN projects dp ON dp.id = d.project_id
          LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
        UNION ALL
-       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.project_id, tm.workspace_id
+       SELECT 'term', tm.id, NULL, tm.name, p.key, NULL, NULL, NULL, tm.updated_at, tm.protected, tm.project_id, tm.workspace_id
        FROM m JOIN terms tm ON tm.id = m.term_id LEFT JOIN projects p ON p.id = tm.project_id
        UNION ALL
        SELECT 'decision', dc.id, ${decisionKeySql("p", "dc")}, dc.title, p.key, NULL, NULL, NULL,
-              dc.updated_at, dc.project_id, dc.workspace_id
+              dc.updated_at, dc.protected, dc.project_id, dc.workspace_id
        FROM m JOIN decisions dc ON dc.id = m.decision_id LEFT JOIN projects p ON p.id = dc.project_id
      )
-     SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at
+     SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
      FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
     [value, readable.projectIds, readable.workspaceId],

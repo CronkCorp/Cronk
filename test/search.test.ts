@@ -73,8 +73,8 @@ describe("Searching", () => {
     expect(found).toHaveLength(2);
     expect(found).toEqual(
       expect.arrayContaining([
-        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket },
-        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label },
+        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, protected: false },
+        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, protected: false },
       ]),
     );
   });
@@ -83,7 +83,7 @@ describe("Searching", () => {
     const { admin } = await startInstalledCronk();
     const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work tracked within a Project.", avoid: ["Issue", "chore"] })).body
       .term.id;
-    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term };
+    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, protected: false };
 
     expect((await admin.get("/api/search?q=tracking")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=issues")).body.results).toEqual([asResult]);

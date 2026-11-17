@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, joinAs, startInstalledCronk } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, startInstalledCronk } from "./harness.js";
 
 describe("marking a Document Protected", () => {
   it("is done and undone by a User with Write, each recorded in its protection history", async () => {
@@ -114,6 +114,87 @@ describe("protecting a Document", () => {
     expect(out.body.document).toMatchObject({ protected: false, protectedBy: null });
     const into = await admin.post(`/api/documents/${handbook.id}/move`, { parentId: architecture.id });
     expect(into.body.document).toMatchObject({ protected: true, protectedBy: { id: architecture.id } });
+  });
+});
+
+describe("lists that show a Document", () => {
+  it("say a Ticket's linked Documents are Protected when marked or under a marked one, on reading the Ticket and on linking", async () => {
+    const { admin, architecture, backups, handbook } = await pageTree();
+    await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 1" });
+    await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
+    await admin.patch(`/api/documents/${handbook.id}`, { baseVersion: handbook.version, body: "Before CRONK-1." });
+    await admin.post(`/api/tickets/CRONK-1/documents/${architecture.id}`);
+
+    const linked = await admin.post(`/api/tickets/CRONK-1/documents/${backups.id}`);
+    const expected = [
+      { title: "Architecture", reason: "linked", protected: true },
+      { title: "Backups", reason: "linked", protected: true },
+      { title: "Handbook", reason: "mention", protected: false },
+    ];
+    expect(linked.body.documents.map(({ title, reason, protected: p }: { title: string; reason: string; protected: boolean }) => ({ title, reason, protected: p }))).toEqual(expected);
+    const read = (await admin.get("/api/tickets/CRONK-1")).body.documents;
+    expect(read.map(({ title, reason, protected: p }: { title: string; reason: string; protected: boolean }) => ({ title, reason, protected: p }))).toEqual(expected);
+    expect(read[0]).not.toHaveProperty("protectedBy");
+    expect(read[0]).not.toHaveProperty("covers");
+  });
+
+  it("say which search results are Protected: Documents and Reports by the same rule, Terms by their mark, never Tickets or Comments", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "The zebra cache." })).body.report;
+    const add = async (title: string, parentId?: string) =>
+      (await admin.post("/api/projects/CRONK/documents", { title, body: "About the zebra.", parentId })).body.document as { id: string };
+    const architecture = await add("Architecture");
+    await add("Storage", architecture.id);
+    await add("Handbook");
+    const term = (await admin.post("/api/projects/CRONK/terms", { name: "Zebra", definition: "A striped thing." })).body.term;
+    await admin.post("/api/projects/CRONK/terms", { name: "Zebra crossing", definition: "Where a zebra crosses." });
+    await admin.patch("/api/tickets/CRONK-1", { title: "Zebra work" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "A zebra comment." });
+    for (const id of [architecture.id, report.id]) await admin.post(`/api/documents/${id}/protection`, { protected: true });
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+
+    const results = (await admin.get("/api/search?q=zebra&limit=50")).body.results as { kind: string; title: string; protected: boolean | null }[];
+    expect(results.map((r) => `${r.kind}: ${r.title}: ${r.protected}`).sort()).toEqual([
+      "comment: Zebra work: null",
+      "document: Architecture: true",
+      "document: Handbook: false",
+      "document: Storage: true",
+      "report: Findings: true",
+      "term: Zebra crossing: false",
+      "term: Zebra: true",
+      "ticket: Zebra work: null",
+    ]);
+  });
+
+  it("say which of what mentions a Term or Decision is Protected: Documents by the same rule, Terms and Decisions by their mark", async () => {
+    const { admin, architecture, storage, handbook } = await pageTree();
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." })).body.term;
+    for (const { id, version } of [architecture, storage, handbook]) await admin.patch(`/api/documents/${id}`, { baseVersion: version, body: "Each Claim." });
+    const lapse = (await admin.post("/api/projects/CRONK/terms", { name: "Lapse", definition: "When a Claim ends unasked." })).body.term;
+    await admin.post("/api/projects/CRONK/terms", { name: "Release", definition: "Giving up a Claim." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Claims lapse", body: "A Claim lapses." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Claims are released", body: "A Claim is released." });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse a stale Claim" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "That Claim again." });
+    await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
+    await admin.post(`/api/terms/${lapse.id}/protection`, { protected: true });
+    await admin.post("/api/decisions/CRONK-D1/protection", { protected: true });
+
+    const res = await admin.get(`/api/terms/${claim.id}/mentions`);
+    expect(res.status).toBe(200);
+    expect(res.body.mentions.map((m: { kind: string; title: string; protected: boolean | null }) => `${m.kind}: ${m.title}: ${m.protected}`).sort()).toEqual([
+      "comment: Lapse a stale Claim: null",
+      "decision: Claims are released: false",
+      "decision: Claims lapse: true",
+      "document: Architecture: true",
+      "document: Handbook: false",
+      "document: Storage: true",
+      "term: Lapse: true",
+      "term: Release: false",
+      "ticket: Lapse a stale Claim: null",
+    ]);
   });
 });
 
