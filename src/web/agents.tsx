@@ -390,7 +390,7 @@ function describeRecordEntry(entry: AgentRecordEntry): ReactNode {
   if (entry.activity) return `logged ${entry.activity.blocking ? "a blocking question" : `a ${ACTIVITY_NAMES[entry.activity.kind]}`}`;
   if (entry.comment) return "commented";
   // A publish of an Artifact, worded apart from a saved Version of a Document.
-  if (entry.kind === "artifact_version") return `published Version ${entry.artifact!.version} of`;
+  if (entry.artifact) return `published Version ${entry.artifact.version} of`;
   return entry.version!.number === 1 ? "wrote" : `saved Version ${entry.version!.number} of`;
 }
 
@@ -398,7 +398,7 @@ function describeRecordEntry(entry: AgentRecordEntry): ReactNode {
 function RecordEntryPlace(props: { entry: AgentRecordEntry }) {
   const { ticket, document, artifact, version } = props.entry;
   if (artifact) {
-    const published = props.entry.kind === "artifact_version";
+    const published = !props.entry.comment;
     return (
       <>
         {!published && "on "}
