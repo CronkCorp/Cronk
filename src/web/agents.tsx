@@ -19,7 +19,8 @@ export function AgentsPage(props: { me: User }) {
   const [agents, reload] = useLoad(() => api.agents(), []);
   const [everyone, reloadEveryone] = useLoad(() => (admin ? api.agents(true) : Promise.resolve([])), [admin]);
   const [removed, reloadRemoved] = useLoad(() => api.removedAgents(admin), [admin]);
-  const changed = () => {
+  // Removing an Agent moves it from the cards to Removed Agents.
+  const reloadOwnAndRemoved = () => {
     reload();
     reloadRemoved();
   };
@@ -29,8 +30,7 @@ export function AgentsPage(props: { me: User }) {
     () =>
       watchAgents({
         ready: () => {
-          reload();
-          reloadRemoved();
+          reloadOwnAndRemoved();
           if (admin) reloadEveryone();
         },
         onLive,
@@ -62,7 +62,7 @@ export function AgentsPage(props: { me: User }) {
           ) : (
             <ul className="agent-cards" aria-label="Your Agents">
               {list.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} onChanged={changed} />
+                <AgentCard key={agent.id} agent={agent} onChanged={reloadOwnAndRemoved} />
               ))}
             </ul>
           )

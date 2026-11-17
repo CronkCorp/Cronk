@@ -9,7 +9,6 @@ import { userActor } from "../actor.js";
 import { countDelegatedTickets, listClaimsOfSessions } from "../coordination/claims.js";
 import {
   findAgent,
-  findAgentEvenRemoved,
   insertAgent,
   issueAgentToken,
   listAgentTokens,
@@ -196,7 +195,7 @@ export function agentRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const agent = await findAgentEvenRemoved(ctx.db, user.workspaceId, request.params.id);
+        const agent = await findAgent(ctx.db, user.workspaceId, request.params.id, { evenRemoved: true });
         if (!agent || (agent.ownerId !== user.id && user.role !== "admin")) throw new HttpError(404, "No such Agent");
         const owner = (await findUserById(ctx.db, agent.ownerId))!;
         const { since, limit } = request.query;

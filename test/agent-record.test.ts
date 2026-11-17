@@ -136,4 +136,15 @@ describe("What a removed Agent did", () => {
     expect((await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).status).toBe(404);
     expect((await admin.delete(`/api/agents/${claude.agentId}/tokens/${token}`)).status).toBe(404);
   });
+
+  it("can no longer be made a Delegate, nor connect", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await projectWithTickets(admin, "CRONK", 1);
+    const adaId = (await admin.get("/api/me")).body.user.id;
+    const claude = await registerAgent(admin, "claude-laptop");
+    expect((await admin.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
+
+    expect((await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: claude.agentId })).status).toBe(400);
+    expect((await cronk.client(claude.secret).post("/api/agent-sessions")).status).toBe(401);
+  });
 });

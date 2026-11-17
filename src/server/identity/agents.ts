@@ -58,18 +58,16 @@ export async function insertAgent(
   return toAgent(rows[0]!);
 }
 
-/** An Agent that hasn't been removed. */
-export async function findAgent(db: Queryable, workspaceId: string, id: string): Promise<Agent | undefined> {
-  const { rows } = await db.query<AgentRow>("SELECT * FROM agents WHERE workspace_id = $1 AND id = $2 AND removed_at IS NULL", [
+/**
+ * An Agent that hasn't been removed. With `evenRemoved`, a removed one too: only for reading its Agent Record, which
+ * outlasts it; everything else refuses a removed Agent.
+ */
+export async function findAgent(db: Queryable, workspaceId: string, id: string, opts: { evenRemoved?: boolean } = {}): Promise<Agent | undefined> {
+  const { rows } = await db.query<AgentRow>("SELECT * FROM agents WHERE workspace_id = $1 AND id = $2 AND ($3 OR removed_at IS NULL)", [
     workspaceId,
     id,
+    opts.evenRemoved ?? false,
   ]);
-  return rows[0] && toAgent(rows[0]);
-}
-
-/** An Agent, live or removed: only for reading its Agent Record, which outlasts it. */
-export async function findAgentEvenRemoved(db: Queryable, workspaceId: string, id: string): Promise<Agent | undefined> {
-  const { rows } = await db.query<AgentRow>("SELECT * FROM agents WHERE workspace_id = $1 AND id = $2", [workspaceId, id]);
   return rows[0] && toAgent(rows[0]);
 }
 
