@@ -6,7 +6,7 @@ import { Link, navigate } from "./router.js";
 import { Show, useLoad } from "./ui.js";
 import { FilterSelect } from "./work.js";
 
-const KIND_NAMES: Record<SearchKind, string> = { ticket: "Ticket", document: "Document", report: "Report", comment: "Comment", term: "Term" };
+const KIND_NAMES: Record<SearchKind, string> = { ticket: "Ticket", document: "Document", report: "Report", comment: "Comment", term: "Term", decision: "Decision" };
 
 /** What the search page searches for: the query, and optionally one kind and one Project key. */
 export interface SearchFilter {

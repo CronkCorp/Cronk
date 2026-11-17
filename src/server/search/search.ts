@@ -1,19 +1,20 @@
 import type { Actor } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { documentReadableSql, readablePlaces, type Readable } from "../identity/access.js";
+import { decisionKeySql } from "../knowledge/decisions.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { SearchKind } from "../../shared/values.js";
 
 /**
  * Full-text search over what an Actor may read, with Postgres's own text search (no extra
  * service). Each kind of thing is searched by the same expression its index is built on
- * (see migrations 0014 and 0037), so the indexes serve these queries.
+ * (see migrations 0014, 0037 and 0040), so the indexes serve these queries.
  */
 
 /** One thing a search found, with an excerpt of its text around the match. */
 export interface SearchResult {
   kind: SearchKind;
-  /** The Ticket's or Document's title, or the Term's name. */
+  /** The Ticket's, Document's or Decision's title, or the Term's name. */
   title: string;
   /** The text around the match, as written (Markdown), from the body (or the title when the body is empty). */
   excerpt: string;
@@ -22,6 +23,8 @@ export interface SearchResult {
   ticketKey: string | null;
   documentId: string | null;
   termId: string | null;
+  /** The Decision, by its key: `CRONK-D7`, or `D7` in the Workspace. */
+  decisionKey: string | null;
 }
 
 /** The text-search configuration everything is indexed and searched with. */
@@ -35,6 +38,7 @@ const TICKET_TEXT = "t.title || ' ' || t.description";
 const DOCUMENT_TEXT = "d.title || ' ' || d.body";
 const COMMENT_TEXT = "c.body";
 const TERM_TEXT = "term_search_text(tm.name, tm.definition, tm.avoid)";
+const DECISION_TEXT = "dc.title || ' ' || dc.body";
 
 /** The excerpt of `body` around the match, falling back to `title` when the body is empty. */
 const excerpt = (title: string, body: string) => `ts_headline(${CONFIG}, CASE WHEN ${body} = '' THEN ${title} ELSE ${body} END, q.query, ${EXCERPT})`;
@@ -47,6 +51,7 @@ const columns = (c: {
   ticketKey: string;
   documentId: string;
   termId: string;
+  decisionKey: string;
   excerptOf: [string, string];
   text: string;
   at: string;
@@ -54,7 +59,8 @@ const columns = (c: {
   boost?: string;
 }) =>
   `SELECT '${c.kind}' AS kind, ${c.title} AS title, ${c.projectKey} AS "projectKey", ${c.ticketKey}::text AS "ticketKey",
-     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${excerpt(...c.excerptOf)} AS excerpt,
+     ${c.documentId}::uuid AS "documentId", ${c.termId}::uuid AS "termId", ${c.decisionKey}::text AS "decisionKey",
+     ${excerpt(...c.excerptOf)} AS excerpt,
      ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
 
 /** Whether the Ticket aliased `t` in the Project aliased `p` has the key the search is for, typed in any case. */
@@ -67,40 +73,46 @@ const KEY_MATCHES = `upper(${ticketKeySql("p", "t")}) = q.key`;
 const SELECTS: { kind: SearchKind; sql: string }[] = [
   {
     kind: "ticket",
-    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${KEY_MATCHES} THEN 1000 ELSE 0 END` })}
+    sql: `${columns({ kind: "ticket", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", excerptOf: ["t.title", "t.description"], text: TICKET_TEXT, at: "t.updated_at", boost: `CASE WHEN ${KEY_MATCHES} THEN 1000 ELSE 0 END` })}
       FROM q, tickets t JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND (to_tsvector(${CONFIG}, ${TICKET_TEXT}) @@ q.query OR ${KEY_MATCHES})`,
   },
   {
     kind: "document",
-    sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
+    sql: `${columns({ kind: "document", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d LEFT JOIN projects p ON p.id = d.project_id
       WHERE d.ticket_id IS NULL AND ${documentReadableSql("d", "q.projects", "q.workspace_id")}
         AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "report",
-    sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", termId: "NULL", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
+    sql: `${columns({ kind: "report", title: "d.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "d.id", termId: "NULL", decisionKey: "NULL", excerptOf: ["d.title", "d.body"], text: DOCUMENT_TEXT, at: "d.updated_at" })}
       FROM q, documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${DOCUMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
-    sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+    sql: `${columns({ kind: "comment", title: "t.title", projectKey: "p.key", ticketKey: ticketKeySql("p", "t"), documentId: "NULL", termId: "NULL", decisionKey: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
       WHERE t.project_id = ANY(q.projects) AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "comment",
-    sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
+    sql: `${columns({ kind: "comment", title: "d.title", projectKey: "p.key", ticketKey: "NULL", documentId: "d.id", termId: "NULL", decisionKey: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
       WHERE ${documentReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
     kind: "term",
-    sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
+    sql: `${columns({ kind: "term", title: "tm.name", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "tm.id", decisionKey: "NULL", excerptOf: ["tm.name", "tm.definition"], text: TERM_TEXT, at: "tm.updated_at" })}
       FROM q, terms tm LEFT JOIN projects p ON p.id = tm.project_id
       WHERE ${documentReadableSql("tm", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${TERM_TEXT}) @@ q.query`,
+  },
+  {
+    kind: "decision",
+    sql: `${columns({ kind: "decision", title: "dc.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: decisionKeySql("p", "dc"), excerptOf: ["dc.title", "dc.body"], text: DECISION_TEXT, at: "dc.updated_at" })}
+      FROM q, decisions dc LEFT JOIN projects p ON p.id = dc.project_id
+      WHERE ${documentReadableSql("dc", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${DECISION_TEXT}) @@ q.query`,
   },
 ];
 
@@ -126,5 +138,14 @@ export async function search(
      LIMIT $4`,
     [input.query, places.projectIds, places.workspaceId, input.limit],
   );
-  return rows.map(({ kind, title, excerpt, projectKey, ticketKey, documentId, termId }) => ({ kind, title, excerpt, projectKey, ticketKey, documentId, termId }));
+  return rows.map(({ kind, title, excerpt, projectKey, ticketKey, documentId, termId, decisionKey }) => ({
+    kind,
+    title,
+    excerpt,
+    projectKey,
+    ticketKey,
+    documentId,
+    termId,
+    decisionKey,
+  }));
 }

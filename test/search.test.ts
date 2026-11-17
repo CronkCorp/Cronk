@@ -73,8 +73,8 @@ describe("Searching", () => {
     expect(found).toHaveLength(2);
     expect(found).toEqual(
       expect.arrayContaining([
-        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket },
-        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label },
+        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null },
+        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null },
       ]),
     );
   });
@@ -83,12 +83,40 @@ describe("Searching", () => {
     const { admin } = await startInstalledCronk();
     const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work tracked within a Project.", avoid: ["Issue", "chore"] })).body
       .term.id;
-    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term };
+    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null };
 
     expect((await admin.get("/api/search?q=tracking")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=issues")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=chore&kind=term")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=chore&kind=document")).body.results).toEqual([]);
+  });
+
+  it("finds Decisions of a Project and of the Workspace by words in their title and body, in any status, with their key and an excerpt of the body", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Postgres for storage", body: "We keep everything in one database." });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "rejected", reason: "Not after all." });
+    await admin.post("/api/workspace/decisions", { title: "Self-hosted only", body: "Runs on our own servers and Postgres." });
+    await admin.post("/api/workspace/documents", { title: "Postgres notes", body: "Tuning the pool." });
+    const asResult = (title: string, excerpt: string, projectKey: string | null, decisionKey: string) => ({
+      kind: "decision",
+      title,
+      excerpt,
+      projectKey,
+      ticketKey: null,
+      documentId: null,
+      termId: null,
+      decisionKey,
+    });
+    const rejected = asResult("Postgres for storage", "We keep everything in one database.", "CRONK", "CRONK-D1");
+    const workspace = asResult("Self-hosted only", "Runs on our own servers and Postgres.", null, "D1");
+
+    const byTitleOrBody = (await admin.get("/api/search?q=postgres&kind=decision")).body.results;
+    expect(byTitleOrBody).toHaveLength(2);
+    expect(byTitleOrBody).toEqual(expect.arrayContaining([rejected, workspace]));
+    expect((await admin.get("/api/search?q=server")).body.results).toEqual([workspace]);
+    expect((await admin.get("/api/search?q=databases")).body.results).toEqual([rejected]);
+    expect((await admin.get("/api/search?q=database&kind=document")).body.results).toEqual([]);
   });
 
   it("narrows to the kinds and Projects asked for, refusing a Project the caller can't see", async () => {
