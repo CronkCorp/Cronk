@@ -77,6 +77,37 @@ describe("Uploading a Transcript", () => {
     expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
+  it("links the Artifact its Session published, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const published = await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }));
+    expect(published.status, JSON.stringify(published.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Publish the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({ tickets: [], documents: [], artifacts: [{ id: published.body.artifact.id, title: "Limits" }] });
+  });
+
+  it("links the Artifact its Session only commented on, or attached a file to a Comment on, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact;
+    const agent = await session();
+    const commented = await agent.post(`/api/artifacts/${limits.id}/comments`, { body: "The legend overlaps the bars." });
+    expect(commented.status, JSON.stringify(commented.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Review the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.artifacts).toEqual([{ id: limits.id, title: "Limits", turn: null }]);
+
+    const attacher = await session();
+    const attached = await attacher.upload(`/api/comments/${commented.body.comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain");
+    expect(attached.status, JSON.stringify(attached.body)).toBe(201);
+    const fromAttaching = await upload(cronk.client(claude.secret), "chat-2", chat("Attach the screenshot", attacher.sessionId));
+    expect(fromAttaching.status, JSON.stringify(fromAttaching.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${fromAttaching.body.transcript.id}`)).body.transcript.artifacts).toEqual([{ id: limits.id, title: "Limits", turn: null }]);
+  });
+
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const idle = await session();
@@ -156,7 +187,7 @@ describe("Scrubbing secrets on upload", () => {
     // What each was stays readable, and so do the Agent Session ids that link it.
     expect(read.markdown).toContain("- [scrubbed: GitHub token]\n");
     expect(read.markdown).toContain("- [scrubbed: AWS access key]\n");
-    expect(read.markdown).toContain("- Cronk: [scrubbed: token]\n");
+    expect(read.markdown).toContain("- Cronk: [scrubbed: Cronk Token]\n");
     expect(read.markdown).toContain(`curl -H "Authorization: Bearer [scrubbed]" -H 'authorization: Basic [scrubbed]' $CRONK/api/me`);
     expect(read.markdown).toContain('{ "Authorization": "token [scrubbed]" }');
     expect(read.markdown).toContain("```\n[scrubbed: private key]\n```");
@@ -193,6 +224,56 @@ describe("Scrubbing secrets on upload", () => {
     const uploaded = await upload(cronk.client(claude.secret), "chat-1", untouched);
     expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
     expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown).toBe(untouched);
+  });
+
+  it("scrubs Cronk's own secrets by their prefix, whatever their random part, and leaves the result alone when scrubbed again", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    const noDigit = "AbCdEfGhIjKlMnOpQrStUvWxYz-_abcdefghijklmno";
+    const allDigits = "1234567890123456789012345678901234567890123";
+    const secrets =
+      "\n## User\n\n" +
+      `- agent: ${claude.secret}\n` +
+      `- agent with no digit: cronk_at_${noDigit}\n` +
+      `- sign-in: cookie cronk_sign_in=cronk_si_${allDigits};\n` +
+      `- invitation: https://cronk.example/invitations/cronk_inv_${noDigit}\n` +
+      `- reset: "cronk_pr_${noDigit}"\n` +
+      `- too short to be one: cronk_at_${noDigit.slice(1)}\n`;
+    const markdown = chat("Fix CRONK-1", agent.sessionId) + secrets;
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", markdown);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const scrubbed = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown;
+    expect(scrubbed).toBe(
+      chat("Fix CRONK-1", agent.sessionId) +
+        "\n## User\n\n" +
+        "- agent: [scrubbed: Cronk Token]\n" +
+        "- agent with no digit: [scrubbed: Cronk Token]\n" +
+        "- sign-in: cookie cronk_sign_in=[scrubbed: Cronk sign-in];\n" +
+        "- invitation: https://cronk.example/invitations/[scrubbed: Cronk Invitation]\n" +
+        '- reset: "[scrubbed: Cronk Password reset link]"\n' +
+        `- too short to be one: cronk_at_${noDigit.slice(1)}\n`,
+    );
+
+    // Scrubbing the scrubbed text changes nothing.
+    const again = await upload(cronk.client(claude.secret), "chat-2", scrubbed);
+    expect((await admin.get(`/api/transcripts/${again.body.transcript.id}`)).body.transcript.markdown).toBe(scrubbed);
+  });
+
+  it("still scrubs an Agent Token issued before tokens had a prefix", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
+    const bare = await cronk.issuedBeforePrefixes(claude.secret);
+    // A bare token is matched by its random look, so this one is made to mix digits, capitals and small letters.
+    const shown = "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V";
+    const uploaded = await upload(cronk.client(bare), "chat-1", chat("Hi", agent.sessionId) + `\nOld token: ${shown}\n`);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.markdown;
+    expect(read).toBe(chat("Hi", agent.sessionId) + "\nOld token: [scrubbed: token]\n");
   });
 
   it("counts the scrubbed text against the Workspace's limit", async () => {
@@ -348,6 +429,30 @@ describe("Who may read a Transcript", () => {
     expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
+  it("counts where its Sessions' Artifacts lie, as for every other item", async () => {
+    const { cronk, admin, bob, carol, bobId, carolId, claude } = await transcriptAcrossProjects();
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "Charting it" })).status).toBe(201);
+    const published = await agent.upload("/api/projects/SECRET/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }));
+    expect(published.status, JSON.stringify(published.body)).toBe(201);
+    const uploaded = await upload(cronk.client(claude.secret), "chat-2", chat("Chart the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const id = uploaded.body.transcript.id;
+    const limits = [{ id: published.body.artifact.id, title: "Limits", turn: null }];
+
+    // Carol reads CRONK, but not SECRET, where the Artifact lies.
+    expect((await carol.get(`/api/transcripts/${id}`)).status).toBe(404);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect((await carol.get(`/api/transcripts/${id}`)).body.transcript.artifacts).toEqual(limits);
+    expect((await bob.get(`/api/transcripts/${id}`)).body.transcript.artifacts).toEqual(limits);
+
+    // Its Owner reads it without Read there, without the Artifact.
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    const read = await bob.get(`/api/transcripts/${id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.transcript).toMatchObject({ tickets: [{ key: "CRONK-1" }], artifacts: [] });
+  });
+
   it("outlives its Agent's removal", async () => {
     const { bob, claude, id } = await transcriptAcrossProjects();
     expect((await bob.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
@@ -497,6 +602,7 @@ describe("Exporting and importing Transcripts", () => {
       documents: ["documents/1-handbook.md"],
       terms: [],
       decisions: [],
+      artifacts: [],
     });
     expect(file.body).toBe(rewritten);
     expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId));
@@ -520,6 +626,34 @@ describe("Exporting and importing Transcripts", () => {
       agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
       documents: [{ id: handbook.id, title: "Handbook", turn: null }],
     });
+  });
+
+  it("names the Artifacts its Sessions published or commented on by path, and the import links them again", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const site = await tarGz({ "index.html": "<h1>Chart</h1>" });
+    const chart = (await agent.upload("/api/workspace/artifacts?title=Chart", site)).body.artifact;
+    cronk.clock.advance(60_000);
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", site)).body.artifact;
+    expect((await agent.post(`/api/artifacts/${limits.id}/comments`, { body: "Legend overlaps." })).status).toBe(201);
+    expect((await upload(cronk.client(claude.secret), "chat-1", chat(`Chart it, see ${limits.id}`, agent.sessionId))).status).toBe(200);
+    const original = (await admin.get("/api/transcripts")).body.transcripts[0];
+    expect((await admin.get(`/api/transcripts/${original.id}`)).body.transcript.artifacts).toEqual([
+      { id: chart.id, title: "Chart", turn: null },
+      { id: limits.id, title: "Limits", turn: 1 },
+    ]);
+
+    const archive = await admin.download("/api/export");
+    const files = await untarGz(archive.body);
+    expect(exported(files["transcripts/1.md"]).data.artifacts).toEqual(["artifacts/1-chart.md", "projects/CRONK/artifacts/1-limits.md"]);
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", archive.body)).status).toBe(201);
+    const listed = (await elsewhere.admin.get("/api/transcripts")).body.transcripts;
+    expect((await elsewhere.admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript.artifacts).toEqual([
+      { id: chart.id, title: "Chart", turn: null },
+      { id: limits.id, title: "Limits", turn: 1 },
+    ]);
   });
 
   it("writes the texts as redacted, with what finds the passages again, so the import keeps redacting them", async () => {
@@ -733,7 +867,7 @@ describe("Searching Transcripts", () => {
     const [, hit] = found.body.results;
     expect(hit).toMatchObject({ kind: "transcript", title: "The deploy failed.", projectKey: null, transcriptId: id, turn: 3, protected: null });
     expect(hit.excerpt).toMatch(/^Rollback the rollback/);
-    expect(found.body.results[0]).toMatchObject({ transcriptId: null, turn: null });
+    expect(found.body.results[0]).toMatchObject({ transcriptId: null, turn: null, artifactId: null });
 
     expect((await admin.get("/api/search?q=rollback&kind=transcript")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["transcript"]);
     expect((await admin.get("/api/search?q=rollback&kind=document")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["document"]);
@@ -774,5 +908,94 @@ describe("Upgrading an installation", () => {
     await cronk.undoMigration("0042_transcript_turns", "DROP TABLE transcript_turns");
     await cronk.restart();
     expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 2 }]);
+  });
+});
+
+describe("Upgrading a Transcript stored before scrubbing", () => {
+  /** Stages the texts of Transcript `id` as an upload before scrubbing kept them, and the upgrade that scrubs them as not yet run. */
+  const storedUnscrubbed = (cronk: Awaited<ReturnType<typeof startInstalledCronk>>["cronk"], id: string, markdown: string, earlier: string[]) =>
+    cronk.undoMigration(
+      "0044_scrub_stored_transcripts",
+      `UPDATE transcripts SET markdown = ${literal(markdown)}, earlier = ARRAY[${earlier.map(literal).join(", ")}]::text[] WHERE id = '${id}'`,
+    );
+  const literal = (text: string) => `'${text.replaceAll("'", "''")}'`;
+
+  it("scrubs the secrets in its current and earlier texts", async () => {
+    const { cronk, admin, bob, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const current = chat("Do it all", sessionId) + `\nMy token: ${SECRETS.github}\n`;
+    const earlier = chat("Start", sessionId) + `\nKeys: ${SECRETS.aws} and ${SECRETS.slack}\n`;
+    await storedUnscrubbed(cronk, id, current, [earlier]);
+    await cronk.restart();
+
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nMy token: [scrubbed: GitHub token]\n");
+    expect(read.earlier).toEqual([chat("Start", sessionId) + "\nKeys: [scrubbed: AWS access key] and [scrubbed: Slack token]\n"]);
+  });
+
+  it("keeps the passages its Owner redacted by hand redacted", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    await upload(cronk.client(claude.secret), "chat-1", chat("Do it all", sessionId) + "\nThe door code is 4711-ALPHA.\n");
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "4711-ALPHA" })).status).toBe(200);
+    await storedUnscrubbed(cronk, id, chat("Do it all", sessionId) + `\nThe door code is 4711-ALPHA, the key ${SECRETS.github}.\n`, [
+      chat("Start", sessionId) + "\nCode 4711-ALPHA.\n",
+    ]);
+    await cronk.restart();
+
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nThe door code is [redacted], the key [scrubbed: GitHub token].\n");
+    expect(read.earlier).toEqual([chat("Start", sessionId) + "\nCode [redacted].\n"]);
+  });
+
+  it("takes a re-upload continuing the chat as replacing its text", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const before = chat("Do it all", sessionId) + `\nMy token: ${SECRETS.github}\n`;
+    const earlier = chat("Start", sessionId) + "\nNothing secret.\n";
+    await storedUnscrubbed(cronk, id, before, [earlier]);
+    await cronk.restart();
+
+    expect((await upload(cronk.client(claude.secret), "chat-1", `${before}\n## Assistant\n\nRotated.\n`)).status).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(read.markdown).toBe(chat("Do it all", sessionId) + "\nMy token: [scrubbed: GitHub token]\n\n## Assistant\n\nRotated.\n");
+    expect(read.earlier).toEqual([earlier]);
+  });
+
+  it("finds the scrub notes in search, not what they replaced", async () => {
+    const { cronk, bob, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    await storedUnscrubbed(cronk, id, chat("Do it all", sessionId) + `\nMy token: ${SECRETS.github}\n`, []);
+    await cronk.undoMigration("0042_transcript_turns", "DROP TABLE transcript_turns");
+    await cronk.restart();
+    expect((await bob.get(`/api/search?q=${SECRETS.github}&kind=transcript`)).body.results).toEqual([]);
+    expect((await bob.get("/api/search?q=scrubbed&kind=transcript")).body.results).toMatchObject([{ transcriptId: id }]);
+  });
+
+  it("changes nothing when run again", async () => {
+    const { cronk, admin, bob, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    await storedUnscrubbed(cronk, id, chat("Do it all", sessionId) + `\nMy token: ${SECRETS.github}\n`, [chat("Start", sessionId) + `\n${SECRETS.aws}\n`]);
+    await cronk.restart();
+    const upgraded = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+
+    await cronk.undoMigration("0044_scrub_stored_transcripts", "SELECT 1");
+    await cronk.restart();
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toEqual(upgraded);
+  });
+
+  it("leaves a Transcript uploaded since scrubbing as it is, its scrub notes and redactions too", async () => {
+    const { cronk, admin, bob, claude, id } = await transcriptAcrossProjects();
+    const sessionId = (await bob.get(`/api/transcripts/${id}`)).body.transcript.sessions[0].id;
+    const hook = cronk.client(claude.secret);
+    await upload(hook, "chat-1", chat("Do it all", sessionId) + `\nKey ${SECRETS.slack}, code 4711-ALPHA.\n`);
+    await upload(hook, "chat-1", chat("Again", sessionId) + `\nKey ${SECRETS.github}.\n`);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "4711-ALPHA" })).status).toBe(200);
+    const uploaded = (await admin.get(`/api/transcripts/${id}`)).body.transcript;
+    expect(uploaded.earlier).toHaveLength(1);
+
+    await cronk.undoMigration("0044_scrub_stored_transcripts", "SELECT 1");
+    await cronk.restart();
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toEqual(uploaded);
   });
 });

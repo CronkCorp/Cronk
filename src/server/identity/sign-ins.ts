@@ -8,7 +8,7 @@ export const SIGN_IN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Records a sign-in and returns the secret token for the cookie. Only its hash is stored. */
 export async function createSignIn(db: Queryable, clock: Clock, userId: string): Promise<{ token: string; expiresAt: Date }> {
-  const token = newToken();
+  const token = newToken("signIn");
   const now = clock.now();
   const expiresAt = new Date(now.getTime() + SIGN_IN_TTL_MS);
   // Expired sign-ins can never be used again; clear them out as new ones arrive.
