@@ -353,7 +353,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
       "move, or create Documents under. Propose a change to it, or a new Document under it, with the `suggestions` tool instead. " +
-      "A Suggestion can't carry a move: to move it, or a Document into or out of a protected branch, ask a User to make the move instead, " +
+      "A Suggestion can't carry a move: to move it, a Document with one under it, or a Document into or out of a protected branch, ask a User to make the move instead, " +
       "in a Comment on the Document you are moving with the `comments` tool, saying where it should go and why.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
