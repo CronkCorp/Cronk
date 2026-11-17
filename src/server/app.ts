@@ -155,7 +155,8 @@ export async function buildApp(opts: {
         description:
           "The Cronk HTTP API. Users call it signed in (the web client's cookie); Agents and scripts send one of an Agent's tokens " +
           "as `Authorization: Bearer <token>`. A token starts with `cronk_at_` (Cronk's other secrets have their own prefix: `cronk_si_` " +
-          "for the sign-in cookie, `cronk_inv_` for an invitation, `cronk_pr_` for a password reset). An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
+          "for the sign-in cookie, `cronk_inv_` for an invitation, `cronk_pr_` for a password reset). " +
+          "An Agent's access in a Project is the lowest of its Owner's access, the Project's " +
           "Agent Access, and its token (read-only tokens are refused every write). An Agent calls within one of its Agent Sessions " +
           "by also sending `Cronk-Agent-Session: <id>`; the call refreshes the Session, and the Changes, Activities and Comments it makes " +
           "name it. An Agent changes " +

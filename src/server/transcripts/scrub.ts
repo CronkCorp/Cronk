@@ -54,10 +54,9 @@ const CRONK_TOKEN_NAMES: Record<TokenKind, string> = {
 };
 
 /**
- * A secret of Cronk's own, by the prefix of its kind (`newToken`): the prefix, then 32 random bytes as base64url (43 characters,
- * any of them, digits or not).
+ * A secret of Cronk's own, by the prefix of its kind (`newToken`): the prefix, then 32 random bytes as base64url (43 characters).
  */
-const PREFIXED_CRONK_TOKENS = (Object.keys(TOKEN_PREFIXES) as TokenKind[]).map(
+const CRONK_TOKENS = (Object.keys(TOKEN_PREFIXES) as TokenKind[]).map(
   (kind): [RegExp, string] => [token(`${TOKEN_PREFIXES[kind]}[${TOKEN_CHAR}]{43}`), CRONK_TOKEN_NAMES[kind]],
 );
 
@@ -65,6 +64,6 @@ const PREFIXED_CRONK_TOKENS = (Object.keys(TOKEN_PREFIXES) as TokenKind[]).map(
 export function scrubSecrets(markdown: string): string {
   let text = markdown.replace(PRIVATE_KEY, "[scrubbed: private key]");
   text = text.replace(AUTHORIZATION, "$1$2[scrubbed]").replace(BEARER, "$1[scrubbed]");
-  for (const [pattern, kind] of [...PROVIDER_TOKENS, ...PREFIXED_CRONK_TOKENS]) text = text.replace(pattern, `[scrubbed: ${kind}]`);
+  for (const [pattern, kind] of [...PROVIDER_TOKENS, ...CRONK_TOKENS]) text = text.replace(pattern, `[scrubbed: ${kind}]`);
   return text;
 }
