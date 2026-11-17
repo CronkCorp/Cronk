@@ -286,8 +286,9 @@ export interface Cronk {
    */
   interruptQueriesOn(table: string, cause: () => Promise<unknown>): Promise<void>;
   /**
-   * Fails at COMMIT every transaction that writes a row of `table` while `during` runs, as Postgres does when a deferred
-   * constraint is broken: the transaction runs all its queries, then rolls back. Await the requests in `during`.
+   * Fails at COMMIT every transaction that writes a row of `table` while `during` runs, as
+   * Postgres does when a deferred constraint is broken: the transaction runs all its queries,
+   * then rolls back. Await the requests in `during`, since commits after it returns succeed.
    */
   failCommitsWriting(table: string, during: () => Promise<unknown>): Promise<void>;
   /**
@@ -481,16 +482,18 @@ export async function startCronk(
     failCommitsWriting: async (table, during) => {
       const admin = new pg.Client({ connectionString: databaseUrl });
       await admin.connect();
+      // Named for the table, so calls on different tables can overlap.
+      const name = `harness_fail_commit_${table}`;
       try {
         // A deferred constraint trigger runs at COMMIT, after the transaction's last query, and its error rolls it back.
-        await admin.query(`CREATE FUNCTION harness_fail_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+        await admin.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$
           BEGIN RAISE EXCEPTION 'Commit failed by the test harness'; END $$`);
-        await admin.query(`CREATE CONSTRAINT TRIGGER harness_fail_commit AFTER INSERT OR UPDATE OR DELETE ON ${table}
-          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION harness_fail_commit()`);
+        await admin.query(`CREATE CONSTRAINT TRIGGER ${name} AFTER INSERT OR UPDATE OR DELETE ON ${table}
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ${name}()`);
         await during();
       } finally {
-        await admin.query(`DROP TRIGGER IF EXISTS harness_fail_commit ON ${table}`).catch(() => {});
-        await admin.query("DROP FUNCTION IF EXISTS harness_fail_commit()").catch(() => {});
+        await admin.query(`DROP TRIGGER IF EXISTS ${name} ON ${table}`).catch(() => {});
+        await admin.query(`DROP FUNCTION IF EXISTS ${name}()`).catch(() => {});
         await admin.end();
       }
     },
