@@ -303,6 +303,14 @@ export interface Cronk {
    */
   queries(during: () => Promise<unknown>): Promise<number>;
   /**
+   * The tables some query the server sends while `during` runs would read whole, rather than look rows up in an index by what the
+   * query knows, even with Postgres told to avoid reading tables whole wherever an index could serve: so for a table listed, the query
+   * has no index to look its rows up in, or found walking all of a small partial index cheaper. Each query is planned again afterwards, on a connection of its own, with the values it
+   * was sent; plans are not run. Only reads (SELECT and WITH) are planned, so what a write looks up is left out. Sorted, each table once.
+   * As `queriesOn`, keep the harness's own queries out of `during`.
+   */
+  tablesReadWhole(during: () => Promise<unknown>): Promise<string[]>;
+  /**
    * Holds back every live update the server pushes from now on, as if each change committed
    * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
    */
@@ -456,6 +464,24 @@ export async function startCronk(
     holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
     queriesOn: (table, during) => countQueries(new RegExp(`\\b${table}\\b`), during),
     queries: (during) => countQueries(/./, during),
+    tablesReadWhole: async (during) => {
+      const sent = await sentQueries(during);
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        // Reading a table whole then costs more than any plan through an index, so a plan reads one whole only where no index serves.
+        for (const setting of ["enable_seqscan", "enable_hashjoin", "enable_mergejoin"]) await client.query(`SET ${setting} = off`);
+        const whole = new Set<string>();
+        for (const { text, values } of sent) {
+          if (!/^\s*(SELECT|WITH)\b/i.test(text)) continue;
+          const { rows } = await client.query<{ "QUERY PLAN": [{ Plan: PlanNode }] }>(`EXPLAIN (FORMAT JSON) ${text}`, values);
+          for (const table of readWhole(rows[0]!["QUERY PLAN"][0].Plan)) whole.add(table);
+        }
+        return [...whole].sort();
+      } finally {
+        await client.end();
+      }
+    },
     holdPushes: () => {
       const release = live.hold();
       onTestFinished(release);
@@ -683,16 +709,29 @@ export async function projectWithTickets(client: Client, key: string, count: num
   for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
 }
 
-/**
- * How many queries the server sends that `matching` matches while `during` runs. The server and this harness share the pg module,
- * and the Pool sends every query through a Client.
- */
+/** How many queries the server sends that `matching` matches while `during` runs. */
 async function countQueries(matching: RegExp, during: () => Promise<unknown>): Promise<number> {
+  return (await sentQueries(during)).filter((q) => matching.test(q.text)).length;
+}
+
+/** A query the server sent: its text and the values bound to it. */
+interface SentQuery {
+  text: string;
+  values: unknown[] | undefined;
+}
+
+/**
+ * The queries the server sends while `during` runs, in order. The server and this harness share the pg module, and the Pool sends
+ * every query through a Client.
+ */
+async function sentQueries(during: () => Promise<unknown>): Promise<SentQuery[]> {
   const query = pg.Client.prototype.query;
-  let n = 0;
+  const sent: SentQuery[] = [];
   pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
-    const config = args[0] as string | { text?: string };
-    if (matching.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
+    const config = args[0] as string | { text?: string; values?: unknown[] };
+    const values = Array.isArray(args[1]) ? args[1] : undefined;
+    if (typeof config === "string") sent.push({ text: config, values });
+    else sent.push({ text: config?.text ?? "", values: config?.values ?? values });
     return (query as (...a: unknown[]) => unknown).apply(this, args);
   } as typeof query;
   try {
@@ -700,8 +739,45 @@ async function countQueries(matching: RegExp, during: () => Promise<unknown>): P
   } finally {
     pg.Client.prototype.query = query;
   }
-  return n;
+  return sent;
 }
+
+/** A node of a plan Postgres gives in EXPLAIN (FORMAT JSON). */
+interface PlanNode {
+  "Node Type": string;
+  "Relation Name"?: string;
+  "Index Cond"?: string;
+  Plans?: PlanNode[];
+}
+
+/**
+ * The tables `plan` reads whole: by a sequential scan, or by an index scan that looks nothing up, which walks the whole index (of a
+ * partial index, every row it holds) rather than finding rows in it.
+ */
+function readWhole(plan: PlanNode): string[] {
+  const children = plan.Plans ?? [];
+  const here = (() => {
+    switch (plan["Node Type"]) {
+      case "Seq Scan":
+        return true;
+      case "Index Scan":
+      case "Index Only Scan":
+        return !looksUp(plan["Index Cond"]);
+      case "Bitmap Heap Scan":
+        return bitmapScans(plan).some((scan) => !looksUp(scan["Index Cond"]));
+      default:
+        return false;
+    }
+  })();
+  return [...(here && plan["Relation Name"] ? [plan["Relation Name"]] : []), ...children.flatMap(readWhole)];
+}
+
+/** The Bitmap Index Scans under a Bitmap Heap Scan, through any BitmapAnd or BitmapOr. */
+const bitmapScans = (plan: PlanNode): PlanNode[] =>
+  (plan.Plans ?? []).flatMap((c) => (c["Node Type"] === "Bitmap Index Scan" ? [c] : c["Node Type"].startsWith("Bitmap") ? bitmapScans(c) : []));
+
+/** Whether an index condition finds rows by a value, rather than only that columns are set, which every row of a partial index on them is. */
+const looksUp = (cond: string | undefined) => cond !== undefined && /\S/.test(cond.replace(/[\w."]+ IS NOT NULL|\bAND\b|[()\s]/g, ""));
 
 /**
  * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
