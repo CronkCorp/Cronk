@@ -873,7 +873,7 @@ export function workRoutes(ctx: AppContext) {
           return { before: ticket, ticket: updated, alsoChanged: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore, avoidedWords };
         });
         // Any change may show in the Inbox of whoever was or is now its Assignee, and its title and Status in the items of the
-        // Discovered Tickets blocking it.
+        // Discovered Tickets blocking it: keep `shown` in step with what `withBlocks` lists of each Ticket blocked.
         if (ticket !== before) {
           const shown = ticket.title !== before.title || ticket.status.id !== before.status.id;
           waitingItemsChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id, ...(shown ? await assigneesWaitingOn(ctx.db, [ticket.id]) : [])]);

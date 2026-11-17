@@ -8,7 +8,7 @@ import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { blockingRefsOf, type BlockingRef } from "../work/relations.js";
-import { visibleTicketsTo } from "../work/ticket-reads.js";
+import { visibilityFilterFor } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -213,7 +213,7 @@ export async function withBlocks(db: Queryable, user: User, items: TicketItem<"d
   if (items.length === 0) return [];
   const [blocks, visible] = await Promise.all([
     blockingRefsOf(db, items.map((item) => item.ticket.id), "from"),
-    visibleTicketsTo(db, userActor(user)),
+    visibilityFilterFor(db, userActor(user)),
   ]);
   return items.map((item) => ({ ...item, blocks: visible(blocks.get(item.ticket.id)!) }));
 }

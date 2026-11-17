@@ -288,7 +288,10 @@ export interface Cronk {
   holdRow(table: string, id: string): Promise<HeldLock>;
   /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
   holdTable(table: string): Promise<HeldLock>;
-  /** How many queries naming `table` the server sends while `during` runs; to tell a fixed number of queries from one per item. */
+  /**
+   * How many queries naming `table` the server sends while `during` runs; to tell a fixed number of queries from one per item.
+   * Counts every pg Client in the process, so keep the harness's own (held locks, say) out of `during`.
+   */
   queriesOn(table: string, during: () => Promise<unknown>): Promise<number>;
   /**
    * Holds back every live update the server pushes from now on, as if each change committed

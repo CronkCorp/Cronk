@@ -317,16 +317,17 @@ describe("The Inbox's live updates", () => {
 
 describe("A waiting Discovered Ticket's Inbox item, live", () => {
   /**
-   * Bob, the Assignee of a Discovered Ticket waiting for him that pauses CRONK-1, and his Inbox stream with Triage. CRONK-1
-   * stays Ada's, so only the block reaches Bob. `before` runs first, as the block stops CRONK-1's Agent claiming it.
+   * Bob, the Assignee of a Discovered Ticket waiting for him that pauses `pauses` (CRONK-1 by default), and his Inbox stream
+   * with Triage. The Ticket paused stays Ada's, so only the block reaches Bob. `before` runs first, as the block stops the
+   * paused Ticket's Agent claiming it.
    */
-  async function waitingOn(before?: (admin: Client, agent: Client) => Promise<unknown>) {
-    const setup = await delegatedSetup();
+  async function waitingOn({ pauses = "CRONK-1", tickets = 1, before }: { pauses?: string; tickets?: number; before?: (admin: Client, agent: Client) => Promise<unknown> } = {}) {
+    const setup = await delegatedSetup(tickets);
     const { cronk, admin, session } = setup;
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const agent = await session();
     await before?.(admin, agent);
-    const discovered = (await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason: "Same migration." }] }))
+    const discovered = (await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: pauses, reason: "Same migration." }] }))
       .body.ticket.key as string;
     await admin.patch(`/api/tickets/${discovered}`, { assigneeId: (await bob.get("/api/me")).body.user.id });
     const stream = await bob.events("/api/inbox/events?triage=true");
@@ -361,36 +362,70 @@ describe("A waiting Discovered Ticket's Inbox item, live", () => {
   });
 
   it("tells its Assignee when a Ticket it pauses in another Project becomes private or open", async () => {
-    const { cronk, admin, session } = await delegatedSetup();
-    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
-    await admin.post("/api/projects/OPS/tickets", { title: "Deploy" });
-    const bob = await joinAs(cronk, admin, "bob@example.com");
-    const agent = await session();
-    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "OPS-1", reason: "Same migration." }] });
-    await admin.patch("/api/tickets/CRONK-2", { assigneeId: (await bob.get("/api/me")).body.user.id });
-    const stream = await bob.events("/api/inbox/events?triage=true");
-    expect((await stream.next())?.event).toBe("ready");
+    const { admin, bob, discovered, toldBob } = await waitingOn({
+      pauses: "OPS-1",
+      before: async (admin) => {
+        await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+        await admin.post("/api/projects/OPS/tickets", { title: "Deploy" });
+      },
+    });
+    const discoveredLines = async () =>
+      ((await bob.get("/api/inbox?kind=discovered")).body.items as { ticket: { key: string }; blocks: { key: string }[] }[]).map((i) => [i.ticket.key, i.blocks.map((b) => b.key)]);
 
     await admin.patch("/api/projects/OPS", { visibility: "private" });
-    expect(await stream.next()).toMatchObject({ event: "changed" });
-    expect(await stream.next()).toMatchObject({ event: "triage" });
-    expect((await bob.get("/api/inbox?kind=discovered")).body.items).toMatchObject([{ ticket: { key: "CRONK-2" }, blocks: [] }]);
+    await toldBob();
+    expect(await discoveredLines()).toEqual([[discovered, []]]);
     await admin.patch("/api/projects/OPS", { visibility: "open" });
-    expect(await stream.next()).toMatchObject({ event: "changed" });
-    expect(await stream.next()).toMatchObject({ event: "triage" });
-    expect((await bob.get("/api/inbox?kind=discovered")).body.items).toMatchObject([{ ticket: { key: "CRONK-2" }, blocks: [{ key: "OPS-1" }] }]);
+    await toldBob();
+    expect(await discoveredLines()).toEqual([[discovered, ["OPS-1"]]]);
+  });
+
+  it("tells its Assignee when a Ticket it pauses is sent back", async () => {
+    const { admin, toldBob } = await waitingOn({
+      before: async (admin, agent) => {
+        await agent.post("/api/tickets/CRONK-1/claim");
+        await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+        expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "in_review") })).status).toBe(200);
+      },
+    });
+
+    expect((await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." })).status).toBe(200);
+    await toldBob();
   });
 
   it("tells its Assignee when a Ticket it pauses is Reopened", async () => {
-    const { admin, toldBob } = await waitingOn(async (admin, agent) => {
-      await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
-      await agent.post("/api/tickets/CRONK-1/claim");
-      await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
-      expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") })).body.ticket).toMatchObject({ verification: "unverified" });
+    const { admin, toldBob } = await waitingOn({
+      before: async (admin, agent) => {
+        await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+        await agent.post("/api/tickets/CRONK-1/claim");
+        await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+        expect((await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") })).body.ticket).toMatchObject({ verification: "unverified" });
+      },
     });
 
     expect((await admin.post("/api/tickets/CRONK-1/reopen", { comment: "The cache isn't cleared on moves.", dependents: {} })).status).toBe(200);
     await toldBob();
+  });
+
+  it("tells its Assignee when a Ticket it pauses is paused by Reopening what it builds on", async () => {
+    const { admin, toldBob } = await waitingOn({
+      pauses: "CRONK-2",
+      tickets: 2,
+      before: async (admin, agent) => {
+        await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+        await admin.patch("/api/tickets/CRONK-1", { autonomous: true });
+        await agent.post("/api/tickets/CRONK-1/claim");
+        await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed the cache." });
+        await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") });
+        expect((await agent.post("/api/tickets/CRONK-2/claim")).status).toBe(200);
+        expect((await agent.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "started") })).status).toBe(200);
+      },
+    });
+
+    const reopened = await admin.post("/api/tickets/CRONK-1/reopen", { comment: "The cache isn't cleared on moves.", dependents: { "CRONK-2": "pause" } });
+    expect(reopened.status).toBe(200);
+    await toldBob();
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.status.category).toBe("unstarted");
   });
 
   it("leaves its Assignee alone once it no longer waits, and when a Ticket it pauses changes only its description", async () => {
@@ -402,6 +437,21 @@ describe("A waiting Discovered Ticket's Inbox item, live", () => {
     await toldBob();
     await admin.patch("/api/tickets/CRONK-1", { title: "Clean up the cache" });
     expect(await stream.next()).toMatchObject({ event: "triage" });
+  });
+
+  it("leaves its Assignee alone once it is delegated or moved out of Backlog", async () => {
+    const delegated = await waitingOn();
+    const bobsAgent = await registerAgent(delegated.bob, "bobs-agent");
+    await delegated.admin.patch(`/api/tickets/${delegated.discovered}`, { delegateId: bobsAgent.agentId });
+    await delegated.toldBob();
+    await delegated.admin.patch("/api/tickets/CRONK-1", { title: "Clean up the cache" });
+    expect(await delegated.stream.next()).toMatchObject({ event: "triage" });
+
+    const started = await waitingOn();
+    await started.admin.patch(`/api/tickets/${started.discovered}`, { statusId: await statusIn(started.admin, "started") });
+    await started.toldBob();
+    await started.admin.patch("/api/tickets/CRONK-1", { title: "Clean up the cache" });
+    expect(await started.stream.next()).toMatchObject({ event: "triage" });
   });
 
   it("are listed with the Tickets they pause in a fixed number of queries, however many there are", async () => {

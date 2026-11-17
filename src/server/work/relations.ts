@@ -151,9 +151,12 @@ export async function blockingRefsOf(db: Queryable, ticketIds: string[], side: "
   const blocks = new Map<string, Map<string, DiscoveredBlock | null>>(ticketIds.map((id) => [id, new Map()]));
   for (const r of rows) blocks.get(r.end_id)!.set(r.id, r.agent_id === null ? null : { agent: { id: r.agent_id, name: r.agent_name! }, reason: r.reason! });
   const refs = rows.length === 0 ? [] : await listIdentifiedTicketRefs(db, "t.id = ANY($1::uuid[])", [[...new Set(rows.map((r) => r.id))]]);
-  return new Map(
-    [...blocks].map(([id, theirs]) => [id, refs.flatMap(({ id: refId, ...ref }) => (theirs.has(refId) ? [{ ...ref, block: theirs.get(refId)! }] : []))]),
-  );
+  // Walked in key order, so each Ticket's list keeps it.
+  const result = new Map<string, BlockingRef[]>(ticketIds.map((id) => [id, []]));
+  for (const { id: otherId, ...ref } of refs) {
+    for (const [id, others] of blocks) if (others.has(otherId)) result.get(id)!.push({ ...ref, block: others.get(otherId)! });
+  }
+  return result;
 }
 
 /** A Ticket's relations, each with the Tickets at its other end in key order; blocks carry who added one from a Discovered Ticket, and why. */

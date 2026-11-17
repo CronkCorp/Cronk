@@ -83,14 +83,14 @@ async function visibleProjectKeys(db: Queryable, actor: Actor): Promise<Set<stri
 const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastIndexOf("-"));
 
 /** A filter leaving out of a list the Tickets of Projects `actor` can't see; one query, for as many lists as are filtered. */
-export async function visibleTicketsTo(db: Queryable, actor: Actor): Promise<<R extends TicketRef>(refs: R[]) => R[]> {
+export async function visibilityFilterFor(db: Queryable, actor: Actor): Promise<<R extends TicketRef>(refs: R[]) => R[]> {
   const keys = await visibleProjectKeys(db, actor);
   return (refs) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
 }
 
 /** Relations, leaving out Tickets of Projects `actor` can't see. */
 export async function visibleRelations(db: Queryable, actor: Actor, relations: Relations): Promise<Relations> {
-  const visible = await visibleTicketsTo(db, actor);
+  const visible = await visibilityFilterFor(db, actor);
   return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
 }
 
