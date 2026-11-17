@@ -14,7 +14,7 @@ export interface TriageAddress {
 }
 
 /** The kinds Triage holds, by the names its chips give them, in the Inbox's order. */
-const TRIAGE_KIND_NAMES = kindNames<TriageKind>({ unverified: true, unattended: true, suggestion: true, discovered: true, decision: true });
+const TRIAGE_KIND_NAMES = kindNames<TriageKind>({ unverified: true, unattended: true, decision: true, suggestion: true, discovered: true });
 
 /** Triage's groups, in the order they are shown: the Inbox's groups that hold its kinds. */
 const TRIAGE_GROUPS: Group[] = GROUPS.filter((group) => group.kind in TRIAGE_KIND_NAMES);

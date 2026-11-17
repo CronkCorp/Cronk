@@ -11,7 +11,7 @@ import { blockingRefsOf, type BlockingRef } from "../work/relations.js";
 import { projectKeyOf } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
-import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
+import { activeReviewerSql, findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
 
 /**
  * A User's Inbox: everything waiting on them: the Tickets in an In Review Status they are Assignee of,
@@ -89,10 +89,7 @@ const OPEN_SUGGESTIONS = `
  * it is proposed: the source Ticket's Assignee, else the proposing Agent's Owner, whichever is still active; none (Triage)
  * when neither is. Keep `usersInheritingFrom` in step with it.
  */
-const decisionReviewerSql = (v: string, t: string) => `
-  COALESCE(
-    (SELECT x.id FROM users x WHERE x.id = ${t}.assignee_id AND x.deactivated_at IS NULL),
-    (SELECT x.id FROM users x WHERE x.id = ${v}.actor_user_id AND x.deactivated_at IS NULL))`;
+const decisionReviewerSql = (v: string, t: string) => activeReviewerSql(`${t}.assignee_id`, `${v}.actor_user_id`);
 
 /**
  * The Decisions Agents proposed, as `d`, each with `reviewer_id`, the User who reviews it while it is

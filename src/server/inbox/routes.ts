@@ -44,7 +44,7 @@ const questionItem = {
   },
 } as const;
 
-const decisionItem = {
+export const decisionItem = {
   type: "object",
   required: ["kind", "at", "decision", "ticket"],
   description:

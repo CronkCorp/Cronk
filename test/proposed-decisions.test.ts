@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { agentOf, delegatedSetup, joinAs, memberPassword, registerAgent, startInstalledCronk, startSession, type Client, type Response } from "./harness.js";
 
-/** The Triage of `client`, as `kind key` lines, in order: a Decision's key, or a Ticket's. */
-const triageLines = async (client: Client, query = "") =>
-  ((await client.get(`/api/triage${query}`)).body.items as { kind: string; decision?: { key: string }; ticket: { key: string } | null }[]).map(
+/** The waiting items at `path` as `client` sees them, as `kind key` lines, in order: a Decision's key, or a Ticket's. */
+const waitingLines = async (client: Client, path: string) =>
+  ((await client.get(path)).body.items as { kind: string; decision?: { key: string }; ticket: { key: string } | null }[]).map(
     (i) => `${i.kind} ${i.decision?.key ?? i.ticket?.key}`,
   );
 
-/** The Inbox of `client`, as `kind key` lines, in order: a Decision's key, or a Ticket's. */
-const inboxLines = async (client: Client) =>
-  ((await client.get("/api/inbox")).body.items as { kind: string; decision?: { key: string }; ticket: { key: string } | null }[]).map(
-    (i) => `${i.kind} ${i.decision?.key ?? i.ticket?.key}`,
-  );
+/** The Inbox of `client`, as `kind key` lines. */
+const inboxLines = (client: Client) => waitingLines(client, "/api/inbox");
+
+/** The Triage of `client`, as `kind key` lines. */
+const triageLines = (client: Client, query = "") => waitingLines(client, `/api/triage${query}`);
 
 describe("an Agent proposing a Decision", () => {
   it("records it as proposed, by the Agent in its Agent Session", async () => {
@@ -346,17 +346,16 @@ async function decisionFromDavesTicket() {
     return { client, id: (await client.get("/api/me")).body.user.id as string };
   };
   const [carol, dave, wendy, rita, bob] = [await join("carol"), await join("dave"), await join("wendy"), await join("rita"), await join("bob")];
-  const [carolId, daveId, wendyId, ritaId] = [carol.id, dave.id, wendy.id, rita.id];
-  for (const id of [carolId, daveId, wendyId]) await admin.put(`/api/projects/CRONK/members/${id}`, { access: "write" });
-  await admin.put(`/api/projects/CRONK/members/${ritaId}`, { access: "read" });
+  for (const id of [carol.id, dave.id, wendy.id]) await admin.put(`/api/projects/CRONK/members/${id}`, { access: "write" });
+  await admin.put(`/api/projects/CRONK/members/${rita.id}`, { access: "read" });
   await admin.patch("/api/projects/CRONK", { visibility: "private" });
   const carolBot = await registerAgent(carol.client, "carol-bot");
-  await admin.patch("/api/tickets/CRONK-1", { assigneeId: carolId, delegateId: carolBot.agentId });
+  await admin.patch("/api/tickets/CRONK-1", { assigneeId: carol.id, delegateId: carolBot.agentId });
   const agent = await startSession(cronk, carolBot.secret);
   await agent.post("/api/tickets/CRONK-1/claim");
   const proposed = await agent.post("/api/projects/CRONK/decisions", { title: "Markdown for Decisions" });
   if (proposed.status !== 201) throw new Error(`Proposing failed: ${JSON.stringify(proposed.body)}`);
-  await admin.patch("/api/tickets/CRONK-1", { assigneeId: daveId });
+  await admin.patch("/api/tickets/CRONK-1", { assigneeId: dave.id });
   const setActive = async (id: string, active: boolean) => {
     const res = await admin.patch(`/api/users/${id}`, { active });
     if (res.status !== 200) throw new Error(`Setting active failed: ${JSON.stringify(res.body)}`);
@@ -368,11 +367,11 @@ async function decisionFromDavesTicket() {
     if (res.status !== 200) throw new Error(`Signing in failed: ${JSON.stringify(res.body)}`);
     return client;
   };
-  return { cronk, admin, carol: carol.client, carolId, dave: dave.client, daveId, wendy: wendy.client, rita: rita.client, bob: bob.client, setActive, signIn };
+  return { cronk, admin, carol: carol.client, carolId: carol.id, dave: dave.client, daveId: dave.id, wendy: wendy.client, rita: rita.client, bob: bob.client, setActive, signIn };
 }
 
 describe("a proposed Decision whose reviewer is deactivated", () => {
-  it("goes to the proposing Agent's Owner while the source Ticket's Assignee is inactive, and back once they return", async () => {
+  it("goes to the proposing Agent's Owner while the source Ticket's Assignee is deactivated, and back once they return", async () => {
     const { carol, dave, daveId, setActive, signIn } = await decisionFromDavesTicket();
     expect(await inboxLines(dave)).toEqual(["decision CRONK-D1"]);
     expect(await inboxLines(carol)).toEqual([]);
@@ -382,9 +381,10 @@ describe("a proposed Decision whose reviewer is deactivated", () => {
 
     await setActive(daveId, true);
     expect(await inboxLines(await signIn("dave"))).toEqual(["decision CRONK-D1"]);
+    expect(await inboxLines(carol)).toEqual([]);
   });
 
-  it("goes to Triage, for the Users who may accept it, while its Owner is inactive too", async () => {
+  it("goes to Triage, for the Users who may accept it, while its Owner is deactivated too", async () => {
     const { admin, carolId, daveId, wendy, rita, bob, setActive, signIn } = await decisionFromDavesTicket();
     await setActive(daveId, false);
     await setActive(carolId, false);
