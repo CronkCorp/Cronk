@@ -182,9 +182,9 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
     case "projectDocuments":
       return <DocumentsPage projectKey={route.key} />;
     case "artifacts":
-      return <ArtifactsPage />;
+      return <ArtifactsPage workspace={props.workspace} />;
     case "projectArtifacts":
-      return <ArtifactsPage projectKey={route.key} />;
+      return <ArtifactsPage projectKey={route.key} workspace={props.workspace} />;
     case "artifact":
       return <ArtifactPage id={route.id} version={versionOf(search.get("version"))} workspace={props.workspace} />;
     case "document":
