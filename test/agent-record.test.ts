@@ -127,6 +127,35 @@ describe("What an Agent did, as each User may see it", () => {
     expect((await agent.get(`/api/agents/${claude.agentId}/record`)).status).toBe(403);
   });
 
+  it("shows its entries on Artifacts only where the reader can read the Artifact's Project, and those in the Workspace outside any", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const ids = Object.fromEntries((await admin.get("/api/users")).body.users.map((u: { id: string; name: string }) => [u.name, u.id]));
+    await projectWithTickets(admin, "CRONK", 0);
+    await projectWithTickets(admin, "SECRET", 0);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.put(`/api/projects/SECRET/members/${ids.bob}`, { access: "write" });
+    const claude = await registerAgent(bob, "claude-laptop");
+    const agent = await startSession(cronk, claude.secret);
+    for (const place of ["/api/projects/CRONK", "/api/projects/SECRET", "/api/workspace"]) {
+      cronk.clock.advance(1000);
+      const title = place.split("/").pop()!;
+      const { artifact } = (await agent.upload(`${place}/artifacts?title=${title}`, await site(1))).body;
+      cronk.clock.advance(1000);
+      await agent.post(`/api/artifacts/${artifact.id}/comments`, { body: "Published." });
+    }
+
+    const seen = async (who: Client) =>
+      (await who.get(`/api/agents/${claude.agentId}/record`)).body.record.map((e: { kind: string; artifact: { title: string } }) => `${e.kind} ${e.artifact.title}`);
+    const everything = ["comment workspace", "artifact_version workspace", "comment SECRET", "artifact_version SECRET", "comment CRONK", "artifact_version CRONK"];
+    expect(await seen(bob)).toEqual(everything);
+    expect(await seen(admin)).toEqual(everything);
+    // Losing sight of SECRET hides what it did on SECRET's Artifact; every User reads the Workspace's.
+    await admin.delete(`/api/projects/SECRET/members/${ids.bob}`);
+    expect(await seen(bob)).toEqual(["comment workspace", "artifact_version workspace", "comment CRONK", "artifact_version CRONK"]);
+    expect(await seen(admin)).toEqual(everything);
+  });
+
   it("narrows to what it did since a time, and to at most a number of entries", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const agent = await session();
