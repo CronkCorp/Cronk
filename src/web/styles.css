@@ -394,6 +394,7 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .chip.warn { background: transparent; border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; }
 .chip.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 999px; }
 .chip.info { background: transparent; border: 1px solid var(--info); color: var(--info); border-radius: 999px; }
+.chip.agent { background: transparent; border: 1px solid var(--agent); color: var(--agent); border-radius: 999px; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
 .filter { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
