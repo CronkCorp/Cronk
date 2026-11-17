@@ -1,6 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Queryable } from "../db/database.js";
-import { placeReadableSql, type Readable } from "../identity/access.js";
+import { readableClause, type Readable } from "../identity/access.js";
 import { replaceReferenceText, TICKET_REFERENCE } from "../../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowledge-references.js";
 import type { MentionKind } from "../../shared/values.js";
@@ -262,16 +262,16 @@ const FOUND_SQL = `
  */
 export async function listMentions(db: Queryable, target: MentionTarget, readable: Readable): Promise<Mention[]> {
   const { condition, params } = mentionsOf(target);
-  const n = params.length;
+  const isReadable = readableClause("f", readable, params.length + 1);
   const { rows } = await db.query<Mention>(
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
 ${FOUND_SQL}
      )
      SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
-     FROM found f WHERE ${placeReadableSql("f", `$${n + 1}::uuid[]`, `$${n + 2}::uuid`)}
+     FROM found f WHERE ${isReadable.sql}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
-    [...params, readable.projectIds, readable.workspaceId],
+    [...params, ...isReadable.params],
   );
   return rows;
 }
@@ -281,13 +281,14 @@ ${FOUND_SQL}
  * unlike `listMentions`, every one is counted. Terms nothing readable mentions are left out.
  */
 export async function countTermMentions(db: Queryable, termIds: string[], readable: Readable): Promise<Map<string, number>> {
+  const isReadable = readableClause("f", readable, 2);
   const { rows } = await db.query<{ term_id: string; n: number }>(
     `WITH m AS (SELECT * FROM mentions m WHERE m.mentioned_term_id = ANY($1::uuid[])),
      found AS (${FOUND_SQL})
      SELECT mentioned_term_id AS term_id, count(*)::int AS n
-     FROM found f WHERE ${placeReadableSql("f", "$2::uuid[]", "$3::uuid")}
+     FROM found f WHERE ${isReadable.sql}
      GROUP BY mentioned_term_id`,
-    [termIds, readable.projectIds, readable.workspaceId],
+    [termIds, ...isReadable.params],
   );
   return new Map(rows.map((r) => [r.term_id, r.n]));
 }
