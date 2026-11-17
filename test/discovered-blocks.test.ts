@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
 
 const reason = "It builds on the migration that leaves orphans.";
 
@@ -142,5 +142,133 @@ describe("A Discovered Ticket in the Inbox and Triage", () => {
     expect(await stream.next()).toMatchObject({ event: "changed" });
     await admin.delete("/api/tickets/CRONK-1/relations/blocked_by/CRONK-2");
     expect(await stream.next()).toMatchObject({ event: "changed" });
+  });
+});
+
+/**
+ * Ada sees every Project; Bob has Write in CRONK only, so he can't see the Ops Project, which is private.
+ * Ada's Agent files OPS-1 there as a Discovered Ticket blocking CRONK-1.
+ */
+async function hiddenBlockSetup() {
+  const setup = await delegatedSetup();
+  const { cronk, admin, session } = setup;
+  await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+  await admin.patch("/api/projects/OPS", { visibility: "private" });
+  const bob = await joinAs(cronk, admin, "bob@example.com");
+  const agent = await session();
+  await agent.post("/api/projects/OPS/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+  return { ...setup, bob, agent };
+}
+
+describe("A block from a Discovered Ticket the User can't see", () => {
+  it("shows on the blocked Ticket as a placeholder with the Agent and why, but nothing of the Ticket", async () => {
+    const { admin, bob } = await hiddenBlockSetup();
+
+    const { relations } = (await bob.get("/api/tickets/CRONK-1")).body;
+
+    expect(relations.blockedBy).toEqual([{ hidden: true, blockId: expect.any(String), block: { agent: { id: expect.any(String), name: "claude-laptop" }, reason } }]);
+    expect(JSON.stringify(relations)).not.toMatch(/OPS|Migration leaves/);
+    const seen = (await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy;
+    expect(seen).toMatchObject([{ key: "OPS-1", title: "Migration leaves orphans", block: { reason } }]);
+    expect(seen[0].hidden).toBeUndefined();
+  });
+});
+
+describe("Removing a block by its id", () => {
+  it("is open to a User with Write on the blocked Ticket who can't see the Discovered Ticket, and makes that Ticket Ready again", async () => {
+    const { admin, bob, agent } = await hiddenBlockSetup();
+    const [{ blockId }] = (await bob.get("/api/tickets/CRONK-1")).body.relations.blockedBy;
+    const stream = await admin.events("/api/inbox/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const removed = await bob.delete(`/api/tickets/cronk-1/blocked-by/${blockId}`);
+
+    expect(removed.status).toBe(200);
+    expect(removed.body.relations.blockedBy).toEqual([]);
+    expect(JSON.stringify(removed.body)).not.toMatch(/OPS|Migration leaves/);
+    expect(await stream.next()).toMatchObject({ event: "changed" });
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blocks).toEqual([]);
+    for (const key of ["CRONK-1", "OPS-1"]) {
+      const changes = (await admin.get(`/api/tickets/${key}/changes`)).body.changes.map((c: any) => `${c.change} by ${c.actor.kind}`);
+      expect(changes.slice(-2)).toEqual(["relation added by agent", "relation removed by user"]);
+    }
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  });
+
+  it("answers the same for an unknown id, a block a User added, and a block on a Ticket the caller can't change", async () => {
+    const { admin, bob, agent } = await hiddenBlockSetup();
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await admin.post("/api/projects", { name: "Web", key: "WEB" });
+    await admin.post("/api/projects/WEB/tickets", { title: "Landing page" });
+    await admin.put(`/api/projects/WEB/members/${bobId}`, { access: "read" });
+    await agent.post("/api/tickets/OPS-1/relations", { kind: "blocks", ticketKey: "WEB-1", reason });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Release" });
+    await admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+    const userAdded = (await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy.find((b: any) => b.key === "CRONK-2").blockId;
+    const [onReadOnly] = (await bob.get("/api/tickets/WEB-1")).body.relations.blockedBy;
+    expect(onReadOnly).toMatchObject({ hidden: true });
+
+    const answers = await Promise.all(
+      [crypto.randomUUID(), userAdded, onReadOnly.blockId].map(async (id) => {
+        const res = await bob.delete(`/api/tickets/CRONK-1/blocked-by/${id}`);
+        return { status: res.status, body: res.body };
+      }),
+    );
+
+    expect(answers[0]).toEqual({ status: 404, body: { error: "No such block" } });
+    expect(answers).toEqual([answers[0], answers[0], answers[0]]);
+    // From the Ticket Bob only reads, every id answers as his Read access does, whatever the id.
+    const [unknown, known] = await Promise.all([crypto.randomUUID(), onReadOnly.blockId].map((id) => bob.delete(`/api/tickets/WEB-1/blocked-by/${id}`)));
+    expect([unknown!.status, known!.status]).toEqual([403, 403]);
+    expect(unknown!.body).toEqual(known!.body);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toHaveLength(2);
+    expect((await admin.get("/api/tickets/WEB-1")).body.relations.blockedBy).toHaveLength(1);
+  });
+
+  it("is left to Users: an Agent removes its block by the other Ticket's key, as before", async () => {
+    const { agent, bob } = await hiddenBlockSetup();
+    const [{ blockId }] = (await bob.get("/api/tickets/CRONK-1")).body.relations.blockedBy;
+
+    expect((await agent.delete(`/api/tickets/CRONK-1/blocked-by/${blockId}`)).status).toBe(403);
+    expect((await bob.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toHaveLength(1);
+  });
+});
+
+describe("A Discovered Ticket's blocks in the Inbox and Triage", () => {
+  it("count the paused Tickets the User can't see, and say which blocks the User may remove", async () => {
+    const { cronk, admin } = await delegatedSetup(2);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    for (const [key, title] of [["OPS", "Deploy"], ["WEB", "Landing page"]]) {
+      await admin.post("/api/projects", { name: key, key });
+      await admin.post(`/api/projects/${key}/tickets`, { title });
+      await admin.patch(`/api/projects/${key}`, { visibility: "private" });
+    }
+    await admin.put(`/api/projects/OPS/members/${bobId}`, { access: "read" });
+    await admin.put(`/api/projects/WEB/members/${bobId}`, { access: "read" });
+    const agent = await agentOf(cronk, bob, "codex");
+    await agent.post("/api/projects/CRONK/tickets", {
+      title: "Migration leaves orphans",
+      blocks: [{ ticketKey: "CRONK-1", reason }, { ticketKey: "OPS-1", reason }, { ticketKey: "WEB-1", reason }],
+    });
+    // A block Ada added from it needs Write on both Tickets to remove, which Bob has in CRONK only.
+    await admin.post("/api/tickets/CRONK-3/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    await admin.delete(`/api/projects/WEB/members/${bobId}`);
+
+    const [item] = (await bob.get("/api/inbox?kind=discovered")).body.items;
+
+    expect(item.ticket.key).toBe("CRONK-3");
+    expect(item.hiddenBlocks).toBe(1);
+    expect(item.blocks.map((b: any) => [b.key, b.canRemove])).toEqual([
+      ["CRONK-1", true],
+      ["CRONK-2", true],
+      ["OPS-1", false],
+    ]);
+    // As Ada sees it in Triage once no one is assigned, every block is hers to remove.
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: null });
+    const [triaged] = (await admin.get("/api/triage?kind=discovered")).body.items;
+    expect(triaged.hiddenBlocks).toBe(0);
+    expect(triaged.blocks.map((b: any) => b.canRemove)).toEqual([true, true, true, true]);
+    expect((await bob.get("/api/triage?kind=discovered")).body.items[0]).toMatchObject({ hiddenBlocks: 1, blocks: [{ canRemove: true }, { canRemove: true }, { canRemove: false }] });
   });
 });

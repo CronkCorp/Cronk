@@ -47,6 +47,7 @@ import type {
   RelationKind,
   Relations,
   BlockingRef,
+  HiddenBlocker,
   Report,
   ReopenChoice,
   DependentChoice,
@@ -123,6 +124,7 @@ export type {
   RelationKind,
   Relations,
   BlockingRef,
+  HiddenBlocker,
   Report,
   ReopenChoice,
   DependentChoice,
@@ -467,6 +469,9 @@ export const api = {
     request<{ relations: Relations }>("POST", `/api/tickets/${encodeURIComponent(key)}/relations`, { kind, ticketKey }).then(
       (r) => r.relations,
     ),
+  /** Removes a block an Agent added from its Discovered Ticket by the block's id, as for one from a Ticket the User can't see; answers the Ticket's relations. */
+  removeBlock: (key: string, blockId: string) =>
+    request<{ relations: Relations }>("DELETE", `/api/tickets/${encodeURIComponent(key)}/blocked-by/${encodeURIComponent(blockId)}`).then((r) => r.relations),
   removeRelation: (key: string, kind: RelationKind, otherKey: string) =>
     request<{ relations: Relations }>(
       "DELETE",

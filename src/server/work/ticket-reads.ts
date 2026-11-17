@@ -9,7 +9,7 @@ import { listLinkedDocuments } from "../knowledge/documents.js";
 import { listMentions } from "../knowledge/mentions.js";
 import { ref } from "../schemas.js";
 import { findProjectById, listAllProjects } from "./projects.js";
-import { listRelations, type Relations } from "./relations.js";
+import { listRelations, type Relations, type ShownRelations } from "./relations.js";
 import { findTicketByKey, listSubTickets, type RecordedChange, type Ticket, type TicketRef } from "./tickets.js";
 
 /** Reading Tickets as an Actor may see them: access-checked lookup, and what a Ticket shows around it. */
@@ -65,7 +65,7 @@ export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, 
   return {
     ticket,
     subTickets: await listSubTickets(db, ticket.id),
-    relations: await visibleRelations(db, actor, await listRelations(db, ticket.id)),
+    relations: await shownRelations(db, actor, ticket.id),
     documents: await listLinkedDocuments(db, ticket, readable),
     mentions: await listMentions(db, { ticketKey: ticket.key, ticketId: ticket.id }, readable),
     transcripts: await transcriptLinks(db, actor, { kind: "ticket", id: ticket.id, key: ticket.key }),
@@ -80,13 +80,30 @@ async function visibleProjectKeys(db: Queryable, actor: Actor): Promise<Set<stri
 }
 
 /** The Project key a Ticket key starts with. */
-const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastIndexOf("-"));
+export const projectKeyOf = (ticketKey: string) => ticketKey.slice(0, ticketKey.lastIndexOf("-"));
+
+/** A filter leaving out of a list the Tickets of Projects `actor` can't see; one query, for as many lists as are filtered. */
+export async function visibilityFilterFor(db: Queryable, actor: Actor): Promise<<R extends TicketRef>(refs: R[]) => R[]> {
+  const keys = await visibleProjectKeys(db, actor);
+  return (refs) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
+}
 
 /** Relations, leaving out Tickets of Projects `actor` can't see. */
 export async function visibleRelations(db: Queryable, actor: Actor, relations: Relations): Promise<Relations> {
-  const keys = await visibleProjectKeys(db, actor);
-  const visible = <R extends TicketRef>(refs: R[]) => refs.filter((ref) => keys.has(projectKeyOf(ref.key)));
+  const visible = await visibilityFilterFor(db, actor);
   return { blocks: visible(relations.blocks), blockedBy: visible(relations.blockedBy), relatesTo: visible(relations.relatesTo) };
+}
+
+/**
+ * The relations of the Ticket `ticketId` as `actor` is shown them: those with Tickets they can see, then a placeholder for
+ * each block from a Discovered Ticket they can't see, saying the Agent and why but nothing of that Ticket.
+ */
+export async function shownRelations(db: Queryable, actor: Actor, ticketId: string): Promise<ShownRelations> {
+  const relations = await listRelations(db, ticketId);
+  const shown = await visibleRelations(db, actor, relations);
+  const seen = new Set(shown.blockedBy.map((b) => b.blockId));
+  const hidden = relations.blockedBy.flatMap(({ blockId, block }) => (!seen.has(blockId) && block !== null ? [{ hidden: true as const, blockId, block }] : []));
+  return { ...shown, blockedBy: [...shown.blockedBy, ...hidden] };
 }
 
 /**
