@@ -351,6 +351,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "A Report is the Document of findings you write on a Ticket you hold the Claim on, with `write_report`; it stays with the Ticket, " +
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
+      "Move a Document within its page tree with `move`. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
       "move, or create Documents under. Propose a change to it, or a new Document under it, with the `suggestions` tool instead. " +
       "A Suggestion can't carry a move: to move it, a Document with one under it, or a Document into or out of a protected branch, ask a User to make the move instead, " +
@@ -358,8 +359,18 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
-      id: z.string().optional().describe("Document id, a Report's included (get, update, replace_section)"),
-      parentId: z.string().optional().describe("The Document to create it under; at the top if left out (create)"),
+      id: z.string().optional().describe("Document id, a Report's included (get, update, replace_section, move)"),
+      parentId: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("The Document to create it under (create) or move it under (move), in the same page tree; at the top if null or left out"),
+      position: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Its place among its new siblings, counted from 0; last if left out (move)"),
       title: z.string().optional().describe("Title (create, update, write_report)"),
       body: z
         .string()
@@ -391,7 +402,16 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           api("POST", `${scopePath(a.project)}/documents`, {
             title: required(a.title, "a title", "create"),
             ...(a.body !== undefined && { body: a.body }),
-            ...(a.parentId !== undefined && { parentId: a.parentId }),
+            ...(a.parentId != null && { parentId: a.parentId }),
+          }),
+      },
+      move: {
+        description: "moves a Document to another place in its page tree, under another Document or at the top, keeping its Version",
+        writes: true,
+        run: (api, a) =>
+          api("POST", `/api/documents/${encodeURIComponent(required(a.id, "an id", "move"))}/move`, {
+            parentId: a.parentId ?? null,
+            ...(a.position !== undefined && { position: a.position }),
           }),
       },
       update: {
