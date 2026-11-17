@@ -611,8 +611,8 @@ export interface Acceptance {
  * Version: as suggested, credited to the Agent; or, with `edited` content that differs, as edited,
  * credited to the User and linked to the Suggestion. An outdated one, whose item has a newer Version than
  * its base, is merged with that Version (ADR 0014), and the result is the User's, linked to the Suggestion:
- * clean merges take the side that changed each part, and conflicting parts need the User's `content`,
- * settled onto the Version `onto`. Run inside a transaction. Returns the accepted Suggestion.
+ * clean merges take the side that changed each part, and conflicting parts need the User's `content`.
+ * Accepting an outdated one needs `onto`, the Version the User saw it merged onto. Run inside a transaction. Returns the accepted Suggestion.
  */
 export async function acceptSuggestion(db: Queryable, user: User, id: string, acceptance: Acceptance, now: Date): Promise<Suggestion> {
   const { suggestion, item } = await lockOpen(db, user, id);
@@ -627,8 +627,13 @@ export async function acceptSuggestion(db: Queryable, user: User, id: string, ac
     content = edited === undefined ? suggestion.content : completeContent(item.item.kind, edited, suggestion.content);
     withEdits = !same(content, suggestion.content);
   } else {
-    if (edited !== undefined && onto === undefined) {
-      throw new HttpError(400, `${name} is at Version ${item.item.version}, newer than this Suggestion's base: name the Version you merged onto as \`onto\``);
+    // Only a User who saw the merge accepts it, so it never takes in a Version they didn't see.
+    if (onto === undefined) {
+      throw new HttpError(
+        409,
+        `${name} is at Version ${item.item.version}, newer than Version ${suggestion.baseVersion} this Suggestion is based on, so it is outdated: ` +
+          `merge it (POST /api/suggestions/{id}/merge) and accept with \`onto\` ${item.item.version}`,
+      );
     }
     const merge = mergeContent(item.item.kind, suggestion.base, suggestion.content, item.current, item.item.version);
     const open = merge.fields.filter((f) => conflicted(f) && !(edited && f.field in edited)).map((f) => f.field);

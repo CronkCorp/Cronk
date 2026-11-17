@@ -182,13 +182,14 @@ export function suggestionRoutes(ctx: AppContext) {
                   "Edit and accept: the content as the User changed it, fields left out as suggested. If it differs from the Suggestion, the new Version " +
                   "is credited to the User and linked to the Suggestion; left out, or unchanged, the Version is credited to the Agent. " +
                   "For an outdated Suggestion: the fields as the User settled its merge (see `POST /api/suggestions/{id}/merge`), " +
-                  "fields left out as merged; needs `onto`.",
+                  "fields left out as merged.",
               },
               onto: {
                 type: "integer",
                 minimum: 0,
                 description:
-                  "The item's Version the User merged an outdated Suggestion onto, the merge's `onto`; refused if the item has moved on since. " +
+                  "The item's Version the User merged an outdated Suggestion onto, the merge's `onto`; required to accept an outdated Suggestion, " +
+                  "and refused if the item has moved on since. " +
                   "Accepting an outdated Suggestion merges it with the item's current Version, credited to the User and linked to the Suggestion; " +
                   "a merge that conflicts needs the settled fields as `content`.",
               },

@@ -135,7 +135,11 @@ describe("accepting an outdated Suggestion", () => {
       item: { version: 3 },
       newerVersion: { number: 3, actor: { kind: "user", id: ada.id, name: "Ada" } },
     });
-    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+    // A plain Accept, as from a client that missed the newer Version, merges nothing the User hasn't seen.
+    const unseen = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+    expect(unseen.status).toBe(409);
+    expect(unseen.body.error).toMatch(/outdated.*`onto` 3/);
+    const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`, { onto: 3 });
 
     expect(accepted.status).toBe(200);
     expect(accepted.body.suggestion).toMatchObject({ state: "accepted", acceptedWithEdits: true, resultVersion: 4, outdated: false, newerVersion: null });
@@ -152,7 +156,7 @@ describe("accepting an outdated Suggestion", () => {
     const suggestion = await suggestBody(agent, documentId, "## Limits\n\nFifty per IP.\n\n## Why\n\nThe proxy passes client IPs through now.\n", 2);
     await admin.patch(`/api/documents/${documentId}`, { baseVersion: 2, title: "Sign-in rate limits", body: "## Limits\n\nFive per minute, sliding.\n\n## Why\n\nThe proxy hides client IPs.\n" });
 
-    const refused = await admin.post(`/api/suggestions/${suggestion.id}/accept`);
+    const refused = await admin.post(`/api/suggestions/${suggestion.id}/accept`, { onto: 3 });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/Version 3.*body conflicting/);
 
@@ -188,7 +192,7 @@ describe("accepting an outdated Suggestion", () => {
 
     const settled = "## Limits\n\nFive per minute, sliding, and fifty per IP.\n\n## Why\n\nThe proxy passes client IPs through now.\n";
     // Settling needs the Version it was settled onto, and that Version must still be current.
-    expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled } })).status).toBe(400);
+    expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled } })).status).toBe(409);
     expect((await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled }, onto: 2 })).status).toBe(409);
     const accepted = await admin.post(`/api/suggestions/${suggestion.id}/accept`, { content: { body: settled }, onto: 3 });
 
@@ -217,7 +221,7 @@ describe("accepting an outdated Suggestion", () => {
         { field: "group", value: null, conflict: { base: null, mine: "Work", theirs: "Coordination" } },
       ],
     });
-    const refused = await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`);
+    const refused = await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`, { onto: 2 });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toMatch(/group conflicting/);
 
@@ -237,8 +241,8 @@ describe("accepting an outdated Suggestion", () => {
     const decision = await agent.post("/api/suggestions", { item: { kind: "decision", key: "CRONK-D1" }, baseVersion: 2, content: { group: "Storage" }, reasoning: "Group it." });
     await admin.patch("/api/decisions/CRONK-D1", { baseVersion: 2, body: "## Why\n\nIt is boring and well known.\n" });
 
-    expect((await admin.post(`/api/suggestions/${guidance.body.suggestion.id}/accept`)).status).toBe(200);
-    expect((await admin.post(`/api/suggestions/${decision.body.suggestion.id}/accept`)).status).toBe(200);
+    expect((await admin.post(`/api/suggestions/${guidance.body.suggestion.id}/accept`, { onto: 2 })).status).toBe(200);
+    expect((await admin.post(`/api/suggestions/${decision.body.suggestion.id}/accept`, { onto: 3 })).status).toBe(200);
 
     expect((await admin.get("/api/projects/CRONK/guidance")).body.guidance).toEqual({ markdown: "## Tools\n\nUse pnpm.\n\n## Style\n\nBe brief and kind.\n", version: 3 });
     expect((await admin.get("/api/decisions/CRONK-D1")).body.decision).toMatchObject({ title: "Postgres", body: "## Why\n\nIt is boring and well known.\n", group: "Storage", status: "accepted", version: 4 });
