@@ -125,9 +125,9 @@ export type BlockingRef = Relations["blocks"][number];
 /** An Agent Session's hold on a Ticket. */
 export type Claim = Serialized<StoredClaim>;
 
-/** A Document linked to a Ticket: one of its Reports, or a Document mentioning its key. */
+/** A Document linked to a Ticket: one of its Reports, or a Document linked to it. */
 export type LinkedDocument = Serialized<StoredLinkedDocument>;
-/** Something whose text mentions a Decision or Term. */
+/** Something whose text mentions a Ticket, Decision or Term. */
 export type Mention = Serialized<StoredMention>;
 /** A Document, Report or Comment embedding an Artifact, as the Artifact's Version menu lists it. */
 export type EmbeddedIn = Serialized<StoredEmbeddedIn>;
@@ -138,6 +138,7 @@ export interface TicketDetail {
   subTickets: TicketRef[];
   relations: Relations;
   documents: LinkedDocument[];
+  mentions: Mention[];
   claim: Claim | null;
 }
 

@@ -11,7 +11,7 @@ export function welcomeText(welcome: Welcome, sessionId: string): string {
     "",
     `You are the Agent **${agent.name}**, acting for ${agent.owner.name} in ${namedSession(sessionId)}.`,
     "Cronk holds the Tickets and Documents that Users and Agents share; use the tools, most with an `action`, to work with them.",
-    "Look things up with the `search` tool. Claiming a Ticket gives you its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and the Documents that mention it.",
+    "Look things up with the `search` tool. Claiming a Ticket gives you its parent, Sub-Tickets, related Tickets, Reports, Linked Documents and what mentions it.",
   ];
   if (welcome.readOnly) lines.push("Your token is read-only: you can look things up but not change anything.");
   if (workspace?.guidance.trim()) {

@@ -143,7 +143,7 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Side panel (280px, sticky):**
   - Status, Priority, Assignee, Delegate, Autonomy (Autonomous, or Stops at In Review; always shown, and pre-filled from the Project's default on delegating) and Labels, each edited in place. An Agent's completion adds a Verification row: an Unverified chip with Accept and Reopen…, or Verified.
   - The **Claim card**, in `--agent-soft`. It shows the Agent, its Agent Session, the claim time and a meter counting down until the Claim lapses if the Agent Session stays silent. The meter spans the silence threshold, from when the Agent Session was last heard from to the lapse time. It is hidden when the Ticket is not Claimed.
-  - Parent, Sub-Tickets, Relations and Mentioned in.
+  - Parent, Sub-Tickets, Relations, Documents (those linked to it, with Link and Unlink) and Mentioned in (every Ticket, Document, Comment, Term, Decision and Activity naming its key, as on a Decision's or Term's page).
 - **Below 900px** the side panel moves above the timeline.
 - **Timeline entries**, oldest first, each with an avatar in the gutter:
   - **Activity:** a kind label, the Agent and its Agent Session, the time, and the body as rendered Markdown with no card around it. A question's body sits in a `--warn-soft` box, or `--danger-soft` when blocking, with its answer box. Errors are mono on `--surface-2` with a `--danger` left border.

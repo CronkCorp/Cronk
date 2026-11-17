@@ -739,7 +739,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   LinkedDocument: {
     description:
-      "A Document linked to a Ticket: one of its Reports, a Document linked to it from the Ticket's side, or a Document that mentions its key. Read it as a Document by its id.",
+      "A Document linked to a Ticket: one of its Reports, or a Document linked to it from the Ticket's side. Read it as a Document by its id.",
     ...object({
       id,
       title: { type: "string" },
@@ -750,7 +750,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       reason: {
         type: "string",
         enum: LINK_REASONS,
-        description: "Why the Ticket lists it: one of its Reports, linked to it, or mentioning its key.",
+        description: "Why the Ticket lists it: one of its Reports, or linked to it.",
       },
     }),
   },
@@ -770,17 +770,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   },
   Mention: {
     description:
-      "Something whose current text mentions a Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term or Decision.",
+      "Something whose current text mentions a Ticket's or Decision's key or a Term's name, as the web client links them: a Ticket, Document, Comment, Term, Decision or Activity.",
     ...object({
       kind: { type: "string", enum: MENTION_KINDS, description: "What mentions it." },
       id: { ...id, description: "Its id; read a Ticket or Decision by its key instead." },
       key: { ...nullable({ type: "string" }), description: "A Ticket's or Decision's key; null for the others." },
-      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on." },
+      title: { type: "string", description: "Its title; a Term's name; for a Comment, the title of the Ticket, Document or Artifact it is on; for an Activity, its Ticket's." },
       projectKey: { ...nullable({ type: "string" }), description: "Null when it lies in the Workspace outside any Project." },
-      ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, or a Report: the Ticket's key." },
+      ticketKey: { ...nullable({ type: "string" }), description: "For a Comment on a Ticket, an Activity, or a Report: the Ticket's key." },
       documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
       artifactId: { ...nullable(id), description: "For a Comment on an Artifact: the Artifact's id." },
-      at: { ...timestamp, description: "When it last changed; for a Comment, when it was posted." },
+      at: { ...timestamp, description: "When it last changed; for a Comment or Activity, when it was posted." },
     }),
   },
   DocumentTreeEntry: {
