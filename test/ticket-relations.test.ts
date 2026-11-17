@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, projectWithTickets, startInstalledCronk } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, startInstalledCronk } from "./harness.js";
 
 const keys = (refs: { key: string }[]) => refs.map((r) => r.key);
 
@@ -176,6 +176,24 @@ describe("Ticket relations", () => {
       expect((await bob.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(400);
       expect((await bob.post("/api/tickets/DOCS-1/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(403);
       expect((await bob.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "DOCS-1" })).status, kind).toBe(403);
+    }
+    await held.release();
+    expect((await waiting).status).toBe(201);
+  });
+
+  it("refuse an Agent's block naming a missing Ticket without waiting for another block being added, with or without its Claim", async () => {
+    const { cronk, admin, session } = await delegatedSetup(4);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const held = await cronk.holdRow("tickets", (await admin.get("/api/tickets/CRONK-4")).body.ticket.id);
+    const waiting = admin.post("/api/tickets/CRONK-3/relations", { kind: "blocks", ticketKey: "CRONK-4" });
+    await held.waiters(1);
+
+    for (const kind of ["blocks", "blocked_by"]) {
+      expect((await agent.post("/api/tickets/CRONK-9/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(404);
+      expect((await agent.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "CRONK-9" })).status, kind).toBe(400);
+      expect((await agent.post("/api/tickets/CRONK-2/relations", { kind, ticketKey: "CRONK-9" })).status, kind).toBe(400);
     }
     await held.release();
     expect((await waiting).status).toBe(201);
