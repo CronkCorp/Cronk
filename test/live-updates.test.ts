@@ -343,6 +343,11 @@ describe("A Document's live updates", () => {
     });
     expect((await deleting).status).toBe(500);
     expect((await admin.get(`/api/documents/${id}`)).status).toBe(200);
+    // The delete runs to its end, then fails at COMMIT.
+    await cronk.failCommitsWriting("documents", async () => {
+      expect((await admin.delete(`/api/documents/${id}?baseVersion=1`)).status).toBe(500);
+    });
+    expect((await admin.get(`/api/documents/${id}`)).status).toBe(200);
 
     await admin.post(`/api/documents/${id}/comments`, { body: "Still here." });
     expect(await stream.next()).toEqual({ event: "comment", data: { comment: expect.objectContaining({ body: "Still here." }) } });

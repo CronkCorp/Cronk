@@ -13,7 +13,7 @@ import type { ImportContext } from "./import-context.js";
  * whom and when.
  */
 
-interface AttachmentRow extends ActorColumns {
+export interface AttachmentRow extends ActorColumns {
   id: string;
   name: string;
   content_type: string;
@@ -33,14 +33,34 @@ async function freeId(ctx: ImportContext, exported: unknown): Promise<string> {
   return rows.length === 0 ? exported.toLowerCase() : randomUUID();
 }
 
-/** The column naming what an Attachment is on, and its id. */
-const targetColumn = (target: AttachmentTarget): [column: string, id: string] =>
-  "ticketId" in target ? ["ticket_id", target.ticketId] : "documentId" in target ? ["document_id", target.documentId] : ["comment_id", target.commentId];
-
-/** Writes the Attachments on `target` (only its own, not those in its Comments) into `${base}.attachments/`. */
-export async function exportAttachments(ctx: ExportContext, base: string, target: AttachmentTarget): Promise<void> {
-  const [column, id] = targetColumn(target);
+/**
+ * Writes the Attachments on a Ticket or Document (only its own, not those in its Comments) into `${base}.attachments/`.
+ * A Comment's come from `attachmentsOfComments`, for all of a target's Comments at once.
+ */
+export async function exportAttachments(ctx: ExportContext, base: string, target: { ticketId: string } | { documentId: string }): Promise<void> {
+  const [column, id] = "ticketId" in target ? ["ticket_id", target.ticketId] : ["document_id", target.documentId];
   const { rows } = await ctx.db.query<AttachmentRow>(`SELECT * FROM attachments WHERE ${column} = $1 ORDER BY seq`, [id]);
+  writeAttachments(ctx, base, rows);
+}
+
+/** The Attachments on each of `commentIds`, in the order they were attached, by Comment id; in one query, however many Comments. */
+export async function attachmentsOfComments(ctx: ExportContext, commentIds: string[]): Promise<Map<string, AttachmentRow[]>> {
+  const byComment = new Map<string, AttachmentRow[]>();
+  if (commentIds.length === 0) return byComment;
+  const { rows } = await ctx.db.query<AttachmentRow & { comment_id: string }>(
+    "SELECT * FROM attachments WHERE comment_id = ANY($1::uuid[]) ORDER BY comment_id, seq",
+    [commentIds],
+  );
+  for (const a of rows) {
+    const list = byComment.get(a.comment_id);
+    if (list) list.push(a);
+    else byComment.set(a.comment_id, [a]);
+  }
+  return byComment;
+}
+
+/** Writes `rows`, the Attachments on one Ticket, Document or Comment in the order they were attached, into `${base}.attachments/`. */
+export function writeAttachments(ctx: ExportContext, base: string, rows: AttachmentRow[]): void {
   if (rows.length === 0) return;
   const index = [];
   for (const [i, a] of rows.entries()) {

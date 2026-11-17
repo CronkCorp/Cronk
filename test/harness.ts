@@ -286,6 +286,12 @@ export interface Cronk {
    */
   interruptQueriesOn(table: string, cause: () => Promise<unknown>): Promise<void>;
   /**
+   * Fails at COMMIT every transaction that writes a row of `table` while `during` runs, as
+   * Postgres does when a deferred constraint is broken: the transaction runs all its queries,
+   * then rolls back. Await the requests in `during`, since commits after it returns succeed.
+   */
+  failCommitsWriting(table: string, during: () => Promise<unknown>): Promise<void>;
+  /**
    * Locks the row of `table` with this id, as a transaction updating it would, so writes that
    * reference it (such as rows with a foreign key to it) wait until it is released.
    */
@@ -478,6 +484,24 @@ export async function startCronk(
       } finally {
         await watcher.end().catch(() => {});
         await admin.query("ROLLBACK").catch(() => {});
+        await admin.end();
+      }
+    },
+    failCommitsWriting: async (table, during) => {
+      const admin = new pg.Client({ connectionString: databaseUrl });
+      await admin.connect();
+      // Named for the table, so calls on different tables can overlap.
+      const name = `harness_fail_commit_${table}`;
+      try {
+        // A deferred constraint trigger runs at COMMIT, after the transaction's last query, and its error rolls it back.
+        await admin.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN RAISE EXCEPTION 'Commit failed by the test harness'; END $$`);
+        await admin.query(`CREATE CONSTRAINT TRIGGER ${name} AFTER INSERT OR UPDATE OR DELETE ON ${table}
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ${name}()`);
+        await during();
+      } finally {
+        await admin.query(`DROP TRIGGER IF EXISTS ${name} ON ${table}`).catch(() => {});
+        await admin.query(`DROP FUNCTION IF EXISTS ${name}()`).catch(() => {});
         await admin.end();
       }
     },

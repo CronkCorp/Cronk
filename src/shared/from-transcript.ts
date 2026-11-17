@@ -3,9 +3,10 @@
  * and whether it is addressed there by its key or its id: `/api/{collection}/{key or id}/transcripts`. The server's
  * routes, the web client and the MCP transcripts tool all derive their lists of these kinds from here, so adding a
  * kind starts here; the type checker then asks for its entry in the server's LINKED route table, for what each branch
- * of the RECORDS query of src/server/transcripts/transcripts.ts puts in its `{kind}_id` column, and for its query in
- * CHANGED there. Not derived from here: the descriptions that name the kinds in prose. Plain data only: this ends up
- * in the web bundle.
+ * of the RECORDS query of src/server/transcripts/transcripts.ts puts in its `{kind}_id` column, for its query in
+ * CHANGED there, and for how a Transcript lists its items in LISTED there (which also says where they lie, for who may
+ * read the Transcript). Not derived from here: the descriptions that name the kinds in prose. Plain data only: this ends
+ * up in the web bundle.
  */
 export const LINKED_KINDS = {
   ticket: { collection: "tickets", by: "key" },

@@ -1,7 +1,10 @@
 import type { Actor } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { holdsLockUntilCommit, lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "../../shared/values.js";
 import { findTicketById, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
+
+// The check `lockBlocking` makes of the lock order costs a query or two per block, so it runs in development and tests only.
+const CHECK_LOCK_ORDER = process.env.NODE_ENV !== "production";
 
 
 const inverse: Record<RelationKind, RelationKind> = { blocks: "blocked_by", blocked_by: "blocks", relates_to: "relates_to" };
@@ -98,9 +101,33 @@ export const isBlocking = (kind: RelationKind): boolean => kind !== "relates_to"
  * added at once can't close a cycle between them. A transaction adding a block takes it before locking any Ticket, since
  * the block's row then takes both Tickets' key-share lock: one holding a Ticket while it waits for this lock would deadlock
  * with one holding this lock while it waits for that Ticket. Taking it again in the same transaction is a no-op.
+ * Outside production, taking it first after locking a Ticket throws, so a path with the order wrong fails in tests.
  */
 export async function lockBlocking(db: Queryable, workspaceId: string): Promise<void> {
-  await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
+  const name = `ticket-blocking:${workspaceId}`;
+  if (CHECK_LOCK_ORDER) await requireBlockingLockFirst(db, name);
+  await lockUntilCommit(db, name);
+}
+
+/**
+ * Throws if the transaction locked or wrote a Ticket row but doesn't yet hold the blocking lock `name`. Postgres keeps a
+ * transaction's row locks on a table as its RowShareLock on it (a foreign key's key-share lock too), and its writes as its
+ * RowExclusiveLock, until the transaction or savepoint ends. Cautious: a lock or write that matched no row, or the insert
+ * of a Ticket no other transaction can see yet, counts too.
+ */
+async function requireBlockingLockFirst(db: Queryable, name: string): Promise<void> {
+  if (await holdsLockUntilCommit(db, name)) return;
+  const { rowCount } = await db.query(
+    `SELECT 1 FROM pg_locks
+     WHERE pid = pg_backend_pid() AND granted AND locktype = 'relation' AND relation = 'tickets'::regclass
+       AND mode IN ('RowShareLock', 'RowExclusiveLock')`,
+  );
+  if (rowCount !== 0) {
+    const err = new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
+    // Printed too, as a request answers only "Something went wrong" and tests run without a logger.
+    console.error(err);
+    throw err;
+  }
 }
 
 /**

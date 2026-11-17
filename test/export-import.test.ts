@@ -210,7 +210,7 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
  * Everything an Admin can read through the API about the Workspace, with ids replaced by the
  * order they first appear in, so two installations holding the same data read the same.
  */
-async function snapshot(admin: Client): Promise<unknown> {
+async function everythingAdminReads(admin: Client): Promise<unknown> {
   const get = async (path: string) => {
     const res = await admin.get(path);
     if (res.status !== 200) throw new Error(`GET ${path} answered ${res.status}: ${JSON.stringify(res.body)}`);
@@ -498,7 +498,7 @@ describe("importing an export", () => {
     const imported = await admin.upload("/api/import", exported.body);
     expect(imported.status).toBe(201);
     expect(imported.body).toEqual({ scope: "workspace", projects: ["CRONK", "OLD"], renamedIds: [] });
-    // Agents keep their ids, which the snapshot below can't tell apart.
+    // Agents keep their ids, which the comparison below can't tell apart.
     const agentIds = async (client: Client) => (await client.get("/api/agents?all=true")).body.agents.map((a: { id: string }) => a.id);
     expect(await agentIds(admin)).toEqual(await agentIds(before.admin));
     const comments = (await admin.get("/api/tickets/CRONK-1/comments")).body.comments;
@@ -509,10 +509,10 @@ describe("importing an export", () => {
     expect(reopenings.map((c: { from: { name: string }; to: { name: string } }) => [c.from.name, c.to.name])).toEqual([["Done", "In Progress"]]);
 
     // Users who weren't in the installation come in deactivated and not joined: they have no password here yet.
-    const expected = JSON.parse(JSON.stringify(await snapshot(before.admin)), (_key, value) =>
+    const expected = JSON.parse(JSON.stringify(await everythingAdminReads(before.admin)), (_key, value) =>
       value?.email === "grace@example.com" ? { ...value, active: false, joined: false } : value,
     );
-    expect(await snapshot(admin)).toEqual(expected);
+    expect(await everythingAdminReads(admin)).toEqual(expected);
     // Suggestions keep their ids, as Agents may have noted them, and all they hold.
     const own = ({ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason, item, reviewer }: any) => ({
       ...{ id, baseVersion, base, content, reasoning, at, sourceTicket, state, outdated, acceptedWithEdits, resultVersion, decidedAt, reason },
@@ -1232,6 +1232,31 @@ describe("Attachments in an export", () => {
     const file = await elsewhere.download(`/api/attachments/${id}/file`);
     expect(file.status).toBe(200);
     expect([...file.body]).toEqual([0x89, 0x50]);
+  });
+
+  it("of Comments are exported in a fixed number of queries, however many Comments there are", async () => {
+    const { cronk, admin } = await startInstalledCronk("Acme", { lapseCheckMs: 3_600_000 });
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const first = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Comment 1" })).body.comment;
+    await admin.upload(`/api/comments/${first.id}/attachments?name=1.txt`, Buffer.from("1"), "text/plain");
+    const exporting = async () => ({
+      workspace: await cronk.queries(() => admin.download("/api/export")),
+      project: await cronk.queries(() => admin.download("/api/projects/CRONK/export")),
+    });
+    const withOne = await exporting();
+
+    // Comments 2, 4 and 6 have a file each; 3 and 5 have none.
+    const withFile = new Set([2, 4, 6]);
+    for (let i = 2; i <= 6; i++) {
+      const comment = (await admin.post("/api/tickets/CRONK-1/comments", { body: `Comment ${i}` })).body.comment;
+      if (withFile.has(i)) await admin.upload(`/api/comments/${comment.id}/attachments?name=${i}.txt`, Buffer.from(`${i}`), "text/plain");
+    }
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(files["projects/CRONK/tickets/CRONK-1.comments/4.attachments/1-4.txt"]).toBe("4");
+    expect(files["projects/CRONK/tickets/CRONK-1.comments/5.attachments/index.md"]).toBeUndefined();
+
+    expect(await exporting()).toEqual(withOne);
   });
 });
 
