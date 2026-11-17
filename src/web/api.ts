@@ -1,5 +1,6 @@
 /** A thin client for the Cronk HTTP API. The UI holds no rules; the API decides. */
 
+import type { ArtifactAt } from "../shared/artifact-embeds.js";
 import type {
   Access,
   Activity,
@@ -347,6 +348,8 @@ export const api = {
     request<{ version: ArtifactVersion }>("GET", `${artifactPath(id)}/versions/${number}`).then((r) => r.version),
   /** Where an Artifact is embedded that the caller can read, most recently changed first. */
   artifactEmbeddedIn: (id: string) => request<{ embeddedIn: EmbeddedIn[] }>("GET", `${artifactPath(id)}/embedded-in`).then((r) => r.embeddedIn),
+  /** What a draft Markdown body would embed, as saving it as a Document would answer; records nothing. */
+  draftEmbeds: (body: string) => request<{ embeds: ArtifactAt[] }>("POST", "/api/markdown/embeds", { body }).then((r) => r.embeds),
   /** Publishes a folder, packed as an archive, as a new Artifact. */
   publishArtifact: (projectKey: string | undefined, title: string, archive: Blob) =>
     upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${new URLSearchParams({ title })}`, archive, "application/gzip").then((r) => r.artifact),

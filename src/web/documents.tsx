@@ -527,6 +527,7 @@ function EditDocument(props: {
               disabled={busy}
               projectKey={props.document.projectKey}
               attach={props.attach}
+              embeds
               ref={props.editor}
             />
             {props.attachments}

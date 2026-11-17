@@ -1,7 +1,8 @@
 import { Button } from "./components/button.js";
-import { useId, useImperativeHandle, useRef, type ClipboardEvent, type DragEvent, type Ref } from "react";
+import { useEffect, useId, useImperativeHandle, useRef, useState, type ClipboardEvent, type DragEvent, type Ref } from "react";
 import { attachmentMarkdown } from "./attachments.js";
-import type { Attachment } from "./api.js";
+import { api, type Attachment } from "./api.js";
+import type { ArtifactAt } from "../shared/artifact-embeds.js";
 import { CronkMarkdown } from "./markdown.js";
 
 /** What a page can do to an open editor: put text at its cursor, in place of the selection, undoably. */
@@ -49,10 +50,39 @@ const code = (text: string, start: number, end: number): TextChange =>
 /** What a toolbar button does to the text and its selection; nothing, if it was called off. */
 type Action = (text: string, start: number, end: number) => TextChange | undefined;
 
+/** How long the text must rest before the preview asks again what it embeds. */
+const EMBEDS_DELAY_MS = 300;
+
+/**
+ * What `text` embeds, as the API answers for it once the text has rested; none until the first answer, and the last
+ * answer while the next is on its way or when asking fails. An answer for text that has changed since is dropped.
+ * Asks nothing while `on` is false.
+ */
+function useDraftEmbeds(text: string, on: boolean): ArtifactAt[] {
+  const [embeds, setEmbeds] = useState<ArtifactAt[]>([]);
+  useEffect(() => {
+    if (!on) return;
+    let current = true;
+    const timer = setTimeout(() => {
+      api.draftEmbeds(text).then(
+        (answer) => current && setEmbeds(answer),
+        // The preview keeps showing what it did; the next change asks again.
+        () => {},
+      );
+    }, EMBEDS_DELAY_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [text, on]);
+  return embeds;
+}
+
 /**
  * A Markdown editor: a textarea with a formatting toolbar beside a live preview, rendered as the
  * Document will read. It only ever edits the Markdown, so what is saved is exactly what it shows.
- * Given `attach`, files dropped or pasted into it are attached and embedded at the cursor.
+ * Given `attach`, files dropped or pasted into it are attached and embedded at the cursor. With `embeds`, the
+ * preview shows Artifacts in place where saving the text as a Document or Report would embed them, as the API answers.
  */
 export function MarkdownEditor(props: {
   label: string;
@@ -63,10 +93,13 @@ export function MarkdownEditor(props: {
   projectKey?: string | null;
   /** Attaches files to what is being edited, answering those that attached; without it, files dropped or pasted are left alone. */
   attach?: (files: File[]) => Promise<Attachment[]>;
+  /** Whether the preview shows embedded Artifacts, as a Document's or Report's body does; off, their addresses stay links. */
+  embeds?: boolean;
   ref?: Ref<MarkdownEditorHandle>;
 }) {
   const area = useRef<HTMLTextAreaElement>(null);
   const id = useId();
+  const embeds = useDraftEmbeds(props.value, props.embeds ?? false);
 
   /** Applies an edit through the browser's own text input, so it can be undone like typing. */
   const apply = (action: Action) => {
@@ -164,7 +197,7 @@ export function MarkdownEditor(props: {
       <section className="markdown-editor-pane" aria-label="Preview">
         <span className="pane-label muted">Preview</span>
         <div className="markdown">
-          {props.value.trim() ? <CronkMarkdown>{props.value}</CronkMarkdown> : <p className="muted">Nothing to preview yet.</p>}
+          {props.value.trim() ? <CronkMarkdown embeds={embeds}>{props.value}</CronkMarkdown> : <p className="muted">Nothing to preview yet.</p>}
         </div>
       </section>
     </div>
