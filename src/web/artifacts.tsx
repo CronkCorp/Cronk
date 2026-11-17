@@ -550,7 +550,7 @@ function PublishDialog(props: {
             {stale ? "Someone published a newer Version meanwhile. Reload the Artifact, then publish again." : error}
           </p>
         )}
-        <div className="dialog-actions">
+        <div className="actions dialog-actions">
           <Button type="button" variant="secondary" onClick={() => props.onOpenChange(false)}>Cancel</Button>
           <Button type="submit" disabled={busy || files.length === 0 || (!props.untitled && title.trim() === "")}>Publish</Button>
         </div>
