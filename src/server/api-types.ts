@@ -211,9 +211,15 @@ export type InboxKind = InboxItem["kind"];
 
 /**
  * One item in Triage, waiting with no clear User: an Unverified completion of a Ticket with no Assignee, a delegated or In Review Ticket
- * whose Assignee is deactivated or can't see its Project, a Suggestion nobody reviews, or a Discovered Ticket with no Assignee who can act on it.
+ * whose Assignee is deactivated or can't see its Project, a Decision an Agent proposed or a Suggestion an Agent made that nobody reviews, or a
+ * Discovered Ticket with no Assignee who can act on it.
  */
-export type TriageItem = Serialized<UnverifiedItem> | Serialized<UnattendedItem> | Serialized<SuggestionInboxItem> | Serialized<DiscoveredItem>;
+export type TriageItem =
+  | Serialized<UnverifiedItem>
+  | Serialized<UnattendedItem>
+  | Serialized<DecisionItem>
+  | Serialized<SuggestionInboxItem>
+  | Serialized<DiscoveredItem>;
 export type TriageKind = TriageItem["kind"];
 
 /** A word a Term says to avoid, found in what a save wrote, as every save of text answers them in `avoidedWords`. */

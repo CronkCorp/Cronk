@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUser, type AppContext } from "../context.js";
 import { answer, errors, ref } from "../schemas.js";
 import { listTriage, TRIAGE_KINDS, type TriageItem } from "./triage.js";
-import { hiddenBlocks, pausedTickets } from "./routes.js";
+import { decisionItem as inboxDecisionItem, hiddenBlocks, pausedTickets } from "./routes.js";
 
 const timestamp = { type: "string", format: "date-time" } as const;
 
@@ -17,6 +17,13 @@ const suggestionItem = {
     at: { ...timestamp, description: "When the Agent made it." },
     suggestion: ref("Suggestion"),
   },
+} as const;
+
+const decisionItem = {
+  ...inboxDecisionItem,
+  description:
+    "A Decision an Agent proposed that nobody reviews: the Assignee of the Ticket it came from, if any, and the proposing Agent's Owner are both " +
+    "deactivated. It leaves Triage once a User accepts or rejects it, with a reason, which reaches the Agent, or once either reviewer is reactivated.",
 } as const;
 
 const unverifiedItem = {
@@ -91,7 +98,7 @@ export function triageRoutes(ctx: AppContext) {
           response: {
             200: answer(
               "The waiting items with no clear User that the signed-in User could act on, which takes Write where the item lives (Admins see all), oldest first",
-              { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [unverifiedItem, unattendedItem, suggestionItem, discoveredItem] } } } },
+              { type: "object", required: ["items"], properties: { items: { type: "array", items: { anyOf: [unverifiedItem, unattendedItem, decisionItem, suggestionItem, discoveredItem] } } } },
             ),
             ...errors(400, 401, 403, 410),
           },

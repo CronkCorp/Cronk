@@ -387,14 +387,21 @@ interface SuggestionRow {
 }
 
 /**
+ * SQL for the User who reviews what an Agent made, from the ids of its source Ticket's Assignee and of the Agent's Owner: the Assignee,
+ * else the Owner, whichever is still active; none (Triage) when neither is. Suggestions and proposed Decisions share it.
+ */
+export const activeReviewerSql = (assigneeId: string, ownerId: string) => `
+  COALESCE(
+    (SELECT x.id FROM users x WHERE x.id = ${assigneeId} AND x.deactivated_at IS NULL),
+    (SELECT x.id FROM users x WHERE x.id = ${ownerId} AND x.deactivated_at IS NULL))`;
+
+/**
  * SQL for the User who reviews the Suggestion aliased `s`, whose source Ticket is aliased `t`: on a
  * Project item, the source Ticket's Assignee, else the proposing Agent's Owner, whichever is still
- * active; none (Triage) on a Workspace item, or when neither is. Keep `usersInheritingFrom` in step with it.
+ * active (see `activeReviewerSql`); none (Triage) on a Workspace item, or when neither is. Keep `usersInheritingFrom` in step with it.
  */
 export const reviewerSql = (s: string, t: string) => `
-  CASE WHEN ${s}.project_id IS NULL THEN NULL ELSE COALESCE(
-    (SELECT x.id FROM users x WHERE x.id = ${t}.assignee_id AND x.deactivated_at IS NULL),
-    (SELECT x.id FROM users x WHERE x.id = ${s}.actor_user_id AND x.deactivated_at IS NULL)) END`;
+  CASE WHEN ${s}.project_id IS NULL THEN NULL ELSE ${activeReviewerSql(`${t}.assignee_id`, `${s}.actor_user_id`)} END`;
 
 const SELECT_SUGGESTIONS = `
   SELECT s.*, u.name AS user_name, a.name AS agent_name, dec.name AS decided_by_name,

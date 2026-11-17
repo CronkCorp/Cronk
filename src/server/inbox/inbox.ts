@@ -11,7 +11,7 @@ import { blockingRefsOf, type BlockingRef } from "../work/relations.js";
 import { projectKeyOf } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
-import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
+import { activeReviewerSql, findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
 
 /**
  * A User's Inbox: everything waiting on them: the Tickets in an In Review Status they are Assignee of,
@@ -85,11 +85,18 @@ const OPEN_SUGGESTIONS = `
   WHERE s.state = 'open' AND s.project_id IS NOT NULL`;
 
 /**
+ * SQL for the User who reviews the Decision an Agent proposed, whose first Version is aliased `v` and source Ticket `t`, while
+ * it is proposed: the source Ticket's Assignee, else the proposing Agent's Owner, whichever is still active; none (Triage)
+ * when neither is. Keep `usersInheritingFrom` in step with it.
+ */
+const decisionReviewerSql = (v: string, t: string) => activeReviewerSql(`${t}.assignee_id`, `${v}.actor_user_id`);
+
+/**
  * The Decisions Agents proposed, as `d`, each with `reviewer_id`, the User who reviews it while it is
- * proposed: the Assignee of the Ticket it came from, or else the proposing Agent's Owner.
+ * proposed (see `decisionReviewerSql`), if any.
  */
 const AGENTS_DECISIONS = `
-  SELECT d.id, d.project_id, d.status, d.created_at, COALESCE(t.assignee_id, v.actor_user_id) AS reviewer_id
+  SELECT d.id, d.workspace_id, d.project_id, d.status, d.created_at, ${decisionReviewerSql("v", "t")} AS reviewer_id
   FROM decisions d JOIN decision_versions v ON v.decision_id = d.id AND v.number = 1
     LEFT JOIN tickets t ON t.id = d.source_ticket_id
   WHERE v.actor_kind = 'agent'`;
@@ -145,12 +152,24 @@ function agentOf(item: InboxItem): string | undefined {
 }
 
 /** The proposed Decisions `user` reviews, in the Projects `projectIds` and, with `inWorkspace`, the Workspace's. */
-async function proposedDecisions(db: Queryable, user: User, projectIds: string[], inWorkspace: boolean): Promise<DecisionItem[]> {
+function proposedDecisions(db: Queryable, user: User, projectIds: string[], inWorkspace: boolean): Promise<DecisionItem[]> {
+  return decisionItems(db, { workspaceId: user.workspaceId, reviewerId: user.id, projectIds, inWorkspace });
+}
+
+/**
+ * The proposed Decisions of the Workspace `workspaceId` whose reviewer is `reviewerId` (none, with null; see `decisionReviewerSql`), in the
+ * Projects `projectIds` and, with `inWorkspace`, the Workspace's, as Decision items, oldest first.
+ */
+export async function decisionItems(
+  db: Queryable,
+  which: { workspaceId: string; reviewerId: string | null; projectIds: string[]; inWorkspace: boolean },
+): Promise<DecisionItem[]> {
   const { rows } = await db.query<{ id: string; created_at: Date }>(
     `SELECT d.id, d.created_at FROM (${PROPOSED_DECISIONS}) d
-     WHERE d.reviewer_id = $1 AND (d.project_id = ANY($2::uuid[]) OR (d.project_id IS NULL AND $3))
-     ORDER BY d.created_at`,
-    [user.id, projectIds, inWorkspace],
+     WHERE d.workspace_id = $1 AND d.reviewer_id IS NOT DISTINCT FROM $2::uuid
+       AND (d.project_id = ANY($3::uuid[]) OR (d.project_id IS NULL AND $4))
+     ORDER BY d.created_at, d.id`,
+    [which.workspaceId, which.reviewerId, which.projectIds, which.inWorkspace],
   );
   const decisions = await Promise.all(rows.map(async (r) => ({ at: r.created_at, decision: (await findDecisionById(db, r.id))! })));
   const sources = await db.query<{ id: string; source_ticket_id: string }>(
@@ -299,7 +318,7 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
      SELECT v.actor_user_id FROM activities v JOIN tickets t ON t.id = v.ticket_id JOIN agents a ON a.id = v.actor_agent_id
      WHERE ${column} = $1 AND a.removed_at IS NULL AND v.kind = 'question' AND v.answer_comment_id IS NULL
      UNION
-     SELECT d.reviewer_id FROM (${PROPOSED_DECISIONS}) d WHERE $2 AND d.project_id = $1
+     SELECT d.reviewer_id FROM (${PROPOSED_DECISIONS}) d WHERE $2 AND d.project_id = $1 AND d.reviewer_id IS NOT NULL
      UNION
      SELECT s.reviewer_id FROM (${OPEN_SUGGESTIONS}) s WHERE $2 AND s.project_id = $1 AND s.reviewer_id IS NOT NULL
      UNION
@@ -310,14 +329,18 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
 }
 
 /**
- * Ids of the Owners of the Agents that made the open Project Suggestions whose source Ticket's Assignee is the User
- * with `userId`: who review those Suggestions while that User is inactive (see `reviewerSql`), so whose Inbox
- * deactivating or reactivating the User may change. Keep it in step with `reviewerSql`.
+ * Ids of the Owners of the Agents that made the open Project Suggestions, or proposed the Decisions still proposed, whose source
+ * Ticket's Assignee is the User with `userId`: who review those while that User is inactive (see `reviewerSql` and
+ * `decisionReviewerSql`), so whose Inbox deactivating or reactivating the User may change. Keep it in step with both.
  */
 export async function usersInheritingFrom(db: Queryable, userId: string): Promise<string[]> {
   const { rows } = await db.query<{ id: string }>(
-    `SELECT DISTINCT s.actor_user_id AS id FROM suggestions s JOIN tickets t ON t.id = s.source_ticket_id
-     WHERE s.state = 'open' AND s.project_id IS NOT NULL AND t.assignee_id = $1 AND s.actor_user_id <> $1`,
+    `SELECT s.actor_user_id AS id FROM suggestions s JOIN tickets t ON t.id = s.source_ticket_id
+     WHERE s.state = 'open' AND s.project_id IS NOT NULL AND t.assignee_id = $1 AND s.actor_user_id <> $1
+     UNION
+     SELECT v.actor_user_id FROM decisions d JOIN decision_versions v ON v.decision_id = d.id AND v.number = 1
+       JOIN tickets t ON t.id = d.source_ticket_id
+     WHERE d.status = 'proposed' AND v.actor_kind = 'agent' AND t.assignee_id = $1 AND v.actor_user_id <> $1`,
     [userId],
   );
   return rows.map((r) => r.id);
