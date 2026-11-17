@@ -1,4 +1,5 @@
 import type { Queryable } from "../db/database.js";
+import type { DiffView } from "../../shared/values.js";
 import type { StoredFolder } from "./archive.js";
 import type { ActorRef } from "./format.js";
 import { writeFrontmatter } from "./frontmatter.js";
@@ -28,6 +29,7 @@ export interface UserRow {
   name: string;
   role: string;
   deactivated_at: Date | null;
+  diff_view: DiffView;
 }
 
 /**
@@ -56,7 +58,7 @@ export class ExportContext {
 
   static async start(db: Queryable, scope: ExportScope): Promise<ExportContext> {
     const { rows } = await db.query<UserRow>(
-      "SELECT id, email, name, role, deactivated_at FROM users WHERE workspace_id = $1 ORDER BY lower(name), lower(email)",
+      "SELECT id, email, name, role, deactivated_at, diff_view FROM users WHERE workspace_id = $1 ORDER BY lower(name), lower(email)",
       [scope.workspaceId],
     );
     return new ExportContext(db, scope, rows);

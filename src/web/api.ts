@@ -17,6 +17,7 @@ import type {
   DecisionStatus,
   DecisionSummary,
   DecisionVersion,
+  DiffView,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -92,6 +93,7 @@ export type {
   DecisionStatus,
   DecisionSummary,
   DecisionVersion,
+  DiffView,
   Document,
   DocumentTreeEntry,
   Guidance,
@@ -404,6 +406,7 @@ export const api = {
   resetPassword: (token: string, password: string) =>
     request<{ user: User }>("POST", `/api/password-resets/by-token/${encodeURIComponent(token)}`, { password }).then((r) => r.user),
   changePassword: (currentPassword: string, password: string) => request<void>("PUT", "/api/me/password", { currentPassword, password }),
+  setDiffView: (diffView: DiffView) => request<{ user: User }>("PATCH", "/api/me", { diffView }).then((r) => r.user),
 
   projects: (archived = false) =>
     request<{ projects: Project[] }>("GET", `/api/projects${archived ? "?archived=true" : ""}`).then((r) => r.projects),

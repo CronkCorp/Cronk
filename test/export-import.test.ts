@@ -53,7 +53,7 @@ describe("exporting a Project", () => {
     ]);
     expect(files["projects/CRONK/tickets/CRONK-1.attachments/1-sign-in-flood.log"]).toBe("429 x 50\n");
     expect(markdown(files["projects/CRONK/documents/1-plan.md"])).toMatchObject({ data: { title: "Plan", version: 1 }, body: "# Plan\n\nShip." });
-    expect(markdown(files["people.md"]).data.users).toEqual([{ email: "ada@example.com", name: "Ada", role: "admin", active: true }]);
+    expect(markdown(files["people.md"]).data.users).toEqual([{ email: "ada@example.com", name: "Ada", role: "admin", active: true, diffView: "unified" }]);
     // History names Users by email, Statuses by name and Tickets by key, keeping the names recorded at the time.
     const history = markdown(files["projects/CRONK/tickets/CRONK-1.history.md"]).data.changes;
     expect(history[0]).toMatchObject({ by: "ada@example.com", change: "created", title: "Build it", status: { name: "Backlog", current: "Backlog" } });
@@ -1038,6 +1038,54 @@ describe("an export edited by hand", () => {
   });
 });
 
+describe("Diff views in an export", () => {
+  /** A Workspace where Ada sees Diffs side by side and Grace unified, exported. */
+  async function exportedViews() {
+    const { cronk, admin } = await startInstalledCronk();
+    const grace = await joinAs(cronk, admin, "grace@example.com", "member", "Grace");
+    const ben = await joinAs(cronk, admin, "ben@example.com", "member", "Ben");
+    await admin.patch("/api/me", { diffView: "split" });
+    await ben.patch("/api/me", { diffView: "split" });
+    expect((await grace.get("/api/me")).body.user.diffView).toBe("unified");
+    return untarGz((await admin.download("/api/export")).body);
+  }
+  const views = async (admin: Client) =>
+    (await admin.get("/api/users")).body.users.map((u: { email: string; diffView: string }) => [u.email, u.diffView]);
+
+  it("are written in people.md, and a User the import creates takes theirs while one already here keeps their own", async () => {
+    const files = await exportedViews();
+    expect(markdown(files["people.md"]).data.users.map((u: { email: string; diffView: string }) => [u.email, u.diffView])).toEqual([
+      ["ada@example.com", "split"],
+      ["ben@example.com", "split"],
+      ["grace@example.com", "unified"],
+    ]);
+
+    const { admin } = await startInstalledCronk("Elsewhere");
+    expect((await admin.upload("/api/import", await tarGz(files))).status).toBe(201);
+    expect(await views(admin)).toEqual([
+      ["ada@example.com", "unified"],
+      ["ben@example.com", "split"],
+      ["grace@example.com", "unified"],
+    ]);
+  });
+
+  it("are unified for each User an export without them creates, and refused when not one Cronk knows", async () => {
+    const files = await exportedViews();
+    const { admin } = await startInstalledCronk("Elsewhere");
+    const odd = await admin.upload("/api/import", await editedExport(files, "people.md", (d) => (d.users[1].diffView = "sideways")));
+    expect(odd.status).toBe(400);
+    expect(odd.body.error).toMatch(/people\.md users\[1\]\.diffView/);
+
+    const older = await editedExport(files, "people.md", (d) => d.users.forEach((u: { diffView?: string }) => delete u.diffView));
+    expect((await admin.upload("/api/import", older)).status).toBe(201);
+    expect(await views(admin)).toEqual([
+      ["ada@example.com", "unified"],
+      ["ben@example.com", "unified"],
+      ["grace@example.com", "unified"],
+    ]);
+  });
+});
+
 describe("a User an import brought in", () => {
   /** A fresh installation holding an import of a Workspace where Grace was assigned CRONK-1. */
   async function importedGrace() {
@@ -1063,7 +1111,7 @@ describe("a User an import brought in", () => {
     expect(invited.status).toBe(201);
     const accepted = await cronk.client().post(`/api/invitations/by-token/${invited.body.token}/accept`, { name: "Grace H", password: "graces password" });
     expect(accepted.status).toBe(201);
-    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true, joined: true });
+    expect(accepted.body.user).toEqual({ id: imported.id, email: "grace@example.com", name: "Grace H", role: "member", active: true, joined: true, diffView: "unified" });
 
     const grace = cronk.client();
     expect((await grace.post("/api/sign-in", { email: "grace@example.com", password: "graces password" })).status).toBe(200);

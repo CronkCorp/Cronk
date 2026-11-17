@@ -879,7 +879,7 @@ function SuggestionDetail(props: DetailProps<SuggestionItem>) {
   const [edited, setEdited] = useState<SuggestedContent>(suggestion.content);
   const [reason, setReason] = useState("");
   const [merge, setMerge] = useState<SuggestionMerge>();
-  const [view, setView] = useDiffView(props.me.id);
+  const [view, setView] = useDiffView(props.me);
   const accept = useAction(() => props.acting(() => api.acceptSuggestion(suggestion.id, mode === "edit" ? edited : undefined)), props.onDone);
   const acceptMerged = useAction(
     (content: SuggestedContent, onto: number) => props.acting(() => api.acceptSuggestion(suggestion.id, content, onto)),

@@ -52,7 +52,7 @@ export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
-export type { ActivityKind, DecisionStatus, Priority, RelationKind, ReopenChoice, SearchKind, StatusCategory, Verification } from "../shared/values.js";
+export type { ActivityKind, DecisionStatus, DiffView, Priority, RelationKind, ReopenChoice, SearchKind, StatusCategory, Verification } from "../shared/values.js";
 export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
 

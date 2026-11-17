@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -12,6 +12,9 @@ export const agentAccessSchema = { type: "string", enum: ["none", "read", "write
 
 /** A User's Role in the Workspace. */
 export const roleSchema = { type: "string", enum: ["admin", "member"] } as const;
+
+/** How a User sees a Diff: `unified`, one column of changes, or `split`, the two Versions side by side. */
+export const diffViewSchema = { type: "string", enum: DIFF_VIEWS } as const;
 
 /** A User's access in a Project. */
 export const accessSchema = { type: "string", enum: ["read", "write"] } as const;
@@ -315,6 +318,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     joined: {
       type: "boolean",
       description: "False for a User an import brought in who hasn't accepted an invitation yet: they have no password and can't sign in until an Admin invites them and they accept.",
+    },
+    diffView: {
+      ...diffViewSchema,
+      description: "How the User sees a Diff, as they last chose it: `unified`, one column of changes, or `split`, the two Versions side by side. `unified` until they choose.",
     },
   }),
   Invitation: object({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinAs, memberPassword, startInstalledCronk } from "./harness.js";
+import { ada, joinAs, memberPassword, registerAgent, startInstalledCronk } from "./harness.js";
 
 describe("inviting Users", () => {
   it("lets an Admin invite a User by email, who sets a password and signs in", async () => {
@@ -143,5 +143,48 @@ describe("managing Users", () => {
   it("answers 404 for a User that doesn't exist", async () => {
     const { admin } = await startInstalledCronk();
     expect((await admin.patch("/api/users/00000000-0000-4000-8000-000000000000", { role: "admin" })).status).toBe(404);
+  });
+});
+
+describe("a User's Diff view", () => {
+  it("is unified for a new User, and changes to side by side for them alone", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.get("/api/me")).body.user.diffView).toBe("unified");
+
+    const changed = await bob.patch("/api/me", { diffView: "split" });
+    expect(changed.status).toBe(200);
+    expect(changed.body.user).toMatchObject({ email: "bob@example.com", diffView: "split" });
+    expect((await bob.get("/api/me")).body.user.diffView).toBe("split");
+    expect((await admin.get("/api/me")).body.user.diffView).toBe("unified");
+  });
+});
+
+describe("changing a User's Diff view", () => {
+  it("is refused for any other value or field", async () => {
+    const { admin } = await startInstalledCronk();
+    expect((await admin.patch("/api/me", { diffView: "sideways" })).status).toBe(400);
+    expect((await admin.patch("/api/me", { diffView: "split", name: "Eve" })).status).toBe(400);
+    expect((await admin.patch("/api/me", {})).status).toBe(400);
+    expect((await admin.get("/api/me")).body.user).toMatchObject({ name: "Ada", diffView: "unified" });
+  });
+
+  it("is only for signed-in Users, not Agents, and signs no one in", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const claude = cronk.client((await registerAgent(admin, "claude-laptop")).secret);
+    const refused = await claude.patch("/api/me", { diffView: "split" });
+    expect(refused.status).toBe(403);
+    expect(claude.lastSetCookie("cronk_sign_in")).toBeUndefined();
+    expect((await claude.get("/api/me")).body).not.toHaveProperty("user");
+    expect((await cronk.client().patch("/api/me", { diffView: "split" })).status).toBe(401);
+    expect((await admin.get("/api/me")).body.user.diffView).toBe("unified");
+  });
+
+  it("lasts into a fresh sign-in", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.patch("/api/me", { diffView: "split" });
+    const later = cronk.client();
+    expect((await later.post("/api/sign-in", { email: ada.email, password: ada.password })).body.user.diffView).toBe("split");
+    expect((await later.get("/api/me")).body.user.diffView).toBe("split");
   });
 });
