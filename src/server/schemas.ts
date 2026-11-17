@@ -345,6 +345,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       name: { type: "string" },
       owner: named,
       createdAt: timestamp,
+      removedAt: { ...nullable(timestamp), description: "When it was removed, or null while it is live." },
       sessions: {
         type: "array",
         items: ref("AgentSession"),

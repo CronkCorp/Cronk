@@ -11,6 +11,8 @@ export interface Agent {
   ownerId: string;
   name: string;
   createdAt: Date;
+  /** When it was removed, or null while it is live. */
+  removedAt: Date | null;
 }
 
 interface AgentRow {
@@ -19,6 +21,7 @@ interface AgentRow {
   owner_id: string;
   name: string;
   created_at: Date;
+  removed_at: Date | null;
 }
 
 const toAgent = (row: AgentRow): Agent => ({
@@ -27,6 +30,7 @@ const toAgent = (row: AgentRow): Agent => ({
   ownerId: row.owner_id,
   name: row.name,
   createdAt: row.created_at,
+  removedAt: row.removed_at,
 });
 
 /** The shape of an Agent the API returns. */
@@ -35,6 +39,7 @@ export const publicAgent = (agent: Agent, owner: User) => ({
   name: agent.name,
   owner: { id: owner.id, name: owner.name },
   createdAt: agent.createdAt,
+  removedAt: agent.removedAt,
 });
 
 /**
@@ -62,13 +67,27 @@ export async function findAgent(db: Queryable, workspaceId: string, id: string):
   return rows[0] && toAgent(rows[0]);
 }
 
-/** The Agents of one Owner, or with no Owner every Agent in the Workspace, each with its Owner, by Owner then name. */
-export async function listAgents(db: Queryable, workspaceId: string, ownerId?: string): Promise<{ agent: Agent; owner: User }[]> {
+/** An Agent, live or removed: only for reading its Agent Record, which outlasts it. */
+export async function findAgentEvenRemoved(db: Queryable, workspaceId: string, id: string): Promise<Agent | undefined> {
+  const { rows } = await db.query<AgentRow>("SELECT * FROM agents WHERE workspace_id = $1 AND id = $2", [workspaceId, id]);
+  return rows[0] && toAgent(rows[0]);
+}
+
+/**
+ * The live Agents of one Owner, or with no Owner every live Agent in the Workspace, each with its Owner, by Owner then name.
+ * With `removed`, the removed Agents instead, the latest removed first among those sharing a name.
+ */
+export async function listAgents(
+  db: Queryable,
+  workspaceId: string,
+  ownerId?: string,
+  opts: { removed?: boolean } = {},
+): Promise<{ agent: Agent; owner: User }[]> {
   const { rows } = await db.query<AgentRow & { owner: UserRow }>(
     `SELECT a.*, to_jsonb(u) AS owner FROM agents a JOIN users u ON u.id = a.owner_id
-     WHERE a.workspace_id = $1 AND a.removed_at IS NULL AND ($2::uuid IS NULL OR a.owner_id = $2)
-     ORDER BY lower(u.name), lower(a.name)`,
-    [workspaceId, ownerId ?? null],
+     WHERE a.workspace_id = $1 AND (a.removed_at IS NOT NULL) = $3 AND ($2::uuid IS NULL OR a.owner_id = $2)
+     ORDER BY lower(u.name), lower(a.name), a.removed_at DESC`,
+    [workspaceId, ownerId ?? null, opts.removed ?? false],
   );
   return rows.map((row) => ({ agent: toAgent(row), owner: toUser(row.owner) }));
 }

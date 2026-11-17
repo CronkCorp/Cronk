@@ -92,3 +92,48 @@ describe("What an Agent did, as each User may see it", () => {
     expect((await admin.get(`/api/agents/${claude.agentId}/work`)).status).toBe(404);
   });
 });
+
+describe("What a removed Agent did", () => {
+  it("stays readable to its Owner, limited to what they can read, and to an Admin, and hidden from other Members", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    await projectWithTickets(admin, "CRONK", 1);
+    await projectWithTickets(admin, "SECRET", 1);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await admin.put(`/api/projects/SECRET/members/${bobId}`, { access: "write" });
+    const claude = await registerAgent(bob, "claude-laptop");
+    for (const key of ["CRONK-1", "SECRET-1"]) await admin.patch(`/api/tickets/${key}`, { assigneeId: bobId, delegateId: claude.agentId });
+    const agent = await startSession(cronk, claude.secret);
+    for (const key of ["CRONK-1", "SECRET-1"]) {
+      await agent.post(`/api/tickets/${key}/claim`);
+      cronk.clock.advance(1000);
+      await agent.post(`/api/tickets/${key}/activities`, { kind: "progress", body: `Working on ${key}` });
+    }
+    await admin.delete(`/api/projects/SECRET/members/${bobId}`);
+    expect((await bob.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
+
+    const seen = async (who: Client) => {
+      const res = await who.get(`/api/agents/${claude.agentId}/record`);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body.record.map((e: { kind: string; ticket: { key: string } }) => `${e.kind} ${e.ticket.key}`);
+    };
+    expect(await seen(bob)).toEqual(["activity CRONK-1"]);
+    expect(await seen(admin)).toEqual(["activity SECRET-1", "activity CRONK-1"]);
+    expect((await carol.get(`/api/agents/${claude.agentId}/record`)).status).toBe(404);
+  });
+
+  it("is still refused by every other Agent route", async () => {
+    const { admin } = await startInstalledCronk();
+    const claude = await registerAgent(admin, "claude-laptop");
+    const token = (await admin.get(`/api/agents/${claude.agentId}/tokens`)).body.tokens[0].id;
+    expect((await admin.delete(`/api/agents/${claude.agentId}`)).status).toBe(204);
+
+    expect((await admin.patch(`/api/agents/${claude.agentId}`, { name: "again" })).status).toBe(404);
+    expect((await admin.delete(`/api/agents/${claude.agentId}`)).status).toBe(404);
+    expect((await admin.get(`/api/agents/${claude.agentId}/tokens`)).status).toBe(404);
+    expect((await admin.post(`/api/agents/${claude.agentId}/tokens`, {})).status).toBe(404);
+    expect((await admin.delete(`/api/agents/${claude.agentId}/tokens/${token}`)).status).toBe(404);
+  });
+});
