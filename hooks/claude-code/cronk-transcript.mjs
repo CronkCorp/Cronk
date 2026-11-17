@@ -13,6 +13,8 @@ import { join } from "node:path";
  * @typedef {{ type: string, text?: string, content?: string | Block[], name?: string, id?: string, tool_use_id?: string, input?: unknown, is_error?: boolean }} Block
  * @typedef {{ type?: string, isSidechain?: boolean, isMeta?: boolean, isCompactSummary?: boolean, agentId?: string, toolUseResult?: unknown, message?: { role?: string, content?: string | Block[] } }} Entry
  * @typedef {{ chat: string, toolUseId?: string }} Subagent a subagent's chat file, and the id of the tool call that launched it
+ * @typedef {{ chats: Map<string, Entry[]>, agentByToolUse: Map<string, string>, placed: Set<string> }} SubagentPlacement
+ *   the subagents' chats by agentId, the agentIds their meta files give the tool calls that launched them, and those already placed
  */
 
 /**
@@ -32,21 +34,19 @@ function toMarkdown(jsonl, subagents = {}) {
     if (!entry.isSidechain || typeof entry.agentId !== "string" || Object.hasOwn(subagents, entry.agentId)) continue;
     chats.set(entry.agentId, [...(chats.get(entry.agentId) ?? []), entry]);
   }
-  for (const [agentId, subagent] of Object.entries(subagents)) chats.set(agentId, parseChat(subagent.chat));
   /** @type {Map<string, string>} */
   const agentByToolUse = new Map();
-  for (const [agentId, subagent] of Object.entries(subagents)) if (subagent.toolUseId) agentByToolUse.set(subagent.toolUseId, agentId);
+  for (const [agentId, subagent] of Object.entries(subagents)) {
+    chats.set(agentId, parseChat(subagent.chat));
+    if (subagent.toolUseId) agentByToolUse.set(subagent.toolUseId, agentId);
+  }
   const mainChat = entries.filter((entry) => !entry.isSidechain);
   return chatMarkdown(mainChat, { chats, agentByToolUse, placed: new Set() });
 }
 
 /**
- * @typedef {{ chats: Map<string, Entry[]>, agentByToolUse: Map<string, string>, placed: Set<string> }} Subagents
- */
-
-/**
  * One chat's entries as Markdown, with the chats of the subagents it learned finished, each placed once.
- * @param {Entry[]} entries @param {Subagents} subagents
+ * @param {Entry[]} entries @param {SubagentPlacement} subagents
  * @returns {string}
  */
 function chatMarkdown(entries, subagents) {
@@ -62,7 +62,7 @@ function chatMarkdown(entries, subagents) {
     }
     parts.push(text);
   };
-  /** The tool calls this chat made, which its subagents' completions must name. */
+  /** @type {Set<string>} The tool calls this chat made, which its subagents' completions must name. */
   const toolUses = new Set();
   /** Appends the chat of the subagent `agentId`, unless it's missing or already placed. @param {string} agentId */
   const placeSubagent = (agentId) => {
