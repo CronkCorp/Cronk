@@ -1,6 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Queryable } from "../db/database.js";
-import { documentReadableSql, type Readable } from "../identity/access.js";
+import { placeReadableSql, type Readable } from "../identity/access.js";
 import { replaceReferenceText, TICKET_REFERENCE } from "../../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowledge-references.js";
 import type { MentionKind } from "../../shared/values.js";
@@ -269,7 +269,7 @@ export async function listMentions(db: Queryable, target: MentionTarget, readabl
 ${FOUND_SQL}
      )
      SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
-     FROM found f WHERE ${documentReadableSql("f", `$${n + 1}::uuid[]`, `$${n + 2}::uuid`)}
+     FROM found f WHERE ${placeReadableSql("f", `$${n + 1}::uuid[]`, `$${n + 2}::uuid`)}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
     [...params, readable.projectIds, readable.workspaceId],
   );
@@ -285,7 +285,7 @@ export async function countTermMentions(db: Queryable, termIds: string[], readab
     `WITH m AS (SELECT * FROM mentions m WHERE m.mentioned_term_id = ANY($1::uuid[])),
      found AS (${FOUND_SQL})
      SELECT mentioned_term_id AS term_id, count(*)::int AS n
-     FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
+     FROM found f WHERE ${placeReadableSql("f", "$2::uuid[]", "$3::uuid")}
      GROUP BY mentioned_term_id`,
     [termIds, readable.projectIds, readable.workspaceId],
   );
