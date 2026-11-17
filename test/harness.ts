@@ -379,10 +379,31 @@ async function pollUntil(done: () => Promise<boolean>, failure: string | (() => 
   }
 }
 
+/** The connections whose queries wait on a lock, in the database named by parameter `$1`. */
+const LOCK_WAITERS_FROM = "FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'";
+
 /** How many queries on database `dbName` are waiting on a lock, asked through `client`. */
 async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
-  const { rows } = await client.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'", [dbName]);
+  const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int AS n ${LOCK_WAITERS_FROM}`, [dbName]);
   return rows[0]!.n;
+}
+
+/**
+ * Runs `job` with a client connected to `connectionString`, and closes the client however connecting or `job` ends.
+ * Should closing fail after `job` failed, `job`'s error is the one thrown.
+ */
+async function withClient<T>(connectionString: string, job: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString });
+  let result: T;
+  try {
+    await client.connect();
+    result = await job(client);
+  } catch (err) {
+    await client.end().catch(() => {});
+    throw err;
+  }
+  await client.end();
+  return result;
 }
 
 /**
@@ -403,10 +424,7 @@ export async function startCronk(
 ): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
   const dbName = `cronk_test_${randomBytes(6).toString("hex")}`;
-  const admin = new pg.Client({ connectionString: adminUrl });
-  await admin.connect();
-  await admin.query(`CREATE DATABASE ${dbName}`);
-  await admin.end();
+  await withClient(adminUrl, (admin) => admin.query(`CREATE DATABASE ${dbName}`));
   const url = new URL(adminUrl);
   url.pathname = `/${dbName}`;
   const databaseUrl = url.toString();
@@ -437,9 +455,7 @@ export async function startCronk(
       listening = undefined;
     },
     terminateConnections: async () => {
-      const admin = new pg.Client({ connectionString: adminUrl });
-      await admin.connect();
-      try {
+      await withClient(adminUrl, async (admin) => {
         // Connections the server opens afterwards are its recovery, not survivors.
         const { rows: terminated } = await admin.query<{ pid: number; started: string }>(
           "SELECT pid, backend_start::text AS started FROM pg_stat_activity WHERE datname = $1",
@@ -455,37 +471,28 @@ export async function startCronk(
             )
           ).rows[0]!.n;
         await pollUntil(async () => (await outliving()) === 0, async () => `${await outliving()} connections to ${dbName} outlived pg_terminate_backend`);
-      } finally {
-        await admin.end();
-      }
+      });
       // Give the server's clients a moment to read the termination notice.
       await new Promise((resolve) => setTimeout(resolve, 50));
     },
     interruptQueriesOn: async (table, cause) => {
-      const admin = new pg.Client({ connectionString: databaseUrl });
-      // Asked outside the locking transaction, as pg_stat_activity stays the same within one: a query
-      // that reaches the table after the first look would otherwise never be seen waiting.
-      const watcher = new pg.Client({ connectionString: databaseUrl });
-      await admin.connect();
-      try {
-        await watcher.connect();
-        await admin.query("BEGIN");
-        await admin.query(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
-        await cause();
-        // Terminates the connections whose queries wait on a lock, once there are any.
-        const terminated = async () =>
-          (
-            await watcher.query<{ n: number }>(
-              "SELECT count(pg_terminate_backend(pid))::int AS n FROM pg_stat_activity WHERE datname = $1 AND wait_event_type = 'Lock'",
-              [dbName],
-            )
-          ).rows[0]!.n > 0;
-        await pollUntil(terminated, `No query waited on ${table}`);
-      } finally {
-        await watcher.end().catch(() => {});
-        await admin.query("ROLLBACK").catch(() => {});
-        await admin.end();
-      }
+      await withClient(databaseUrl, async (admin) => {
+        try {
+          // Asked outside the locking transaction, as pg_stat_activity stays the same within one: a query
+          // that reaches the table after the first look would otherwise never be seen waiting.
+          await withClient(databaseUrl, async (watcher) => {
+            await admin.query("BEGIN");
+            await admin.query(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
+            await cause();
+            // Terminates the connections whose queries wait on a lock, once there are any.
+            const terminated = async () =>
+              (await watcher.query<{ n: number }>(`SELECT count(pg_terminate_backend(pid))::int AS n ${LOCK_WAITERS_FROM}`, [dbName])).rows[0]!.n > 0;
+            await pollUntil(terminated, `No query waited on ${table}`);
+          });
+        } finally {
+          await admin.query("ROLLBACK").catch(() => {});
+        }
+      });
     },
     failCommitsWriting: async (table, during) => {
       const admin = new pg.Client({ connectionString: databaseUrl });
@@ -511,9 +518,7 @@ export async function startCronk(
     queries: (during) => countQueries(/./, during),
     tablesReadWhole: async (during) => {
       const sent = await sentQueries(during);
-      const client = new pg.Client({ connectionString: databaseUrl });
-      await client.connect();
-      try {
+      return withClient(databaseUrl, async (client) => {
         // Reading a table whole then costs more than any plan through an index, so a plan reads one whole only where no index serves.
         for (const setting of ["enable_seqscan", "enable_hashjoin", "enable_mergejoin"]) await client.query(`SET ${setting} = off`);
         const whole = new Set<string>();
@@ -523,9 +528,7 @@ export async function startCronk(
           for (const table of readWhole(rows[0]!["QUERY PLAN"][0].Plan)) whole.add(table);
         }
         return [...whole].sort();
-      } finally {
-        await client.end();
-      }
+      });
     },
     holdPushes: () => {
       const release = live.hold();
@@ -555,24 +558,26 @@ export async function startCronk(
       };
     },
     undoMigration: async (id, undo) => {
-      const client = new pg.Client({ connectionString: databaseUrl });
-      await client.connect();
-      try {
+      await withClient(databaseUrl, async (client) => {
         await client.query(undo);
         await client.query("DELETE FROM schema_migrations WHERE id = $1", [id]);
-      } finally {
-        await client.end();
-      }
+      });
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
     databaseUrl,
   };
   /** Takes a lock with `sql` in a transaction it keeps open until released. */
   async function hold(sql: string, params: unknown[]): Promise<HeldLock> {
+    // The holder stays open until released, so it isn't closed by `withClient`; but should taking the lock fail, nothing would release it.
     const holder = new pg.Client({ connectionString: databaseUrl });
-    await holder.connect();
-    await holder.query("BEGIN");
-    await holder.query(sql, params);
+    try {
+      await holder.connect();
+      await holder.query("BEGIN");
+      await holder.query(sql, params);
+    } catch (err) {
+      await holder.end().catch(() => {});
+      throw err;
+    }
     let released = false;
     const release = async () => {
       if (released) return;
@@ -584,13 +589,9 @@ export async function startCronk(
     return {
       waiters: async (n) => {
         // Asked outside the holding transaction, as pg_stat_activity stays the same within one.
-        const watcher = new pg.Client({ connectionString: databaseUrl });
-        await watcher.connect();
-        try {
-          await pollUntil(async () => (await lockWaiters(watcher, dbName)) >= n, `Fewer than ${n} queries waited on a lock`);
-        } finally {
-          await watcher.end();
-        }
+        await withClient(databaseUrl, (watcher) =>
+          pollUntil(async () => (await lockWaiters(watcher, dbName)) >= n, `Fewer than ${n} queries waited on a lock`),
+        );
       },
       release,
     };
@@ -599,10 +600,7 @@ export async function startCronk(
 
   onTestFinished(async () => {
     await cronk.app.close();
-    const admin = new pg.Client({ connectionString: adminUrl });
-    await admin.connect();
-    await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
-    await admin.end();
+    await withClient(adminUrl, (admin) => admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`));
     await rm(filesDir, { recursive: true, force: true });
   });
   return cronk;
