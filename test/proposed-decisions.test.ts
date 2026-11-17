@@ -139,6 +139,69 @@ describe("a proposed Decision in the Inbox", () => {
     expect((await admin.post("/api/projects/CRONK/decisions", { title: "A User's", ticket: "CRONK-1" })).status).toBe(400);
   });
 
+  it.each([
+    ["naming the Ticket is refused", { ticket: "CRONK-1" }, 409, undefined],
+    ["naming none records no source", {}, 201, null],
+  ])("waits for a release of its source Claim committed first: %s", async (_, named, status, sourceTicket) => {
+    const { cronk, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const ticketId = (await agent.get("/api/tickets/CRONK-1")).body.ticket.id;
+
+    // The release waits on the Ticket first, then the Decision waits behind it.
+    const held = await cronk.holdRow("tickets", ticketId);
+    const release = agent.delete("/api/tickets/CRONK-1/claim");
+    await held.waiters(1);
+    const proposing = agent.post("/api/projects/CRONK/decisions", { title: "Raced", ...named });
+    expect(await Promise.race([proposing.then(() => "proposed"), held.waiters(2).then(() => "waited")])).toBe("waited");
+    await held.release();
+
+    expect((await release).status).toBe(204);
+    const proposed = await proposing;
+    expect(proposed.status).toBe(status);
+    if (status === 409) expect(proposed.body.error).toMatch(/Claim CRONK-1 in your Agent Session before naming it as the Ticket a Decision came from/);
+    else expect(proposed.body.decision.sourceTicket).toBe(sourceTicket);
+  });
+
+  it("holds a release of its source Claim until it commits, so the Claim it records was live", async () => {
+    const { cronk, admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const projectId = (await admin.get("/api/projects/CRONK")).body.project.id;
+
+    // Recording the Decision's first Version waits, after the Decision has found its source Claim.
+    const held = await cronk.holdTable("decision_versions");
+    const proposing = agent.post("/api/projects/CRONK/decisions", { title: "First", ticket: "CRONK-1" });
+    await held.waiters(1);
+    const release = agent.delete("/api/tickets/CRONK-1/claim");
+    expect(await Promise.race([release.then(() => "released"), held.waiters(2).then(() => "waited")])).toBe("waited");
+    await held.release();
+
+    const proposed = await proposing;
+    expect(proposed.status).toBe(201);
+    expect(proposed.body.decision.sourceTicket).toMatchObject({ key: "CRONK-1" });
+    expect((await release).status).toBe(204);
+  });
+
+  it("locks its Project before its source Ticket, as filing a Discovered Ticket from the same Claim does", async () => {
+    const { cronk, admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const projectId = (await admin.get("/api/projects/CRONK")).body.project.id;
+
+    // The Discovered Ticket waits on the Project first, then the Decision does.
+    const held = await cronk.holdRow("projects", projectId);
+    const filing = agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "CRONK-1" });
+    await held.waiters(1);
+    const proposing = agent.post("/api/projects/CRONK/decisions", { title: "Meanwhile", ticket: "CRONK-1" });
+    await held.waiters(2);
+    await held.release();
+
+    // Neither is aborted as a deadlock.
+    expect((await filing).status).toBe(201);
+    expect((await proposing).status).toBe(201);
+  });
+
   it("names a source Ticket only where everyone who reads the Decision can read the Ticket", async () => {
     const { admin, session } = await delegatedSetup(1);
     await admin.patch("/api/projects/CRONK", { visibility: "private" });
