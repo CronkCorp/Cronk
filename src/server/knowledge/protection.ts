@@ -74,8 +74,16 @@ export const suggestNewDocumentInstead = (parentId: string) =>
   "or the `suggestions` tool), for a User to accept or reject";
 
 /**
- * Refuses an Agent's change to a Protected item (a 403) with a pointer to Suggestions, the way an
- * Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3",
+ * What an Agent refused a move of the Document `documentId` into, out of or within a protected branch does
+ * instead, ending a refusal's sentence. A Suggestion carries content only, never a place, so a User makes the move.
+ */
+export const askToMoveInstead = (documentId: string) =>
+  `ask a User to make the move instead, in a Comment on the Document you are moving (POST /api/documents/${documentId}/comments, or the \`comments\` tool) ` +
+  "saying where it should go and why";
+
+/**
+ * Refuses an Agent's change to a Protected item (a 403) with a pointer to what it does instead: by
+ * default a Suggestion, the way an Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3",
  * `change` what the Agent may not do, such as "delete it", and `instead` what it does instead.
  */
 export function requireUnprotected(actor: Actor, item: { protected: boolean }, what: string, change = "change it", instead = SUGGEST_INSTEAD): void {
