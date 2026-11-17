@@ -57,9 +57,15 @@ export function SearchBox() {
   );
 }
 
-/** Where a search result opens: its Term, its Document or its Ticket. */
+/** Where a search result opens: its Decision, its Term, its Document or its Ticket. */
 const resultPath = (r: SearchResult) =>
-  r.termId ? `/terms/${r.termId}` : r.documentId ? `/documents/${r.documentId}` : `/tickets/${r.ticketKey}`;
+  r.decisionKey
+    ? `/decisions/${r.decisionKey}`
+    : r.termId
+      ? `/terms/${r.termId}`
+      : r.documentId
+        ? `/documents/${r.documentId}`
+        : `/tickets/${r.ticketKey}`;
 
 /** What the search for `filter` found, best match first, with controls to narrow it to a kind and a Project. */
 export function SearchPage(props: { filter: SearchFilter }) {
@@ -92,7 +98,7 @@ export function SearchPage(props: { filter: SearchFilter }) {
                   <Link to={resultPath(r)} className="row-link search-result">
                     <div className="search-result-head">
                       <Chip>{KIND_NAMES[r.kind]}</Chip>
-                      {r.ticketKey && <span className="key">{r.ticketKey}</span>}
+                      {(r.ticketKey ?? r.decisionKey) && <span className="key">{r.ticketKey ?? r.decisionKey}</span>}
                       <span className="grow">{r.kind === "comment" ? `On ${r.title}` : r.title}</span>
                       <span className="muted">{r.projectKey ?? "Workspace"}</span>
                     </div>
