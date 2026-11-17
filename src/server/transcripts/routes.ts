@@ -29,7 +29,7 @@ import {
 } from "./transcripts.js";
 import { redactionOf } from "./redact.js";
 import type { TranscriptRefusalReason } from "../../shared/values.js";
-import { LINKED_KINDS, type LinkedKind } from "../../shared/from-transcript.js";
+import { LINKED_KIND_NAMES, LINKED_KINDS, type LinkedKind } from "../../shared/from-transcript.js";
 
 /** The media types a Transcript may be uploaded as: its Markdown, as text. */
 const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
@@ -155,7 +155,8 @@ export function transcriptRoutes(ctx: AppContext) {
       },
     );
 
-    for (const [kind, linked] of Object.entries(LINKED) as [LinkedKind, (typeof LINKED)[LinkedKind]][]) {
+    for (const kind of LINKED_KIND_NAMES) {
+      const linked = LINKED[kind];
       const { collection, by } = LINKED_KINDS[kind];
       app.get<{ Params: Record<string, string> }>(
         `/api/${collection}/:${by}/transcripts`,

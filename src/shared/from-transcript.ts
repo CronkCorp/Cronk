@@ -17,5 +17,8 @@ export const LINKED_KINDS = {
 /** A kind of item that lists the Transcripts it came from. */
 export type LinkedKind = keyof typeof LINKED_KINDS;
 
+/** The LinkedKinds, in LINKED_KINDS' order. */
+export const LINKED_KIND_NAMES = Object.keys(LINKED_KINDS) as [LinkedKind, ...LinkedKind[]];
+
 /** The collection under `/api` that items of a LinkedKind are listed in. */
 export type LinkedCollection = (typeof LINKED_KINDS)[LinkedKind]["collection"];

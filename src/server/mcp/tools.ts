@@ -4,7 +4,7 @@ import { z } from "zod";
 import { ACTIVITY_KINDS, DECISION_STATUSES, EXTRA_ORIGIN_USES, MENTION_SYNTAX, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES } from "../../shared/values.js";
 import type { AvoidedWord, Transcript, Welcome } from "../api-types.js";
 import { turnsOf } from "../../shared/transcript-turns.js";
-import { LINKED_KINDS, type LinkedKind } from "../../shared/from-transcript.js";
+import { LINKED_KIND_NAMES, LINKED_KINDS } from "../../shared/from-transcript.js";
 import { formatBytes } from "../files/sizes.js";
 import { FileBody, type ApiCall, type ApiResponse, type Caller } from "./api.js";
 import { namedSession } from "./welcome.js";
@@ -893,8 +893,6 @@ function attachmentsPath(a: { key?: string | undefined; documentId?: string | un
   return `/api/comments/${encodeURIComponent(a.commentId!)}/attachments`;
 }
 
-/** The kinds of item the from action takes, for its `kind` argument. */
-const LINKED_KIND_NAMES = Object.keys(LINKED_KINDS) as [LinkedKind, ...LinkedKind[]];
 
 /** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */
 const scopePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);
