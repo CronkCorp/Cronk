@@ -36,21 +36,33 @@ export class Database extends pg.Pool {
     }, withinMs).unref();
   }
 
-  /** Has Postgres end the sessions of `clients`, then drops each connection, in case Postgres could not be reached. */
+  /**
+   * Has Postgres end the sessions of `clients`, then drops each connection, in case Postgres could not be reached.
+   * Takes at most `CUT_OFF_MS` before the connections are dropped.
+   */
   private async cutOff(clients: pg.PoolClient[]): Promise<void> {
     if (clients.length === 0) return;
-    const pids = clients.map((client) => (client as pg.PoolClient & { processID: number }).processID);
-    const admin = new pg.Client({ ...this.options, connectionTimeoutMillis: 1_000, query_timeout: 1_000 });
+    const admin = new pg.Client({ ...this.options, connectionTimeoutMillis: CUT_OFF_MS / 2, query_timeout: CUT_OFF_MS / 2 });
     try {
       await admin.connect();
-      await admin.query("SELECT pg_terminate_backend(pid) FROM unnest($1::int[]) AS pid", [pids]);
+      // Only connections still in use: one given back meanwhile has ended, and its process id may already be another session's.
+      const pids = clients.filter((client) => this.inUse.has(client)).map((client) => pgInternals(client).processID);
+      await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND datname = current_database()", [pids]);
     } catch {
       // Dropping the connections below still frees the pool; Postgres ends their sessions once it notices.
     } finally {
       await admin.end().catch(() => {});
     }
-    for (const client of clients) client.connection.stream.destroy();
+    for (const client of clients) if (this.inUse.has(client)) pgInternals(client).connection.stream.destroy();
   }
+}
+
+/** The longest cutting off connections takes, past the bound, should Postgres not answer. */
+const CUT_OFF_MS = 1_000;
+
+/** What pg knows of a connection but doesn't declare: Postgres's process id for its session, and its socket. */
+function pgInternals(client: pg.PoolClient): { processID: number; connection: { stream: { destroy(): void } } } {
+  return client as unknown as { processID: number; connection: { stream: { destroy(): void } } };
 }
 
 /** Postgres's error code for a unique index refusing a row. */

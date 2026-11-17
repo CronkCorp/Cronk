@@ -76,8 +76,9 @@ export async function buildApp(opts: {
   /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
   lapseCheckMs?: number;
   /**
-   * How long closing may wait on the database, for requests and looks for lapsed Claims still running; 5 seconds by default,
-   * inside the 10 seconds a container is given to stop. What still waits then is cut off: its uncommitted work rolls back.
+   * How long closing may wait on the database, for requests and looks for lapsed Claims still running; 5 seconds by default.
+   * What still waits then is cut off, taking at most a second more: its uncommitted work rolls back and a request answers 500.
+   * So closing finishes within about 6 seconds, inside the 10 seconds `docker stop` gives by default before killing.
    */
   closeWithinMs?: number;
   /** Called once with a function that looks for lapsed Claims at once and resolves when that look is done; tests use it to know a look happened. */
