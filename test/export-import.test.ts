@@ -1233,6 +1233,29 @@ describe("Attachments in an export", () => {
     expect(file.status).toBe(200);
     expect([...file.body]).toEqual([0x89, 0x50]);
   });
+
+  it("of Comments are exported in a fixed number of queries, however many Comments there are", async () => {
+    const { cronk, admin } = await startInstalledCronk("Acme", { lapseCheckMs: 3_600_000 });
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const first = (await admin.post("/api/tickets/CRONK-1/comments", { body: "Comment 1" })).body.comment;
+    await admin.upload(`/api/comments/${first.id}/attachments?name=1.txt`, Buffer.from("1"), "text/plain");
+    const exporting = async () => ({
+      workspace: await cronk.queries(() => admin.download("/api/export")),
+      project: await cronk.queries(() => admin.download("/api/projects/CRONK/export")),
+    });
+    const withOne = await exporting();
+
+    for (let i = 2; i <= 6; i++) {
+      const comment = (await admin.post("/api/tickets/CRONK-1/comments", { body: `Comment ${i}` })).body.comment;
+      if (i % 2 === 0) await admin.upload(`/api/comments/${comment.id}/attachments?name=${i}.txt`, Buffer.from(`${i}`), "text/plain");
+    }
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(files["projects/CRONK/tickets/CRONK-1.comments/4.attachments/1-4.txt"]).toBe("4");
+    expect(files["projects/CRONK/tickets/CRONK-1.comments/5.attachments/index.md"]).toBeUndefined();
+
+    expect(await exporting()).toEqual(withOne);
+  });
 });
 
 describe("Attachment Changes in an export", () => {

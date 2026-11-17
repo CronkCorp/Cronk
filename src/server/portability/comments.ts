@@ -1,5 +1,5 @@
 import { insertComment, type CommentTarget } from "../conversation/comments.js";
-import { exportAttachments, importAttachments } from "./attachments.js";
+import { commentAttachments, importAttachments, writeAttachments } from "./attachments.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
 import { date, integer, refuse, text } from "./fields.js";
 import type { ImportContext } from "./import-context.js";
@@ -32,6 +32,7 @@ export async function exportComments(
     }
   >(`SELECT * FROM comments WHERE ${on} = $1 ORDER BY seq`, [id]);
   const numbers = new Map(rows.map((c, i) => [c.id, i + 1]));
+  const attachments = await commentAttachments(ctx, rows.map((c) => c.id));
   for (const c of rows) {
     ctx.add(
       `${dir}/${numbers.get(c.id)}.md`,
@@ -46,7 +47,7 @@ export async function exportComments(
       },
       c.body,
     );
-    await exportAttachments(ctx, `${dir}/${numbers.get(c.id)}`, { commentId: c.id });
+    writeAttachments(ctx, `${dir}/${numbers.get(c.id)}`, attachments.get(c.id) ?? []);
   }
   return numbers;
 }
