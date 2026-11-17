@@ -64,6 +64,7 @@ export type SharedSchemaName =
   | "Mention"
   | "Transcript"
   | "TranscriptSummary"
+  | "TranscriptLink"
   | "AgentRecordEntry"
   | "Decision"
   | "DecisionSummary"
@@ -110,6 +111,7 @@ const firstTurn = {
 /** What a Transcript and its summary share. */
 const transcriptFields = {
   id,
+  title: { type: "string", description: "What it is called: the first line of its first `## User` turn, shortened, or its chat id when it has none." },
   chatId: { type: "string", description: "The client's id for the chat, such as Claude Code's `session_id`; one Transcript per Agent and chat." },
   agent: {
     ...object({ id, name: { type: "string" }, owner: named }),
@@ -1039,6 +1041,17 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   TranscriptSummary: {
     description: "A Transcript without its text.",
     ...object(transcriptFields),
+  },
+  TranscriptLink: {
+    description:
+      "A Transcript an item came from (\"From Transcript\"): one whose Agent Sessions changed the item, without its text, with the turn where the item first appears.",
+    ...object({
+      id,
+      title: transcriptFields.title,
+      agent: { ...object({ id, name: { type: "string" } }), description: "The Agent that uploaded it." },
+      turn: firstTurn,
+      updatedAt: timestamp,
+    }),
   },
   Suggestion: {
     description:

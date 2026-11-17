@@ -651,3 +651,46 @@ describe("Where a Transcript's items first appear", () => {
     });
   });
 });
+
+describe("From Transcript links", () => {
+  it("list, on each item, the Transcripts its changes came from with the turn where it first appears", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Go" });
+    const doc = (await agent.post("/api/projects/CRONK/documents", { title: "Notes", body: "Kept." })).body.document.id;
+    const term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
+    expect((await agent.post("/api/projects/CRONK/decisions", { title: "Retry migrations", ticket: "CRONK-1" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    const named = (
+      await upload(hook, "chat-1", `## User\n\nFix CRONK-1\n\n## Assistant\n\nAgent Session ${agent.sessionId}\n\n## Assistant\n\nSaved ${doc}, ${term} and CRONK-D1\n`)
+    ).body.transcript.id;
+    cronk.clock.advance(1000);
+    const unnamed = (await upload(hook, "chat-2", chat("Carry on", agent.sessionId))).body.transcript.id;
+
+    const links = async (path: string) => {
+      const res = await admin.get(path);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body.transcripts.map((t: { id: string; turn: number | null }) => [t.id, t.turn]);
+    };
+    expect(await links("/api/tickets/CRONK-1/transcripts")).toEqual([[unnamed, null], [named, 1]]);
+    expect(await links(`/api/documents/${doc}/transcripts`)).toEqual([[unnamed, null], [named, 3]]);
+    expect(await links(`/api/terms/${term}/transcripts`)).toEqual([[unnamed, null], [named, 3]]);
+    expect(await links("/api/decisions/CRONK-D1/transcripts")).toEqual([[unnamed, null], [named, 3]]);
+    const [link] = (await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts;
+    expect(link).toEqual({ id: unnamed, title: "Carry on", agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) });
+    expect((await admin.get("/api/tickets/CRONK-2/transcripts")).status).toBe(404);
+  });
+
+  it("leave out the Transcripts the caller may not read, and answer only for items they can read", async () => {
+    const { admin, carol, carolId, id } = await transcriptAcrossProjects();
+    expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
+    // Carol reads CRONK-1 but not SECRET, where the same Transcript's Sessions changed things too.
+    const carols = await carol.get("/api/tickets/CRONK-1/transcripts");
+    expect(carols.status).toBe(200);
+    expect(carols.body.transcripts).toEqual([]);
+    expect((await carol.get("/api/tickets/SECRET-1/transcripts")).status).toBe(404);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
+  });
+});
