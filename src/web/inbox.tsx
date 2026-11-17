@@ -6,7 +6,7 @@ import { Menu } from "./components/overlays.js";
 import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Actor, agentActor } from "./components/actor.js";
-import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type User } from "./api.js";
+import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type Ticket, type User } from "./api.js";
 import { ContentEditor, contentText, creditNote, Diff, mainText, mergeCreditNote, Reasoning, settledContent, suggestionMergeable, useDiffView } from "./suggestions.js";
 import { conflictCount, ResolveMerge } from "./merge.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
@@ -701,12 +701,7 @@ function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
   const { ticket, reports } = props.item;
   const [detail] = useLoad(() => api.ticket(ticket.key), [ticket.key]);
   const continued = detail.kind === "loaded" ? detail.value.relations.blocks.filter((t) => CONTINUED.includes(t.status.category)) : [];
-  const accept = useAction(() => props.acting(() => api.accept(ticket.key)), props.onDone);
-  const [reopening, setReopening] = useState(false);
-  const runAccept = () => {
-    if (!accept.busy) void accept.run();
-  };
-  useDetailKeys(props.keys, props.resolved ? {} : { complete: runAccept, sendBack: () => setReopening(true) });
+  const verify = useVerifyActions(props, ticket);
 
   return (
     <div className="inbox-detail-body">
@@ -728,21 +723,48 @@ function UnverifiedDetail(props: DetailProps<UnverifiedItem>) {
       ) : (
         <p className="muted">No Report.</p>
       )}
-      {accept.error && <p className="error" role="alert">{accept.error}</p>}
+      {verify.error && <p className="error" role="alert">{verify.error}</p>}
       <div className="actions">
-        <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
-        <Button variant="secondary" onClick={() => setReopening(true)} disabled={props.resolved}>Reopen…</Button>
+        {verify.buttons}
         <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
       </div>
+      {verify.dialog}
+    </div>
+  );
+}
+
+/**
+ * Accept (primary) and Reopen…, with its dialog, for an Unverified completion, and the keys that run them (Complete and
+ * Send back's), which a detail pane places among its actions. With `ticket` undefined, as for a Ticket that isn't
+ * Unverified, it offers nothing.
+ */
+function useVerifyActions(props: DetailProps<WaitingItem>, ticket: Ticket | undefined) {
+  const key = ticket?.key ?? "";
+  const accept = useAction(() => props.acting(() => api.accept(key)), props.onDone);
+  const [reopening, setReopening] = useState(false);
+  const runAccept = () => {
+    if (!accept.busy) void accept.run();
+  };
+  useDetailKeys(props.keys, props.resolved || !ticket ? {} : { complete: runAccept, sendBack: () => setReopening(true) });
+  if (!ticket) return { error: undefined, buttons: null, dialog: null };
+  return {
+    error: accept.error,
+    buttons: (
+      <>
+        <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+        <Button variant="secondary" onClick={() => setReopening(true)} disabled={props.resolved}>Reopen…</Button>
+      </>
+    ),
+    dialog: (
       <ReopenDialog
         ticket={ticket}
         open={reopening}
         onOpenChange={setReopening}
-        reopen={(input) => props.acting(() => api.reopen(ticket.key, input))}
+        reopen={(input) => props.acting(() => api.reopen(key, input))}
         onDone={props.onDone}
       />
-    </div>
-  );
+    ),
+  };
 }
 
 /** Why nobody would act on an unattended Ticket: its Assignee is deactivated, or can't see its Project. */
@@ -752,9 +774,10 @@ function unattendedBecause(item: UnattendedItem): string {
 }
 
 /**
- * A delegated or In Review Ticket whose Assignee is deactivated or can't see its Project: why it is in Triage, its Status, Delegate
- * and Reports, and Reassign to… (primary), which offers the active Users, and a link to the Ticket. Reassigning it to someone who
- * can see the Project takes it out of Triage; one who can't is refused, saying so.
+ * A delegated or In Review Ticket, or an Unverified completion, whose Assignee is deactivated or can't see its Project: why it is in
+ * Triage, its Status, Delegate and Reports, and Reassign to… (primary), which offers the active Users, and a link to the Ticket.
+ * Reassigning it to someone who can see the Project takes it out of Triage; one who can't is refused, saying so. An Unverified
+ * completion also offers Accept (primary in its place), which takes it out of Triage, and Reopen…, as in its own detail pane.
  */
 function UnattendedDetail(props: DetailProps<UnattendedItem>) {
   const { ticket, reports } = props.item;
@@ -763,14 +786,16 @@ function UnattendedDetail(props: DetailProps<UnattendedItem>) {
   const active = users.kind === "loaded" ? users.value.filter((u) => u.active && u.id !== ticket.assignee?.id) : [];
   // The signed-in User first, as the one most likely to take it.
   const candidates = [...active.filter((u) => u.id === props.me.id), ...active.filter((u) => u.id !== props.me.id)];
-  useDetailKeys(props.keys, {});
+  const unverified = ticket.verification === "unverified";
+  const verify = useVerifyActions(props, unverified ? ticket : undefined);
+  const error = verify.error ?? reassign.error;
 
   return (
     <div className="inbox-detail-body">
       <DetailHead item={props.item} />
       {props.resolved && <ResolvedElsewhere />}
       <Banner tone="warn" role="status">
-        <p>{`${unattendedBecause(props.item)}, so nobody would act on this Ticket. Reassign it to someone who can.`}</p>
+        <p>{`${unattendedBecause(props.item)}, so nobody would act on this Ticket. ${unverified ? "Accept it, or reassign" : "Reassign"} it to someone who can.`}</p>
       </Banner>
       <div className="inbox-detail-who">
         <StatusPill status={ticket.status} />
@@ -783,16 +808,22 @@ function UnattendedDetail(props: DetailProps<UnattendedItem>) {
       ) : (
         <p className="muted">No Report.</p>
       )}
-      {reassign.error && <p className="error" role="alert">{reassign.error}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
       <div className="actions">
+        {verify.buttons}
         <Menu
           label="Reassign to"
-          trigger={<Button disabled={props.resolved || reassign.busy}>Reassign to…</Button>}
+          trigger={
+            <Button variant={unverified ? "secondary" : undefined} disabled={props.resolved || reassign.busy}>
+              Reassign to…
+            </Button>
+          }
           items={candidates.map((u) => ({ label: u.id === props.me.id ? `${u.name} (you)` : u.name, onSelect: () => void reassign.run(u.id) }))}
         />
         <Link to={`/tickets/${ticket.key}`} className={buttonClass("ghost")}>Open Ticket</Link>
         {ticket.delegate && <span className="muted small">{`Its Delegate, ${ticket.delegate.name}, stays only if it goes to ${ticket.delegate.name}'s Owner.`}</span>}
       </div>
+      {verify.dialog}
     </div>
   );
 }
@@ -1036,7 +1067,8 @@ const ticketCount = (n: number) => (n === 1 ? "1 Ticket" : `${n} Tickets`);
 /** Who found a Discovered Ticket and where, as its list item says it: "By claude-laptop · from CRONK-12". */
 function foundBy(item: DiscoveredItem): string {
   const { agent, sourceTicket } = item.ticket.discovered!;
-  const pauses = item.blocks.length === 0 ? "" : ` · pauses ${ticketCount(item.blocks.length)}`;
+  const paused = item.blocks.length + item.hiddenBlocks;
+  const pauses = paused === 0 ? "" : ` · pauses ${ticketCount(paused)}`;
   return `By ${agent.name}${sourceTicket ? ` · from ${sourceTicket.key}` : ""}${pauses}`;
 }
 
@@ -1047,7 +1079,7 @@ function foundBy(item: DiscoveredItem): string {
  * User and moves it to their Inbox, and Cancel.
  */
 function DiscoveredDetail(props: DetailProps<DiscoveredItem>) {
-  const { ticket, blocks } = props.item;
+  const { ticket, blocks, hiddenBlocks } = props.item;
   const { agent, session, sourceTicket } = ticket.discovered!;
   // An Inbox holds only the User's own; Triage, those with no Assignee or one who can't act on them.
   const inTriage = ticket.assignee?.id !== props.me.id;
@@ -1092,22 +1124,27 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem>) {
           )}
         </span>
       </div>
-      {blocks.length > 0 && (
+      {blocks.length + hiddenBlocks > 0 && (
         <Banner tone="warn" role="status">
-          <p>{`Pauses ${ticketCount(blocks.length)} until it is finished:`}</p>
-          <ul className="paused-list" aria-label="Paused Tickets">
-            {blocks.map((b) => (
-              <li key={b.key}>
-                <div className="paused-ticket">
-                  <Link to={`/tickets/${b.key}`} className="link"><span className="mono">{b.key}</span> {b.title}</Link>
-                  <button type="button" className="link-button" aria-label={`Remove the block on ${b.key}`} disabled={busy} onClick={() => void unblock.run(b.key)}>
-                    Remove block
-                  </button>
-                </div>
-                {b.block && <p className="muted small">{b.block.reason}</p>}
-              </li>
-            ))}
-          </ul>
+          <p>{`Pauses ${ticketCount(blocks.length + hiddenBlocks)} until it is finished:`}</p>
+          {blocks.length > 0 && (
+            <ul className="paused-list" aria-label="Paused Tickets">
+              {blocks.map((b) => (
+                <li key={b.key}>
+                  <div className="paused-ticket">
+                    <Link to={`/tickets/${b.key}`} className="link"><span className="mono">{b.key}</span> {b.title}</Link>
+                    {b.canRemove && (
+                      <button type="button" className="link-button" aria-label={`Remove the block on ${b.key}`} disabled={busy} onClick={() => void unblock.run(b.key)}>
+                        Remove block
+                      </button>
+                    )}
+                  </div>
+                  {b.block && <p className="muted small">{b.block.reason}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {hiddenBlocks > 0 && <p className="muted small">{`${blocks.length > 0 ? "And " : ""}${ticketCount(hiddenBlocks)} you can't see.`}</p>}
         </Banner>
       )}
       {ticket.description.trim() ? (

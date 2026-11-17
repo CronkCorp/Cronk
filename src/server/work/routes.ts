@@ -19,7 +19,7 @@ import {
 } from "../schemas.js";
 import { avoidedWordsIn, titleAndDescription } from "../knowledge/avoided-words.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
-import { addRelation, isDiscoveredBlock, listRelations, removeRelation } from "./relations.js";
+import { addRelation, findDiscoveredBlocker, isDiscoveredBlock, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
@@ -68,8 +68,8 @@ import { findAgent } from "../identity/agents.js";
 import { clearClaim, isOwnDiscoveryAwaitingDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { sourceClaimOf } from "../coordination/sources.js";
-import { ticketDetail, ticketDetailSchema, ticketFor, visibleChanges, visibleRelations } from "./ticket-reads.js";
-import { waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
+import { shownRelations, ticketDetail, ticketDetailSchema, ticketFor, visibleChanges } from "./ticket-reads.js";
+import { assigneesWaitingOn, waitingItemsChanged, usersWithItemsOn } from "../inbox/inbox.js";
 import { projectTopic } from "../live/topics.js";
 import { statusesChanged, ticketsChanged } from "./ticket-changes.js";
 import { readyNow, tellReadyAfter, tellNewlyReady, ticketsBlockedBy } from "../coordination/ready.js";
@@ -428,8 +428,8 @@ export function workRoutes(ctx: AppContext) {
         // Moved Tickets, and those they block, which show their Status and may now be unblocked.
         ticketsChanged(ctx.live, [...moved, ...(await findTicketsByIds(ctx.db, mayBecomeReady))]);
         await tellNewlyReady(ctx, mayBecomeReady, readyBefore);
-        // Moved Tickets may have entered or left an In Review Status.
-        waitingItemsChanged(ctx.live, moved.map((t) => t.assignee?.id));
+        // Moved Tickets may have entered or left an In Review Status, and the Discovered Tickets blocking them show their Status.
+        waitingItemsChanged(ctx.live, [...moved.map((t) => t.assignee?.id), ...(await assigneesWaitingOn(ctx.db, moved.map((t) => t.id)))]);
         return reply.code(204).send();
       },
     );
@@ -722,7 +722,7 @@ export function workRoutes(ctx: AppContext) {
           if (!added) {
             throw new HttpError(409, `${other.key} already blocks ${ticket.key}, directly or through other Tickets, so that would make a blocking cycle`);
           }
-          return { ends: [ticket, other], relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
+          return { ends: [ticket, other], relations: await shownRelations(tx, actor, ticket.id) };
         });
         ticketsChanged(ctx.live, ends);
         discoveriesChanged(ends);
@@ -762,7 +762,46 @@ export function workRoutes(ctx: AppContext) {
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
           if (!removed) throw new HttpError(404, "No such relation");
-          return { ends: [ticket, other], readyBefore, relations: await visibleRelations(tx, actor, await listRelations(tx, ticket.id)) };
+          return { ends: [ticket, other], readyBefore, relations: await shownRelations(tx, actor, ticket.id) };
+        });
+        ticketsChanged(ctx.live, ends);
+        discoveriesChanged(ends);
+        await tellNewlyReady(ctx, ends.map((t) => t.id), readyBefore);
+        return { relations };
+      },
+    );
+
+    app.delete<{ Params: { key: string; blockId: string } }>(
+      "/api/tickets/:key/blocked-by/:blockId",
+      {
+        schema: {
+          params: pathParams({
+            key: ticketKeyParam,
+            blockId: { type: "string", format: "uuid", description: "The block's id, as the Ticket's `relations.blockedBy` gives it." },
+          }),
+          response: {
+            200: answer(
+              "The Ticket's remaining relations, without the block an Agent added from its Discovered Ticket. A User with Write on the blocked Ticket may remove it " +
+                "whether or not they can see the Discovered Ticket, so this is how a HiddenBlocker is removed. Any id that isn't such a block on this Ticket answers " +
+                "404 alike. Only Users remove blocks by id; an Agent removes its block by the other Ticket's key.",
+              holding("relations", "Relations"),
+            ),
+            ...errors(400, 401, 403, 404, 410),
+          },
+        },
+      },
+      async (request) => {
+        const actor = await requireActor(ctx, request);
+        requireUserActor(actor, "remove a block by its id");
+        const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
+          const ticket = await ticketFor(tx, actor, request.params.key, "write");
+          const other = await findDiscoveredBlocker(tx, request.params.blockId, ticket.id);
+          if (!other) throw new HttpError(404, "No such block");
+          // Removing the block may make the blocked Ticket Ready; the blocker's Readiness doesn't change.
+          const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
+          // Removed by another request since it was found: answered as any id that isn't a block on this Ticket.
+          if (!(await removeRelation(tx, { ticket, kind: "blocked_by", other, actor, now: ctx.clock.now() }))) throw new HttpError(404, "No such block");
+          return { ends: [ticket, other], readyBefore, relations: await shownRelations(tx, actor, ticket.id) };
         });
         ticketsChanged(ctx.live, ends);
         discoveriesChanged(ends);
@@ -872,9 +911,11 @@ export function workRoutes(ctx: AppContext) {
           const avoidedWords = await avoidedWordsIn(tx, actor, ticket.projectId, titleAndDescription({ title, description }));
           return { before: ticket, ticket: updated, alsoChanged: [...parents, ...below], blockedIds, mayBecomeReady, readyBefore, avoidedWords };
         });
-        // Any change may show in the Inbox of whoever was or is now its Assignee.
+        // Any change may show in the Inbox of whoever was or is now its Assignee, and its title and Status in the items of the
+        // Discovered Tickets blocking it: keep `shown` in step with what `withBlocks` lists of each Ticket blocked.
         if (ticket !== before) {
-          waitingItemsChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id]);
+          const shown = ticket.title !== before.title || ticket.status.id !== before.status.id;
+          waitingItemsChanged(ctx.live, [before.assignee?.id, ticket.assignee?.id, ...(shown ? await assigneesWaitingOn(ctx.db, [ticket.id]) : [])]);
           // The Tickets it blocks show its Status, and may now be unblocked.
           // Its parents list their Sub-Tickets, and Sub-Tickets may have followed its Autonomous Delegation.
           ticketsChanged(ctx.live, [ticket, ...alsoChanged, ...(await findTicketsByIds(ctx.db, blockedIds))]);

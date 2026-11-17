@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type EventStream } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type EventStream } from "./harness.js";
 
 describe("A Project's live updates", () => {
   it("tell its watchers which Ticket changed when one is edited", async () => {
@@ -492,5 +492,109 @@ describe("A Project's Terms' live updates", () => {
     expect(await project.next()).toEqual(CHANGED);
     expect(await workspace.next()).toEqual(CHANGED);
   });
+
+  it("tell their watchers, and the Workspace's, when a Suggestion on one of its Terms is made or rejected, so its count shows", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const term = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold." })).body.term;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const project = await admin.events("/api/projects/CRONK/terms/events");
+    const workspace = await admin.events("/api/workspace/terms/events");
+    expect((await project.next())?.event).toBe("ready");
+    expect((await workspace.next())?.event).toBe("ready");
+
+    const made = await claude.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition: "A temporary hold." }, reasoning: "Say it ends." });
+    expect(made.status).toBe(201);
+    expect(await project.next()).toEqual(CHANGED);
+    expect(await workspace.next()).toEqual(CHANGED);
+
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/reject`, { reason: "It doesn't." })).status).toBe(200);
+    expect(await project.next()).toEqual(CHANGED);
+    expect(await workspace.next()).toEqual(CHANGED);
+  });
+
+  it("tell nothing of a Suggestion on a Document", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Limits", body: "Five." })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const project = await admin.events("/api/projects/CRONK/terms/events");
+    expect((await project.next())?.event).toBe("ready");
+
+    const made = await claude.post("/api/suggestions", { item: { kind: "document", id: document.id }, baseVersion: 1, content: { body: "Six." }, reasoning: "More." });
+    expect(made.status).toBe(201);
+    await expectQuiet(project);
+  });
 });
 
+describe("Terms' live updates after an import", () => {
+  /** An export of the Project CRONK holding a Term "Ticket", made in another installation. */
+  async function projectExport(visibility: "public" | "private" = "public"): Promise<Buffer> {
+    const { admin } = await startInstalledCronk("Elsewhere");
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    if (visibility === "private") await admin.patch("/api/projects/CRONK", { visibility });
+    await admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of Cronk work." });
+    return (await admin.download("/api/projects/CRONK/export")).body;
+  }
+
+  it("tell the Workspace's watchers once a Project import gives it Terms that override a Workspace Term", async () => {
+    const exported = await projectExport();
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.upload("/api/import", exported)).status).toBe(201);
+    expect(await stream.next()).toEqual(CHANGED);
+  });
+
+  it("tell nothing of a Project import to a watcher who can't see the new Project", async () => {
+    const exported = await projectExport("private");
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const stream = await bob.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.upload("/api/import", exported)).status).toBe(201);
+    expect((await bob.get("/api/projects/CRONK")).status).toBe(404);
+    await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." });
+    expect(await stream.next()).toEqual(CHANGED);
+    await expectQuiet(stream);
+  });
+
+  it("tell the Workspace's watchers once a Workspace import gives it Terms", async () => {
+    const before = await startInstalledCronk("Elsewhere");
+    await before.admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
+    const exported = (await before.admin.download("/api/export")).body;
+    const { admin } = await startInstalledCronk();
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.upload("/api/import", exported)).status).toBe(201);
+    expect(await stream.next()).toEqual(CHANGED);
+  });
+
+  it("tell nothing of an import that is refused, even once it has written Terms", async () => {
+    const before = await startInstalledCronk("Elsewhere");
+    await before.admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await before.admin.post("/api/projects/CRONK/terms", { name: "Ticket", definition: "A unit of Cronk work." });
+    await before.admin.post("/api/projects/CRONK/tickets", { title: "Ship it" });
+    const files = await untarGz((await before.admin.download("/api/projects/CRONK/export")).body);
+    // Tickets are imported after Terms, so a Ticket's history Cronk can't take rolls back Terms already written.
+    const broken = { ...files, "projects/CRONK/tickets/CRONK-1.history.md": "---\nchanges:\n  - { at: 2026-01-01T09:00:00Z, by: ada@example.com, change: renamed }\n---\n" };
+    const { admin } = await startInstalledCronk();
+    const stream = await admin.events("/api/workspace/terms/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    const refused = await admin.upload("/api/import", await tarGz(broken));
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/CRONK-1\.history\.md/);
+    await expectQuiet(stream);
+  });
+});

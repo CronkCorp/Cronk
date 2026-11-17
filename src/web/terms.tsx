@@ -170,8 +170,9 @@ function TermRow(props: { term: Term }) {
         {t.protected && <ProtectedMark />}
         <OverridePill term={t} />
         <span className="muted small">{placeName(t.projectKey)}</span>
+        {t.suggestions > 0 && <Chip tone="agent">{`${t.suggestions} ${t.suggestions === 1 ? "Suggestion" : "Suggestions"}`}</Chip>}
         <span className="grow" />
-        <span className="muted small">Version {t.version}</span>
+        <span className="muted small">used in {t.mentions} · Version {t.version}</span>
       </div>
       <div className="markdown term-definition">
         <CronkMarkdown>{t.definition}</CronkMarkdown>

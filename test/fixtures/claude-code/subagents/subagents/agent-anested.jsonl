@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"How are tests run?"},"isSidechain":true,"agentId":"anested"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The README says:\n\n```sh\nnpm test\n```"}]},"isSidechain":true,"agentId":"anested"}
