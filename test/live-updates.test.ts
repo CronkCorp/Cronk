@@ -177,6 +177,22 @@ describe("A Project's live updates", () => {
     expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
   });
 
+  it("tell which Ticket changed when its Claim lapses because the silence threshold was lowered in the middle of a look", async () => {
+    const { cronk, admin, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000 });
+    await (await session()).post("/api/tickets/CRONK-1/claim");
+    const stream = await admin.events("/api/projects/CRONK/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    cronk.clock.advance(120_000);
+    await cronk.lookForLapses();
+    // The look has found no Claim lapsed, at the old threshold, and has yet to list the live ones when it is lowered.
+    const look = await cronk.holdLookBetweenReads();
+    expect((await admin.patch("/api/workspace", { silenceThresholdSeconds: 60 })).status).toBe(200);
+    await look.release();
+    await cronk.lookForLapses();
+    expect(await stream.next()).toEqual({ event: "changed", data: { ticket: "CRONK-1" } });
+  });
+
   it("tell their watchers when the Project's Statuses change, and which Tickets a removed Status moved", async () => {
     const { admin } = await delegatedSetup(1);
     const stream = await admin.events("/api/projects/CRONK/events");

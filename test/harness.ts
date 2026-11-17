@@ -319,6 +319,12 @@ export interface Cronk {
    */
   lookForLapses(): Promise<void>;
   /**
+   * Starts a look for lapsed Claims, as `lookForLapses` does, and holds it between its reads: after its first query on the
+   * Tickets, before its next, until released. So a test can commit a change in the middle of a look. Start Cronk with a long
+   * `lapseCheckMs`, so the look held is the one this starts, and send no other request on the Tickets while it is held.
+   */
+  holdLookBetweenReads(): Promise<HeldLook>;
+  /**
    * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
    * before it shipped, so the next `restart` applies it again over the data already there.
    */
@@ -333,6 +339,12 @@ export interface Cronk {
 export interface HeldPushes {
   /** Pushes the held updates, in the order they were made, and stops holding. */
   release(): void;
+}
+
+/** A look for lapsed Claims held between its reads by `Cronk.holdLookBetweenReads`, until released. */
+export interface HeldLook {
+  /** Lets the look go on, and waits until it is done (failing if it fails). */
+  release(): Promise<void>;
 }
 
 /** A row held by `Cronk.holdRow`, or a table held by `Cronk.holdTable`, until released. */
@@ -466,6 +478,24 @@ export async function startCronk(
       await live.heartbeat();
     },
     lookForLapses: () => lookForLapses(),
+    holdLookBetweenReads: async () => {
+      const held = holdQuery(/\btickets\b/, 2);
+      onTestFinished(held.release);
+      const look = lookForLapses();
+      look.catch(() => {});
+      const ended = await Promise.race([held.reached.then(() => false), look.then(() => true, () => true)]);
+      if (ended) {
+        held.release();
+        await look;
+        throw new Error("The look ended without reading the Tickets twice");
+      }
+      return {
+        release: async () => {
+          held.release();
+          await look;
+        },
+      };
+    },
     undoMigration: async (id, undo) => {
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
@@ -684,6 +714,38 @@ export async function projectWithTickets(client: Client, key: string, count: num
 }
 
 /**
+ * Holds back the `nth` query the server sends from now on that `matching` matches, until released; queries before it go
+ * through, and so does every query once it is held. `reached` resolves once it is held. The server and this harness share the
+ * pg module, and the Pool sends every query through a Client.
+ */
+function holdQuery(matching: RegExp, nth: number): { reached: Promise<void>; release: () => void } {
+  const query = pg.Client.prototype.query;
+  let reach!: () => void;
+  const reached = new Promise<void>((resolve) => (reach = resolve));
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let seen = 0;
+  const holding = function (this: pg.Client, ...args: unknown[]) {
+    const config = args[0] as string | { text?: string };
+    const send = () => (query as (...a: unknown[]) => unknown).apply(this, args);
+    if (!matching.test(typeof config === "string" ? config : (config?.text ?? "")) || ++seen < nth) return send();
+    pg.Client.prototype.query = query;
+    reach();
+    // The Pool passes a callback and takes no result; a Client used directly takes a promise.
+    if (typeof args.at(-1) === "function") return void released.then(send);
+    return released.then(send);
+  } as typeof query;
+  pg.Client.prototype.query = holding;
+  return {
+    reached,
+    release: () => {
+      if (pg.Client.prototype.query === holding) pg.Client.prototype.query = query;
+      release();
+    },
+  };
+}
+
+/**
  * How many queries the server sends that `matching` matches while `during` runs. The server and this harness share the pg module,
  * and the Pool sends every query through a Client.
  */
@@ -707,8 +769,8 @@ async function countQueries(matching: RegExp, during: () => Promise<unknown>): P
  * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
  * delegated to her Agent claude-laptop. `session()` starts a new Agent Session of that Agent.
  */
-export async function delegatedSetup(tickets = 1) {
-  const { cronk, admin } = await startInstalledCronk();
+export async function delegatedSetup(tickets = 1, opts: Parameters<typeof startCronk>[0] = {}) {
+  const { cronk, admin } = await startInstalledCronk("Acme", opts);
   await projectWithTickets(admin, "CRONK", tickets);
   const claude = await registerAgent(admin, "claude-laptop");
   const adaId = (await admin.get("/api/users")).body.users[0].id;
