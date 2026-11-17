@@ -23,11 +23,12 @@ const MAX_RESTARTS = 3;
  */
 export default async function globalSetup() {
   await assertPortFree(E2E_PORT);
-  const postgres = await startPostgres();
   await mkdir("test-results", { recursive: true });
   const log = createWriteStream(SERVER_LOG);
   // The log is evidence, not a reason to fail the run: losing it only goes to the console.
   log.on("error", (err) => console.error(`Could not write ${SERVER_LOG}: ${err.message}`));
+  // Started last, so that nothing before the health check can fail and leave its database behind in a shared Postgres.
+  const postgres = await startPostgres();
   const start = (): Server => {
     const running = spawn(process.execPath, ["--import", "tsx", "src/server/main.ts"], {
       env: {
@@ -77,9 +78,12 @@ export default async function globalSetup() {
 
   return async () => {
     stopping = true;
-    await stop(server);
-    log.end();
-    await postgres.stop();
+    try {
+      await stop(server);
+      log.end();
+    } finally {
+      await postgres.stop();
+    }
   };
 }
 
