@@ -1,4 +1,4 @@
-import type { FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { userActor, type Actor, type AgentActor } from "./actor.js";
 import type { Clock } from "./clock.js";
 import { findLiveAgentSession, touchAgentSession } from "./coordination/agent-sessions.js";
@@ -29,6 +29,8 @@ export interface AppContext {
   clock: Clock;
   cookieSecure: boolean;
   live: LiveUpdates;
+  /** The server's logger, for failures no request answers for, such as work after a commit. */
+  log: FastifyBaseLogger;
   /** Where the files of Attachments and Artifacts are stored. */
   files: FileStore;
   /** The most bytes one import of an export may write, to local disk and the file store together (see `AppConfig`). */

@@ -116,7 +116,7 @@ export function suggestionRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const suggestion = await transaction(ctx.db, (tx) => createSuggestion(tx, actor, request.body, ctx.clock.now()));
-        await changed(suggestion, actingUser(actor).workspaceId);
+        changed(suggestion, actingUser(actor).workspaceId);
         return reply.code(201).send({ suggestion });
       },
     );
@@ -204,7 +204,7 @@ export function suggestionRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         const suggestion = await transaction(ctx, (tx) => acceptSuggestion(tx, user, request.params.id, request.body ?? {}, ctx.clock.now()));
-        await changed(suggestion, user.workspaceId);
+        changed(suggestion, user.workspaceId);
         return { suggestion };
       },
     );
@@ -237,7 +237,7 @@ export function suggestionRoutes(ctx: AppContext) {
             if (seq !== undefined) ctx.live.publish(agentTopic(suggestion.proposedBy.id), waitingEvent(seq, suggestionRejectionOf(suggestion)));
           },
         );
-        await changed(suggestion, user.workspaceId);
+        changed(suggestion, user.workspaceId);
         return { suggestion };
       },
     );

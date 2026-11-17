@@ -33,6 +33,13 @@ export interface Publisher {
   publish(topic: string, event: LiveEvent): void;
 }
 
+/** A database whose transactions can publish live updates once committed, logging work after a commit that fails. */
+export interface LiveDatabase {
+  db: Database;
+  live: Publisher;
+  log: { error(obj: object, msg: string): void };
+}
+
 /** A transaction that can tell watchers of its changes, once they are committed. */
 export interface PublishingTransaction extends Transaction {
   /** Publishes `event` on `topic` once the transaction has committed, never before (ADR 0012), and never if it rolls back. */
@@ -42,12 +49,12 @@ export interface PublishingTransaction extends Transaction {
 /**
  * Runs `fn` in a transaction, committing on success and rolling back on error, then the work `fn`
  * registered with `afterCommit`. A connection Postgres drops meanwhile fails the transaction and is
- * discarded instead of going back to the pool. Given a `live` to publish on, `fn` can also `publish`.
+ * discarded instead of going back to the pool. Given a `LiveDatabase`, `fn` can also `publish`.
  */
 export function transaction<T>(db: Database, fn: (tx: Transaction) => Promise<T>): Promise<T>;
-export function transaction<T>(on: { db: Database; live: Publisher }, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T>;
-export async function transaction<T>(on: Database | { db: Database; live: Publisher }, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T> {
-  const { db, live } = on instanceof pg.Pool ? { db: on, live: undefined } : on;
+export function transaction<T>(on: LiveDatabase, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T>;
+export async function transaction<T>(on: Database | LiveDatabase, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T> {
+  const { db, live, log } = on instanceof pg.Pool ? { db: on, live: undefined, log: undefined } : on;
   const client = await db.connect();
   // The pool listens for a lost connection only while it is idle; the query running when it is lost fails instead.
   let lost: Error | undefined;
@@ -64,10 +71,12 @@ export async function transaction<T>(on: Database | { db: Database; live: Publis
     },
   });
   let result: T;
+  let committed = false;
   try {
     await client.query("BEGIN");
     result = await fn(tx);
-    await client.query("COMMIT");
+    // Postgres answers COMMIT of a transaction an error aborted with ROLLBACK, failing nothing; the held work must not run then.
+    committed = (await client.query("COMMIT")).command === "COMMIT";
   } catch (err) {
     await client.query("ROLLBACK").catch((rollbackErr: Error) => (lost ??= rollbackErr));
     throw err;
@@ -78,11 +87,13 @@ export async function transaction<T>(on: Database | { db: Database; live: Publis
     client.removeListener("error", onError);
     client.release(lost);
   }
+  if (!committed) return result;
   for (const work of pending) {
     try {
       work();
     } catch (err) {
-      console.error("Work after a commit failed", err);
+      if (log) log.error({ err }, "Work after a commit failed");
+      else console.error("Work after a commit failed", err);
     }
   }
   return result;

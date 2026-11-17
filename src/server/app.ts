@@ -94,6 +94,7 @@ export async function buildApp(opts: {
     clock: opts.clock,
     cookieSecure: opts.config.cookieSecure,
     live: opts.live ?? new LiveUpdates(),
+    log: app.log,
     files: createFileStore(opts.config.storage),
     importMaxBytes: opts.config.importMaxBytes ?? DEFAULT_IMPORT_MAX_BYTES,
     publicUrl: opts.config.publicUrl,

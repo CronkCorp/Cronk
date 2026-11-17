@@ -4,7 +4,7 @@ import { agentTopic } from "../live/topics.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor, RecordedActor } from "../actor.js";
 import { actingUser } from "../actor.js";
-import { lockUntilCommit, transaction, type Database, type PublishingTransaction, type Queryable } from "../db/database.js";
+import { lockUntilCommit, transaction, type LiveDatabase, type PublishingTransaction, type Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
 import { listAgents, type Agent } from "../identity/agents.js";
 import type { User } from "../identity/users.js";
@@ -200,7 +200,7 @@ export type Positioned = (agentId: string, seq: string) => void;
  * or `committed` throws, they are forgotten, so they never hold a stream's `ready` back for good.
  */
 export async function withWaitingWork<T>(
-  ctx: { db: Database; live: LiveUpdates },
+  ctx: LiveDatabase & { live: LiveUpdates },
   fn: (tx: PublishingTransaction, positioned: Positioned) => Promise<T>,
   committed: (result: T) => void,
 ): Promise<T> {
