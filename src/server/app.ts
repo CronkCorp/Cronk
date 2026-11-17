@@ -63,6 +63,11 @@ export interface AppConfig {
    * Without it, they are served from Cronk's own hostname in a stricter sandbox.
    */
   artifactsUrl?: string | undefined;
+  /**
+   * Check that each transaction takes the Workspace's blocking lock before locking any Ticket, failing the request if not,
+   * so a path with the lock order wrong fails in tests. Costs a query or two per block, so it's off in production.
+   */
+  checkLockOrder: boolean;
 }
 
 /**
@@ -112,6 +117,7 @@ export async function buildApp(opts: {
     importMaxBytes: opts.config.importMaxBytes ?? DEFAULT_IMPORT_MAX_BYTES,
     publicUrl: opts.config.publicUrl,
     artifactsUrl: opts.config.artifactsUrl,
+    checkLockOrder: opts.config.checkLockOrder,
   };
 
   let closing = false;
