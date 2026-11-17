@@ -18,12 +18,12 @@ import type { ImportContext } from "./import-context.js";
  * `transcripts/<n>.md`: the Workspace's Transcripts, numbered from 1 in the order they were first uploaded, in a Workspace
  * export only. The frontmatter names the Agent and its Agent Sessions by their ids in `people.md`, with the client's chat id;
  * the body is the latest text. `<n>.earlier/<k>.md` hold, as they are, the texts a later upload didn't continue, oldest first.
- * The Tickets (by key), Documents (by path), Terms (by name, after their Project's key) and Decisions (by key) the Sessions changed are listed
+ * The Tickets (by key), Documents (by path), Terms (by name, after their Project's key), Decisions (by key) and Artifacts (by path) the Sessions changed are listed
  * for whoever reads the files; an import links them again through the Sessions. The texts are as stored: scrubbed and with the
  * Owner's hand redactions applied. `redactions` lists those, without the passages, so the import keeps redacting re-uploads.
  */
 
-/** Writes every Transcript of the Workspace. Run after the Documents, so it can name them by path, and before `people.md`. */
+/** Writes every Transcript of the Workspace. Run after the Documents and Artifacts, so it can name them by path, and before `people.md`. */
 export async function exportTranscripts(ctx: ExportContext): Promise<void> {
   const transcripts = await listTranscripts(ctx.db, ctx.scope.workspaceId, "oldest");
   for (const [i, t] of transcripts.entries()) {
@@ -43,6 +43,7 @@ export async function exportTranscripts(ctx: ExportContext): Promise<void> {
         documents: items.documents.flatMap((d) => ctx.documentPaths.get(d.id) ?? []),
         terms: items.terms.map((t) => (t.project_key === null ? t.name : `${t.project_key}: ${t.name}`)),
         decisions: items.decisions.map((d) => d.key),
+        artifacts: items.artifacts.flatMap((a) => ctx.artifactPaths.get(a.id) ?? []),
         ...(redactions.length > 0 && { redactions }),
       },
       t.markdown,

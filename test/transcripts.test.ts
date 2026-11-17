@@ -552,6 +552,7 @@ describe("Exporting and importing Transcripts", () => {
       documents: ["documents/1-handbook.md"],
       terms: [],
       decisions: [],
+      artifacts: [],
     });
     expect(file.body).toBe(rewritten);
     expect(files["transcripts/1.earlier/1.md"]).toBe(chat("Do it all", sessionId));
@@ -575,6 +576,34 @@ describe("Exporting and importing Transcripts", () => {
       agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
       documents: [{ id: handbook.id, title: "Handbook", turn: null }],
     });
+  });
+
+  it("names the Artifacts its Sessions published or commented on by path, and the import links them again", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    const site = await tarGz({ "index.html": "<h1>Chart</h1>" });
+    const chart = (await agent.upload("/api/workspace/artifacts?title=Chart", site)).body.artifact;
+    cronk.clock.advance(60_000);
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", site)).body.artifact;
+    expect((await agent.post(`/api/artifacts/${limits.id}/comments`, { body: "Legend overlaps." })).status).toBe(201);
+    expect((await upload(cronk.client(claude.secret), "chat-1", chat(`Chart it, see ${limits.id}`, agent.sessionId))).status).toBe(200);
+    const original = (await admin.get("/api/transcripts")).body.transcripts[0];
+    expect((await admin.get(`/api/transcripts/${original.id}`)).body.transcript.artifacts).toEqual([
+      { id: chart.id, title: "Chart", turn: null },
+      { id: limits.id, title: "Limits", turn: 1 },
+    ]);
+
+    const archive = await admin.download("/api/export");
+    const files = await untarGz(archive.body);
+    expect(exported(files["transcripts/1.md"]).data.artifacts).toEqual(["artifacts/1-chart.md", "projects/CRONK/artifacts/1-limits.md"]);
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", archive.body)).status).toBe(201);
+    const listed = (await elsewhere.admin.get("/api/transcripts")).body.transcripts;
+    expect((await elsewhere.admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript.artifacts).toEqual([
+      { id: chart.id, title: "Chart", turn: null },
+      { id: limits.id, title: "Limits", turn: 1 },
+    ]);
   });
 
   it("writes the texts as redacted, with what finds the passages again, so the import keeps redacting them", async () => {
