@@ -89,6 +89,25 @@ describe("Uploading a Transcript", () => {
     expect(read).toMatchObject({ tickets: [], documents: [], artifacts: [{ id: published.body.artifact.id, title: "Limits" }] });
   });
 
+  it("links the Artifact its Session only commented on, or attached a file to a Comment on, which alone is enough to keep it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const limits = (await admin.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact;
+    const agent = await session();
+    const commented = await agent.post(`/api/artifacts/${limits.id}/comments`, { body: "The legend overlaps the bars." });
+    expect(commented.status, JSON.stringify(commented.body)).toBe(201);
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Review the limits", agent.sessionId));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.artifacts).toEqual([{ id: limits.id, title: "Limits", turn: null }]);
+
+    const attacher = await session();
+    const attached = await attacher.upload(`/api/comments/${commented.body.comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain");
+    expect(attached.status, JSON.stringify(attached.body)).toBe(201);
+    const fromAttaching = await upload(cronk.client(claude.secret), "chat-2", chat("Attach the screenshot", attacher.sessionId));
+    expect(fromAttaching.status, JSON.stringify(fromAttaching.body)).toBe(200);
+    expect((await admin.get(`/api/transcripts/${fromAttaching.body.transcript.id}`)).body.transcript.artifacts).toEqual([{ id: limits.id, title: "Limits", turn: null }]);
+  });
+
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
     const idle = await session();

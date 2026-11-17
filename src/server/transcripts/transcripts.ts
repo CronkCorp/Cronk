@@ -147,9 +147,9 @@ function hasWord(text: string, word: string): boolean {
 const RECORDS = `
   SELECT actor_session_id, ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id, NULL::uuid AS artifact_id FROM ticket_changes
   UNION ALL SELECT actor_session_id, ticket_id, NULL, NULL, NULL, NULL FROM activities
-  UNION ALL SELECT actor_session_id, ticket_id, document_id, NULL, NULL, NULL FROM comments
+  UNION ALL SELECT actor_session_id, ticket_id, document_id, NULL, NULL, artifact_id FROM comments
   UNION ALL SELECT actor_session_id, NULL, document_id, NULL, NULL, NULL FROM document_versions
-  UNION ALL SELECT x.actor_session_id, coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL, NULL FROM attachments x
+  UNION ALL SELECT x.actor_session_id, coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL, c.artifact_id FROM attachments x
     LEFT JOIN comments c ON c.id = x.comment_id
   UNION ALL SELECT actor_session_id, NULL, NULL, term_id, NULL, NULL FROM term_versions
   UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id, NULL FROM decision_versions
