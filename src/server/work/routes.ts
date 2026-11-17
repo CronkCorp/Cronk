@@ -19,7 +19,7 @@ import {
 } from "../schemas.js";
 import { avoidedWordsIn, titleAndDescription } from "../knowledge/avoided-words.js";
 import { actingUser, userActor, type Actor, type AgentActor } from "../actor.js";
-import { addRelation, findDiscoveredBlocker, isDiscoveredBlock, removeRelation } from "./relations.js";
+import { addRelation, findDiscoveredBlocker, isBlocking, isDiscoveredBlock, lockBlocking, removeRelation } from "./relations.js";
 import { FINISHED_CATEGORIES, PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, WORKABLE_CATEGORIES, type Priority, type RelationKind, type StatusCategory } from "../../shared/values.js";
 import type { Queryable } from "../db/database.js";
 import { projectFor, requireAdmin, requireProjectAccess, requireWorkspaceAccess, visibleProjects, type Access, type AgentAccess } from "../identity/access.js";
@@ -579,7 +579,7 @@ export function workRoutes(ctx: AppContext) {
           let ticket: Ticket;
           const blocked: Ticket[] = [];
           if (actor.kind === "agent") {
-            // The blocked Tickets first, locked with the source in id order before adding the blocks takes the Workspace's blocking lock.
+            // The blocked Tickets first, locked with the source in id order after the Workspace's blocking lock.
             const blocks: { other: Ticket; reason: string }[] = [];
             for (const { ticketKey, reason } of request.body.blocks ?? []) blocks.push({ other: await otherTicketFor(tx, actor, ticketKey), reason });
             const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now, { blockedIds: blocks.map((b) => b.other.id) });
@@ -713,6 +713,8 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { kind, reason } = request.body;
         const { ends, relations } = await transaction(ctx.db, async (tx) => {
+          // Before relationEnds locks an Agent's Ticket, as the block's row then waits on both Tickets (see lockBlocking).
+          if (isBlocking(kind)) await lockBlocking(tx, actingUser(actor).workspaceId);
           const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now());
           if (discoveredBlock && reason === undefined) throw new HttpError(400, `Say why ${ticket.key} blocks ${other.key} with a reason`);
           if (!discoveredBlock && reason !== undefined) {

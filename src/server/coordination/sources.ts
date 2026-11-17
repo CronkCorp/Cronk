@@ -3,6 +3,7 @@ import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { shareProject } from "../work/projects.js";
+import { lockBlocking } from "../work/relations.js";
 import { lockTicketsByIds } from "../work/tickets.js";
 import { listSessionClaims, requireClaimHolder, type SessionClaim } from "./claims.js";
 
@@ -47,16 +48,17 @@ export function sourceClaimOf(
  * (see `Discovery.sourceTicket`), so unlike `sourceClaimOf` any held Claim fits. None for a User, who may not name one.
  * Run inside the caller's transaction, once it has locked the Project the Ticket is filed in: it locks the Claim's
  * Ticket as `sourceClaimOf` does. With it, in id order, it takes the key-share lock of the Tickets with ids `blockedIds`,
- * which the Discovered Ticket blocks, as adding those blocks takes it after the Workspace's blocking lock: so two filings
- * each blocking the other's source queue rather than deadlock, and a block onto the same Ticket added meanwhile isn't held up.
+ * which the Discovered Ticket blocks, as adding those blocks would take it later, without keeping out a block onto the same
+ * Ticket added meanwhile. With `blockedIds`, it takes the Workspace's blocking lock before locking any Ticket (see `lockBlocking`).
  */
-export function discoverySourceClaimOf(
+export async function discoverySourceClaimOf(
   db: Queryable,
   actor: Actor,
   key: string | undefined,
   now: Date,
   { blockedIds }: { blockedIds: string[] },
 ): Promise<SourceClaim | null> {
+  if (actor.kind === "agent" && blockedIds.length > 0) await lockBlocking(db, actor.owner.workspaceId);
   return heldSourceClaim(db, actor, key, now, "a Discovered Ticket", { projectId: null, keyShare: blockedIds });
 }
 

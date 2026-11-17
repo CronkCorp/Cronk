@@ -118,6 +118,50 @@ describe("Blocks from a Discovered Ticket", () => {
   });
 });
 
+describe("Blocks added at once by holders of the Tickets' Claims", () => {
+  it("queue rather than deadlock when two Agents block each other's Ticket: one is added, the other would close a cycle", async () => {
+    const { cronk, admin, adaId, session } = await delegatedSetup(4);
+    const codex = await registerAgent(admin, "codex");
+    await admin.patch("/api/tickets/CRONK-2", { assigneeId: adaId, delegateId: codex.agentId });
+    const onFirst = await session();
+    const onSecond = await startSession(cronk, codex.secret);
+    expect((await onFirst.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+    expect((await onSecond.post("/api/tickets/CRONK-2/claim")).status).toBe(200);
+
+    // A User's block holds the Workspace's blocking lock while it waits on CRONK-3, so both Agents' blocks queue behind it.
+    const held = await cronk.holdRow("tickets", (await admin.get("/api/tickets/CRONK-3")).body.ticket.id);
+    const byUser = admin.post("/api/tickets/CRONK-4/relations", { kind: "blocks", ticketKey: "CRONK-3" });
+    await held.waiters(1);
+    const first = onFirst.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    await held.waiters(2);
+    const second = onSecond.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+    await held.waiters(3);
+    await held.release();
+
+    expect((await byUser).status).toBe(201);
+    expect([(await first).status, (await second).status].sort()).toEqual([201, 409]);
+  });
+
+  it("queue rather than deadlock when an Agent files a Discovered Ticket with blocks while a User blocks its source", async () => {
+    const { cronk, admin, session } = await delegatedSetup(3);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const backlog = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "backlog").id;
+
+    // The filing waits to file its Ticket in Backlog, then the User's block waits on the filing's source.
+    const held = await cronk.holdRow("statuses", backlog);
+    const filing = agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "CRONK-1", blocks: [{ ticketKey: "CRONK-3", reason }] });
+    await held.waiters(1);
+    const blocking = admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+    await held.waiters(2);
+    await held.release();
+
+    expect([(await filing).status, (await blocking).status]).toEqual([201, 201]);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-2" }]);
+    expect((await admin.get("/api/tickets/CRONK-3")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+  });
+});
+
 describe("Removing a block from a Discovered Ticket", () => {
   it("is open to a User who may change the blocked Ticket, even reading the Discovered Ticket only, and makes that Ticket Ready again", async () => {
     const { cronk, admin, session } = await delegatedSetup();

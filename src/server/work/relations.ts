@@ -90,11 +90,25 @@ async function wouldCycle(db: Queryable, blocker: string, blocked: string): Prom
   return rows.length > 0;
 }
 
+/** Whether a Relation of this kind is a block, one way or the other. */
+export const isBlocking = (kind: RelationKind): boolean => kind !== "relates_to";
+
+/**
+ * Takes the Workspace's blocking lock until the transaction commits: one blocking change per Workspace at a time, so two
+ * added at once can't close a cycle between them. A transaction adding a block takes it before locking any Ticket, since
+ * the block's row then takes both Tickets' key-share lock: one holding a Ticket while it waits for this lock would deadlock
+ * with one holding this lock while it waits for that Ticket. Taking it again in the same transaction is a no-op.
+ */
+export async function lockBlocking(db: Queryable, workspaceId: string): Promise<void> {
+  await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
+}
+
 /**
  * Relates `ticket` to `other`, recording it in both Tickets' history unless they
  * were already related that way. Returns false, changing nothing, for a blocking
  * relation that would close a cycle. The Tickets must differ and share
- * `workspaceId`. `block` records the Agent and reason of a block from its Discovered Ticket. Run inside a transaction.
+ * `workspaceId`. `block` records the Agent and reason of a block from its Discovered Ticket. Run inside a transaction
+ * that took `lockBlocking` before locking any Ticket, for a blocking relation.
  */
 export async function addRelation(
   db: Queryable,
@@ -103,8 +117,7 @@ export async function addRelation(
 ): Promise<boolean> {
   const row: StoredRelation = { ...storedRow(input.ticket, input.kind, input.other), block: input.block ?? null };
   if (row.kind === "blocks") {
-    // One blocking change per Workspace at a time, so two added at once can't close a cycle between them.
-    await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
+    await lockBlocking(db, workspaceId);
     if (await wouldCycle(db, row.from, row.to)) return false;
   }
   if (await storeRelation(db, row)) await recordBothSides(db, "relation added", input);
