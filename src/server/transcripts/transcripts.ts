@@ -152,8 +152,24 @@ interface RecordsBranch {
   on: Record<LinkedKind, string | null>;
 }
 
-/** SQL for the `column` of the Comment that the Attachment aliased `x` is on, if any. */
-const attachmentCommentColumn = (column: string) => `(SELECT c.${column} FROM comments c WHERE c.id = x.comment_id)`;
+/**
+ * The Attachments branch of RECORDS, reading `attachments` aliased `x`, the one place that alias is named. An Attachment on a
+ * Comment is on what the Comment is on, looked up by the Comment's id.
+ */
+const attachmentsBranch = (x: string): RecordsBranch => {
+  /** SQL for the `column` of the Comment the Attachment is on, if any. */
+  const commentColumn = (column: string) => `(SELECT c.${column} FROM comments c WHERE c.id = ${x}.comment_id)`;
+  return {
+    from: `attachments ${x}`,
+    on: {
+      ticket: `coalesce(${x}.ticket_id, ${commentColumn("ticket_id")})`,
+      document: `coalesce(${x}.document_id, ${commentColumn("document_id")})`,
+      term: null,
+      decision: null,
+      artifact: commentColumn("artifact_id"),
+    },
+  };
+};
 
 /** The branches of RECORDS, one per table it reads. */
 const RECORDS_BRANCHES: RecordsBranch[] = [
@@ -161,16 +177,7 @@ const RECORDS_BRANCHES: RecordsBranch[] = [
   { from: "activities", on: { ticket: "ticket_id", document: null, term: null, decision: null, artifact: null } },
   { from: "comments", on: { ticket: "ticket_id", document: "document_id", term: null, decision: null, artifact: "artifact_id" } },
   { from: "document_versions", on: { ticket: null, document: "document_id", term: null, decision: null, artifact: null } },
-  {
-    from: "attachments x",
-    on: {
-      ticket: `coalesce(x.ticket_id, ${attachmentCommentColumn("ticket_id")})`,
-      document: `coalesce(x.document_id, ${attachmentCommentColumn("document_id")})`,
-      term: null,
-      decision: null,
-      artifact: attachmentCommentColumn("artifact_id"),
-    },
-  },
+  attachmentsBranch("x"),
   { from: "term_versions", on: { ticket: null, document: null, term: "term_id", decision: null, artifact: null } },
   { from: "decision_versions", on: { ticket: null, document: null, term: null, decision: "decision_id", artifact: null } },
   { from: "artifact_versions", on: { ticket: null, document: null, term: null, decision: null, artifact: "artifact_id" } },
