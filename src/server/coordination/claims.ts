@@ -262,7 +262,7 @@ export async function claimNextReady(db: Queryable, scope: ReadyScope, sessionId
 }
 
 /**
- * Whether the Agent filed `ticket` as a Discovered Ticket that no User has delegated or finished yet, nor finished: the Agent
+ * Whether the Agent filed `ticket` as a Discovered Ticket that no User has delegated or finished yet: the Agent
  * may then change it without a Claim, from any of its Agent Sessions, though not work on it. Once delegated, it stays
  * the Delegate's to work on under a Claim, even if the Delegation is later taken away.
  */
