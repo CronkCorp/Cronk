@@ -5,7 +5,7 @@ import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
 import { scrubSecrets } from "./scrub.js";
-import { firstTurnNaming, titleOf, turnsOf } from "./turns.js";
+import { firstTurnNaming, titleOf, turnsOf } from "../../shared/transcript-turns.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -17,7 +17,7 @@ import { firstTurnNaming, titleOf, turnsOf } from "./turns.js";
 /** A Transcript as the API returns it to someone who may read it. */
 export interface Transcript {
   id: string;
-  /** What it is called: the first line of its first User turn, or its chat id (see turns.ts). */
+  /** What it is called: the first line of its first User turn, or its chat id (see shared/transcript-turns.ts). */
   title: string;
   chatId: string;
   agent: { id: string; name: string; owner: { id: string; name: string } };
@@ -29,7 +29,7 @@ export interface Transcript {
   sessions: { id: string }[];
   /**
    * The Tickets its Sessions changed, Activities and Comments included, that the reader can read. Each item here and below has
-   * the turn of the latest text where its key or id first appears (see turns.ts), or null when none names it.
+   * the turn of the latest text where its key or id first appears (see shared/transcript-turns.ts), or null when none names it.
    */
   tickets: { key: string; title: string; turn: number | null }[];
   /** The Documents and Reports its Sessions saved or commented on, that the reader can read. */

@@ -1,3 +1,4 @@
+import { TranscriptPage } from "./transcripts.js";
 import { Button, buttonClass } from "./components/button.js";
 import { useEffect, useState } from "react";
 import { AgentAccessSelect, AgentsPage } from "./agents.js";
@@ -198,6 +199,8 @@ function Page(props: { me: User; workspace: Workspace | undefined; onWorkspaceCh
       return <TermsPage projectKey={search.get("project") ?? undefined} />;
     case "term":
       return <TermPage id={route.id} edit={search.get("edit") === "1"} />;
+    case "transcript":
+      return <TranscriptPage id={route.id} />;
     case "project":
       // Keyed by Project, so state kept while on the page, such as opened board columns, starts afresh in another.
       return <ProjectPage key={route.key} projectKey={route.key} {...projectViewOf(search.get("view"))} filter={filterFrom(search)} me={props.me} />;

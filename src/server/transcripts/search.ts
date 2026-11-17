@@ -2,7 +2,7 @@ import type { Actor } from "../actor.js";
 import { actingUser } from "../actor.js";
 import type { Queryable } from "../db/database.js";
 import { findable, findTranscript } from "./transcripts.js";
-import { titleOf, turnsOf } from "./turns.js";
+import { titleOf, turnsOf } from "../../shared/transcript-turns.js";
 
 /**
  * Full-text search over the turns of Transcripts' latest texts (kept in transcript_turns, see migration 0042), with the same
@@ -16,7 +16,7 @@ export interface TranscriptHit {
   title: string;
   /** The turn that matches best; the earliest of those that match equally well. */
   turn: number;
-  /** The text around the match in that turn, as written (Markdown). */
+  /** The text around the match in that turn, as written (Markdown), without the turn's heading. */
   excerpt: string;
 }
 
@@ -50,11 +50,11 @@ export async function searchTranscripts(
     const stored = await findTranscript(db, actingUser(actor).workspaceId, row.transcript_id);
     if (!stored || !(await findable(db, actor, stored, input.projectIds))) continue;
     const { rows: excerpt } = await db.query<{ excerpt: string }>(
-      `SELECT ts_headline('english', tt.body, websearch_to_tsquery('english', $3), 'StartSel="", StopSel="", MinWords=10, MaxWords=30') AS excerpt
+      `SELECT ts_headline('english', substr(tt.body, strpos(tt.body, E'\\n') + 1), websearch_to_tsquery('english', $3), 'StartSel="", StopSel="", MinWords=10, MaxWords=30') AS excerpt
        FROM transcript_turns tt WHERE tt.transcript_id = $1 AND tt.n = $2`,
       [row.transcript_id, row.n, input.query],
     );
-    hits.push({ transcriptId: stored.id, title: titleOf(turnsOf(stored.markdown), stored.chatId), turn: row.n, excerpt: excerpt[0]?.excerpt ?? "" });
+    hits.push({ transcriptId: stored.id, title: titleOf(turnsOf(stored.markdown), stored.chatId), turn: row.n, excerpt: (excerpt[0]?.excerpt ?? "").trim() });
   }
   return hits;
 }

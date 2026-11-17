@@ -27,7 +27,7 @@ export interface SearchResult {
   /** The Decision, by its key: `CRONK-D7`, or `D7` in the Workspace. */
   decisionKey: string | null;
   transcriptId: string | null;
-  /** The Transcript's turn that matches best (see transcripts/turns.ts); null for every other kind. */
+  /** The Transcript's turn that matches best (see shared/transcript-turns.ts); null for every other kind. */
   turn: number | null;
 }
 

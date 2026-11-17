@@ -1008,7 +1008,7 @@ export const migrations: Migration[] = [
   {
     id: "0042_transcript_turns",
     sql: `
-      -- The turns of each Transcript's latest text (transcripts/turns.ts), numbered from 1, kept for full-text search
+      -- The turns of each Transcript's latest text (shared/transcript-turns.ts), numbered from 1, kept for full-text search
       -- (transcripts/search.ts), which matches this exact expression. Only a turn's first 100,000 characters are searched, so no
       -- turn is too long to index.
       CREATE TABLE transcript_turns (

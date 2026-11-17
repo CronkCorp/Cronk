@@ -63,6 +63,8 @@ import type {
   TicketDetail,
   TicketName,
   TicketRef,
+  Transcript,
+  TranscriptLink,
   User,
   UserRef,
   Version,
@@ -135,6 +137,8 @@ export type {
   TicketDetail,
   TicketName,
   TicketRef,
+  Transcript,
+  TranscriptLink,
   User,
   UserRef,
   Version,
@@ -256,6 +260,10 @@ export const api = {
   importDocuments: (projectKey: string | undefined, file: Blob) =>
     upload<{ documents: DocumentTreeEntry[] }>(`${scopePath(projectKey)}/documents/import`, file).then((r) => r.documents),
   /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
+  transcript: (id: string) => request<{ transcript: Transcript }>("GET", `/api/transcripts/${encodeURIComponent(id)}`).then((r) => r.transcript),
+  /** The Transcripts an item came from ("From Transcript"): a Ticket or Decision by key, a Document or Term by id. */
+  transcriptsOf: (kind: "tickets" | "documents" | "terms" | "decisions", keyOrId: string) =>
+    request<{ transcripts: TranscriptLink[] }>("GET", `/api/${kind}/${encodeURIComponent(keyOrId)}/transcripts`).then((r) => r.transcripts),
   search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
     request<{ results: SearchResult[] }>(
       "GET",

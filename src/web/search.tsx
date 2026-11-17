@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { SEARCH_KINDS } from "../shared/values.js";
 import { api, type SearchKind, type SearchResult } from "./api.js";
 import { Link, navigate } from "./router.js";
+import { transcriptAddress } from "./transcripts.js";
 import { Show, useLoad } from "./ui.js";
 import { FilterSelect } from "./work.js";
 
@@ -57,10 +58,12 @@ export function SearchBox() {
   );
 }
 
-/** Where a search result opens: its Decision, its Term, its Document or its Ticket. */
+/** Where a search result opens: its Transcript at the turn that matched, its Decision, its Term, its Document or its Ticket. */
 const resultPath = (r: SearchResult) =>
-  r.decisionKey
-    ? `/decisions/${r.decisionKey}`
+  r.transcriptId
+    ? transcriptAddress(r.transcriptId, r.turn)
+    : r.decisionKey
+      ? `/decisions/${r.decisionKey}`
     : r.termId
       ? `/terms/${r.termId}`
       : r.documentId
@@ -100,7 +103,7 @@ export function SearchPage(props: { filter: SearchFilter }) {
                       <Chip>{KIND_NAMES[r.kind]}</Chip>
                       {(r.ticketKey ?? r.decisionKey) && <span className="key">{r.ticketKey ?? r.decisionKey}</span>}
                       <span className="grow">{r.kind === "comment" ? `On ${r.title}` : r.title}</span>
-                      <span className="muted">{r.projectKey ?? "Workspace"}</span>
+                      <span className="muted">{r.kind === "transcript" ? `Turn ${r.turn}` : (r.projectKey ?? "Workspace")}</span>
                     </div>
                     <p className="muted search-excerpt">{r.excerpt}</p>
                   </Link>
