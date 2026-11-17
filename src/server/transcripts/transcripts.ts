@@ -239,10 +239,13 @@ export async function storeTurns(db: Queryable, transcriptId: string, markdown: 
   ]);
 }
 
-/** Keeps the turns of every Transcript, as an upgrade fills them in. */
+/** Keeps the turns of every Transcript, as an upgrade fills them in: one text at a time, as each may hold megabytes. */
 export async function storeAllTurns(db: Queryable): Promise<void> {
-  const { rows } = await db.query<{ id: string; markdown: string }>("SELECT id, markdown FROM transcripts");
-  for (const r of rows) await storeTurns(db, r.id, r.markdown);
+  const { rows: ids } = await db.query<{ id: string }>("SELECT id FROM transcripts");
+  for (const { id } of ids) {
+    const { rows } = await db.query<{ markdown: string }>("SELECT markdown FROM transcripts WHERE id = $1", [id]);
+    await storeTurns(db, id, rows[0]!.markdown);
+  }
 }
 
 /** The bytes a Transcript's texts take, as the Workspace's limit counts them. */

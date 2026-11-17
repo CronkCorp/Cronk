@@ -20,6 +20,9 @@ export interface TranscriptHit {
   excerpt: string;
 }
 
+/** The text-search configuration, as search/search.ts and the index (migration 0042) use. */
+const CONFIG = "'english'";
+
 /** The searchable text of a turn, as its index is built on. */
 const TURN_TEXT = "left(tt.body, 100000)";
 
@@ -34,11 +37,11 @@ export async function searchTranscripts(
 ): Promise<TranscriptHit[]> {
   if (input.limit <= 0) return [];
   const { rows } = await db.query<{ transcript_id: string; n: number }>(
-    `WITH q AS (SELECT websearch_to_tsquery('english', $1) AS query)
+    `WITH q AS (SELECT websearch_to_tsquery(${CONFIG}, $1) AS query)
      SELECT transcript_id, n FROM (
-       SELECT DISTINCT ON (tt.transcript_id) tt.transcript_id, tt.n, ts_rank(to_tsvector('english', ${TURN_TEXT}), q.query) AS rank, tr.updated_at
+       SELECT DISTINCT ON (tt.transcript_id) tt.transcript_id, tt.n, ts_rank(to_tsvector(${CONFIG}, ${TURN_TEXT}), q.query) AS rank, tr.updated_at
        FROM q, transcript_turns tt JOIN transcripts tr ON tr.id = tt.transcript_id
-       WHERE tr.workspace_id = $2 AND to_tsvector('english', ${TURN_TEXT}) @@ q.query
+       WHERE tr.workspace_id = $2 AND to_tsvector(${CONFIG}, ${TURN_TEXT}) @@ q.query
        ORDER BY tt.transcript_id, rank DESC, tt.n
      ) best
      ORDER BY rank DESC, updated_at DESC, transcript_id`,
@@ -50,7 +53,7 @@ export async function searchTranscripts(
     const stored = await findTranscript(db, actingUser(actor).workspaceId, row.transcript_id);
     if (!stored || !(await findable(db, actor, stored, input.projectIds))) continue;
     const { rows: excerpt } = await db.query<{ excerpt: string }>(
-      `SELECT ts_headline('english', substr(tt.body, strpos(tt.body, E'\\n') + 1), websearch_to_tsquery('english', $3), 'StartSel="", StopSel="", MinWords=10, MaxWords=30') AS excerpt
+      `SELECT ts_headline(${CONFIG}, substr(tt.body, strpos(tt.body, E'\\n') + 1), websearch_to_tsquery(${CONFIG}, $3), 'StartSel="", StopSel="", MinWords=10, MaxWords=30') AS excerpt
        FROM transcript_turns tt WHERE tt.transcript_id = $1 AND tt.n = $2`,
       [row.transcript_id, row.n, input.query],
     );
