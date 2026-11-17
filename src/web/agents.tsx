@@ -389,12 +389,24 @@ function describeRecordEntry(entry: AgentRecordEntry): ReactNode {
   if (entry.change) return describeChange(entry.change);
   if (entry.activity) return `logged ${entry.activity.blocking ? "a blocking question" : `a ${ACTIVITY_NAMES[entry.activity.kind]}`}`;
   if (entry.comment) return "commented";
+  // A publish of an Artifact, worded apart from a saved Version of a Document.
+  if (entry.kind === "artifact_version") return `published Version ${entry.artifact!.version} of`;
   return entry.version!.number === 1 ? "wrote" : `saved Version ${entry.version!.number} of`;
 }
 
-/** Where an entry of an Agent Record happened: its Ticket, or the Document it was on. */
+/** Where an entry of an Agent Record happened: its Ticket, or the Document or Artifact Version it was on. */
 function RecordEntryPlace(props: { entry: AgentRecordEntry }) {
-  const { ticket, document, version } = props.entry;
+  const { ticket, document, artifact, version } = props.entry;
+  if (artifact) {
+    const published = props.entry.kind === "artifact_version";
+    return (
+      <>
+        {!published && "on "}
+        <Link to={`/artifacts/${artifact.id}?version=${artifact.version}`} className="link">{artifact.title}</Link>
+        {!published && <span className="muted"> (Version {artifact.version})</span>}
+      </>
+    );
+  }
   // A saved Version is of its Document, even a Report, which also names its Ticket.
   if (document && (version || !ticket)) {
     return (

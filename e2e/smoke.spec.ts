@@ -1572,6 +1572,15 @@ test("comment on an Artifact's Version from the drawer beside it, and see a repl
   // The button closes the drawer.
   await page.getByRole("button", { name: "Comments 2" }).click();
   await expect(drawer).toBeHidden();
+
+  // The Agents page lists the publish and the reply among what the Agent did, each opening the Artifact at its Version.
+  await page.goto("/agents");
+  const card = page.getByRole("listitem", { name: "artifact-bot" });
+  await card.getByRole("button", { name: "Show what it did" }).click();
+  const record = card.getByRole("list", { name: "What artifact-bot did" });
+  await expect(record.getByRole("listitem").filter({ hasText: "commented on Limits (Version 1)" })).toBeVisible();
+  await record.getByRole("listitem").filter({ hasText: "published Version 1 of Limits" }).getByRole("link", { name: "Limits" }).click();
+  await expect(page).toHaveURL(`/artifacts/${artifact.id}?version=1`);
 });
 
 /** A gzipped tar archive holding `files`, path to text, as publishing an Artifact takes. */
