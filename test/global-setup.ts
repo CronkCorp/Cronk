@@ -12,7 +12,7 @@ export interface S3Server {
 declare module "vitest" {
   export interface ProvidedContext {
     postgresAdminUrl: string;
-    /** The disposable MinIO, or null when none could be started outside CI: S3 tests are then skipped. In CI it is never null. */
+    /** The S3-compatible server (TEST_S3_ENDPOINT or a disposable MinIO), or null when none could be started outside CI: S3 tests are then skipped. In CI it is never null. */
     s3Server: S3Server | null;
   }
 }
