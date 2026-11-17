@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -41,6 +41,7 @@ export type SharedSchemaName =
   | "Ticket"
   | "TicketRef"
   | "BlockingRef"
+  | "DependentChoice"
   | "Relations"
   | "RecordedChange"
   | "Activity"
@@ -469,6 +470,30 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "Set on a block an Agent added from its own Discovered Ticket: the Agent that added it, and why. Null on any other block.",
       },
     }),
+  },
+  DependentChoice: {
+    description: "A Ticket the Reopened one blocks, as a Reopen asks about it: what it is, what may be chosen for it, and whether the caller may change it.",
+    ...object(
+      {
+        ticket: object({
+          key: { type: "string" },
+          title: { type: "string" },
+          status: ref("Status"),
+          verification: { ...nullable({ type: "string", enum: VERIFICATIONS }), description: "As on the Ticket: `unverified` for an Agent's completion awaiting a User." },
+          delegate: { ...nullable(named), description: "The Agent the Ticket is delegated to." },
+        }),
+        claim: { ...nullable(object({ agent: named })), description: "Its live Claim's Agent; null for none." },
+        choices: {
+          type: "array",
+          items: { type: "string", enum: REOPEN_CHOICES },
+          description:
+            "What the Reopen accepts for it, the first being the default: `keep` or `pause` for a Started one, `keep` or `reopen` for an Unverified one, none for any other.",
+        },
+        canChange: { type: "boolean", description: "Whether the caller has Write in its Project. Without it, the Reopen accepts only `keep` for it." },
+        pausesTo: { ...ref("Status"), description: "Only for a Started one: the Status a `pause` moves it into, its Project's first Unstarted Status." },
+      },
+      ["pausesTo"],
+    ),
   },
   Relations: {
     description: "A Ticket's relations to other Tickets, each list in key order.",
