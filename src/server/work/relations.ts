@@ -3,9 +3,10 @@ import { holdsLockUntilCommit, lockUntilCommit, type Queryable } from "../db/dat
 import type { RelationKind } from "../../shared/values.js";
 import { findTicketById, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
 
-// The check `lockBlocking` makes of the lock order costs a query or two per block, so it runs in development and tests only.
-const CHECK_LOCK_ORDER = process.env.NODE_ENV !== "production";
-
+/** Whether `lockBlocking` checks the lock order (see `AppConfig`); `AppContext` has it. */
+export interface LockOrderCheck {
+  checkLockOrder: boolean;
+}
 
 const inverse: Record<RelationKind, RelationKind> = { blocks: "blocked_by", blocked_by: "blocks", relates_to: "relates_to" };
 
@@ -101,11 +102,12 @@ export const isBlocking = (kind: RelationKind): boolean => kind !== "relates_to"
  * added at once can't close a cycle between them. A transaction adding a block takes it before locking any Ticket, since
  * the block's row then takes both Tickets' key-share lock: one holding a Ticket while it waits for this lock would deadlock
  * with one holding this lock while it waits for that Ticket. Taking it again in the same transaction is a no-op.
- * Outside production, taking it first after locking a Ticket throws, so a path with the order wrong fails in tests.
+ * With `checkLockOrder` (`AppConfig`, on outside production), taking it first after locking a Ticket throws, so a path
+ * with the order wrong fails in tests.
  */
-export async function lockBlocking(db: Queryable, workspaceId: string): Promise<void> {
+export async function lockBlocking(db: Queryable, workspaceId: string, { checkLockOrder }: LockOrderCheck): Promise<void> {
   const name = `ticket-blocking:${workspaceId}`;
-  if (CHECK_LOCK_ORDER) await requireBlockingLockFirst(db, name);
+  if (checkLockOrder) await requireBlockingLockFirst(db, name);
   await lockUntilCommit(db, name);
 }
 
@@ -122,12 +124,8 @@ async function requireBlockingLockFirst(db: Queryable, name: string): Promise<vo
      WHERE pid = pg_backend_pid() AND granted AND locktype = 'relation' AND relation = 'tickets'::regclass
        AND mode IN ('RowShareLock', 'RowExclusiveLock')`,
   );
-  if (rowCount !== 0) {
-    const err = new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
-    // Printed too, as a request answers only "Something went wrong" and tests run without a logger.
-    console.error(err);
-    throw err;
-  }
+  // Thrown to the request, whose error handler logs it.
+  if (rowCount !== 0) throw new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
 }
 
 /**
@@ -141,10 +139,11 @@ export async function addRelation(
   db: Queryable,
   workspaceId: string,
   input: RelationChange & { block?: NewDiscoveredBlock },
+  lockOrder: LockOrderCheck,
 ): Promise<boolean> {
   const row: StoredRelation = { ...storedRow(input.ticket, input.kind, input.other), block: input.block ?? null };
   if (row.kind === "blocks") {
-    await lockBlocking(db, workspaceId);
+    await lockBlocking(db, workspaceId, lockOrder);
     if (await wouldCycle(db, row.from, row.to)) return false;
   }
   if (await storeRelation(db, row)) await recordBothSides(db, "relation added", input);

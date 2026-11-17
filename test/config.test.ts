@@ -62,3 +62,11 @@ describe("Configuring the most an import may take", () => {
     expect(() => loadConfig({ DATABASE_URL, IMPORT_MAX_BYTES: value })).toThrow(`IMPORT_MAX_BYTES must be a positive whole number of bytes, such as 53687091200 for 50 GiB, got "${value}"`);
   });
 });
+
+describe("Configuring the check of the lock order", () => {
+  it("checks it outside production, and not in production", () => {
+    expect(loadConfig({ DATABASE_URL }).checkLockOrder).toBe(true);
+    expect(loadConfig({ DATABASE_URL, NODE_ENV: "test" }).checkLockOrder).toBe(true);
+    expect(loadConfig({ DATABASE_URL, NODE_ENV: "production" }).checkLockOrder).toBe(false);
+  });
+});

@@ -198,24 +198,59 @@ const RECORDS = RECORDS_BRANCHES.map(
 ).join("\n  UNION ALL ");
 
 /**
+ * Where an item of a LinkedKind lies, for transcriptPlacesSql: the `table` its items are in, joined aliased `alias` on the record's
+ * `{kind}_id` column, any further `joins` that need, and SQL for the item's `projectId`, NULL for the Workspace outside any Project.
+ * Every alias, those in `joins` too, is named once in transcriptPlacesSql's query, so each must differ from every other kind's and
+ * from `ts`, `r`, `rt` and `place`.
+ */
+interface ItemPlace {
+  table: string;
+  alias: string;
+  joins?: string;
+  projectId: string;
+}
+
+/**
+ * Where an item of each LinkedKind lies, the SQL twin of the `project_id` CHANGED gives each item. Typed over the LinkedKinds, so a
+ * kind added to LINKED_KINDS without its place here is a type error. A Report lies in its Ticket's Project.
+ */
+const ITEM_PLACES: Record<LinkedKind, ItemPlace> = {
+  ticket: { table: "tickets", alias: "t", projectId: "t.project_id" },
+  document: {
+    table: "documents",
+    alias: "d",
+    joins: "LEFT JOIN tickets rt ON rt.id = d.ticket_id",
+    projectId: "coalesce(rt.project_id, d.project_id)",
+  },
+  term: { table: "terms", alias: "tm", projectId: "tm.project_id" },
+  decision: { table: "decisions", alias: "dc", projectId: "dc.project_id" },
+  artifact: { table: "artifacts", alias: "a", projectId: "a.project_id" },
+};
+
+/** The item of each LinkedKind a record of RECORDS aliased `r` is on, joined as ITEM_PLACES says, in LINKED_KINDS' order. */
+const ITEM_PLACE_JOINS = LINKED_KIND_NAMES.map((kind) => {
+  const { table, alias, joins } = ITEM_PLACES[kind];
+  return `LEFT JOIN ${table} ${alias} ON ${alias}.id = r.${recordColumn(kind)}${joins ? ` ${joins}` : ""}`;
+}).join("\n  ");
+
+/** One row of `(changed, project_id)` per LinkedKind: whether the record is on an item of that kind, and where that item lies. */
+const ITEM_PLACE_ROWS = LINKED_KIND_NAMES.map((kind) => {
+  const { alias, projectId } = ITEM_PLACES[kind];
+  return `(${alias}.id IS NOT NULL, ${projectId})`;
+}).join(",\n    ");
+
+/**
  * Where the Sessions of the Transcript aliased `tr` changed things, one row per record of a change to an item that is still there:
  * the item's `project_id`, NULL for the Workspace outside any Project, a Report's being its Ticket's. Derived from the current rows,
- * so an item that changes place counts where it lies now. The places `changedItems` gives, for many Transcripts at once.
+ * so an item that changes place counts where it lies now. The places `changedItems` gives, for many Transcripts at once. One join
+ * and one row of places per LinkedKind, from ITEM_PLACES.
  */
 const transcriptPlacesSql = (tr: string) => `
   SELECT place.project_id
   FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
-  LEFT JOIN tickets t ON t.id = r.ticket_id
-  LEFT JOIN documents d ON d.id = r.document_id LEFT JOIN tickets rt ON rt.id = d.ticket_id
-  LEFT JOIN terms tm ON tm.id = r.term_id
-  LEFT JOIN decisions dc ON dc.id = r.decision_id
-  LEFT JOIN artifacts a ON a.id = r.artifact_id
+  ${ITEM_PLACE_JOINS}
   CROSS JOIN LATERAL (VALUES
-    (t.id IS NOT NULL, t.project_id),
-    (d.id IS NOT NULL, coalesce(rt.project_id, d.project_id)),
-    (tm.id IS NOT NULL, tm.project_id),
-    (dc.id IS NOT NULL, dc.project_id),
-    (a.id IS NOT NULL, a.project_id)
+    ${ITEM_PLACE_ROWS}
   ) AS place(changed, project_id)
   WHERE ts.transcript_id = ${tr}.id AND place.changed`;
 

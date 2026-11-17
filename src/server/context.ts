@@ -39,6 +39,8 @@ export interface AppContext {
   publicUrl?: string | undefined;
   /** The address of the Artifact hostname, if configured (see `AppConfig`). */
   artifactsUrl?: string | undefined;
+  /** Whether taking the Workspace's blocking lock checks it comes before any Ticket lock (see `AppConfig`). */
+  checkLockOrder: boolean;
 }
 
 export class HttpError extends Error {
