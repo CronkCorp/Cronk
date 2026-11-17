@@ -1,6 +1,6 @@
 import { createCipheriv, createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -223,7 +223,7 @@ async function installationWithFilesIn(name: string) {
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
   const { admin } = await startInstalledCronk(name, { storage: { kind: "disk", dir } });
   const stored = async () => (await readdir(dir, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
-  return { admin, stored };
+  return { admin, stored, dir };
 }
 
 describe("an import that fails partway", () => {
@@ -380,3 +380,55 @@ describe("an export whose download drops partway", () => {
     expect(size).toBeGreaterThan(64 * MB);
   });
 });
+
+describe("an export whose stored files don't match their records", () => {
+  /** An installation with a Ticket Attachment of 3000 bytes in a Project, its files in a directory the test can change. */
+  async function installationWithAttachment() {
+    const installation = await installationWithFilesIn("Acme");
+    const { admin } = installation;
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const res = await admin.upload("/api/tickets/CRONK-1/attachments?name=trace.bin", binary(3000), "application/octet-stream");
+    expect(res.status).toBe(201);
+    return { ...installation, file: join(installation.dir, "attachments", res.body.attachment.id) };
+  }
+
+  it("answers an error naming the file, not a 200 with an archive cut short, when an Attachment's file is missing from the store", async () => {
+    const { admin, file } = await installationWithAttachment();
+    await rm(file);
+
+    const res = await admin.download("/api/export");
+
+    expect(res.status).toBe(500);
+    expect(JSON.parse(res.body.toString()).error).toBe("The file of projects/CRONK/tickets/CRONK-1.attachments/1-trace.bin is missing from the file store");
+  });
+
+  it("answers an error naming the file when an Attachment's file in the store holds another number of bytes than recorded", async () => {
+    const { admin, file } = await installationWithAttachment();
+    await writeFile(file, binary(2999));
+
+    const res = await admin.download("/api/projects/CRONK/export");
+
+    expect(res.status).toBe(500);
+    expect(JSON.parse(res.body.toString()).error).toBe(
+      "The file of projects/CRONK/tickets/CRONK-1.attachments/1-trace.bin holds 2999 bytes in the file store, not the 3000 recorded",
+    );
+  });
+
+  it("aborts the download, never ending the archive cleanly, when a file checked before sending is removed before the archive reaches it", async () => {
+    const { admin, dir } = await installationWithFilesIn("Acme");
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Recordings" });
+    await attach(admin, "/api/tickets/CRONK-1/attachments?name=first.bin", 1, 32 * MB);
+    const second = await attach(admin, "/api/tickets/CRONK-1/attachments?name=second.bin", 2, MB);
+
+    const res = await admin.send("/api/export");
+    expect(res.statusCode).toBe(200);
+    // The download is read no further until the second file is gone, which the archive reaches only after the first.
+    await new Promise((resolve) => res.once("readable", resolve));
+    await rm(join(dir, "attachments", second.id));
+
+    await expect(text(res)).rejects.toThrow();
+  });
+});
+
