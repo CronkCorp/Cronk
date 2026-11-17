@@ -230,7 +230,9 @@ li.comment { background: var(--bg); border: 1px dashed var(--border); border-rad
 .side-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
 .side-panel .error { margin: 8px 12px; }
 .side-fields { display: flex; flex-direction: column; }
-.side-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 36px; padding: 4px 12px; font-size: 13px; }
+/* The label sits on the baseline of its value's first line, so it stays beside a chip whose actions wrap under it;
+   a one-line row's line is centred in the row's height. */
+.side-field { display: flex; flex-wrap: wrap; align-items: baseline; align-content: center; gap: 8px; min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .side-field + .side-field { border-top: 1px solid var(--border); }
 .side-field-label { width: 76px; flex: none; color: var(--muted); font-size: 12px; }
 /* A row whose controls don't fit beside the label wraps them under it: a chip keeps its words on one line, and the
