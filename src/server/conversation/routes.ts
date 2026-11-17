@@ -16,7 +16,7 @@ import { findActivity, markAnswered, publicActivity, type Activity } from "../co
 import { agentTopic, artifactTopic, documentTopic, ticketTopic } from "../live/topics.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { tellNewlyReady } from "../coordination/ready.js";
-import { waitingItemsChanged } from "../inbox/inbox.js";
+import { assigneesWaitingOn, waitingItemsChanged } from "../inbox/inbox.js";
 import { MENTION_SYNTAX } from "../../shared/values.js";
 import { markWaiting, waitingEvent, withWaitingWork, type CommentPlace, type CommentWork, type Positioned, type WaitingFor } from "../coordination/waiting-work.js";
 import type { Document } from "../knowledge/documents.js";
@@ -217,12 +217,14 @@ export function conversationRoutes(ctx: AppContext) {
             const status = await startedStatus(tx, ticket, request.body.statusId);
             const moved = await updateTicket(tx, ticket, { status, sendBack: true }, actor, ctx.clock.now());
             const place = { projectId: ticket.projectId, delegateId: ticket.delegate?.id ?? null, publisherId: null };
-            return { ticket: moved, posted: await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true }) };
+            const posted = await post(tx, positioned, actor, { ticketId: ticket.id }, place, { body: request.body.comment, sendBack: true });
+            return { ticket: moved, posted, waitingOn: await assigneesWaitingOn(tx, [ticket.id]) };
           },
-          ({ ticket, posted }) => {
+          ({ ticket, posted, waitingOn }) => {
             ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
             pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
-            waitingItemsChanged(ctx.live, [ticket.assignee?.id]);
+            // The Discovered Tickets blocking it show its Status.
+            waitingItemsChanged(ctx.live, [ticket.assignee?.id, ...waitingOn]);
             ticketsChanged(ctx.live, [ticket]);
           },
         );
@@ -345,14 +347,16 @@ export function conversationRoutes(ctx: AppContext) {
                 await tellAgent(dependent, dependentNote(ticket, reason, { kept: d }));
               }
             }
-            return { ticket: reopened, posted, posts, changed, blockedAgain };
+            const waitingOn = await assigneesWaitingOn(tx, changed.map((t) => t.id));
+            return { ticket: reopened, posted, posts, changed, blockedAgain, waitingOn };
           },
-          ({ posts, changed, blockedAgain }) => {
+          ({ posts, changed, blockedAgain, waitingOn }) => {
             for (const { ticket, posted } of posts) {
               ctx.live.publish(ticketTopic(ticket.id), { event: "comment", data: { comment: publicComment(posted.comment) } });
               pushWaiting(posted, { ticket: { key: ticket.key, title: ticket.title }, document: null, artifact: null });
             }
-            waitingItemsChanged(ctx.live, changed.map((t) => t.assignee?.id));
+            // The Discovered Tickets blocking the Tickets moved show their Status.
+            waitingItemsChanged(ctx.live, [...changed.map((t) => t.assignee?.id), ...waitingOn]);
             ticketsChanged(ctx.live, [...changed, ...blockedAgain]);
           },
         );
