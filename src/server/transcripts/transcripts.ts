@@ -257,6 +257,20 @@ export async function redactionsOf(db: Queryable, transcriptId: string): Promise
   return rows.map((r) => ({ length: r.length, fingerprint: Number(r.fingerprint), digest: r.digest }));
 }
 
+/** The hand redactions of each Transcript `transcriptIds`, by the Transcript's id, in the order they were made. One query. */
+export async function redactionsPerTranscript(db: Queryable, transcriptIds: string[]): Promise<(id: string) => Redaction[]> {
+  const { rows } = await db.query<{ transcript_id: string; length: number; fingerprint: string; digest: string }>(
+    "SELECT transcript_id, length, fingerprint, digest FROM transcript_redactions WHERE transcript_id = ANY($1::uuid[]) ORDER BY transcript_id, seq",
+    [transcriptIds],
+  );
+  const byTranscript = new Map<string, Redaction[]>();
+  for (const r of rows) {
+    if (!byTranscript.has(r.transcript_id)) byTranscript.set(r.transcript_id, []);
+    byTranscript.get(r.transcript_id)!.push({ length: r.length, fingerprint: Number(r.fingerprint), digest: r.digest });
+  }
+  return (id) => byTranscript.get(id) ?? [];
+}
+
 /** Keeps `redactions` as the Transcript's next ones, after any it has. */
 export async function storeRedactions(db: Queryable, transcriptId: string, redactions: Redaction[], at: Date): Promise<void> {
   for (const r of redactions) {
@@ -438,6 +452,15 @@ async function changedItemsPerGroup(db: Queryable, grouping: Grouping, ids: stri
  */
 export async function changedItems(db: Queryable, sessionIds: string[]): Promise<ChangedItems> {
   return (await changedItemsPerGroup(db, SESSION_GROUP, sessionIds)).get(null) ?? noChanges();
+}
+
+/**
+ * What the Sessions of each Transcript `transcriptIds` changed, by the Transcript's id, each in the order `changedItems` gives.
+ * Five queries, however many Transcripts there are.
+ */
+export async function changedItemsPerTranscript(db: Queryable, transcriptIds: string[]): Promise<(id: string) => ChangedItems> {
+  const items = await changedItemsPerGroup(db, TRANSCRIPT_GROUPS, transcriptIds);
+  return (id) => items.get(id) ?? noChanges();
 }
 
 /** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
