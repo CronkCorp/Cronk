@@ -1085,6 +1085,22 @@ describe("Who may read Transcripts, decided for many at once", () => {
     }
     expect(await listing()).toEqual(withOne);
   });
+  it("looks up what each Transcript's Sessions changed by Session, reading no kind of their records whole", async () => {
+    const { cronk, admin, carol, claude, id } = await transcriptAcrossProjects(QUIET);
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "More" })).status).toBe(201);
+    expect((await upload(cronk.client(claude.secret), "chat-2", chat("Again", agent.sessionId))).status).toBe(200);
+    // Carol may read neither Transcript and Ada both, so each decides who may read them to the end.
+    for (const reader of [carol, admin]) {
+      expect({
+        search: await cronk.tablesReadWhole(() => reader.get("/api/search?q=done&kind=transcript")),
+        read: await cronk.tablesReadWhole(() => reader.get(`/api/transcripts/${id}`)),
+        // Listing goes through every Transcript in the Workspace, and reads only them whole.
+        list: await cronk.tablesReadWhole(() => reader.get("/api/transcripts")),
+        links: await cronk.tablesReadWhole(() => reader.get("/api/tickets/CRONK-1/transcripts")),
+      }).toEqual({ search: [], read: [], list: ["transcripts"], links: ["transcripts"] });
+    }
+  });
 });
 
 describe("Upgrading an installation", () => {
