@@ -312,150 +312,150 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
   return (
     <article className="document">
       <PageAttachments.Provider value={{ attachments: loadedAttachments, onOpen: setOpened }}>
-      <Breadcrumb projectKey={d.projectKey} ticketKey={d.ticketKey} />
-      {panel === "edit" ? (
-        <EditDocument
-          document={d}
-          editor={editor}
-          attach={attaching.attach}
-          attachments={<AttachmentThumbnails {...files} onInsert={(a) => editor.current?.insert(attachmentMarkdown(a))} />}
-          newerVersion={newer}
-          onCancel={() => setPanel("none")}
-          onSaved={(saved) => {
-            props.onChanged(saved);
-            setPanel("none");
-          }}
-        />
-      ) : (
-        <>
-          <div className="page-head">
-            <h1>
-              {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>} {d.protected && <ProtectedMark covers={marked ? d.covers : 0} />}
-            </h1>
-            <div className="actions">
-              <LiveIndicator state={live} />
-              <span className="muted">Version {d.version}</span>
-              <Button variant="secondary" onClick={() => toggle("versions")}>Versions</Button>
-              {canWrite && (
-                <>
-                  {!d.ticketKey && (
-                    <>
-                      <Button variant="secondary" onClick={() => toggle("move")}>Move</Button>
-                      <Button variant="secondary" onClick={() => toggle("new")}>New Document under this one</Button>
-                    </>
-                  )}
-                  <Button
-                    variant="secondary"
-                    onClick={() => void protect.run(!marked)}
-                    disabled={protect.busy}
-                    title={marked ? "Let Agents edit it again" : "Let Agents read but not edit it, and every Document under it"}
-                  >
-                    {marked ? "Unprotect" : "Protect"}
-                  </Button>
-                  <Button variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={remove.busy}>Delete</Button>
-                  <ConfirmDialog
-                    open={confirmingDelete}
-                    onOpenChange={setConfirmingDelete}
-                    title={`Delete ${d.title}?`}
-                    description="This deletes the Document and all its Versions."
-                    confirmLabel="Delete"
-                    busy={remove.busy}
-                    onConfirm={() => void remove.run()}
-                  />
-                  <Button onClick={() => setPanel("edit")}>Edit</Button>
-                </>
-              )}
-            </div>
-          </div>
-          {d.protectedBy && !marked && (
-            <p className="muted small">
-              Protected as part of <Link to={`/documents/${d.protectedBy.id}`} className="link">{d.protectedBy.title}</Link>, which covers the Documents under it.
-            </p>
-          )}
-          {remove.error && <p className="error" role="alert">{remove.error}</p>}
-          {protect.error && <p className="error" role="alert">{protect.error}</p>}
-          {panel === "new" && <NewDocument projectKey={d.projectKey ?? undefined} parentId={d.id} onCancel={() => setPanel("none")} />}
-          {panel === "move" && (
-            <MoveDocument
-              document={d}
-              onCancel={() => setPanel("none")}
-              onMoved={(moved) => {
-                props.onChanged(moved);
-                setPanel("none");
-              }}
-            />
-          )}
-          {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} onOutdated={props.onReload} />}
-          <div className="document-read">
-            <div
-              className="selectable document-body"
-              onMouseOver={(e) => setHovered(highlightAt(e.target))}
-              onMouseLeave={() => setHovered([])}
-              onFocus={(e) => setFocused(highlightAt(e.target))}
-              onBlur={() => setFocused([])}
-            >
-              <div className="markdown" data-testid="document-body" ref={bodyAt}>
-                <DocumentBody body={d.body} highlights={highlights} embeds={d.embeds} />
-              </div>
-              <AttachmentThumbnails {...files} />
-              {canWrite && offer && (
-                <Popover
-                  open={composing !== undefined}
-                  onOpenChange={(open) => {
-                    if (!open) return setComposing(undefined);
-                    if (!selected) return;
-                    setPassage(selected.passage);
-                    setComposing(selected);
-                    getSelection()?.removeAllRanges();
-                  }}
-                  label="Comment on this passage"
-                  onOpenAutoFocus={(e) => {
-                    e.preventDefault();
-                    commentAt.current?.focus();
-                  }}
-                  trigger={
+        <Breadcrumb projectKey={d.projectKey} ticketKey={d.ticketKey} />
+        {panel === "edit" ? (
+          <EditDocument
+            document={d}
+            editor={editor}
+            attach={attaching.attach}
+            attachments={<AttachmentThumbnails {...files} onInsert={(a) => editor.current?.insert(attachmentMarkdown(a))} />}
+            newerVersion={newer}
+            onCancel={() => setPanel("none")}
+            onSaved={(saved) => {
+              props.onChanged(saved);
+              setPanel("none");
+            }}
+          />
+        ) : (
+          <>
+            <div className="page-head">
+              <h1>
+                {d.title} {d.ticketKey && <Chip>{`Report on ${d.ticketKey}`}</Chip>} {d.protected && <ProtectedMark covers={marked ? d.covers : 0} />}
+              </h1>
+              <div className="actions">
+                <LiveIndicator state={live} />
+                <span className="muted">Version {d.version}</span>
+                <Button variant="secondary" onClick={() => toggle("versions")}>Versions</Button>
+                {canWrite && (
+                  <>
+                    {!d.ticketKey && (
+                      <>
+                        <Button variant="secondary" onClick={() => toggle("move")}>Move</Button>
+                        <Button variant="secondary" onClick={() => toggle("new")}>New Document under this one</Button>
+                      </>
+                    )}
                     <Button
-                      type="button"
-                      className="comment-on-selection"
-                      style={{ top: offer.top, left: offer.left }}
-                      // Pressing the button would otherwise clear the selection before it is read.
-                      onMouseDown={(e) => e.preventDefault()}
+                      variant="secondary"
+                      onClick={() => void protect.run(!marked)}
+                      disabled={protect.busy}
+                      title={marked ? "Let Agents edit it again" : "Let Agents read but not edit it, and every Document under it"}
                     >
-                      Comment on this passage
+                      {marked ? "Unprotect" : "Protect"}
                     </Button>
-                  }
-                >
-                  <PassageCommentForm
-                    documentId={d.id}
-                    passage={passage}
-                    onPassageChange={setPassage}
-                    commentRef={commentAt}
-                    onPosted={() => {
-                      setComposing(undefined);
-                      reloadComments();
-                    }}
-                  />
-                </Popover>
-              )}
+                    <Button variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={remove.busy}>Delete</Button>
+                    <ConfirmDialog
+                      open={confirmingDelete}
+                      onOpenChange={setConfirmingDelete}
+                      title={`Delete ${d.title}?`}
+                      description="This deletes the Document and all its Versions."
+                      confirmLabel="Delete"
+                      busy={remove.busy}
+                      onConfirm={() => void remove.run()}
+                    />
+                    <Button onClick={() => setPanel("edit")}>Edit</Button>
+                  </>
+                )}
+              </div>
             </div>
-            <Show state={comments}>
-              {(all) => (
-                <DocumentMargin
-                  documentId={d.id}
-                  comments={all}
-                  placed={placed}
-                  bodyRef={bodyAt}
-                  active={active}
-                  onHover={(id) => setHovered(id ? [id] : [])}
-                  onFocus={(id) => setFocused(id ? [id] : [])}
-                  canWrite={canWrite}
-                  onPosted={reloadComments}
-                />
-              )}
-            </Show>
-          </div>
-        </>
-      )}
+            {d.protectedBy && !marked && (
+              <p className="muted small">
+                Protected as part of <Link to={`/documents/${d.protectedBy.id}`} className="link">{d.protectedBy.title}</Link>, which covers the Documents under it.
+              </p>
+            )}
+            {remove.error && <p className="error" role="alert">{remove.error}</p>}
+            {protect.error && <p className="error" role="alert">{protect.error}</p>}
+            {panel === "new" && <NewDocument projectKey={d.projectKey ?? undefined} parentId={d.id} onCancel={() => setPanel("none")} />}
+            {panel === "move" && (
+              <MoveDocument
+                document={d}
+                onCancel={() => setPanel("none")}
+                onMoved={(moved) => {
+                  props.onChanged(moved);
+                  setPanel("none");
+                }}
+              />
+            )}
+            {panel === "versions" && <Versions document={d} canWrite={canWrite} onRestored={props.onChanged} onOutdated={props.onReload} />}
+            <div className="document-read">
+              <div
+                className="selectable document-body"
+                onMouseOver={(e) => setHovered(highlightAt(e.target))}
+                onMouseLeave={() => setHovered([])}
+                onFocus={(e) => setFocused(highlightAt(e.target))}
+                onBlur={() => setFocused([])}
+              >
+                <div className="markdown" data-testid="document-body" ref={bodyAt}>
+                  <DocumentBody body={d.body} highlights={highlights} embeds={d.embeds} />
+                </div>
+                <AttachmentThumbnails {...files} />
+                {canWrite && offer && (
+                  <Popover
+                    open={composing !== undefined}
+                    onOpenChange={(open) => {
+                      if (!open) return setComposing(undefined);
+                      if (!selected) return;
+                      setPassage(selected.passage);
+                      setComposing(selected);
+                      getSelection()?.removeAllRanges();
+                    }}
+                    label="Comment on this passage"
+                    onOpenAutoFocus={(e) => {
+                      e.preventDefault();
+                      commentAt.current?.focus();
+                    }}
+                    trigger={
+                      <Button
+                        type="button"
+                        className="comment-on-selection"
+                        style={{ top: offer.top, left: offer.left }}
+                        // Pressing the button would otherwise clear the selection before it is read.
+                        onMouseDown={(e) => e.preventDefault()}
+                      >
+                        Comment on this passage
+                      </Button>
+                    }
+                  >
+                    <PassageCommentForm
+                      documentId={d.id}
+                      passage={passage}
+                      onPassageChange={setPassage}
+                      commentRef={commentAt}
+                      onPosted={() => {
+                        setComposing(undefined);
+                        reloadComments();
+                      }}
+                    />
+                  </Popover>
+                )}
+              </div>
+              <Show state={comments}>
+                {(all) => (
+                  <DocumentMargin
+                    documentId={d.id}
+                    comments={all}
+                    placed={placed}
+                    bodyRef={bodyAt}
+                    active={active}
+                    onHover={(id) => setHovered(id ? [id] : [])}
+                    onFocus={(id) => setFocused(id ? [id] : [])}
+                    canWrite={canWrite}
+                    onPosted={reloadComments}
+                  />
+                )}
+              </Show>
+            </div>
+          </>
+        )}
       </PageAttachments.Provider>
       <AttachmentViewer
         attachment={opened}

@@ -3,7 +3,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Nodes } from "mdast";
 import Markdown, { type Components } from "react-markdown";
 import { api, attachmentFileUrl } from "./api.js";
-import { PageAttachments } from "./attachments.js";
+import { InlinePlayer, PageAttachments } from "./attachments.js";
 import { fileKind } from "./components/files.js";
 import { Link } from "./router.js";
 import { useLoad } from "./ui.js";
@@ -445,8 +445,7 @@ function MarkdownImage({ node: _, ...props }: ComponentProps<"img"> & { node?: u
   const page = useContext(PageAttachments);
   const attachment = props.src === undefined ? undefined : page?.attachments.find((a) => attachmentFileUrl(a.id) === props.src);
   const kind = attachment && fileKind(attachment.contentType);
-  if (kind === "video") return <video className="inline-media" src={props.src} controls preload="metadata" playsInline aria-label={props.alt} />;
-  if (kind === "audio") return <audio className="inline-audio" src={props.src} controls preload="metadata" aria-label={props.alt} />;
+  if (attachment && (kind === "video" || kind === "audio")) return <InlinePlayer kind={kind} attachment={attachment} label={props.alt} />;
   return <img {...props} />;
 }
 

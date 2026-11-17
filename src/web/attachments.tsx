@@ -146,6 +146,7 @@ export interface AttachmentsView {
 
 /** An item's own Attachments as thumbnails, under a Ticket's description or a Document's body, with where to drop more. */
 export function AttachmentThumbnails(props: AttachmentsView) {
+  const { onInsert } = props;
   if (!props.canWrite && props.attachments.length === 0) return null;
   return (
     <section className="attachments" aria-label="Attachments">
@@ -166,8 +167,8 @@ export function AttachmentThumbnails(props: AttachmentsView) {
                   </span>
                 </span>
               </button>
-              {props.onInsert && (
-                <Button type="button" variant="ghost" className="thumbnail-insert" aria-label={`Insert ${a.name}`} onClick={() => props.onInsert!(a)}>
+              {onInsert && (
+                <Button type="button" variant="ghost" className="thumbnail-insert" aria-label={`Insert ${a.name}`} onClick={() => onInsert(a)}>
                   Insert
                 </Button>
               )}
@@ -322,6 +323,16 @@ export function ChangeLineAttachment(props: { attachment: Extract<RecordedChange
   );
 }
 
+/** A video or audio Attachment playing in place, video at most 360px tall, named `label`. */
+export function InlinePlayer(props: { kind: "video" | "audio"; attachment: Attachment; label: string | undefined }) {
+  const url = attachmentFileUrl(props.attachment.id);
+  return props.kind === "video" ? (
+    <video className="inline-media" src={url} controls preload="metadata" playsInline aria-label={props.label} />
+  ) : (
+    <audio className="inline-audio" src={url} controls preload="metadata" aria-label={props.label} />
+  );
+}
+
 /**
  * The Attachments on one Comment, or on one Document or Report itself, shown where they were posted: images and video in
  * the page, audio playing, other files by name. Opening one shows it in the page's dialog. Nothing outside a page that
@@ -344,10 +355,8 @@ export function InlineAttachments(props: { commentId: string } | { documentId: s
               <button type="button" className="inline-media-button" onClick={() => page.onOpen(a)} aria-label={`Open ${a.name}`}>
                 <img className="inline-media" src={url} alt={a.name} loading="lazy" />
               </button>
-            ) : kind === "video" ? (
-              <video className="inline-media" src={url} controls preload="metadata" playsInline aria-label={a.name} />
-            ) : kind === "audio" ? (
-              <audio className="inline-audio" src={url} controls preload="metadata" aria-label={a.name} />
+            ) : kind === "video" || kind === "audio" ? (
+              <InlinePlayer kind={kind} attachment={a} label={a.name} />
             ) : null}
             <span className="inline-caption">
               <button type="button" className="link-button inline-name" onClick={() => page.onOpen(a)}>
