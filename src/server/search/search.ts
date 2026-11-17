@@ -176,7 +176,7 @@ export async function search(
   }
   // Transcripts are a separate kind, ranked below everything else: they fill what the limit leaves.
   if (!input.kinds || input.kinds.includes("transcript")) {
-    const hits = await searchTranscripts(db, actor, { query: input.query, limit: input.limit - results.length, projectIds: input.projectIds && places.projectIds });
+    const hits = await searchTranscripts(db, actor, { query: input.query, limit: input.limit - results.length, projectIds: input.projectIds && places.projectIds, readable });
     for (const hit of hits) {
       results.push({
         kind: "transcript",

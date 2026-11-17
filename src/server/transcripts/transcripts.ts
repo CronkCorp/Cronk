@@ -155,6 +155,43 @@ const RECORDS = `
   UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id, NULL FROM decision_versions
   UNION ALL SELECT actor_session_id, NULL, NULL, NULL, NULL, artifact_id FROM artifact_versions`;
 
+/**
+ * Where the Sessions of the Transcript aliased `tr` changed things, one row per record of a change to an item that is still there:
+ * the item's `project_id`, NULL for the Workspace outside any Project, a Report's being its Ticket's. Derived from the current rows,
+ * so an item that changes place counts where it lies now. The places `changedItems` gives, for many Transcripts at once.
+ */
+export const transcriptPlacesSql = (tr: string) => `
+  SELECT place.project_id
+  FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
+  LEFT JOIN tickets t ON t.id = r.ticket_id
+  LEFT JOIN documents d ON d.id = r.document_id LEFT JOIN tickets rt ON rt.id = d.ticket_id
+  LEFT JOIN terms tm ON tm.id = r.term_id
+  LEFT JOIN decisions dc ON dc.id = r.decision_id
+  LEFT JOIN artifacts a ON a.id = r.artifact_id
+  CROSS JOIN LATERAL (VALUES
+    (t.id IS NOT NULL, t.project_id),
+    (d.id IS NOT NULL, coalesce(rt.project_id, d.project_id)),
+    (tm.id IS NOT NULL, tm.project_id),
+    (dc.id IS NOT NULL, dc.project_id),
+    (a.id IS NOT NULL, a.project_id)
+  ) AS place(changed, project_id)
+  WHERE ts.transcript_id = ${tr}.id AND place.changed`;
+
+/**
+ * SQL for whether the Transcript aliased `tr`, whose Owner's id is the SQL `ownerId`, may be read (see readTranscript) by an Actor
+ * reading where SQL for a `Readable`'s `projectIds` (a uuid[]) and `workspaceId` (a uuid, NULL when the Workspace isn't readable)
+ * says, and who is the User with the id `userId` (NULL for an Agent): when they are its Owner, or when its Sessions changed something
+ * and every place they changed something is readable. What `accessTo` decides for one Transcript, for many in one query.
+ */
+export const transcriptReadableSql = (tr: string, ownerId: string, projectIds: string, workspaceId: string, userId: string) =>
+  `(${ownerId} = ${userId} OR coalesce((
+     SELECT bool_and(coalesce(p.project_id = ANY(${projectIds}), ${workspaceId} IS NOT NULL)) FROM (${transcriptPlacesSql(tr)}) p
+   ), false))`;
+
+/** SQL for whether the Sessions of the Transcript aliased `tr` changed something in one of the Projects `projectIds` (a uuid[]). */
+export const transcriptChangedInSql = (tr: string, projectIds: string) =>
+  `EXISTS (SELECT 1 FROM (${transcriptPlacesSql(tr)}) p WHERE p.project_id = ANY(${projectIds}))`;
+
 /** Everything the Agent Sessions `$1` did (see RECORDS). */
 const SESSION_RECORDS = `SELECT * FROM (${RECORDS}) all_records WHERE actor_session_id = ANY($1::uuid[])`;
 

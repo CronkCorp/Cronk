@@ -380,8 +380,8 @@ describe("Uploading the same chat again", () => {
  * Bob's Agent changes CRONK-1 (an open Project), SECRET-1 (private, where Bob has Write) and a Workspace Document, and
  * uploads the chat. Carol is another Member; Ada the Admin.
  */
-async function transcriptAcrossProjects() {
-  const { cronk, admin } = await startInstalledCronk();
+async function transcriptAcrossProjects(opts: Parameters<typeof startInstalledCronk>[1] = {}) {
+  const { cronk, admin } = await startInstalledCronk("Acme", opts);
   const bob = await joinAs(cronk, admin, "bob@example.com");
   const carol = await joinAs(cronk, admin, "carol@example.com");
   const bobId = (await bob.get("/api/me")).body.user.id;
@@ -899,6 +899,30 @@ describe("Searching Transcripts", () => {
     expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "Done" })).status).toBe(200);
     expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
     expect((await bob.get("/api/search?q=redacted&kind=transcript")).body.results).toHaveLength(1);
+  });
+});
+
+/** Looks for lapsed Claims too seldom to fall among the queries a test counts. */
+const QUIET = { lapseCheckMs: 3_600_000 };
+
+describe("Who may read Transcripts, decided for many at once", () => {
+  it("lets search find them in a fixed number of queries, however many match", async () => {
+    const { cronk, admin, carol, claude, bob } = await transcriptAcrossProjects(QUIET);
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/SECRET-1/comments", { body: "More" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    // Carol may read none of them; Ada all of them.
+    const searching = async () => ({
+      carol: await cronk.queries(() => carol.get("/api/search?q=done&kind=transcript")),
+      admin: await cronk.queries(() => admin.get("/api/search?q=done&kind=transcript")),
+      bob: await cronk.queries(() => bob.get("/api/search?q=done&kind=transcript&project=CRONK")),
+    });
+    const withOne = await searching();
+
+    for (let i = 2; i <= 6; i++) expect((await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId))).status).toBe(200);
+    expect((await admin.get("/api/search?q=done&kind=transcript")).body.results).toHaveLength(6);
+    expect((await carol.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
+    expect(await searching()).toEqual(withOne);
   });
 });
 

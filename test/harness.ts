@@ -298,6 +298,11 @@ export interface Cronk {
    */
   queriesOn(table: string, during: () => Promise<unknown>): Promise<number>;
   /**
+   * How many queries the server sends while `during` runs, whatever they name; as `queriesOn`, for a fixed number however many items
+   * there are. Its own looks for lapsed Claims count too, so start it with a long `lapseCheckMs` to leave them out.
+   */
+  queries(during: () => Promise<unknown>): Promise<number>;
+  /**
    * Holds back every live update the server pushes from now on, as if each change committed
    * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
    */
@@ -359,7 +364,15 @@ async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
  * `publicUrl` is the address Cronk is configured to be reached at, if any. `storage` is where it keeps files:
  * by default a directory of the test's own on local disk. `importMaxBytes` is the most one import may write, 50 GiB by default.
  */
-export async function startCronk(opts: { publicUrl?: string; storage?: StorageConfig; importMaxBytes?: number } = {}): Promise<Cronk> {
+export async function startCronk(
+  opts: {
+    publicUrl?: string;
+    storage?: StorageConfig;
+    importMaxBytes?: number;
+    /** How often it looks for lapsed Claims, 50 ms unless set; set it long to keep those looks out of `queries`. */
+    lapseCheckMs?: number;
+  } = {},
+): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
   const dbName = `cronk_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -376,7 +389,7 @@ export async function startCronk(opts: { publicUrl?: string; storage?: StorageCo
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
   const start = () =>
-    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: opts.lapseCheckMs ?? 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -435,23 +448,8 @@ export async function startCronk(opts: { publicUrl?: string; storage?: StorageCo
     },
     holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
     holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
-    queriesOn: async (table, during) => {
-      // The server and this harness share the pg module, and the Pool sends every query through a Client.
-      const naming = new RegExp(`\\b${table}\\b`);
-      const query = pg.Client.prototype.query;
-      let n = 0;
-      pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
-        const config = args[0] as string | { text?: string };
-        if (naming.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
-        return (query as (...a: unknown[]) => unknown).apply(this, args);
-      } as typeof query;
-      try {
-        await during();
-      } finally {
-        pg.Client.prototype.query = query;
-      }
-      return n;
-    },
+    queriesOn: (table, during) => countQueries(new RegExp(`\\b${table}\\b`), during),
+    queries: (during) => countQueries(/./, during),
     holdPushes: () => {
       const release = live.hold();
       onTestFinished(release);
@@ -693,6 +691,26 @@ export async function projectWithTickets(client: Client, key: string, count: num
   const res = await client.post("/api/projects", { name: key, key });
   if (res.status !== 201) throw new Error(`Creating Project ${key} failed: ${JSON.stringify(res.body)}`);
   for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
+}
+
+/**
+ * How many queries the server sends that `matching` matches while `during` runs. The server and this harness share the pg module,
+ * and the Pool sends every query through a Client.
+ */
+async function countQueries(matching: RegExp, during: () => Promise<unknown>): Promise<number> {
+  const query = pg.Client.prototype.query;
+  let n = 0;
+  pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
+    const config = args[0] as string | { text?: string };
+    if (matching.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
+    return (query as (...a: unknown[]) => unknown).apply(this, args);
+  } as typeof query;
+  try {
+    await during();
+  } finally {
+    pg.Client.prototype.query = query;
+  }
+  return n;
 }
 
 /**
