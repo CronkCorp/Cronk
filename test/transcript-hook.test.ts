@@ -138,6 +138,43 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(transcript.markdown).toContain("## User\n\nPick up CRONK-1.\n");
   });
 
+  it("keeps an upload in which only a subagent's Cronk result names the Agent Session, and links what it changed", async () => {
+    const { cronk, admin, claude } = await delegatedSetup();
+    const mcp = await connectMcp(cronk, claude.secret);
+    const call = async (name: string, args: object) => ((await mcp.client.callTool({ name, arguments: { ...args } })) as { content: unknown[] }).content;
+    await call("tickets", { action: "claim", key: "CRONK-1" });
+    const logged = await call("activities", { action: "log", key: "CRONK-1", kind: "plan", body: "Fix the sign-in form." });
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    const jsonl = (entries: object[]) => entries.map((entry) => JSON.stringify(entry) + "\n").join("");
+    // The main chat only launches the subagent; its report doesn't repeat the Agent Session.
+    await writeFile(
+      join(dir, "chat.jsonl"),
+      jsonl([
+        { type: "user", message: { role: "user", content: "Plan CRONK-1." } },
+        { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Agent", input: { prompt: "Log a plan on CRONK-1." } }] } },
+        { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "Planned it." }] }, toolUseResult: { status: "completed", agentId: "a1" } },
+      ]),
+    );
+    await mkdir(join(dir, "chat", "subagents"), { recursive: true });
+    await writeFile(
+      join(dir, "chat", "subagents", "agent-a1.jsonl"),
+      jsonl([
+        { type: "user", isSidechain: true, agentId: "a1", message: { role: "user", content: "Log a plan on CRONK-1." } },
+        { type: "assistant", isSidechain: true, agentId: "a1", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_2", name: "mcp__cronk__activities", input: { action: "log", key: "CRONK-1" } }] } },
+        { type: "user", isSidechain: true, agentId: "a1", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_2", content: logged }] } },
+      ]),
+    );
+
+    const ran = await runHook({ session_id: "claude-chat-1", transcript_path: join(dir, "chat.jsonl"), hook_event_name: "Stop" }, { CRONK_URL: await cronk.url(), CRONK_TOKEN: claude.secret });
+    expect(ran, ran.stderr).toMatchObject({ code: 0 });
+
+    const listed = (await admin.get("/api/transcripts")).body.transcripts;
+    expect(listed).toHaveLength(1);
+    const transcript = (await admin.get(`/api/transcripts/${listed[0].id}`)).body.transcript;
+    expect(transcript).toMatchObject({ chatId: "claude-chat-1", tickets: [{ key: "CRONK-1" }] });
+    expect(transcript.markdown).toMatch(/^`{4}subagent a1$/m);
+  });
+
   it("stays quiet about a chat that changed nothing yet, and reports what keeps any other upload out without blocking Claude", async () => {
     const { cronk, admin, claude } = await delegatedSetup();
     const event = { session_id: "claude-chat-1", transcript_path: fixture("text-only.jsonl"), hook_event_name: "Stop" };
