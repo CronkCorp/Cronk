@@ -54,51 +54,57 @@ const documentPlaceSql = (document: string) => `jsonb_build_object('document', j
 const artifactPlaceSql = (artifact: string, version: string) =>
   `jsonb_build_object('artifact', jsonb_build_object('id', ${artifact}.id, 'title', ${artifact}.title, 'version', ${version}))`;
 
-/**
- * One SELECT per kind of record, each giving the same columns: `place` holds only the places its kind fills.
- * They read the Agent as `$1`, the readable Project ids as `$2` and the Workspace's id, when it is readable
- * outside any Project, as `$3`.
- */
-const SELECTS = [
+/** SQL for the values the SELECTS read, each bound as a query parameter. */
+interface RecordParams {
+  /** The Agent's id (a uuid). */
+  agent: string;
+  /** The ids of the Projects the reader may read (a uuid[]). */
+  projectIds: string;
+  /** The Workspace's id when the reader may read outside any Project, else NULL (a uuid). */
+  workspaceId: string;
+}
+
+/** One SELECT per kind of record, each giving the same columns: `place` holds only the places its kind fills. */
+const selects = ({ agent, projectIds, workspaceId }: RecordParams) => [
   `SELECT 'change' AS kind, c.at, c.actor_session_id AS session_id, p.key AS project_key, ${ticketPlaceSql("p", "t")} AS place,
      jsonb_build_object('change', c.change) || c.data AS data, c.id AS seq
    FROM ticket_changes c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
-   WHERE c.actor_agent_id = $1 AND t.project_id = ANY($2)
+   WHERE c.actor_agent_id = ${agent} AND t.project_id = ANY(${projectIds})
      -- A relation names another Ticket, which may lie in a Project the reader can't see.
      AND (c.change NOT IN ('relation added', 'relation removed') OR EXISTS (
-       SELECT 1 FROM projects rp WHERE rp.id = ANY($2) AND rp.key = regexp_replace(c.data->'ticket'->>'key', '-[0-9]+$', '')))
+       SELECT 1 FROM projects rp WHERE rp.id = ANY(${projectIds}) AND rp.key = regexp_replace(c.data->'ticket'->>'key', '-[0-9]+$', '')))
      -- So may a linked Document; null projectKey means a Workspace Document.
      AND (c.change NOT IN ('document linked', 'document unlinked') OR
-       CASE WHEN c.data->'document'->>'projectKey' IS NULL THEN $3::uuid IS NOT NULL
-            ELSE EXISTS (SELECT 1 FROM projects dp WHERE dp.id = ANY($2) AND dp.key = c.data->'document'->>'projectKey') END)`,
+       CASE WHEN c.data->'document'->>'projectKey' IS NULL THEN ${workspaceId} IS NOT NULL
+            ELSE EXISTS (SELECT 1 FROM projects dp WHERE dp.id = ANY(${projectIds}) AND dp.key = c.data->'document'->>'projectKey') END)`,
   `SELECT 'activity', a.at, a.actor_session_id, p.key, ${ticketPlaceSql("p", "t")},
      jsonb_build_object('id', a.id, 'kind', a.kind, 'body', a.body, 'blocking', a.blocking), a.seq
    FROM activities a JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id
-   WHERE a.actor_agent_id = $1 AND t.project_id = ANY($2)`,
+   WHERE a.actor_agent_id = ${agent} AND t.project_id = ANY(${projectIds})`,
   `SELECT 'comment', c.at, c.actor_session_id, p.key, ${ticketPlaceSql("p", "t")},
      jsonb_build_object('id', c.id, 'body', c.body), c.seq
    FROM comments c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
-   WHERE c.actor_agent_id = $1 AND t.project_id = ANY($2)`,
+   WHERE c.actor_agent_id = ${agent} AND t.project_id = ANY(${projectIds})`,
   `SELECT 'comment', c.at, c.actor_session_id, p.key, ${documentPlaceSql("d")},
      jsonb_build_object('id', c.id, 'body', c.body), c.seq
    FROM comments c JOIN documents d ON d.id = c.document_id LEFT JOIN projects p ON p.id = d.project_id
-   WHERE c.actor_agent_id = $1 AND ${placeReadableSql("d", "$2", "$3")}`,
+   WHERE c.actor_agent_id = ${agent} AND ${placeReadableSql("d", projectIds, workspaceId)}`,
   // A Report lies with its Ticket, so whoever can read the Ticket can read it, and its Version is on both.
   `SELECT 'version', v.at, v.actor_session_id, p.key,
      CASE WHEN t.id IS NULL THEN '{}'::jsonb ELSE ${ticketPlaceSql("p", "t")} END || ${documentPlaceSql("d")},
      jsonb_build_object('number', v.number), v.number::bigint
    FROM document_versions v JOIN documents d ON d.id = v.document_id LEFT JOIN tickets t ON t.id = d.ticket_id
      LEFT JOIN projects p ON p.id = coalesce(t.project_id, d.project_id)
-   WHERE v.actor_agent_id = $1 AND (CASE WHEN t.id IS NULL THEN ${placeReadableSql("d", "$2", "$3")} ELSE t.project_id = ANY($2) END)`,
+   WHERE v.actor_agent_id = ${agent} AND (CASE WHEN t.id IS NULL THEN ${placeReadableSql("d", projectIds, workspaceId)} ELSE t.project_id = ANY(${projectIds}) END)`,
   // An Artifact lies in a Project, or in the Workspace outside any.
   `SELECT 'comment', c.at, c.actor_session_id, p.key, ${artifactPlaceSql("a", "c.artifact_version")},
      jsonb_build_object('id', c.id, 'body', c.body), c.seq
    FROM comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id
-   WHERE c.actor_agent_id = $1 AND ${placeReadableSql("a", "$2", "$3")}`,
+   WHERE c.actor_agent_id = ${agent} AND ${placeReadableSql("a", projectIds, workspaceId)}`,
   `SELECT 'artifact_version', v.at, v.actor_session_id, p.key, ${artifactPlaceSql("a", "v.number")},
      '{}'::jsonb, v.number::bigint
    FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id LEFT JOIN projects p ON p.id = a.project_id
-   WHERE v.actor_agent_id = $1 AND ${placeReadableSql("a", "$2", "$3")}`,
+   WHERE v.actor_agent_id = ${agent} AND ${placeReadableSql("a", projectIds, workspaceId)}`,
 ];
 
 /**
@@ -112,12 +118,21 @@ export async function listAgentRecord(
   input: { since?: Date | undefined; limit: number },
 ): Promise<AgentRecordEntry[]> {
   const readable = await readablePlaces(db, actor);
+  const params: unknown[] = [];
+  /** Binds `value` as the next parameter, returning SQL that reads it. */
+  const param = (value: unknown, type: string) => `$${params.push(value)}::${type}`;
+  const record = selects({
+    agent: param(agent.id, "uuid"),
+    projectIds: param(readable.projectIds, "uuid[]"),
+    workspaceId: param(readable.workspaceId, "uuid"),
+  });
+  const since = param(input.since ?? null, "timestamptz");
   const { rows } = await db.query<RecordRow>(
-    `SELECT * FROM (${SELECTS.join("\n UNION ALL ")}) entries
-     WHERE $4::timestamptz IS NULL OR entries.at >= $4
+    `SELECT * FROM (${record.join("\n UNION ALL ")}) entries
+     WHERE ${since} IS NULL OR entries.at >= ${since}
      ORDER BY entries.at DESC, entries.kind, entries.seq DESC
-     LIMIT $5`,
-    [agent.id, readable.projectIds, readable.workspaceId, input.since ?? null, input.limit],
+     LIMIT ${param(input.limit, "int")}`,
+    params,
   );
   return rows.map((row) => {
     const session = row.session_id === null ? null : { id: row.session_id };
