@@ -1,0 +1,6 @@
+{"type":"user","message":{"role":"user","content":"Log a plan on CRONK-1."},"isSidechain":true,"agentId":"afg"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_f1","name":"mcp__cronk__activities","input":{"action":"log","key":"CRONK-1","kind":"plan"}}]},"isSidechain":true,"agentId":"afg"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_f1","content":[{"type":"text","text":"Agent Session 0b5e7a52-8c1e-4f7e-9a51-3f0c2d8e1a77"},{"type":"text","text":"{\"activity\":{\"kind\":\"plan\"}}"}]}]},"isSidechain":true,"agentId":"afg"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_f2","name":"Agent","input":{"description":"Read the README","prompt":"How are tests run?"}}]},"isSidechain":true,"agentId":"afg"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_f2","content":"With npm test."}]},"isSidechain":true,"agentId":"afg","toolUseResult":{"status":"completed","agentId":"anested"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Planned CRONK-1."}]},"isSidechain":true,"agentId":"afg"}

@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"Log a plan on CRONK-2."},"isSidechain":true,"agentId":"abg"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_b1","name":"mcp__cronk__activities","input":{"action":"log","key":"CRONK-2","kind":"plan"}}]},"isSidechain":true,"agentId":"abg"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":[{"type":"text","text":"Agent Session 0b5e7a52-8c1e-4f7e-9a51-3f0c2d8e1a77"}]}]},"isSidechain":true,"agentId":"abg"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Planned CRONK-2."}]},"isSidechain":true,"agentId":"abg"}

@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"Nobody launched me."},"isSidechain":true,"agentId":"astray"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Unclaimed."}]},"isSidechain":true,"agentId":"astray"}

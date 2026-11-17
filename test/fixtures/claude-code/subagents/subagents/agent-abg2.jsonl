@@ -1,0 +1,2 @@
+{"type":"user","isSidechain":true,"agentId":"abg2","message":{"role":"user","content":"Log a plan on CRONK-3."}}
+{"type":"assistant","isSidechain":true,"agentId":"abg2","message":{"role":"assistant","content":[{"type":"text","text":"Planned CRONK-3."}]}}

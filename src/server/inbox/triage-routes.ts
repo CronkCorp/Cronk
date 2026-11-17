@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUser, type AppContext } from "../context.js";
 import { answer, errors, ref } from "../schemas.js";
 import { listTriage, TRIAGE_KINDS, type TriageItem } from "./triage.js";
-import { pausedTickets } from "./routes.js";
+import { hiddenBlocks, pausedTickets } from "./routes.js";
 
 const timestamp = { type: "string", format: "date-time" } as const;
 
@@ -55,7 +55,7 @@ const unattendedItem = {
 
 const discoveredItem = {
   type: "object",
-  required: ["kind", "at", "ticket", "reports", "blocks"],
+  required: ["kind", "at", "ticket", "reports", "blocks", "hiddenBlocks"],
   description:
     "A Discovered Ticket in Backlog and undelegated, with no Assignee or one who is deactivated or has no access to its Project. " +
     "A User with Write in its Project takes it by assigning it to themselves, " +
@@ -66,6 +66,7 @@ const discoveredItem = {
     ticket: ref("Ticket"),
     reports: { type: "array", items: ref("Report") },
     blocks: pausedTickets,
+    hiddenBlocks,
   },
 } as const;
 
