@@ -15,7 +15,7 @@ import type { publicInvitation } from "./identity/invitations.js";
 import type { Guidance as StoredGuidance, GuidanceVersion as StoredGuidanceVersion } from "./knowledge/guidance.js";
 import type { publicUser } from "./identity/users.js";
 import type { Project as StoredProject } from "./work/projects.js";
-import type { Relations as StoredRelations } from "./work/relations.js";
+import type { ShownRelations } from "./work/relations.js";
 import type { DependentChoice as StoredDependentChoice } from "./work/reopen.js";
 import type {
   RecordedActor,
@@ -119,11 +119,14 @@ export type Project = Serialized<StoredProject> & {
 };
 
 export type Ticket = Serialized<StoredTicket>;
-export type Relations = Serialized<StoredRelations>;
+/** A Ticket's relations as the caller is shown them, hidden Discovered blockers as placeholders. */
+export type Relations = Serialized<ShownRelations>;
 /** A Ticket a Reopen would reach, with the choices it takes (GET /api/tickets/:key/reopen). */
 export type DependentChoice = Serialized<StoredDependentChoice>;
 /** Another Ticket at the other end of a block, with who added it from a Discovered Ticket and why. */
 export type BlockingRef = Relations["blocks"][number];
+/** A block from a Discovered Ticket the caller can't see, in place of that Ticket among a Ticket's blockers. */
+export type HiddenBlocker = Extract<Relations["blockedBy"][number], { hidden: true }>;
 
 /** An Agent Session's hold on a Ticket. */
 export type Claim = Serialized<StoredClaim>;
@@ -159,7 +162,7 @@ export type Activity = Serialized<ReturnType<typeof publicActivity>>;
 /** A message an Actor posted on a Ticket or a Document. */
 export type Comment = Serialized<ReturnType<typeof publicComment>>;
 
-/** One entry in an Agent Record: a Change, an Activity, a Comment or a saved Version. */
+/** One entry in an Agent Record: a Change, an Activity, a Comment, a saved Document Version or a published Artifact Version. */
 export type AgentRecordEntry = Serialized<StoredAgentRecordEntry>;
 
 /** A Comment waiting for an Agent, with why and what it is on. */

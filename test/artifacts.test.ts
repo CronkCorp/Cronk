@@ -222,6 +222,25 @@ describe("Who may publish and read an Artifact", () => {
       sourceTicket: { key: "CRONK-1" },
     });
   });
+
+  it("locks its Project before its source Ticket, as filing a Discovered Ticket from the same Claim does", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    const claude = await session();
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const projectId = (await admin.get("/api/projects/CRONK")).body.project.id;
+
+    // The Discovered Ticket waits on the Project first, then the publish does.
+    const held = await cronk.holdRow("projects", projectId);
+    const filing = claude.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "CRONK-1" });
+    await held.waiters(1);
+    const publishing = claude.upload("/api/projects/CRONK/artifacts?title=Limits&ticket=CRONK-1", await tarGz(site));
+    await held.waiters(2);
+    await held.release();
+
+    // Neither is aborted as a deadlock.
+    expect((await filing).status).toBe(201);
+    expect((await publishing).status).toBe(201);
+  });
 });
 
 describe("A Protected Artifact", () => {

@@ -91,21 +91,19 @@ const newSuggestionBody = {
 export function suggestionRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /**
-     * Tells whoever a change to `suggestion`, in the Workspace with this id, concerns: its reviewer's Inbox and, once accepted,
-     * the watchers of a Document, Term or Decision it changed.
+     * Tells whoever a change to `suggestion`, in the Workspace with this id, concerns: its reviewer's Inbox; the watchers of
+     * a Term's Terms, whenever its count of open Suggestions or (once accepted) the Term changes; and, once accepted, the
+     * watchers of a Document or Decision it changed.
      */
     const changed = async (suggestion: Suggestion, workspaceId: string) => {
       waitingItemsChanged(ctx.live, [suggestion.reviewer?.id]);
+      if (suggestion.item.kind === "term") termsChanged(ctx.live, { workspaceId, projectId: suggestion.item.projectId });
       if (suggestion.state !== "accepted") return;
       if (suggestion.item.kind === "decision") {
         const decision = await findDecisionById(ctx.db, suggestion.item.id!);
         if (decision && suggestion.resultVersion !== null) await decisionVersionSaved(ctx, decision, suggestion.resultVersion);
-        return;
-      }
-      if (suggestion.item.kind === "document") {
+      } else if (suggestion.item.kind === "document") {
         ctx.live.publish(documentTopic(suggestion.item.id!), { event: "version", data: { version: suggestion.resultVersion } });
-      } else if (suggestion.item.kind === "term") {
-        termsChanged(ctx.live, { workspaceId, projectId: suggestion.item.projectId });
       }
     };
 

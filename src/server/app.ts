@@ -3,7 +3,8 @@ import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
-import { HttpError, isReading, SIGN_IN_COOKIE, type AppContext } from "./context.js";
+import { HttpError, isReading, requestActor, SIGN_IN_COOKIE, type AppContext } from "./context.js";
+import { forReader } from "./identity/readable-only-in.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
@@ -31,6 +32,7 @@ import { attachmentRoutes } from "./files/attachment-routes.js";
 import { artifactRoutes } from "./files/artifact-routes.js";
 import { artifactHostRoutes, keepArtifactHostApart } from "./files/artifact-host.js";
 import { createFileStore, type StorageConfig } from "./files/storage.js";
+import { DEFAULT_IMPORT_MAX_BYTES } from "./portability/archive.js";
 import { cachedSerializers } from "./serializers.js";
 
 const healthSchema = { type: "object", required: ["status"], properties: { status: { type: "string", const: "ok" } } } as const;
@@ -50,6 +52,8 @@ export interface AppConfig {
   webRoot?: string | undefined;
   /** Where the files of Attachments and Artifacts are stored: a directory on local disk, or a bucket of an S3-compatible store. */
   storage: StorageConfig;
+  /** The most bytes one import of an export may write, to local disk and the file store together; 50 GiB if not given. */
+  importMaxBytes?: number | undefined;
   /**
    * The address Artifacts are served from, a hostname of their own such as `https://artifacts.cronk.example` (ADR 0007).
    * Without it, they are served from Cronk's own hostname in a stricter sandbox.
@@ -91,6 +95,7 @@ export async function buildApp(opts: {
     cookieSecure: opts.config.cookieSecure,
     live: opts.live ?? new LiveUpdates(),
     files: createFileStore(opts.config.storage),
+    importMaxBytes: opts.config.importMaxBytes ?? DEFAULT_IMPORT_MAX_BYTES,
     publicUrl: opts.config.publicUrl,
     artifactsUrl: opts.config.artifactsUrl,
   };
@@ -121,6 +126,9 @@ export async function buildApp(opts: {
       response: { ...errors(400), ...(isWrite(route.method) && errors(403)), ...(schema.response as object | undefined) },
     };
   });
+  // No answer carries what its reader can't read, such as a Discovered Ticket's source in a Project they can't (see `readableOnlyIn`).
+  app.addHook("preSerialization", async (request, _reply, payload) => forReader(db, requestActor(request), payload));
+  ctx.live.shapeDataWith((request, data) => forReader(db, requestActor(request), data));
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ ...err.details, error: err.message });

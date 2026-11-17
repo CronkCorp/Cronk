@@ -768,6 +768,28 @@ describe("Discovered Tickets in an export", () => {
     });
     expect(markdown(files["projects/CRONK/tickets/CRONK-1.md"]).data.discovered).toBeUndefined();
   });
+
+  it("keep a source in another Project by its own key, with its Claim, and are imported without it when the archive lacks it", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/OPS/tickets", { title: "Deploy is flaky" });
+    await agent.post("/api/tickets/CRONK-1/reports", { title: "Done", body: "Fixed." });
+
+    const workspace = await admin.download("/api/export");
+    expect(markdown((await untarGz(workspace.body))["projects/OPS/tickets/OPS-1.md"]).data.discovered).toMatchObject({ sourceTicket: "CRONK-1", sourceClaim: expect.any(String) });
+    const { admin: elsewhere } = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.upload("/api/import", workspace.body)).status).toBe(201);
+    expect((await elsewhere.get("/api/tickets/OPS-1")).body.ticket.discovered.sourceTicket).toEqual({ key: "CRONK-1", title: "Ticket 1" });
+    // The Claim came along too, so the Report written in it still lists the Ticket.
+    expect((await elsewhere.get("/api/tickets/CRONK-1/reports")).body.reports[0].discovered.map((t: { key: string }) => t.key)).toEqual(["OPS-1"]);
+
+    const project = await admin.download("/api/projects/OPS/export");
+    const { admin: another } = await startInstalledCronk("Another");
+    expect((await another.upload("/api/import", project.body)).status).toBe(201);
+    expect((await another.get("/api/tickets/OPS-1")).body.ticket.discovered).toMatchObject({ agent: { name: "claude-laptop" }, sourceTicket: null });
+  });
 });
 
 describe("Terms in an export", () => {

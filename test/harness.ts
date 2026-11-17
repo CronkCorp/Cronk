@@ -177,8 +177,12 @@ export class Client {
       request.once("error", reject);
     });
     if (init.body) {
-      // A server answering before it has read the whole body, as it does refusing one, stops the upload; the answer still counts.
-      await pipeline(init.body, request).catch(() => {});
+      // A server answering before it has read the whole body, as it does refusing one, stops the upload; the answer still counts,
+      // so the request is left to the answer rather than torn down with it. A body that fails ends the request.
+      const body = init.body;
+      request.once("response", () => body.unpipe(request));
+      body.once("error", (err) => request.destroy(err));
+      body.pipe(request);
     } else {
       request.end();
     }
@@ -289,6 +293,11 @@ export interface Cronk {
   /** Locks all of `table`, as a schema change would, so every query on it (reads too) waits until it is released. */
   holdTable(table: string): Promise<HeldLock>;
   /**
+   * How many queries naming `table` the server sends while `during` runs; to tell a fixed number of queries from one per item.
+   * Counts every pg Client in the process, so keep the harness's own (held locks, say) out of `during`.
+   */
+  queriesOn(table: string, during: () => Promise<unknown>): Promise<number>;
+  /**
    * Holds back every live update the server pushes from now on, as if each change committed
    * but its push hadn't run yet, until released, which pushes them in order. Released when the test ends.
    */
@@ -348,9 +357,9 @@ async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
 /**
  * Starts Cronk in-process on a fresh, empty database and stops it when the test ends.
  * `publicUrl` is the address Cronk is configured to be reached at, if any. `storage` is where it keeps files:
- * by default a directory of the test's own on local disk.
+ * by default a directory of the test's own on local disk. `importMaxBytes` is the most one import may write, 50 GiB by default.
  */
-export async function startCronk(opts: { publicUrl?: string; storage?: StorageConfig } = {}): Promise<Cronk> {
+export async function startCronk(opts: { publicUrl?: string; storage?: StorageConfig; importMaxBytes?: number } = {}): Promise<Cronk> {
   const adminUrl = inject("postgresAdminUrl");
   const dbName = `cronk_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -367,7 +376,7 @@ export async function startCronk(opts: { publicUrl?: string; storage?: StorageCo
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
   const start = () =>
-    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
+    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: 50 });
 
   const cronk: Cronk = {
     app: await start(),
@@ -426,6 +435,23 @@ export async function startCronk(opts: { publicUrl?: string; storage?: StorageCo
     },
     holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
     holdTable: (table) => hold(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`, []),
+    queriesOn: async (table, during) => {
+      // The server and this harness share the pg module, and the Pool sends every query through a Client.
+      const naming = new RegExp(`\\b${table}\\b`);
+      const query = pg.Client.prototype.query;
+      let n = 0;
+      pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
+        const config = args[0] as string | { text?: string };
+        if (naming.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
+        return (query as (...a: unknown[]) => unknown).apply(this, args);
+      } as typeof query;
+      try {
+        await during();
+      } finally {
+        pg.Client.prototype.query = query;
+      }
+      return n;
+    },
     holdPushes: () => {
       const release = live.hold();
       onTestFinished(release);

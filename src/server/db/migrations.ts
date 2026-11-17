@@ -1037,4 +1037,13 @@ export const migrations: Migration[] = [
     `,
     backfill: (db) => scrubAllStored(db),
   },
+  {
+    id: "0045_relation_ids",
+    sql: `
+      -- An opaque id per Relation (work/relations.ts), so a User may remove a block from a Discovered Ticket they can't see
+      -- by the block's id, which, unlike a Ticket's key or id, says nothing of that Ticket.
+      ALTER TABLE ticket_relations ADD COLUMN id uuid NOT NULL DEFAULT gen_random_uuid();
+      CREATE UNIQUE INDEX ticket_relations_id ON ticket_relations (id);
+    `,
+  },
 ];

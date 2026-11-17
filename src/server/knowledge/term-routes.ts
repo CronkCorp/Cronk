@@ -12,6 +12,7 @@ import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
 import { listMentions } from "./mentions.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 import {
+  answeredTerms,
   deleteTerm,
   findProtectedWorkspaceTerm,
   findTerm,
@@ -20,7 +21,6 @@ import {
   listTerms,
   listTermVersions,
   saveTermVersion,
-  withOverrides,
   type StoredTerm,
   type Term,
   type TermFields,
@@ -97,7 +97,7 @@ export function termRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /** Answers Terms with their overrides as the caller may see them. */
     const answerTerms = async (actor: Actor, terms: StoredTerm[]) =>
-      withOverrides(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
+      answeredTerms(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
     const answerTerm = async (actor: Actor, term: StoredTerm): Promise<Term> => (await answerTerms(actor, [term]))[0]!;
 
     /**
@@ -167,7 +167,7 @@ export function termRoutes(ctx: AppContext) {
       200: {
         description:
           `A server-sent event stream of changes to ${what} as they happen, for as long as the caller can read there. It opens with a ` +
-          "`ready` event; whenever a Term there is created, saved, deleted, or marked Protected or unmarked, a `changed` event arrives " +
+          "`ready` event; whenever a Term there is created, saved, deleted, or marked Protected or unmarked, or a Suggestion on one is made, accepted or rejected, a `changed` event arrives " +
           "whose data is `{}`, so the caller reads the Terms again.",
         content: { "text/event-stream": { schema: { type: "string" } } },
       },

@@ -19,6 +19,7 @@ import {
   type TicketChanges,
   type TicketDetail,
   type BlockingRef,
+  type HiddenBlocker,
   type TicketRef,
 } from "./api.js";
 import { PRIORITIES } from "../shared/values.js";
@@ -495,27 +496,36 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean }) {
   const [other, setOther] = useState("");
   const add = useAction(() => api.addRelation(t.key, kind, other.trim()), () => setOther(""));
   const remove = useAction((kind: RelationKind, otherKey: string) => api.removeRelation(t.key, kind, otherKey), () => {});
+  const removeHidden = useAction((blockId: string) => api.removeBlock(t.key, blockId), () => {});
+  const { blocks, blockedBy, relatesTo } = props.detail.relations;
+  const hidden = blockedBy.filter((b): b is HiddenBlocker => "hidden" in b);
   const lists: [RelationKind, (TicketRef & { block?: BlockingRef["block"] })[]][] = [
-    ["blocks", props.detail.relations.blocks],
-    ["blocked_by", props.detail.relations.blockedBy],
-    ["relates_to", props.detail.relations.relatesTo],
+    ["blocks", blocks],
+    ["blocked_by", blockedBy.filter((b): b is BlockingRef => !("hidden" in b))],
+    ["relates_to", relatesTo],
   ];
-  const any = lists.some(([, refs]) => refs.length > 0);
+  const any = hidden.length > 0 || lists.some(([, refs]) => refs.length > 0);
+  const busy = remove.busy || removeHidden.busy;
   if (props.readOnly && !any) return null;
   return (
     <div className="side-group">
       <h3>Relations</h3>
       {lists.map(
         ([listKind, refs]) =>
-          refs.length > 0 && (
+          (refs.length > 0 || (listKind === "blocked_by" && hidden.length > 0)) && (
             <div key={listKind} className="relation-group">
               <h4>{RELATION_NAMES[listKind]}</h4>
-              <TicketRefList
-                name={RELATION_NAMES[listKind]}
-                refs={refs}
-                onRemove={props.readOnly ? undefined : (ref) => void remove.run(listKind, ref.key)}
-                busy={remove.busy}
-              />
+              {refs.length > 0 && (
+                <TicketRefList
+                  name={RELATION_NAMES[listKind]}
+                  refs={refs}
+                  onRemove={props.readOnly ? undefined : (ref) => void remove.run(listKind, ref.key)}
+                  busy={busy}
+                />
+              )}
+              {listKind === "blocked_by" && hidden.length > 0 && (
+                <HiddenBlockerList blockers={hidden} onRemove={props.readOnly ? undefined : (b) => void removeHidden.run(b.blockId)} busy={busy} />
+              )}
             </div>
           ),
       )}
@@ -536,7 +546,7 @@ function RelationsEditor(props: { detail: TicketDetail; readOnly: boolean }) {
           <Button type="submit" variant="secondary" disabled={add.busy}>Add relation</Button>
         </form>
       )}
-      {(add.error ?? remove.error) && <p className="error" role="alert">{add.error ?? remove.error}</p>}
+      {(add.error ?? remove.error ?? removeHidden.error) && <p className="error" role="alert">{add.error ?? remove.error ?? removeHidden.error}</p>}
     </div>
   );
 }
@@ -649,6 +659,30 @@ function TicketRefList(props: { name: string; refs: (TicketRef & { block?: Block
               <Actor actor={agentActor(ref.block.agent)} />: {ref.block.reason}
             </p>
           )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Blocks Agents added from Discovered Tickets the User can't see: each says so in place of the Ticket, with the Agent and why, and Remove
+ * when given `onRemove` (docs/ui.md § Ticket).
+ */
+function HiddenBlockerList(props: { blockers: HiddenBlocker[]; onRemove?: (blocker: HiddenBlocker) => void; busy?: boolean }) {
+  return (
+    <ul className="side-list" aria-label="Blocked by Tickets you can't see">
+      {props.blockers.map((b) => (
+        <li key={b.blockId}>
+          <span className="side-ref-link muted">A Ticket you can't see</span>
+          {props.onRemove && (
+            <Button variant="ghost" aria-label="Remove the block by a Ticket you can't see" disabled={props.busy} onClick={() => props.onRemove!(b)}>
+              Remove
+            </Button>
+          )}
+          <p className="side-ref-why muted small">
+            <Actor actor={agentActor(b.block.agent)} />: {b.block.reason}
+          </p>
         </li>
       ))}
     </ul>

@@ -105,6 +105,16 @@ function storageContract(name: string, open: () => Promise<FileStore>, skip = fa
       expect(await store.list("artifacts/v1/css")).toEqual(["artifacts/v1/css/site.css"]);
     });
 
+    it("says how many bytes a file holds without reading it, and null for a key with no file", async () => {
+      const store = await open();
+      await store.put("attachments/a1", Buffer.from("hello, world"));
+      await store.put("attachments/empty", Buffer.alloc(0));
+
+      expect(await store.size("attachments/a1")).toBe(12);
+      expect(await store.size("attachments/empty")).toBe(0);
+      expect(await store.size("attachments/missing")).toBeNull();
+    });
+
     it("fails reading a key with no file", async () => {
       const store = await open();
 
