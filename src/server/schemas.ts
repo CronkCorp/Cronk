@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, TRANSCRIPT_REFUSAL_REASONS, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -57,6 +57,7 @@ export type SharedSchemaName =
   | "VersionSummary"
   | "StaleVersion"
   | "SectionRefused"
+  | "TranscriptRefused"
   | "Merge"
   | "Guidance"
   | "GuidanceVersion"
@@ -163,7 +164,7 @@ const priority = { type: "string", enum: PRIORITIES } as const;
 const labels = { type: "array", items: { type: "string" } } as const;
 
 /** The Artifacts a Markdown body embeds: their addresses standing alone on a line. */
-const embeds = (whose: string) => ({
+export const embeds = (whose: string) => ({
   type: "array",
   items: object({
     artifactId: id,
@@ -858,6 +859,12 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     description: "A section replacement refused because no section, or more than one, has that heading, with the Document's headings to pick from.",
     ...object({ error: { type: "string" }, headings: { type: "array", items: { type: "string" }, description: "Its heading lines, such as `## Setup`, in order." } }, ["headings"]),
   },
+  TranscriptRefused: {
+    description:
+      "A Transcript upload refused with a reason clients match on, rather than on the status alone or on the message, which may change: " +
+      "`nothing_changed` when the chat names none of the Agent's Agent Sessions that changed anything.",
+    ...object({ error: { type: "string" }, reason: { type: "string", enum: TRANSCRIPT_REFUSAL_REASONS, description: "Why the upload was refused." } }),
+  },
   Merge: {
     description: "An edit merged section by section with the current Version. Only conflicts need a User's choice.",
     ...object({
@@ -946,16 +953,26 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   AgentRecordEntry: {
-    description: "One entry in an Agent Record: one thing the Agent did. `kind` says which; the field named after it holds what, and the other three are null.",
+    description:
+      "One entry in an Agent Record: one thing the Agent did. `kind` says which; the field named after it holds what, and the others are null. " +
+      "An `artifact_version` entry, a published Artifact Version, holds it in `artifact`.",
     ...object({
-      kind: { type: "string", enum: ["change", "activity", "comment", "version"], description: "A Change to a Ticket, an Activity, a Comment or a saved Version." },
+      kind: {
+        type: "string",
+        enum: ["change", "activity", "comment", "version", "artifact_version"],
+        description: "A Change to a Ticket, an Activity, a Comment, a saved Version of a Document, or a published Version of an Artifact.",
+      },
       at: timestamp,
       session: { ...nullable(object({ id })), description: "The Agent Session it was done in; null for an imported entry that names none." },
-      projectKey: { ...nullable({ type: "string" }), description: "Null for a Document in the Workspace outside any Project." },
+      projectKey: { ...nullable({ type: "string" }), description: "Null for a Document or Artifact in the Workspace outside any Project." },
       ticket: { ...nullable(ticketName), description: "The Ticket it was on: a Change's, Activity's or Comment's, or a Report's." },
       document: {
         ...nullable(object({ id, title: { type: "string" } })),
         description: "The Document or Report it was on, for a Comment or a saved Version.",
+      },
+      artifact: {
+        ...nullable(object({ id, title: { type: "string", description: "The Artifact's current title." }, version: { type: "integer" } })),
+        description: "The Artifact it was on, at a Version: the Version it published, or the Version a Comment is on.",
       },
       change: { ...nullable(ref("RecordedChange")), description: "A Change it made to the Ticket." },
       activity: {

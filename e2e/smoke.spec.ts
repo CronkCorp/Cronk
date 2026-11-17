@@ -1578,6 +1578,15 @@ test("comment on an Artifact's Version from the drawer beside it, and see a repl
   await page.getByRole("searchbox", { name: "Search" }).press("Enter");
   await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /On Limits/ }).click();
   await expect(page).toHaveURL(`/artifacts/${artifact.id}`);
+
+  // The Agents page lists the publish and the reply among what the Agent did, each opening the Artifact at its Version.
+  await page.goto("/agents");
+  const card = page.getByRole("listitem", { name: "artifact-bot" });
+  await card.getByRole("button", { name: "Show what it did" }).click();
+  const record = card.getByRole("list", { name: "What artifact-bot did" });
+  await expect(record.getByRole("listitem").filter({ hasText: "commented on Limits (Version 1)" })).toBeVisible();
+  await record.getByRole("listitem").filter({ hasText: "published Version 1 of Limits" }).getByRole("link", { name: "Limits" }).click();
+  await expect(page).toHaveURL(`/artifacts/${artifact.id}?version=1`);
 });
 
 // Runs after the tests above, so Ada exists; the Workspace allows extra origins, as a fresh one does.
@@ -1652,6 +1661,35 @@ test("declare an extra origin when publishing an Artifact from the dialog, and s
   } finally {
     await rm(picked, { recursive: true, force: true });
   }
+});
+
+test("preview an Artifact embedded in a Document while editing it, but only a link in a Decision", async ({ page }) => {
+  await signIn(page);
+  await page.request.post("/api/projects", { data: { name: "Embed preview", key: "EMB" } });
+  const published = await page.request.post("/api/projects/EMB/artifacts?title=Limits", {
+    headers: { "content-type": "application/gzip" },
+    data: await tarGz({ "index.html": "<h1>Limits</h1>" }),
+  });
+  expect(published.status()).toBe(201);
+  const { artifact } = await published.json();
+
+  // Before saving, the preview shows the Artifact where the saved Document would: its address alone on a line.
+  const doc = (await (await page.request.post("/api/projects/EMB/documents", { data: { title: "Limits notes", body: "Notes." } })).json()).document;
+  await page.goto(`/documents/${doc.id}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill(`The dashboard:\n\n${artifact.versionUrl}\n\nAlso at ${artifact.url} in a sentence.`);
+  const preview = page.getByRole("region", { name: "Preview" });
+  await expect(preview.locator("iframe[title='Limits, Version 1']")).toBeVisible();
+  await expect(preview.locator(".artifact-embed")).toHaveCount(1);
+  await expect(preview.getByRole("link", { name: artifact.url })).toBeVisible();
+
+  // A Decision doesn't embed Artifacts, so its preview keeps the address a link, as its saved view does.
+  const decision = (await (await page.request.post("/api/projects/EMB/decisions", { data: { title: "Show limits", body: "Limit sign-ins." } })).json()).decision;
+  await page.goto(`/decisions/${decision.key}`);
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Body (Markdown)").fill(`Evidence:\n\n${artifact.versionUrl}`);
+  await expect(preview.getByRole("link", { name: artifact.versionUrl })).toBeVisible();
+  await expect(preview.locator(".artifact-embed")).toHaveCount(0);
 });
 
 /** A gzipped tar archive holding `files`, path to text, as publishing an Artifact takes. */

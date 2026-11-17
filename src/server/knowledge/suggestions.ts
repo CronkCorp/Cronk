@@ -389,7 +389,7 @@ interface SuggestionRow {
 /**
  * SQL for the User who reviews the Suggestion aliased `s`, whose source Ticket is aliased `t`: on a
  * Project item, the source Ticket's Assignee, else the proposing Agent's Owner, whichever is still
- * active; none (Triage) on a Workspace item, or when neither is.
+ * active; none (Triage) on a Workspace item, or when neither is. Keep `usersInheritingFrom` in step with it.
  */
 export const reviewerSql = (s: string, t: string) => `
   CASE WHEN ${s}.project_id IS NULL THEN NULL ELSE COALESCE(
