@@ -8,6 +8,7 @@ Every command's output lands in the agent's context, so keep each run small and 
 
 - While working, run the one file you are changing: `npx vitest run test/<file>.test.ts --reporter=agent`, adding `-t "<test name>"` for a single test. The `agent` reporter prints only failures and the summary.
 - `npm run test:e2e` rebuilds the web client every run. For a series of smoke runs, run `npm run build:web` once, then `npx playwright test -g "<test name>" --reporter=line -x`, and rebuild only after changing `src/web/`. The server runs from source, so server changes need no rebuild.
+- Both `npm test` and `npm run test:e2e` start a disposable Postgres container. Where no container runtime is available, set `TEST_POSTGRES_URL` to an existing Postgres (for example `postgres://postgres:postgres@127.0.0.1:5432/postgres`) instead: each test, or each smoke run, creates a fresh database of its own in it and drops it again.
 - Run `npm run check` once, before opening the PR.
 
 ## What a good test is
