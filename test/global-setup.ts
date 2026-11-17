@@ -56,7 +56,11 @@ async function startMinio(): Promise<{ server: S3Server | null; container?: Star
       container,
     };
   } catch (err) {
-    console.warn(`No MinIO could be started, so the S3-compatible storage tests are skipped: ${(err as Error).message}`);
+    const reason = (err as Error).message;
+    if (process.env.CI) {
+      throw new Error(`No MinIO could be started, and in CI the S3-compatible storage tests must run, not be skipped: ${reason}`, { cause: err });
+    }
+    console.warn(`No MinIO could be started, so the S3-compatible storage tests are skipped: ${reason}`);
     return { server: null };
   }
 }
