@@ -1403,7 +1403,12 @@ test("open a Suggestion from the Inbox, switch to side by side, and accept it", 
   await expect(changes.locator(".diff-added")).toHaveText(/Fifty per IP\./);
 
   // Side by side shows the current Version beside the suggestion, and stays chosen for this User across a reload.
+  // The page shows no save status for this choice, so wait for its save to finish before the reload relies on it.
+  const savedDiffView = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/me" && response.request().postDataJSON()?.diffView === "split",
+  );
   await detail.getByRole("button", { name: "Side by side" }).click();
+  expect((await savedDiffView).ok()).toBe(true);
   await expect(detail.getByRole("list", { name: "Version 1, current" })).toContainText("No per-IP limits.");
   await expect(detail.getByRole("list", { name: "Suggested by suggest-bot" })).toContainText("Fifty per IP.");
   await page.reload();
