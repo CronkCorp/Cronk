@@ -77,6 +77,9 @@ export const MARKDOWN_FILE = /\.(md|markdown)$/i;
 export const SUGGESTION_KINDS = ["document", "term", "decision", "guidance"] as const;
 export type SuggestionKind = (typeof SUGGESTION_KINDS)[number];
 
+/** The field of each kind of Suggestion's content that holds its Markdown, which merges section by section. */
+export const SUGGESTION_TEXT_FIELD: Record<SuggestionKind, string> = { document: "body", term: "definition", decision: "body", guidance: "markdown" };
+
 /** Where a Suggestion stands: open until a User accepts or rejects it. */
 export const SUGGESTION_STATES = ["open", "accepted", "rejected"] as const;
 export type SuggestionState = (typeof SUGGESTION_STATES)[number];

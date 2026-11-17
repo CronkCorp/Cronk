@@ -39,7 +39,7 @@ import type { ProtectionMarking as StoredProtectionMarking } from "./knowledge/p
 import type { AgentRecordEntry as StoredAgentRecordEntry } from "./coordination/agent-record.js";
 import type { QuestionItem, DecisionItem, DiscoveredItem, ReviewItem, SuggestionInboxItem, UnverifiedItem } from "./inbox/inbox.js";
 import type { UnattendedItem } from "./inbox/triage.js";
-import type { Suggestion as StoredSuggestion, SuggestedContent } from "./knowledge/suggestions.js";
+import type { Suggestion as StoredSuggestion, SuggestedContent, SuggestionMerge } from "./knowledge/suggestions.js";
 import type {
   Decision as StoredDecision,
   DecisionSummary as StoredDecisionSummary,
@@ -194,7 +194,7 @@ export type InboxItem =
 
 /** A new Version of a Protected item, or of Guidance, an Agent proposes for a User to accept or reject (ADR 0014). */
 export type Suggestion = Serialized<StoredSuggestion>;
-export type { SuggestedContent };
+export type { SuggestedContent, SuggestionMerge };
 export type InboxKind = InboxItem["kind"];
 
 /**

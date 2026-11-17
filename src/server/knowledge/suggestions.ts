@@ -8,8 +8,9 @@ import { ticketKeySql } from "../work/tickets.js";
 import { sourceClaimOf } from "../coordination/sources.js";
 import { findDecisionById, findDecisionByKey, findDecisionVersion, saveDecision, contentOf as decisionContentOf } from "./decisions.js";
 import { findDocument, findVersion, insertDocument, saveVersion, type Document } from "./documents.js";
-import { getGuidance, guidanceAt, writeGuidance } from "./guidance.js";
+import { getGuidance, guidanceAt, listGuidanceVersions, writeGuidance } from "./guidance.js";
 import { findTerm, listTermVersions, saveTermVersion, tidyFields } from "./terms.js";
+import { mergeField, mergeMarkdown, type FieldConflict, type MergedSection } from "./sections.js";
 
 /**
  * Suggestions (ADR 0014): an Agent can't change a Protected item, so it proposes the item's whole new
@@ -20,7 +21,7 @@ import { findTerm, listTermVersions, saveTermVersion, tidyFields } from "./terms
  */
 
 export { SUGGESTION_KINDS, SUGGESTION_STATES, type SuggestionKind, type SuggestionState } from "../../shared/values.js";
-import type { DecisionStatus, SuggestionKind, SuggestionState } from "../../shared/values.js";
+import { SUGGESTION_TEXT_FIELD, type DecisionStatus, type SuggestionKind, type SuggestionState } from "../../shared/values.js";
 
 /**
  * What a Suggestion proposes: the item's whole content as its next Version would hold it. A Document's
@@ -90,6 +91,8 @@ export interface Suggestion {
   state: SuggestionState;
   /** Whether the item has a newer Version than `baseVersion`, while it is open. */
   outdated: boolean;
+  /** While it is outdated: the item's current Version, newer than `baseVersion`, who saved it and when; null otherwise. */
+  newerVersion: { number: number; actor: RecordedActor; at: Date } | null;
   /** Whether the User changed it before accepting it; null unless accepted. */
   acceptedWithEdits: boolean | null;
   /** The Version accepting it made; null unless accepted. */
@@ -107,6 +110,8 @@ interface Suggestable {
   openToAgents: boolean;
   current: SuggestedContent;
   contentAt(db: Queryable, version: number): Promise<SuggestedContent | undefined>;
+  /** Who saved its Version `version`, and when, if it has one. */
+  savedAt(db: Queryable, version: number): Promise<Saved | undefined>;
   /**
    * Saves `content` as its next Version by `actor`; returns its number, and the id of the Document it created for a new one, or
    * why it was refused.
@@ -115,6 +120,15 @@ interface Suggestable {
   /** For a new Document, or one a Suggestion created: the Document it goes, or went, under (see `Suggestion.parent`). */
   parent?: { id: string; title: string } | null;
 }
+
+/** Who saved one of an item's Versions, and when. */
+interface Saved {
+  actor: RecordedActor;
+  at: Date;
+}
+
+/** A Version's `Saved`, if there is one. */
+const savedOf = (v: Saved | undefined): Saved | undefined => v && { actor: v.actor, at: v.at };
 
 /** Where a loaded item lives, and its row's ids, as a Suggestion's columns store it. */
 interface ItemColumns {
@@ -153,6 +167,7 @@ async function documentItem(db: Queryable, workspaceId: string, id: string, crea
       const v = await findVersion(q, d.id, n);
       return v && { title: v.title, body: v.body };
     },
+    savedAt: async (q, n) => savedOf(await findVersion(q, d.id, n)),
     save: async (q, c, actor, now) => ({ version: (await saveVersion(q, d, { title: textOf(c.title), body: textOf(c.body), actor, now })).version }),
     ...(createdBySuggestion && { parent: d.parentId === null ? null : idAndTitle(await findDocument(db, workspaceId, d.parentId)) }),
   };
@@ -174,6 +189,7 @@ async function newDocumentItem(db: Queryable, workspaceId: string, parentId: str
     openToAgents: !parent.protected,
     current: EMPTY_DOCUMENT,
     contentAt: async (_, n) => (n === 0 ? EMPTY_DOCUMENT : undefined),
+    savedAt: async () => undefined,
     save: async (q, c, actor, now) => {
       const tree = { workspaceId, projectId: parent.projectId };
       const created = await insertDocument(q, { tree, parentId, title: textOf(c.title), body: textOf(c.body), actor, now });
@@ -195,6 +211,7 @@ async function termItem(db: Queryable, workspaceId: string, id: string): Promise
       const v = (await listTermVersions(q, t.id)).find((v) => v.number === n);
       return v && fields(v);
     },
+    savedAt: async (q, n) => savedOf((await listTermVersions(q, t.id)).find((v) => v.number === n)),
     save: async (q, c, actor, now) => {
       const saved = await saveTermVersion(q, workspaceId, t, { fields: c as unknown as Parameters<typeof tidyFields>[0], actor, now });
       return saved === "name taken" ? `There is already a Term named ${textOf(c.name)} here; names are unique ignoring case` : { version: saved.version };
@@ -213,6 +230,7 @@ function decisionItem(d: Awaited<ReturnType<typeof findDecisionById>>): Suggesta
       const v = await findDecisionVersion(q, d, n);
       return v && { title: v.title, body: v.body, group: v.group };
     },
+    savedAt: async (q, n) => savedOf(await findDecisionVersion(q, d, n)),
     save: async (q, c, actor, now) => ({
       version: (await saveDecision(q, d, { ...decisionContentOf(d), title: textOf(c.title), body: textOf(c.body), group: c.group as string | null }, actor, now)).version,
     }),
@@ -231,6 +249,7 @@ async function guidanceItem(db: Queryable, workspaceId: string, projectId: strin
       const markdown = await guidanceAt(q, owner, n);
       return markdown === undefined ? undefined : { markdown };
     },
+    savedAt: async (q, n) => savedOf((await listGuidanceVersions(q, owner)).find((v) => v.version === n)),
     save: async (q, c, actor, now) => {
       const saved = await writeGuidance(q, owner, { markdown: textOf(c.markdown), baseVersion: g.version, actor, now });
       return saved ? { version: saved.version } : "The Guidance changed meanwhile; try again";
@@ -386,7 +405,9 @@ const SELECT_SUGGESTIONS = `
     LEFT JOIN users r ON r.id = (${reviewerSql("s", "t")})`;
 
 async function toSuggestion(db: Queryable, row: SuggestionRow): Promise<Suggestion> {
-  const { item, contentAt, parent } = await itemOf(db, row);
+  const { item, contentAt, savedAt, parent } = await itemOf(db, row);
+  const outdated = row.state === "open" && item.version !== row.base_version;
+  const newer = outdated ? await savedAt(db, item.version) : undefined;
   return {
     id: row.id,
     item,
@@ -406,7 +427,8 @@ async function toSuggestion(db: Queryable, row: SuggestionRow): Promise<Suggesti
     sourceTicket: row.source_ticket_key === null ? null : { key: row.source_ticket_key, title: row.source_ticket_title! },
     reviewer: row.reviewer_id === null ? null : { id: row.reviewer_id, name: row.reviewer_name! },
     state: row.state,
-    outdated: row.state === "open" && item.version !== row.base_version,
+    outdated,
+    newerVersion: newer ? { number: item.version, ...newer } : null,
     acceptedWithEdits: row.with_edits,
     resultVersion: row.result_version,
     decidedBy: row.decided_by_user_id === null ? null : { id: row.decided_by_user_id, name: row.decided_by_name! },
@@ -509,6 +531,81 @@ export async function createSuggestion(db: Queryable, actor: Actor, input: NewSu
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+/** One field of a Suggestion's content merged with the item's current Version. */
+export interface MergedContentField {
+  field: string;
+  /** The merged value; null when it conflicts, and for a group, also when there is none. */
+  value: string | string[] | null;
+  /** For a field that merges whole: each side's value, set when both changed it differently. */
+  conflict: FieldConflict<string | string[] | null> | null;
+  /** For the Markdown field: its sections, in order, conflicting ones included; null for a field that merges whole. */
+  sections: MergedSection[] | null;
+}
+
+/** An outdated Suggestion's content merged with the item's current Version, from its base Version as the common ancestor. */
+export interface SuggestionMerge {
+  /** The item's current Version the merge is onto; accept the settled result with it as `onto`. */
+  onto: number;
+  /** What the item holds at `onto`. */
+  current: SuggestedContent;
+  /** The merged content; null while any field conflicts. */
+  content: SuggestedContent | null;
+  /** Each field of the kind's content, in order. */
+  fields: MergedContentField[];
+  /** How many sections of the Markdown field conflict, plus one for each other field that does. */
+  conflicts: number;
+}
+
+/** Whether a merged field still needs a User's choice. */
+const conflicted = (f: MergedContentField) => f.conflict !== null || (f.sections ?? []).some((s) => s.conflict !== null);
+
+/**
+ * Three-way merges two edits of a Term's words to avoid, word by word and ignoring case, so it never conflicts: `theirs`, less
+ * the words `mine` removed from `base`, then the words only `mine` added.
+ */
+function mergeWords(base: string[], mine: string[], theirs: string[]): string[] {
+  const has = (list: string[], word: string) => list.some((w) => w.toLowerCase() === word.toLowerCase());
+  const removedByMine = base.filter((w) => !has(mine, w));
+  const addedByMine = mine.filter((w) => !has(base, w) && !has(theirs, w));
+  return [...theirs.filter((w) => !has(removedByMine, w)), ...addedByMine];
+}
+
+/**
+ * Three-way merges `mine` (the Suggestion's content) and `theirs` (the item's current content), both changed from `base`: the
+ * Markdown field section by section, a Term's words to avoid word by word, and every other field whole, taken from the side
+ * that changed it, or a conflict when both did, differently.
+ */
+function mergeContent(kind: SuggestionKind, base: SuggestedContent, mine: SuggestedContent, theirs: SuggestedContent, onto: number): SuggestionMerge {
+  const fields = CONTENT_FIELDS[kind].map((field): MergedContentField => {
+    if (field === SUGGESTION_TEXT_FIELD[kind]) {
+      const m = mergeMarkdown(textOf(base[field] ?? ""), textOf(mine[field]), textOf(theirs[field]));
+      return { field, value: m.markdown, conflict: null, sections: m.sections };
+    }
+    if (field === "avoid") {
+      return { field, value: mergeWords(base.avoid as string[], mine.avoid as string[], theirs.avoid as string[]), conflict: null, sections: null };
+    }
+    const m = mergeField(base[field] ?? null, mine[field] ?? null, theirs[field] ?? null, (a, b) => JSON.stringify(a) === JSON.stringify(b));
+    return { field, value: m.merged, conflict: m.conflict, sections: null };
+  });
+  const clean = !fields.some(conflicted);
+  return {
+    onto,
+    current: theirs,
+    content: clean ? Object.fromEntries(fields.map((f) => [f.field, f.value])) : null,
+    fields,
+    conflicts: fields.reduce((n, f) => n + (f.conflict ? 1 : 0) + (f.sections ?? []).filter((s) => s.conflict).length, 0),
+  };
+}
+
+/** An open Suggestion's content merged with its item's current Version, if `actor` can read where the item lives. */
+export async function mergeSuggestion(db: Queryable, actor: Actor, id: string): Promise<SuggestionMerge> {
+  const suggestion = await suggestionFor(db, actor, id, "read");
+  if (suggestion.state !== "open") throw new HttpError(409, `This Suggestion was ${suggestion.state} already`);
+  const { rows } = await db.query<SuggestionRow>(`${SELECT_SUGGESTIONS} WHERE s.id = $1`, [id]);
+  const item = await itemOf(db, rows[0]!);
+  return mergeContent(item.item.kind, suggestion.base, suggestion.content, item.current, item.item.version);
+}
+
 /** Locks an open Suggestion `user` may decide on, with its item; refuses one already decided. */
 async function lockOpen(db: Queryable, user: User, id: string): Promise<{ suggestion: Suggestion; item: Suggestable }> {
   const actor = userActor(user);
@@ -523,23 +620,55 @@ async function lockOpen(db: Queryable, user: User, id: string): Promise<{ sugges
   return { suggestion, item: await itemOf(db, stored[0]!) };
 }
 
+/** How accepting a Suggestion is asked for: with the User's `content`, and the item's Version `onto` which they merged an outdated one. */
+export interface Acceptance {
+  content?: Record<string, unknown>;
+  onto?: number;
+}
+
 /**
  * Accepts an open Suggestion by `user`, who has Write where its item lives, making it the item's next
  * Version: as suggested, credited to the Agent; or, with `edited` content that differs, as edited,
- * credited to the User and linked to the Suggestion. Refused while the item has a newer Version than
- * the Suggestion's base. Run inside a transaction. Returns the accepted Suggestion.
+ * credited to the User and linked to the Suggestion. An outdated one, whose item has a newer Version than
+ * its base, is merged with that Version (ADR 0014), and the result is the User's, linked to the Suggestion:
+ * clean merges take the side that changed each part, and conflicting parts need the User's `content`.
+ * Accepting an outdated one needs `onto`, the Version the User saw it merged onto. Run inside a transaction. Returns the accepted Suggestion.
  */
-export async function acceptSuggestion(db: Queryable, user: User, id: string, edited: Record<string, unknown> | undefined, now: Date): Promise<Suggestion> {
+export async function acceptSuggestion(db: Queryable, user: User, id: string, acceptance: Acceptance, now: Date): Promise<Suggestion> {
   const { suggestion, item } = await lockOpen(db, user, id);
-  if (item.item.version !== suggestion.baseVersion) {
-    throw new HttpError(
-      409,
-      `${capitalize(nameOf(item.item))} is at Version ${item.item.version}, newer than Version ${suggestion.baseVersion} this Suggestion is based on; ` +
-        "it is outdated, and accepting it needs a merge",
-    );
+  const { content: edited, onto } = acceptance;
+  const name = capitalize(nameOf(item.item));
+  if (onto !== undefined && onto !== item.item.version) {
+    throw new HttpError(409, `${name} is at Version ${item.item.version} now, not Version ${onto} you merged onto; merge it again`);
   }
-  const content = edited === undefined ? suggestion.content : completeContent(item.item.kind, edited, suggestion.content);
-  const withEdits = !same(content, suggestion.content);
+  let content: SuggestedContent;
+  let withEdits: boolean;
+  if (item.item.version === suggestion.baseVersion) {
+    content = edited === undefined ? suggestion.content : completeContent(item.item.kind, edited, suggestion.content);
+    withEdits = !same(content, suggestion.content);
+  } else {
+    // Only a User who saw the merge accepts it, so it never takes in a Version they didn't see.
+    if (onto === undefined) {
+      throw new HttpError(
+        409,
+        `${name} is at Version ${item.item.version}, newer than Version ${suggestion.baseVersion} this Suggestion is based on, so it is outdated: ` +
+          `merge it (POST /api/suggestions/{id}/merge) and accept with \`onto\` ${item.item.version}`,
+      );
+    }
+    const merge = mergeContent(item.item.kind, suggestion.base, suggestion.content, item.current, item.item.version);
+    const open = merge.fields.filter((f) => conflicted(f) && !(edited && f.field in edited)).map((f) => f.field);
+    if (open.length > 0) {
+      throw new HttpError(
+        409,
+        `${name} is at Version ${item.item.version}, newer than Version ${suggestion.baseVersion} this Suggestion is based on, and merging them leaves ` +
+          `${open.join(" and ")} conflicting: settle ${open.length === 1 ? "it" : "them"} and accept with \`content\` and \`onto\` ${item.item.version}`,
+      );
+    }
+    const clean = Object.fromEntries(merge.fields.filter((f) => !conflicted(f)).map((f) => [f.field, f.value]));
+    content = completeContent(item.item.kind, edited ?? {}, clean);
+    // A merge counts as the User's edit, whatever it holds.
+    withEdits = true;
+  }
   if (same(content, item.current)) throw new HttpError(400, "Accepting it like this would change nothing; reject it instead");
   // Only Agents make Suggestions, so it records an Agent, with the Owner it acted for.
   const proposedBy = suggestion.proposedBy as Extract<RecordedActor, { kind: "agent" }>;

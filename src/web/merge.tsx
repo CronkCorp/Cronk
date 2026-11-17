@@ -228,6 +228,8 @@ function ConflictChoice(props: {
   rows: number;
   /** Whether to offer keeping both sides; true unless said otherwise. */
   combinable?: boolean;
+  /** What the User's side is called; "Yours" unless said otherwise. */
+  mineLabel?: string;
 }) {
   const c = props.conflict;
   const side = (name: string, text: string | null) => (
@@ -243,7 +245,7 @@ function ConflictChoice(props: {
         <Chip tone="danger">Both changed</Chip>
       </div>
       <div className="merge-sides">
-        {side("Yours", c.mine)}
+        {side(props.mineLabel ?? "Yours", c.mine)}
         {side(props.theirsLabel, c.theirs)}
       </div>
       <div className="actions merge-choices">
@@ -270,7 +272,7 @@ export interface MergedField {
 }
 
 /** What `ResolveMerge` settles: a merge's sections, for a Document or Decision its title, and for a Decision its other fields. */
-interface Mergeable {
+export interface Mergeable {
   title?: string | null;
   titleConflict?: Conflict | null;
   fields?: MergedField[];
@@ -278,22 +280,29 @@ interface Mergeable {
 }
 
 /** How many parts of a merge, its title and other fields included, need the User's choice. */
-function conflictCount(m: Mergeable): number {
+export function conflictCount(m: Mergeable): number {
   return (m.titleConflict ? 1 : 0) + (m.fields ?? []).filter((f) => f.conflict).length + m.sections.filter((s) => s.conflict).length;
 }
 
 /**
  * Lets the User settle each conflict of a merge, then hands back the merged title (empty without one), other fields and body.
  * What merged cleanly shows as a folded diff from `mine`, the User's draft; `theirsLabel` names the other side.
- * `onBack` leaves without settling, back to the User's own draft; `onDiscardMine` takes their Version instead.
+ * `onBack` leaves without settling, back to the User's own draft; `onDiscardMine`, when given, takes their Version instead.
+ * The labels of the submit and back buttons, and a note beside them, can be named for other uses, such as accepting a Suggestion.
  */
 export function ResolveMerge(props: {
   merge: Mergeable;
   mine: string;
+  /** What the User's side is called; "Yours" unless said otherwise. */
+  mineLabel?: string;
   theirsLabel: string;
   onResolved: (r: { title: string; body: string; fields: Fields }) => void;
   onBack: () => void;
-  onDiscardMine: () => void;
+  onDiscardMine?: () => void;
+  submitLabel?: string;
+  backLabel?: string;
+  note?: string;
+  busy?: boolean;
 }) {
   const m = props.merge;
   const [title, setTitle] = useState(m.title ?? m.titleConflict?.mine ?? "");
@@ -313,13 +322,14 @@ export function ResolveMerge(props: {
       }}
     >
       {m.titleConflict && (
-        <ConflictChoice label="Title" theirsLabel={props.theirsLabel} conflict={m.titleConflict} value={title} onChange={setTitle} rows={1} />
+        <ConflictChoice label="Title" mineLabel={props.mineLabel} theirsLabel={props.theirsLabel} conflict={m.titleConflict} value={title} onChange={setTitle} rows={1} />
       )}
       {(m.fields ?? []).map((f) =>
         f.conflict ? (
           <ConflictChoice
             key={f.label}
             label={f.label}
+            mineLabel={props.mineLabel}
             theirsLabel={props.theirsLabel}
             conflict={f.conflict}
             combinable={f.combinable}
@@ -331,7 +341,7 @@ export function ResolveMerge(props: {
       )}
       {m.sections.map((s, i) =>
         s.conflict ? (
-          <ConflictChoice key={i} label={sectionName(s)} theirsLabel={props.theirsLabel} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} />
+          <ConflictChoice key={i} label={sectionName(s)} mineLabel={props.mineLabel} theirsLabel={props.theirsLabel} conflict={s.conflict} value={kept[i]!} onChange={(v) => keep(i, v)} rows={8} />
         ) : null,
       )}
       {cleanlyMerged !== props.mine && (
@@ -341,9 +351,10 @@ export function ResolveMerge(props: {
         </details>
       )}
       <div className="actions">
-        <Button type="submit">Use these and keep editing</Button>
-        <Button type="button" variant="secondary" onClick={props.onBack}>Back to my draft</Button>
-        <DiscardMine onClick={props.onDiscardMine} />
+        <Button type="submit" disabled={props.busy}>{props.submitLabel ?? "Use these and keep editing"}</Button>
+        <Button type="button" variant="secondary" onClick={props.onBack}>{props.backLabel ?? "Back to my draft"}</Button>
+        {props.onDiscardMine && <DiscardMine onClick={props.onDiscardMine} />}
+        {props.note && <span className="muted small">{props.note}</span>}
       </div>
     </form>
   );
