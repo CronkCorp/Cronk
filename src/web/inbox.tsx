@@ -932,7 +932,9 @@ function OutdatedBanner(props: { suggestion: SuggestionItem["suggestion"]; merge
         {newer && (
           <>
             <Actor actor={newer.actor} />
-            {` saved Version ${newer.number}. `}
+            {` saved Version ${newer.number} `}
+            <RelativeTime at={newer.at} />
+            {". "}
           </>
         )}
         {advice}

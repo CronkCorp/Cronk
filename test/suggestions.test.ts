@@ -133,7 +133,7 @@ describe("accepting an outdated Suggestion", () => {
     expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion).toMatchObject({
       outdated: true,
       item: { version: 3 },
-      newerVersion: { number: 3, actor: { kind: "user", id: ada.id, name: "Ada" } },
+      newerVersion: { number: 3, actor: { kind: "user", id: ada.id, name: "Ada" }, at: "2026-01-01T09:01:00.000Z" },
     });
     // A plain Accept, as from a client that missed the newer Version, merges nothing the User hasn't seen.
     const unseen = await admin.post(`/api/suggestions/${suggestion.id}/accept`);

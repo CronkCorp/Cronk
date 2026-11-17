@@ -1059,8 +1059,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       state: { type: "string", enum: SUGGESTION_STATES },
       outdated: { type: "boolean", description: "True while it is open and the item has a newer Version than its base; accepting it then merges it with that Version." },
       newerVersion: {
-        ...nullable(object({ number: { type: "integer" }, actor: recordedActor })),
-        description: "While it is outdated: the item's current Version and who saved it; null otherwise.",
+        ...nullable(object({ number: { type: "integer" }, actor: recordedActor, at: timestamp })),
+        description: "While it is outdated: the item's current Version, who saved it and when; null otherwise.",
       },
       acceptedWithEdits: { ...nullable({ type: "boolean" }), description: "Whether the User changed it before accepting it; null unless accepted." },
       resultVersion: { ...nullable({ type: "integer" }), description: "The Version of the item accepting it made; null unless accepted." },

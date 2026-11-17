@@ -91,8 +91,8 @@ export interface Suggestion {
   state: SuggestionState;
   /** Whether the item has a newer Version than `baseVersion`, while it is open. */
   outdated: boolean;
-  /** While it is outdated: the item's current Version, newer than `baseVersion`, and who saved it; null otherwise. */
-  newerVersion: { number: number; actor: RecordedActor } | null;
+  /** While it is outdated: the item's current Version, newer than `baseVersion`, who saved it and when; null otherwise. */
+  newerVersion: { number: number; actor: RecordedActor; at: Date } | null;
   /** Whether the User changed it before accepting it; null unless accepted. */
   acceptedWithEdits: boolean | null;
   /** The Version accepting it made; null unless accepted. */
@@ -110,8 +110,8 @@ interface Suggestable {
   openToAgents: boolean;
   current: SuggestedContent;
   contentAt(db: Queryable, version: number): Promise<SuggestedContent | undefined>;
-  /** Who saved its Version `version`, if it has one. */
-  actorAt(db: Queryable, version: number): Promise<RecordedActor | undefined>;
+  /** Who saved its Version `version`, and when, if it has one. */
+  savedAt(db: Queryable, version: number): Promise<Saved | undefined>;
   /**
    * Saves `content` as its next Version by `actor`; returns its number, and the id of the Document it created for a new one, or
    * why it was refused.
@@ -120,6 +120,15 @@ interface Suggestable {
   /** For a new Document, or one a Suggestion created: the Document it goes, or went, under (see `Suggestion.parent`). */
   parent?: { id: string; title: string } | null;
 }
+
+/** Who saved one of an item's Versions, and when. */
+interface Saved {
+  actor: RecordedActor;
+  at: Date;
+}
+
+/** A Version's `Saved`, if there is one. */
+const savedOf = (v: Saved | undefined): Saved | undefined => v && { actor: v.actor, at: v.at };
 
 /** Where a loaded item lives, and its row's ids, as a Suggestion's columns store it. */
 interface ItemColumns {
@@ -158,7 +167,7 @@ async function documentItem(db: Queryable, workspaceId: string, id: string, crea
       const v = await findVersion(q, d.id, n);
       return v && { title: v.title, body: v.body };
     },
-    actorAt: async (q, n) => (await findVersion(q, d.id, n))?.actor,
+    savedAt: async (q, n) => savedOf(await findVersion(q, d.id, n)),
     save: async (q, c, actor, now) => ({ version: (await saveVersion(q, d, { title: textOf(c.title), body: textOf(c.body), actor, now })).version }),
     ...(createdBySuggestion && { parent: d.parentId === null ? null : idAndTitle(await findDocument(db, workspaceId, d.parentId)) }),
   };
@@ -180,7 +189,7 @@ async function newDocumentItem(db: Queryable, workspaceId: string, parentId: str
     openToAgents: !parent.protected,
     current: EMPTY_DOCUMENT,
     contentAt: async (_, n) => (n === 0 ? EMPTY_DOCUMENT : undefined),
-    actorAt: async () => undefined,
+    savedAt: async () => undefined,
     save: async (q, c, actor, now) => {
       const tree = { workspaceId, projectId: parent.projectId };
       const created = await insertDocument(q, { tree, parentId, title: textOf(c.title), body: textOf(c.body), actor, now });
@@ -202,7 +211,7 @@ async function termItem(db: Queryable, workspaceId: string, id: string): Promise
       const v = (await listTermVersions(q, t.id)).find((v) => v.number === n);
       return v && fields(v);
     },
-    actorAt: async (q, n) => (await listTermVersions(q, t.id)).find((v) => v.number === n)?.actor,
+    savedAt: async (q, n) => savedOf((await listTermVersions(q, t.id)).find((v) => v.number === n)),
     save: async (q, c, actor, now) => {
       const saved = await saveTermVersion(q, workspaceId, t, { fields: c as unknown as Parameters<typeof tidyFields>[0], actor, now });
       return saved === "name taken" ? `There is already a Term named ${textOf(c.name)} here; names are unique ignoring case` : { version: saved.version };
@@ -221,7 +230,7 @@ function decisionItem(d: Awaited<ReturnType<typeof findDecisionById>>): Suggesta
       const v = await findDecisionVersion(q, d, n);
       return v && { title: v.title, body: v.body, group: v.group };
     },
-    actorAt: async (q, n) => (await findDecisionVersion(q, d, n))?.actor,
+    savedAt: async (q, n) => savedOf(await findDecisionVersion(q, d, n)),
     save: async (q, c, actor, now) => ({
       version: (await saveDecision(q, d, { ...decisionContentOf(d), title: textOf(c.title), body: textOf(c.body), group: c.group as string | null }, actor, now)).version,
     }),
@@ -240,7 +249,7 @@ async function guidanceItem(db: Queryable, workspaceId: string, projectId: strin
       const markdown = await guidanceAt(q, owner, n);
       return markdown === undefined ? undefined : { markdown };
     },
-    actorAt: async (q, n) => (await listGuidanceVersions(q, owner)).find((v) => v.version === n)?.actor,
+    savedAt: async (q, n) => savedOf((await listGuidanceVersions(q, owner)).find((v) => v.version === n)),
     save: async (q, c, actor, now) => {
       const saved = await writeGuidance(q, owner, { markdown: textOf(c.markdown), baseVersion: g.version, actor, now });
       return saved ? { version: saved.version } : "The Guidance changed meanwhile; try again";
@@ -396,9 +405,9 @@ const SELECT_SUGGESTIONS = `
     LEFT JOIN users r ON r.id = (${reviewerSql("s", "t")})`;
 
 async function toSuggestion(db: Queryable, row: SuggestionRow): Promise<Suggestion> {
-  const { item, contentAt, actorAt, parent } = await itemOf(db, row);
+  const { item, contentAt, savedAt, parent } = await itemOf(db, row);
   const outdated = row.state === "open" && item.version !== row.base_version;
-  const newerBy = outdated ? await actorAt(db, item.version) : undefined;
+  const newer = outdated ? await savedAt(db, item.version) : undefined;
   return {
     id: row.id,
     item,
@@ -419,7 +428,7 @@ async function toSuggestion(db: Queryable, row: SuggestionRow): Promise<Suggesti
     reviewer: row.reviewer_id === null ? null : { id: row.reviewer_id, name: row.reviewer_name! },
     state: row.state,
     outdated,
-    newerVersion: newerBy ? { number: item.version, actor: newerBy } : null,
+    newerVersion: newer ? { number: item.version, ...newer } : null,
     acceptedWithEdits: row.with_edits,
     resultVersion: row.result_version,
     decidedBy: row.decided_by_user_id === null ? null : { id: row.decided_by_user_id, name: row.decided_by_name! },
