@@ -14,7 +14,7 @@ import { artifactFor } from "./artifact-routes.js";
 import { answer, artifactIdParam, attachmentIdParam, commentIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { ticketFor } from "../work/ticket-reads.js";
-import { findTicketByKey, recordChange, type Ticket } from "../work/tickets.js";
+import { findTicketByKey, recordChange, type Ticket, type TicketChange } from "../work/tickets.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { SHOWN_MEDIA_TYPES } from "../../shared/values.js";
 import { FileTooLarge, type ByteRange } from "./store.js";
@@ -281,7 +281,7 @@ function attachmentsChanged(ctx: AppContext, attachment: Attachment): void {
  * Records attaching or deleting `attachment` in its Ticket's history, if it is on the Ticket itself: one in a Comment
  * or Report shows in the timeline with them already. Run inside the transaction that inserts or deletes it.
  */
-async function recordAttachmentChange(tx: Queryable, change: "attachment added" | "attachment removed", attachment: Attachment, actor: Actor, now: Date): Promise<void> {
+async function recordAttachmentChange(tx: Queryable, change: Extract<TicketChange, { attachment: unknown }>["change"], attachment: Attachment, actor: Actor, now: Date): Promise<void> {
   if (attachment.on !== "ticket") return;
   const { id, name, contentType, size } = attachment;
   await recordChange(tx, attachment.ticketId!, actor, now, { change, attachment: { id, name, contentType, size } });

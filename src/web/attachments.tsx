@@ -3,7 +3,7 @@ import { Actor, agentActor, userActor } from "./components/actor.js";
 import { Button, buttonClass } from "./components/button.js";
 import { fileKind, formatBytes, typeLabel } from "./components/files.js";
 import { ConfirmDialog, Dialog } from "./components/overlays.js";
-import { api, attachmentFileUrl, type Attachment, type RecordedActor } from "./api.js";
+import { api, attachmentFileUrl, type Attachment, type RecordedActor, type RecordedChange } from "./api.js";
 import { messageOf } from "./ui.js";
 
 /**
@@ -291,16 +291,16 @@ export function AttachmentViewer(props: { attachment: Attachment | undefined; ca
 export const PageAttachments = createContext<{ attachments: Attachment[]; onOpen: (attachment: Attachment) => void } | undefined>(undefined);
 
 /**
- * A file a Ticket's change line names: a button opening it while it is still on the Ticket, in a page that provides
- * `PageAttachments`; otherwise, once deleted or where nothing can open it, its name alone.
+ * The Attachment a Ticket's change line names, by the name it recorded: a button opening it while it is still on the
+ * Ticket, in a page that provides `PageAttachments`; otherwise, once deleted or where nothing can open it, its name alone.
  */
-export function ChangedAttachment(props: { attachment: { id: string; name: string } }) {
+export function ChangeLineAttachment(props: { attachment: Extract<RecordedChange, { attachment: unknown }>["attachment"] }) {
   const page = useContext(PageAttachments);
   const found = page?.attachments.find((a) => a.id === props.attachment.id && a.on === "ticket");
-  if (!page || !found) return <span className="changed-file">{props.attachment.name}</span>;
+  if (!page || !found) return <>{props.attachment.name}</>;
   return (
-    <button type="button" className="link-button changed-file" onClick={() => page.onOpen(found)}>
-      {found.name}
+    <button type="button" className="link-button" onClick={() => page.onOpen(found)}>
+      {props.attachment.name}
     </button>
   );
 }

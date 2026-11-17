@@ -428,7 +428,7 @@ export type TicketChange =
   | { change: "kept" }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
   | { change: "document linked" | "document unlinked"; document: DocumentName }
-  /** A file attached to the Ticket itself, or deleted from it; not those in its Comments or Reports. */
+  /** An Attachment attached to the Ticket itself, or deleted from it; not those in its Comments or Reports. */
   | { change: "attachment added" | "attachment removed"; attachment: AttachmentName };
 
 export type { ChangeActor, RecordedActor };

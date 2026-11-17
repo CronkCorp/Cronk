@@ -535,7 +535,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
             description: "The Attachment as it was when attached. After `attachment removed` its file is gone, and only this record remains.",
           },
         }),
-        description: "A file attached to the Ticket itself, or deleted from it. Files in its Comments and Reports record no Change.",
+        description: "An Attachment attached to the Ticket itself, or deleted from it. Attachments in its Comments and Reports record no Change.",
       },
     ],
   },
