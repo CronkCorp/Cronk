@@ -278,9 +278,10 @@ const conflict = {
 /** Decision keys, in order. */
 const keyList = { type: "array", items: { type: "string" } } as const;
 
-/** The sections of a merge, in order; joined, they make the merged `whole`. */
 /** A field of a Suggestion's content: text, a list of words (a Term's `avoid`), or null (no group). */
 const fieldValue = { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }] };
+
+/** The sections of a merge, in order; joined, they make the merged `whole`. */
 
 const mergedSections = (whole: string) => ({
   type: "array",

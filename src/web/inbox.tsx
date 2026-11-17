@@ -7,7 +7,7 @@ import { RelativeTime } from "./components/time.js";
 import { useEffect, useRef, useState } from "react";
 import { Actor, agentActor } from "./components/actor.js";
 import { api, watchInbox, type InboxFilter, type InboxItem, type InboxKind, type TriageItem, type SuggestedContent, type SuggestionMerge, type User } from "./api.js";
-import { ContentEditor, contentText, creditNote, Diff, mainText, Reasoning, settledContent, suggestionMergeable, useDiffView } from "./suggestions.js";
+import { ContentEditor, contentText, creditNote, Diff, mainText, mergeCreditNote, Reasoning, settledContent, suggestionMergeable, useDiffView } from "./suggestions.js";
 import { conflictCount, ResolveMerge } from "./merge.js";
 import { RejectDecisionForm } from "./components/reject-decision.js";
 import { CONTINUED, ReopenDialog } from "./components/reopen-dialog.js";
@@ -807,7 +807,6 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
   );
   const reject = useAction(() => props.acting(() => api.rejectSuggestion(suggestion.id, reason)), props.onDone);
   const error = accept.error ?? acceptMerged.error ?? openMerge.error ?? reject.error;
-  const blocked = props.resolved || suggestion.outdated;
   const runAccept = () => {
     if (props.resolved) return;
     if (!suggestion.outdated) {
@@ -860,7 +859,7 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
           onBack={() => setMode("read")}
           submitLabel={`Accept merged as Version ${merge.onto + 1}`}
           backLabel="Back"
-          note={`A merge counts as your edit: Version ${merge.onto + 1} is yours, linked to this Suggestion.`}
+          note={mergeCreditNote(merge.onto + 1)}
           busy={acceptMerged.busy || props.resolved}
         />
       ) : mode === "edit" ? (
@@ -889,7 +888,7 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         />
       ) : mode === "edit" ? (
         <div className="actions suggestion-actions">
-          <Button onClick={runAccept} disabled={blocked || accept.busy}>Accept</Button>
+          <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
           <Button variant="secondary" onClick={() => setMode("read")}>Cancel</Button>
           <span className="muted small">{creditNote(next, proposedBy, changed)}</span>
         </div>
@@ -897,12 +896,12 @@ function SuggestionDetail(props: DetailProps<SuggestionItem> & { me: User }) {
         <div className="actions suggestion-actions">
           <Button onClick={runAccept} disabled={props.resolved || openMerge.busy}>Merge and accept…</Button>
           <Button variant="secondary" onClick={() => setMode("reject")} disabled={props.resolved}>Reject…</Button>
-          <span className="muted small">{`A merge counts as your edit: Version ${next} will be yours, linked to this Suggestion.`}</span>
+          <span className="muted small">{mergeCreditNote(next)}</span>
         </div>
       ) : (
         <div className="actions suggestion-actions">
-          <Button onClick={runAccept} disabled={blocked || accept.busy}>Accept</Button>
-          <Button variant="secondary" onClick={() => setMode("edit")} disabled={blocked}>Edit and accept…</Button>
+          <Button onClick={runAccept} disabled={props.resolved || accept.busy}>Accept</Button>
+          <Button variant="secondary" onClick={() => setMode("edit")} disabled={props.resolved}>Edit and accept…</Button>
           <Button variant="secondary" onClick={() => setMode("reject")} disabled={props.resolved}>Reject…</Button>
           <span className="muted small">{creditNote(next, proposedBy, false)}</span>
         </div>

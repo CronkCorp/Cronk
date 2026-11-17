@@ -21,7 +21,7 @@ import { mergeField, mergeMarkdown, type FieldConflict, type MergedSection } fro
  */
 
 export { SUGGESTION_KINDS, SUGGESTION_STATES, type SuggestionKind, type SuggestionState } from "../../shared/values.js";
-import type { DecisionStatus, SuggestionKind, SuggestionState } from "../../shared/values.js";
+import { SUGGESTION_TEXT_FIELD, type DecisionStatus, type SuggestionKind, type SuggestionState } from "../../shared/values.js";
 
 /**
  * What a Suggestion proposes: the item's whole content as its next Version would hold it. A Document's
@@ -522,9 +522,6 @@ export async function createSuggestion(db: Queryable, actor: Actor, input: NewSu
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** The field of each kind's content that holds its Markdown, which merges section by section; the others merge whole. */
-const TEXT_FIELD: Record<SuggestionKind, string> = { document: "body", term: "definition", decision: "body", guidance: "markdown" };
-
 /** One field of a Suggestion's content merged with the item's current Version. */
 export interface MergedContentField {
   field: string;
@@ -571,7 +568,7 @@ function mergeWords(base: string[], mine: string[], theirs: string[]): string[] 
  */
 function mergeContent(kind: SuggestionKind, base: SuggestedContent, mine: SuggestedContent, theirs: SuggestedContent, onto: number): SuggestionMerge {
   const fields = CONTENT_FIELDS[kind].map((field): MergedContentField => {
-    if (field === TEXT_FIELD[kind]) {
+    if (field === SUGGESTION_TEXT_FIELD[kind]) {
       const m = mergeMarkdown(textOf(base[field] ?? ""), textOf(mine[field]), textOf(theirs[field]));
       return { field, value: m.markdown, conflict: null, sections: m.sections };
     }

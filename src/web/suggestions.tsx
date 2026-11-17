@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { Conflict, RecordedActor, SuggestedContent, Suggestion, SuggestionMerge } from "./api.js";
 import type { Fields, Mergeable, MergedField } from "./merge.js";
+import { SUGGESTION_TEXT_FIELD as MAIN_FIELD } from "../shared/values.js";
 import { KindLabel } from "./components/tags.js";
 import { diffLines, type DiffLine } from "./diff.js";
 import { CronkMarkdown } from "./markdown.js";
@@ -173,6 +174,9 @@ export function ContentEditor(props: { kind: Suggestion["item"]["kind"]; value: 
   return <div className="suggestion-editor">{fields}</div>;
 }
 
+/** Who a Version made by merging an outdated Suggestion is credited to, as the note beside the actions says it. */
+export const mergeCreditNote = (version: number) => `A merge counts as your edit: Version ${version} will be yours, linked to this Suggestion.`;
+
 /** Who a Version made by accepting a Suggestion is credited to, as the note beside the actions says it. */
 export function creditNote(version: number, proposedBy: RecordedActor, edited: boolean): string {
   return edited ? `Version ${version} will be credited to you, linked to this Suggestion.` : `Version ${version} will be credited to ${proposedBy.name}, accepted by you.`;
@@ -180,8 +184,6 @@ export function creditNote(version: number, proposedBy: RecordedActor, edited: b
 
 type Kind = Suggestion["item"]["kind"];
 
-/** The field of each kind's content holding its Markdown, which merges by sections. */
-const MAIN_FIELD: Record<Kind, string> = { document: "body", decision: "body", term: "definition", guidance: "markdown" };
 
 /** The fields besides the title and Markdown that merge whole, by the label the merge shows them under. */
 const OTHER_FIELDS: Record<string, { label: string; combinable: boolean }> = {
