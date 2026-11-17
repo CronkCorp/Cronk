@@ -361,7 +361,7 @@ interface Places {
  * the Sessions `$1` as one group, `TRANSCRIPT_GROUPS` groups the Sessions of each Transcript `$1` by the Transcript's id.
  */
 type Grouping = string;
-const SESSION_GROUP: Grouping = `SELECT NULL::uuid AS grp, r.* FROM (${RECORDS}) r WHERE r.actor_session_id = ANY($1::uuid[])`;
+const SESSION_GROUP: Grouping = `SELECT NULL::uuid AS grp, r.* FROM (${SESSION_RECORDS}) r`;
 const TRANSCRIPT_GROUPS: Grouping = `
   SELECT ts.transcript_id AS grp, r.* FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
   WHERE ts.transcript_id = ANY($1::uuid[])`;
@@ -403,19 +403,29 @@ export interface ChangedItems {
   artifacts: { id: string; title: string; project_id: string | null }[];
 }
 
-const KINDS = ["tickets", "documents", "terms", "decisions", "artifacts"] as const;
-const CHANGED = { tickets: changedTickets, documents: changedDocuments, terms: changedTerms, decisions: changedDecisions, artifacts: changedArtifacts };
+/** The query for what each group changed, of each kind. */
+const CHANGED: Record<keyof ChangedItems, (g: Grouping) => string> = {
+  tickets: changedTickets,
+  documents: changedDocuments,
+  terms: changedTerms,
+  decisions: changedDecisions,
+  artifacts: changedArtifacts,
+};
+
+const noChanges = (): ChangedItems => ({ tickets: [], documents: [], terms: [], decisions: [], artifacts: [] });
 
 /**
- * What each of `groups`, a grouping (see Grouping) of `ids`, changed, in the order `changedItems` gives: five queries, however
- * many groups there are.
+ * What each group of a grouping (see Grouping) of `ids` changed, by the group's id, in the order `changedItems` gives; a group that
+ * changed nothing is left out. Five queries, however many groups there are.
  */
-async function changedItemsBy<G extends string | null>(db: Queryable, grouping: Grouping, ids: string[], groups: G[]): Promise<Map<G, ChangedItems>> {
-  const byGroup = new Map<G, ChangedItems>(groups.map((g) => [g, { tickets: [], documents: [], terms: [], decisions: [], artifacts: [] }]));
-  if (ids.length === 0) return byGroup;
-  for (const kind of KINDS) {
-    const { rows } = await db.query<{ grp: G }>(CHANGED[kind](grouping), [ids]);
-    for (const { grp, ...item } of rows) (byGroup.get(grp)![kind] as object[]).push(item);
+async function changedItemsPerGroup(db: Queryable, grouping: Grouping, ids: string[]): Promise<Map<string | null, ChangedItems>> {
+  const byGroup = new Map<string | null, ChangedItems>();
+  for (const [kind, changed] of Object.entries(CHANGED) as [keyof ChangedItems, (g: Grouping) => string][]) {
+    const { rows } = await db.query<{ grp: string | null }>(changed(grouping), [ids]);
+    for (const { grp, ...item } of rows) {
+      if (!byGroup.has(grp)) byGroup.set(grp, noChanges());
+      (byGroup.get(grp)![kind] as object[]).push(item);
+    }
   }
   return byGroup;
 }
@@ -425,7 +435,7 @@ async function changedItemsBy<G extends string | null>(db: Queryable, grouping: 
  * order they were created, Terms and Decisions the Workspace's first.
  */
 export async function changedItems(db: Queryable, sessionIds: string[]): Promise<ChangedItems> {
-  return (await changedItemsBy(db, SESSION_GROUP, sessionIds, [null])).get(null)!;
+  return (await changedItemsPerGroup(db, SESSION_GROUP, sessionIds)).get(null) ?? noChanges();
 }
 
 /** Where these changed items lie: their Projects, and whether any lies in the Workspace outside every Project. */
@@ -441,13 +451,13 @@ function placesOf(items: ChangedItems): Places {
 
 /**
  * What the Transcript's Sessions changed, where, and which of those places `actor` can read; undefined if `actor` may not read the
- * Transcript (see readTranscript).
+ * Transcript (see readTranscript). transcriptReadableSql decides the same for many Transcripts at once; keep the two alike.
  */
 async function accessTo(db: Queryable, actor: Actor, stored: StoredTranscript, opts: { uploader?: boolean } = {}) {
   if (actingUser(actor).workspaceId !== stored.workspaceId) return undefined;
   const items = await changedItems(db, stored.sessionIds);
   const places = placesOf(items);
-  const canReadIn = canReadInOf(await readablePlaces(db, actor));
+  const canReadIn = readsIn(await readablePlaces(db, actor));
   const readsAnyway = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
   const somewhere = places.projectIds.length > 0 || places.workspace;
   const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
@@ -474,11 +484,11 @@ export async function readTranscript(
     "SELECT a.name AS agent_name, u.name AS owner_name FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1",
     [stored.agentId],
   );
-  return asRead(stored, { agent: rows[0]!.agent_name, owner: rows[0]!.owner_name }, access.items, access.canReadIn);
+  return transcriptAsRead(stored, { agent: rows[0]!.agent_name, owner: rows[0]!.owner_name }, access.items, access.canReadIn);
 }
 
 /** The Transcript `stored`, whose Agent and Owner have the `names`, as a reader who `canReadIn` a place reads it, with what its Sessions changed. */
-function asRead(
+function transcriptAsRead(
   stored: StoredTranscript,
   names: { agent: string; owner: string },
   items: ChangedItems,
@@ -505,7 +515,7 @@ function asRead(
 }
 
 /** Where `readable` lets its reader read: in one of its Projects, or (null) in the Workspace outside any Project. */
-const canReadInOf = (readable: Readable) => (projectId: string | null) =>
+const readsIn = (readable: Readable) => (projectId: string | null) =>
   projectId === null ? readable.workspaceId !== null : readable.projectIds.includes(projectId);
 
 /** How `listTranscripts` orders them: most recently uploaded first, or in the order they were first uploaded. */
@@ -531,9 +541,9 @@ export async function readableTranscripts(db: Queryable, actor: Actor): Promise<
      ORDER BY ${ORDERS.newest}`,
     [actingUser(actor).workspaceId, ...readerParams(actor, readable)],
   );
-  const items = await changedItemsBy(db, TRANSCRIPT_GROUPS, rows.map((r) => r.id), rows.map((r) => r.id));
-  const canReadIn = canReadInOf(readable);
-  return rows.map((row) => asRead(toStored(row), { agent: row.agent_name, owner: row.owner_name }, items.get(row.id)!, canReadIn));
+  const items = await changedItemsPerGroup(db, TRANSCRIPT_GROUPS, rows.map((r) => r.id));
+  const canReadIn = readsIn(readable);
+  return rows.map((row) => transcriptAsRead(toStored(row), { agent: row.agent_name, owner: row.owner_name }, items.get(row.id) ?? noChanges(), canReadIn));
 }
 
 /** An item a Transcript may have led to: a Ticket, Document (or Report), Term, Decision or Artifact, by its id, and its key if it has one. */

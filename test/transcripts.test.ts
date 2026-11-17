@@ -1068,6 +1068,10 @@ describe("Who may read Transcripts, decided for many at once", () => {
     const withOne = await listing();
 
     for (let i = 2; i <= 6; i++) expect((await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId))).status).toBe(200);
+    // Carol may read the five that changed only CRONK-1, not the first.
+    expect((await carol.get("/api/transcripts")).body.transcripts).toHaveLength(5);
+    expect(await listing()).toEqual(withOne);
+
     // Bob loses Read in CRONK, so what his Transcripts list of it is left out.
     await admin.patch("/api/projects/CRONK", { visibility: "private" });
     expect((await admin.get("/api/transcripts")).body.transcripts).toHaveLength(6);
