@@ -437,7 +437,7 @@ export async function startCronk(
   let lookForLapses!: () => Promise<void>;
   const start = () =>
     buildApp({
-      config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` },
+      config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}`, checkLockOrder: true },
       clock,
       live: (live = new HoldableLiveUpdates()),
       lapseCheckMs: opts.lapseCheckMs ?? 50,

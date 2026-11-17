@@ -3,7 +3,7 @@ import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { ticketFor } from "../work/ticket-reads.js";
 import { shareProject } from "../work/projects.js";
-import { lockBlocking } from "../work/relations.js";
+import { lockBlocking, type LockOrderCheck } from "../work/relations.js";
 import { lockTicketsByIds } from "../work/tickets.js";
 import { listSessionClaims, requireClaimHolder, type SessionClaim } from "./claims.js";
 
@@ -57,8 +57,9 @@ export async function discoverySourceClaimOf(
   key: string | undefined,
   now: Date,
   { blockedIds }: { blockedIds: string[] },
+  check: LockOrderCheck,
 ): Promise<SourceClaim | null> {
-  if (actor.kind === "agent" && blockedIds.length > 0) await lockBlocking(db, actor.owner.workspaceId);
+  if (actor.kind === "agent" && blockedIds.length > 0) await lockBlocking(db, actor.owner.workspaceId, check);
   return heldSourceClaim(db, actor, key, now, "a Discovered Ticket", { projectId: null, keyShare: blockedIds });
 }
 
