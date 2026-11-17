@@ -13,11 +13,17 @@ import { snapshot } from "../db/database.js";
  * are now Ready for.
  * Claims released or whose Agent Session was ended are told of where that happens. Claims that
  * lapse while the server is down aren't told of; a stream reopening catches up with its `ready`.
- * Stops when `stop` is called; `lookNow` looks at once, for tests to choose when it happens.
+ * `stop` stops it and resolves once any look still running is done, so the database can be closed after it.
+ * `lookNow` looks at once, for tests to choose when it happens, and does nothing once stopped.
  */
-export function watchSilence(ctx: AppContext, intervalMs: number): { stop: () => void; lookNow: () => Promise<void> } {
+export function watchSilence(ctx: AppContext, intervalMs: number): { stop: () => Promise<void>; lookNow: () => Promise<void> } {
+  let stopped = false;
   let last = { at: ctx.clock.now(), live: new Map<string, string>(), sessions: new Map<string, SessionLook>() };
   let looking: Promise<void> | null = null;
+  /** Resolves once no look is running, however the last one ended. */
+  const lookDone = async () => {
+    while (looking) await looking.catch(() => {});
+  };
   const look = async () => {
     const now = ctx.clock.now();
     // One snapshot for the whole look: a silence threshold lowered between finding lapsed Claims and listing live ones
@@ -33,7 +39,8 @@ export function watchSilence(ctx: AppContext, intervalMs: number): { stop: () =>
   };
   // One look at a time, each from where the last left off. A look that fails rejects, so `lookNow` doesn't pass for a look made.
   const lookAfterAny = async (): Promise<void> => {
-    while (looking) await looking.catch(() => {});
+    await lookDone();
+    if (stopped) return;
     looking = look().finally(() => (looking = null));
     await looking;
   };
@@ -41,5 +48,10 @@ export function watchSilence(ctx: AppContext, intervalMs: number): { stop: () =>
     // A failed look (a database blip) is tried again next time, from the same Claims and Sessions.
     if (!looking) lookAfterAny().catch(() => {});
   }, intervalMs).unref();
-  return { stop: () => clearInterval(timer), lookNow: lookAfterAny };
+  const stop = async (): Promise<void> => {
+    stopped = true;
+    clearInterval(timer);
+    await lookDone();
+  };
+  return { stop, lookNow: lookAfterAny };
 }

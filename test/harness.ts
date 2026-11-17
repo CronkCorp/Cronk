@@ -783,8 +783,8 @@ const looksUp = (cond: string | undefined) => cond !== undefined && /\S/.test(co
  * Ada, the Admin, with the Project CRONK holding `tickets` Tickets, all assigned to her and
  * delegated to her Agent claude-laptop. `session()` starts a new Agent Session of that Agent.
  */
-export async function delegatedSetup(tickets = 1) {
-  const { cronk, admin } = await startInstalledCronk();
+export async function delegatedSetup(tickets = 1, opts: Parameters<typeof startCronk>[0] = {}) {
+  const { cronk, admin } = await startInstalledCronk("Acme", opts);
   await projectWithTickets(admin, "CRONK", tickets);
   const claude = await registerAgent(admin, "claude-laptop");
   const adaId = (await admin.get("/api/users")).body.users[0].id;
