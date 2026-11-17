@@ -12,32 +12,41 @@ import { messageOf } from "./ui.js";
  * picking, dropping anywhere on the page or pasting. Opening one shows it in a dialog, where video and audio play with seeking.
  */
 
-/** Uploads files one after another with `upload`, saying how far it got and what was refused. */
-export function useAttach(upload: (file: File) => Promise<unknown>, onAttached: () => void) {
+/**
+ * Uploads files one after another with `upload`, saying how far it got and what was refused. Attaching answers what
+ * each upload that went through gave back, in the order the files came.
+ */
+export function useAttach<T>(upload: (file: File) => Promise<T>, onAttached: () => void) {
   const [uploading, setUploading] = useState<string>();
   const [errors, setErrors] = useState<string[]>([]);
-  const attach = async (files: File[]) => {
-    if (files.length === 0) return;
+  const attach = async (files: File[]): Promise<T[]> => {
+    const attached: T[] = [];
+    if (files.length === 0) return attached;
     setErrors([]);
     for (const file of files) {
       setUploading(file.name || "pasted file");
       try {
-        await upload(file);
+        attached.push(await upload(file));
       } catch (err) {
         setErrors((e) => [...e, `${file.name || "The pasted file"}: ${messageOf(err)}`]);
       }
     }
     setUploading(undefined);
     onAttached();
+    return attached;
   };
   return { attach, uploading, errors };
 }
 
-export type Attaching = ReturnType<typeof useAttach>;
+export type Attaching = ReturnType<typeof useAttach<unknown>>;
+
+/** The Markdown that embeds an Attachment: an image whose address is its file, named after it. */
+export const attachmentMarkdown = (a: Attachment) => `![${a.name.replace(/[\\[\]]/g, "\\$&")}](${attachmentFileUrl(a.id)})`;
 
 /**
  * Attaches files dropped anywhere on the page, or pasted while no text field holds a selection to paste into, while
- * `enabled`. Answers whether files are being dragged over the page, to show where they'll go.
+ * `enabled`; not those something in the page, such as a Markdown editor, already took. Answers whether files are being
+ * dragged over the page, to show where they'll go.
  */
 export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): boolean {
   const [dragging, setDragging] = useState(false);
@@ -57,13 +66,14 @@ export function usePageDrop(enabled: boolean, attach: (files: File[]) => void): 
     };
     const drop = (e: DragEvent) => {
       if (!carriesFiles(e)) return;
-      e.preventDefault();
       setDragging(false);
+      if (e.defaultPrevented) return;
+      e.preventDefault();
       latest.current([...(e.dataTransfer?.files ?? [])]);
     };
     const paste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
-      if (files.length === 0) return;
+      if (files.length === 0 || e.defaultPrevented) return;
       e.preventDefault();
       latest.current(files);
     };
@@ -130,10 +140,13 @@ export interface AttachmentsView {
   /** Whether files are being dragged over the page. */
   dragging: boolean;
   onOpen: (attachment: Attachment) => void;
+  /** Puts an Attachment's Markdown in an open editor; each thumbnail offers "Insert" only when given. */
+  onInsert?: (attachment: Attachment) => void;
 }
 
 /** An item's own Attachments as thumbnails, under a Ticket's description or a Document's body, with where to drop more. */
 export function AttachmentThumbnails(props: AttachmentsView) {
+  const { onInsert } = props;
   if (!props.canWrite && props.attachments.length === 0) return null;
   return (
     <section className="attachments" aria-label="Attachments">
@@ -154,6 +167,11 @@ export function AttachmentThumbnails(props: AttachmentsView) {
                   </span>
                 </span>
               </button>
+              {onInsert && (
+                <Button type="button" variant="ghost" className="thumbnail-insert" aria-label={`Insert ${a.name}`} onClick={() => onInsert(a)}>
+                  Insert
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -305,6 +323,16 @@ export function ChangeLineAttachment(props: { attachment: Extract<RecordedChange
   );
 }
 
+/** A video or audio Attachment playing in place, video at most 360px tall, named `label`. */
+export function InlinePlayer(props: { kind: "video" | "audio"; attachment: Attachment; label: string | undefined }) {
+  const url = attachmentFileUrl(props.attachment.id);
+  return props.kind === "video" ? (
+    <video className="inline-media" src={url} controls preload="metadata" playsInline aria-label={props.label} />
+  ) : (
+    <audio className="inline-audio" src={url} controls preload="metadata" aria-label={props.label} />
+  );
+}
+
 /**
  * The Attachments on one Comment, or on one Document or Report itself, shown where they were posted: images and video in
  * the page, audio playing, other files by name. Opening one shows it in the page's dialog. Nothing outside a page that
@@ -327,10 +355,8 @@ export function InlineAttachments(props: { commentId: string } | { documentId: s
               <button type="button" className="inline-media-button" onClick={() => page.onOpen(a)} aria-label={`Open ${a.name}`}>
                 <img className="inline-media" src={url} alt={a.name} loading="lazy" />
               </button>
-            ) : kind === "video" ? (
-              <video className="inline-media" src={url} controls preload="metadata" playsInline aria-label={a.name} />
-            ) : kind === "audio" ? (
-              <audio className="inline-audio" src={url} controls preload="metadata" aria-label={a.name} />
+            ) : kind === "video" || kind === "audio" ? (
+              <InlinePlayer kind={kind} attachment={a} label={a.name} />
             ) : null}
             <span className="inline-caption">
               <button type="button" className="link-button inline-name" onClick={() => page.onOpen(a)}>

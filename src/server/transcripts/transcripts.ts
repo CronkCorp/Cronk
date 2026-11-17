@@ -5,6 +5,7 @@ import { ticketKeySql } from "../work/tickets.js";
 import { decisionKeySql } from "../knowledge/decisions.js";
 import { applyRedaction, applyRedactions, type Redaction } from "./redact.js";
 import { scrubSecrets } from "./scrub.js";
+import { firstTurnNaming, titleOf, turnsOf } from "../../shared/transcript-turns.js";
 
 /**
  * Transcripts (ADR 0013): the verbatim chats behind an Agent's changes, uploaded from the client side as
@@ -16,6 +17,8 @@ import { scrubSecrets } from "./scrub.js";
 /** A Transcript as the API returns it to someone who may read it. */
 export interface Transcript {
   id: string;
+  /** What it is called: the first line of its first User turn, or its chat id (see shared/transcript-turns.ts). */
+  title: string;
   chatId: string;
   agent: { id: string; name: string; owner: { id: string; name: string } };
   /** The text of the latest upload. */
@@ -24,14 +27,17 @@ export interface Transcript {
   earlier: string[];
   /** The Agent Sessions it names, in the order they started. */
   sessions: { id: string }[];
-  /** The Tickets its Sessions changed, Activities and Comments included, that the reader can read. */
-  tickets: { key: string; title: string }[];
+  /**
+   * The Tickets its Sessions changed, Activities and Comments included, that the reader can read. Each item here and below has
+   * the turn of the latest text where its key or id first appears (see shared/transcript-turns.ts), or null when none names it.
+   */
+  tickets: { key: string; title: string; turn: number | null }[];
   /** The Documents and Reports its Sessions saved or commented on, that the reader can read. */
-  documents: { id: string; title: string }[];
+  documents: { id: string; title: string; turn: number | null }[];
   /** The Terms its Sessions saved, that the reader can read. */
-  terms: { id: string; name: string }[];
+  terms: { id: string; name: string; turn: number | null }[];
   /** The Decisions its Sessions proposed or refined, that the reader can read. */
-  decisions: { key: string; title: string }[];
+  decisions: { key: string; title: string; turn: number | null }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -132,18 +138,21 @@ function hasWord(text: string, word: string): boolean {
 }
 
 /**
- * Everything the Agent Sessions `$1` did, as the Ticket, Document, Term or Decision each record is on: the Ticket changes they
- * made, the Activities, Comments and Attachments they added and the Document, Term and Decision Versions they saved.
+ * Everything Agent Sessions did, by the Session that did it and the Ticket, Document, Term or Decision each record is on: the Ticket
+ * changes they made, the Activities, Comments and Attachments they added and the Document, Term and Decision Versions they saved.
  */
-const SESSION_RECORDS = `
-  SELECT ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id FROM ticket_changes WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, NULL, NULL, NULL FROM activities WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT ticket_id, document_id, NULL, NULL FROM comments WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT NULL, document_id, NULL, NULL FROM document_versions WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL FROM attachments x
-    LEFT JOIN comments c ON c.id = x.comment_id WHERE x.actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT NULL, NULL, term_id, NULL FROM term_versions WHERE actor_session_id = ANY($1::uuid[])
-  UNION ALL SELECT NULL, NULL, NULL, decision_id FROM decision_versions WHERE actor_session_id = ANY($1::uuid[])`;
+const RECORDS = `
+  SELECT actor_session_id, ticket_id, NULL::uuid AS document_id, NULL::uuid AS term_id, NULL::uuid AS decision_id FROM ticket_changes
+  UNION ALL SELECT actor_session_id, ticket_id, NULL, NULL, NULL FROM activities
+  UNION ALL SELECT actor_session_id, ticket_id, document_id, NULL, NULL FROM comments
+  UNION ALL SELECT actor_session_id, NULL, document_id, NULL, NULL FROM document_versions
+  UNION ALL SELECT x.actor_session_id, coalesce(x.ticket_id, c.ticket_id), coalesce(x.document_id, c.document_id), NULL, NULL FROM attachments x
+    LEFT JOIN comments c ON c.id = x.comment_id
+  UNION ALL SELECT actor_session_id, NULL, NULL, term_id, NULL FROM term_versions
+  UNION ALL SELECT actor_session_id, NULL, NULL, NULL, decision_id FROM decision_versions`;
+
+/** Everything the Agent Sessions `$1` did (see RECORDS). */
+const SESSION_RECORDS = `SELECT * FROM (${RECORDS}) all_records WHERE actor_session_id = ANY($1::uuid[])`;
 
 /**
  * Whether any of these Agent Sessions changed something: a Ticket, an Activity, a Comment, an Attachment, or a Document, Term or
@@ -213,8 +222,30 @@ export async function redactTranscript(db: Queryable, stored: StoredTranscript, 
   const earlier = stored.earlier.map((t) => applyRedaction(t, r));
   if (!markdown.found && !earlier.some((e) => e.found)) return false;
   await db.query("UPDATE transcripts SET markdown = $2, earlier = $3 WHERE id = $1", [stored.id, markdown.text, earlier.map((e) => e.text)]);
+  await storeTurns(db, stored.id, markdown.text);
   await storeRedactions(db, stored.id, [r], at);
   return true;
+}
+
+/** Keeps the turns of the Transcript's latest text, `markdown`, for search, replacing those it had. */
+export async function storeTurns(db: Queryable, transcriptId: string, markdown: string): Promise<void> {
+  await db.query("DELETE FROM transcript_turns WHERE transcript_id = $1", [transcriptId]);
+  const turns = turnsOf(markdown);
+  if (turns.length === 0) return;
+  await db.query("INSERT INTO transcript_turns (transcript_id, n, body) SELECT $1, unnest($2::int[]), unnest($3::text[])", [
+    transcriptId,
+    turns.map((t) => t.n),
+    turns.map((t) => t.text),
+  ]);
+}
+
+/** Keeps the turns of every Transcript, as an upgrade fills them in: one text at a time, as each may hold megabytes. */
+export async function storeAllTurns(db: Queryable): Promise<void> {
+  const { rows: ids } = await db.query<{ id: string }>("SELECT id FROM transcripts");
+  for (const { id } of ids) {
+    const { rows } = await db.query<{ markdown: string }>("SELECT markdown FROM transcripts WHERE id = $1", [id]);
+    await storeTurns(db, id, rows[0]!.markdown);
+  }
 }
 
 /** The bytes a Transcript's texts take, as the Workspace's limit counts them. */
@@ -242,6 +273,7 @@ export async function storeTranscript(
     "INSERT INTO transcript_sessions (transcript_id, session_id) SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING",
     [id, upload.sessionIds],
   );
+  if (input.existing?.markdown !== upload.markdown) await storeTurns(db, id, upload.markdown);
   return id;
 }
 
@@ -307,6 +339,33 @@ function placesOf(items: Awaited<ReturnType<typeof changedItems>>): Places {
 }
 
 /**
+ * What the Transcript's Sessions changed, where, and which of those places `actor` can read; undefined if `actor` may not read the
+ * Transcript (see readTranscript).
+ */
+async function accessTo(db: Queryable, actor: Actor, stored: StoredTranscript, opts: { uploader?: boolean } = {}) {
+  if (actingUser(actor).workspaceId !== stored.workspaceId) return undefined;
+  const items = await changedItems(db, stored.sessionIds);
+  const places = placesOf(items);
+  const readable = await readablePlaces(db, actor);
+  const canReadIn = (projectId: string | null) => (projectId === null ? readable.workspaceId !== null : readable.projectIds.includes(projectId));
+  const readsAnyway = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
+  const somewhere = places.projectIds.length > 0 || places.workspace;
+  const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
+  // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
+  if (!readsAnyway && !(somewhere && everywhere)) return undefined;
+  return { items, places, canReadIn };
+}
+
+/**
+ * Whether `actor` may read the Transcript and, when `projectIds` narrows a search to Projects, whether its Sessions changed
+ * something in one of them.
+ */
+export async function findable(db: Queryable, actor: Actor, stored: StoredTranscript, projectIds?: string[]): Promise<boolean> {
+  const access = await accessTo(db, actor, stored);
+  return access !== undefined && (!projectIds || access.places.projectIds.some((p) => projectIds.includes(p)));
+}
+
+/**
  * The Transcript as `actor` may read it, or undefined if they may not: its Owner may, and so may anyone (Agents capped as usual)
  * with Read in every Project its Sessions changed things in, and in the Workspace for what they changed outside any Project.
  * What it lists of those changes leaves out what the reader can't read.
@@ -318,31 +377,27 @@ export async function readTranscript(
   /** Set when answering the Agent that uploaded it, who may always read back what it sent. */
   opts: { uploader?: boolean } = {},
 ): Promise<Transcript | undefined> {
-  const items = await changedItems(db, stored.sessionIds);
-  const places = placesOf(items);
-  const readable = await readablePlaces(db, actor);
-  const canReadIn = (projectId: string | null) => (projectId === null ? readable.workspaceId !== null : readable.projectIds.includes(projectId));
-  const readsAnyway = (actor.kind === "user" && actor.user.id === stored.ownerId) || opts.uploader === true;
-  const somewhere = places.projectIds.length > 0 || places.workspace;
-  const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
-  if (actingUser(actor).workspaceId !== stored.workspaceId) return undefined;
-  // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
-  if (!readsAnyway && !(somewhere && everywhere)) return undefined;
+  const access = await accessTo(db, actor, stored, opts);
+  if (!access) return undefined;
+  const { items, canReadIn } = access;
   const { rows } = await db.query<{ agent_name: string; owner_name: string }>(
     "SELECT a.name AS agent_name, u.name AS owner_name FROM agents a JOIN users u ON u.id = a.owner_id WHERE a.id = $1",
     [stored.agentId],
   );
+  const turns = turnsOf(stored.markdown);
+  const turn = (...keyOrId: string[]) => firstTurnNaming(turns, keyOrId);
   return {
     id: stored.id,
+    title: titleOf(turns, stored.chatId),
     chatId: stored.chatId,
     agent: { id: stored.agentId, name: rows[0]!.agent_name, owner: { id: stored.ownerId, name: rows[0]!.owner_name } },
     markdown: stored.markdown,
     earlier: stored.earlier,
     sessions: stored.sessionIds.map((id) => ({ id })),
-    tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title })),
-    documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title })),
-    terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name })),
-    decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title })),
+    tickets: items.tickets.filter((t) => canReadIn(t.project_id)).map((t) => ({ key: t.key, title: t.title, turn: turn(t.key, t.id) })),
+    documents: items.documents.filter((d) => canReadIn(d.project_id)).map((d) => ({ id: d.id, title: d.title, turn: turn(d.id) })),
+    terms: items.terms.filter((t) => canReadIn(t.project_id)).map((t) => ({ id: t.id, name: t.name, turn: turn(t.id) })),
+    decisions: items.decisions.filter((d) => canReadIn(d.project_id)).map((d) => ({ key: d.key, title: d.title, turn: turn(d.key, d.id) })),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   };
@@ -357,8 +412,47 @@ export async function listTranscripts(db: Queryable, workspaceId: string, order:
   return rows.map(toStored);
 }
 
-/** A Transcript without its text, as listings show it. */
-export const transcriptSummary = ({ markdown: _m, earlier: _e, ...summary }: Transcript) => summary;
+/** An item a Transcript may have led to: a Ticket, Document (or Report), Term or Decision, by its id, and its key if it has one. */
+export type LinkedItem = { kind: "ticket" | "document" | "term" | "decision"; id: string; key?: string };
+
+/** The Transcripts linked to an Agent Session that changed `item`, most recently uploaded first, whoever may read them. */
+export async function transcriptsOf(db: Queryable, workspaceId: string, item: LinkedItem): Promise<StoredTranscript[]> {
+  const { rows } = await db.query<TranscriptRow>(
+    `${SELECT_TRANSCRIPTS} WHERE tr.workspace_id = $1 AND tr.id IN (
+       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
+     ORDER BY ${ORDERS.newest}`,
+    [workspaceId, item.id],
+  );
+  return rows.map(toStored);
+}
+
+/**
+ * A Transcript as an item it led to links to it ("From Transcript"): without its text, not even its title, so context on claim
+ * never holds any of the chat; with the turn where the item first appears.
+ */
+export interface TranscriptLink {
+  id: string;
+  agent: { id: string; name: string };
+  /** The turn where the item's key or id first appears; null for the top. */
+  turn: number | null;
+  updatedAt: Date;
+}
+
+/** The Transcripts `item` came from that `actor` may read, most recently uploaded first. */
+export async function transcriptLinks(db: Queryable, actor: Actor, item: LinkedItem): Promise<TranscriptLink[]> {
+  const links: TranscriptLink[] = [];
+  for (const stored of await transcriptsOf(db, actingUser(actor).workspaceId, item)) {
+    const transcript = await readTranscript(db, actor, stored);
+    if (!transcript) continue;
+    // Found as readTranscript finds each item's turn.
+    const turn = firstTurnNaming(turnsOf(stored.markdown), item.key ? [item.key, item.id] : [item.id]);
+    links.push({ id: transcript.id, agent: { id: transcript.agent.id, name: transcript.agent.name }, turn, updatedAt: transcript.updatedAt });
+  }
+  return links;
+}
+
+/** A Transcript without its text, as listings show it: its title, the first line of a turn, is text too. */
+export const transcriptSummary = ({ markdown: _m, earlier: _e, title: _t, ...summary }: Transcript) => summary;
 
 /** Deletes a Transcript and its links. */
 export async function deleteTranscript(db: Queryable, id: string): Promise<void> {

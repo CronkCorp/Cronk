@@ -1,6 +1,7 @@
 import type { Queryable } from "./database.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 import { recordAllEmbeds } from "../files/artifact-embeds.js";
+import { storeAllTurns } from "../transcripts/transcripts.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -1005,7 +1006,23 @@ export const migrations: Migration[] = [
     backfill: (db) => recordAllMentions(db),
   },
   {
-    id: "0042_user_diff_view",
+    id: "0042_transcript_turns",
+    sql: `
+      -- The turns of each Transcript's latest text (shared/transcript-turns.ts), numbered from 1, kept for full-text search
+      -- (transcripts/search.ts), which matches this exact expression. Only a turn's first 100,000 characters are searched, so no
+      -- turn is too long to index.
+      CREATE TABLE transcript_turns (
+        transcript_id uuid NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+        n integer NOT NULL CHECK (n > 0),
+        body text NOT NULL,
+        PRIMARY KEY (transcript_id, n)
+      );
+      CREATE INDEX transcript_turns_search ON transcript_turns USING gin (to_tsvector('english', left(body, 100000)));
+    `,
+    backfill: (db) => storeAllTurns(db),
+  },
+  {
+    id: "0043_user_diff_view",
     sql: `
       -- The Diff view each User last chose (identity/users.ts), so it follows them across browsers. Unified until they choose.
       ALTER TABLE users ADD COLUMN diff_view text NOT NULL DEFAULT 'unified' CHECK (diff_view IN ('unified', 'split'));

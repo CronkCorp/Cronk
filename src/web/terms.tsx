@@ -11,6 +11,7 @@ import { LiveIndicator, useLiveState } from "./components/live.js";
 import { explainStale } from "./documents.js";
 import { CronkMarkdown, forgetLinkedKnowledge, MarkdownPlace } from "./markdown.js";
 import { MentionedIn } from "./mentions.js";
+import { LoadFromTranscripts } from "./transcripts.js";
 import { Link, navigate } from "./router.js";
 import { termsAddress } from "./routes.js";
 import { Field, Show, TextArea, useAction, useCanWrite, useLoad } from "./ui.js";
@@ -353,6 +354,7 @@ function TermView(props: { term: Term; startEditing: boolean; onChanged: (t: Ter
             {t.group && <>Group: {t.group} · </>}
             {placeName(t.projectKey)} · Version {t.version}, <RelativeTime at={t.updatedAt} />
           </p>
+          <LoadFromTranscripts kind="terms" keyOrId={t.id} heading="h4" reloadOn={t.version} />
         </section>
       )}
       <MentionedIn load={() => api.termMentions(t.id)} deps={[t.id, t.version]} what="the Term's name" />

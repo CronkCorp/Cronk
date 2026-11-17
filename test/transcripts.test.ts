@@ -62,7 +62,7 @@ describe("Uploading a Transcript", () => {
     expect(read).toMatchObject({ tickets: [], documents: [], terms: [], decisions: [{ key: "D1", title: "Compose for installs" }, { key: "CRONK-D1", title: "Markdown for Decisions" }] });
     const refined = await upload(cronk.client(claude.secret), "chat-2", chat("Refine it", refiner.sessionId));
     expect(refined.status, JSON.stringify(refined.body)).toBe(200);
-    expect((await admin.get(`/api/transcripts/${refined.body.transcript.id}`)).body.transcript.decisions).toEqual([{ key: "CRONK-D1", title: "Markdown for Decisions" }]);
+    expect((await admin.get(`/api/transcripts/${refined.body.transcript.id}`)).body.transcript.decisions).toEqual([{ key: "CRONK-D1", title: "Markdown for Decisions", turn: null }]);
   });
 
   it("links the Ticket its Sessions attached a file to, which alone is enough to keep it", async () => {
@@ -74,7 +74,7 @@ describe("Uploading a Transcript", () => {
 
     const uploaded = await upload(cronk.client(claude.secret), "chat-1", chat("Attach the log", agent.sessionId));
     expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
-    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1" }]);
+    expect((await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
   it("refuses a chat naming none of the uploading Agent's Sessions that changed anything", async () => {
@@ -345,7 +345,7 @@ describe("Who may read a Transcript", () => {
     await admin.delete(`/api/projects/SECRET/members/${bobId}`);
     const read = await bob.get(`/api/transcripts/${id}`);
     expect(read.status).toBe(200);
-    expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1" }]);
+    expect(read.body.transcript.tickets).toEqual([{ key: "CRONK-1", title: "Ticket 1", turn: null }]);
   });
 
   it("outlives its Agent's removal", async () => {
@@ -518,7 +518,7 @@ describe("Exporting and importing Transcripts", () => {
       id: listed[0].id,
       // The import keeps the Agent's and its Session's ids; only the Owner, a User, is new here.
       agent: { ...original.agent, owner: { id: expect.any(String), name: "bob" } },
-      documents: [{ id: handbook.id, title: "Handbook" }],
+      documents: [{ id: handbook.id, title: "Handbook", turn: null }],
     });
   });
 
@@ -569,6 +569,7 @@ describe("Listing Transcripts", () => {
     const mine = (await bob.get("/api/transcripts")).body.transcripts;
     expect(mine.map((t: { id: string }) => t.id)).toEqual([second, id]);
     expect(mine[0]).not.toHaveProperty("markdown");
+    expect(mine[0]).not.toHaveProperty("title");
     expect(mine[0]).toMatchObject({ chatId: "chat-2", tickets: [{ key: "CRONK-1" }] });
     expect((await carol.get("/api/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([second]);
   });
@@ -614,5 +615,164 @@ describe("Linking a chat written before an import", () => {
     expect(byHand.status, JSON.stringify(byHand.body)).toBe(200);
     expect(byHand.body.transcript.tickets.map((t: { key: string }) => t.key)).toEqual(["HAND-1"]);
     expect((await upload(hook, "chat-3", "## Assistant\n\nnot-my-session-at-all\n")).status).toBe(422);
+  });
+});
+
+describe("Where a Transcript's items first appear", () => {
+  it("gives each item the turn where its key or id first appears, and none when no turn names it", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    for (const key of ["CRONK-1", "CRONK-2"]) {
+      await agent.post(`/api/tickets/${key}/claim`);
+      await agent.post(`/api/tickets/${key}/activities`, { kind: "plan", body: "Go" });
+    }
+    const doc = (await agent.post("/api/projects/CRONK/documents", { title: "Notes", body: "Kept." })).body.document.id;
+    const term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
+    const decided = await agent.post("/api/projects/CRONK/decisions", { title: "Retry migrations", ticket: "CRONK-1" });
+    expect(decided.status, JSON.stringify(decided.body)).toBe(201);
+    const markdown = [
+      "## User\n\nThe migration test is flaky.\n",
+      "## Assistant\n\n```tool-result\nAgent Session " + agent.sessionId + "\n```\n",
+      // A heading inside a fenced block isn't a turn.
+      "## User\n\nLook at cronk-1, and this:\n\n````\n## Assistant\n\nCRONK-D1\n````\n",
+      "## Assistant\n\nSaved " + doc.toUpperCase() + " and recorded CRONK-D1; CRONK-12 is another Ticket.\n",
+    ].join("\n");
+
+    const uploaded = await upload(cronk.client(claude.secret), "chat-1", markdown);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const read = (await admin.get(`/api/transcripts/${uploaded.body.transcript.id}`)).body.transcript;
+    expect(read).toMatchObject({
+      tickets: [
+        { key: "CRONK-1", turn: 3 },
+        { key: "CRONK-2", turn: null },
+      ],
+      documents: [{ id: doc, turn: 4 }],
+      terms: [{ id: term, turn: null }],
+      decisions: [{ key: "CRONK-D1", turn: 3 }],
+    });
+  });
+});
+
+describe("From Transcript links", () => {
+  it("list, on each item, the Transcripts its changes came from with the turn where it first appears", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Go" });
+    const doc = (await agent.post("/api/projects/CRONK/documents", { title: "Notes", body: "Kept." })).body.document.id;
+    const term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
+    expect((await agent.post("/api/projects/CRONK/decisions", { title: "Retry migrations", ticket: "CRONK-1" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    const named = (
+      await upload(hook, "chat-1", `## User\n\nFix CRONK-1\n\n## Assistant\n\nAgent Session ${agent.sessionId}\n\n## Assistant\n\nSaved ${doc}, ${term} and CRONK-D1\n`)
+    ).body.transcript.id;
+    cronk.clock.advance(1000);
+    const unnamed = (await upload(hook, "chat-2", chat("Carry on", agent.sessionId))).body.transcript.id;
+
+    const links = async (path: string) => {
+      const res = await admin.get(path);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body.transcripts.map((t: { id: string; turn: number | null }) => [t.id, t.turn]);
+    };
+    expect(await links("/api/tickets/CRONK-1/transcripts")).toEqual([[unnamed, null], [named, 1]]);
+    expect(await links(`/api/documents/${doc}/transcripts`)).toEqual([[unnamed, null], [named, 3]]);
+    expect(await links(`/api/terms/${term}/transcripts`)).toEqual([[unnamed, null], [named, 3]]);
+    expect(await links("/api/decisions/CRONK-D1/transcripts")).toEqual([[unnamed, null], [named, 3]]);
+    const [link] = (await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts;
+    expect(link).toEqual({ id: unnamed, agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) });
+    expect((await admin.get("/api/tickets/CRONK-2/transcripts")).status).toBe(404);
+  });
+
+  it("leave out the Transcripts the caller may not read, and answer only for items they can read", async () => {
+    const { admin, carol, carolId, id } = await transcriptAcrossProjects();
+    expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
+    // Carol reads CRONK-1 but not SECRET, where the same Transcript's Sessions changed things too.
+    const carols = await carol.get("/api/tickets/CRONK-1/transcripts");
+    expect(carols.status).toBe(200);
+    expect(carols.body.transcripts).toEqual([]);
+    expect((await carol.get("/api/tickets/SECRET-1/transcripts")).status).toBe(404);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
+  });
+});
+
+describe("Context on claim", () => {
+  it("lists the Transcripts the Ticket came from, without their text", async () => {
+    const { cronk, claude, session } = await delegatedSetup();
+    const first = await session();
+    await first.post("/api/tickets/CRONK-1/claim");
+    await first.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Started" });
+    await first.delete("/api/tickets/CRONK-1/claim");
+    const id = (await upload(cronk.client(claude.secret), "chat-1", chat("Start on CRONK-1", first.sessionId))).body.transcript.id;
+
+    const claimed = await (await session()).post("/api/tickets/CRONK-1/claim");
+    expect(claimed.status, JSON.stringify(claimed.body)).toBe(200);
+    expect(claimed.body.transcripts).toEqual([
+      { id, agent: { id: claude.agentId, name: "claude-laptop" }, turn: 1, updatedAt: expect.any(String) },
+    ]);
+    // Nothing of the chat, not even its first line.
+    expect(JSON.stringify(claimed.body)).not.toMatch(/tool-result|Start on/);
+  });
+});
+
+describe("Searching Transcripts", () => {
+  it("finds them as their own kind, below everything else, pointing at the best matching turn", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Go" });
+    await admin.post("/api/workspace/documents", { title: "Rollback", body: "We rollback by hand." });
+    const markdown =
+      `## User\n\nThe deploy failed.\n\n## Assistant\n\nAgent Session ${agent.sessionId}\n\n` +
+      "## User\n\nRollback the rollback, then rollback again: rollback, rollback, rollback.\n\n## Assistant\n\nRolled back.\n";
+    const id = (await upload(cronk.client(claude.secret), "chat-1", markdown)).body.transcript.id;
+
+    const found = await admin.get("/api/search?q=rollback");
+    expect(found.status, JSON.stringify(found.body)).toBe(200);
+    expect(found.body.results.map((r: { kind: string }) => r.kind)).toEqual(["document", "transcript"]);
+    const [, hit] = found.body.results;
+    expect(hit).toMatchObject({ kind: "transcript", title: "The deploy failed.", projectKey: null, transcriptId: id, turn: 3, protected: null });
+    expect(hit.excerpt).toMatch(/^Rollback the rollback/);
+    expect(found.body.results[0]).toMatchObject({ transcriptId: null, turn: null });
+
+    expect((await admin.get("/api/search?q=rollback&kind=transcript")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["transcript"]);
+    expect((await admin.get("/api/search?q=rollback&kind=document")).body.results.map((r: { kind: string }) => r.kind)).toEqual(["document"]);
+    // Only the latest text is searched.
+    await upload(cronk.client(claude.secret), "chat-1", `## Assistant\n\nAgent Session ${agent.sessionId} started over.\n`);
+    expect((await admin.get("/api/search?q=rollback&kind=transcript")).body.results).toEqual([]);
+    expect((await admin.get("/api/search?q=started&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 1 }]);
+  });
+
+  it("finds only those the caller may read, and narrowed to Projects, those whose Sessions changed things there", async () => {
+    const { cronk, admin, bob, carol, carolId, claude, id } = await transcriptAcrossProjects();
+    const ids = async (client: Client, filters = "") =>
+      ((await client.get(`/api/search?q=done&kind=transcript${filters}`)).body.results as { transcriptId: string }[]).map((r) => r.transcriptId);
+    expect(await ids(bob)).toEqual([id]);
+    expect(await ids(admin)).toEqual([id]);
+    expect(await ids(carol)).toEqual([]);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect(await ids(carol)).toEqual([id]);
+    expect(await ids(cronk.client(claude.secret))).toEqual([id]);
+
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    expect(await ids(admin, "&project=SECRET")).toEqual([id]);
+    expect(await ids(admin, "&project=OPS")).toEqual([]);
+  });
+
+  it("finds what a hand redaction left, never the passage", async () => {
+    const { bob, id } = await transcriptAcrossProjects();
+    expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toHaveLength(1);
+    expect((await bob.post(`/api/transcripts/${id}/redactions`, { passage: "Done" })).status).toBe(200);
+    expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
+    expect((await bob.get("/api/search?q=redacted&kind=transcript")).body.results).toHaveLength(1);
+  });
+});
+
+describe("Upgrading an installation", () => {
+  it("makes the Transcripts it already holds searchable", async () => {
+    const { cronk, bob, id } = await transcriptAcrossProjects();
+    await cronk.undoMigration("0042_transcript_turns", "DROP TABLE transcript_turns");
+    await cronk.restart();
+    expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 2 }]);
   });
 });

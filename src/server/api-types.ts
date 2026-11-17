@@ -16,6 +16,7 @@ import type { Guidance as StoredGuidance, GuidanceVersion as StoredGuidanceVersi
 import type { publicUser } from "./identity/users.js";
 import type { Project as StoredProject } from "./work/projects.js";
 import type { Relations as StoredRelations } from "./work/relations.js";
+import type { DependentChoice as StoredDependentChoice } from "./work/reopen.js";
 import type {
   RecordedActor,
   RecordedChange as StoredRecordedChange,
@@ -32,6 +33,7 @@ import type { DecisionMerge as StoredDecisionMerge, MarkdownMerge, Merge as Stor
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
+import type { Transcript as StoredTranscript, TranscriptLink as StoredTranscriptLink } from "./transcripts/transcripts.js";
 import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { EmbeddedIn as StoredEmbeddedIn } from "./files/artifact-embeds.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
@@ -50,8 +52,7 @@ export type { Access, AgentAccess } from "./identity/access.js";
 export type { Role } from "./identity/users.js";
 export type { Status, Visibility } from "./work/projects.js";
 export type { TicketChanges } from "./work/tickets.js";
-export type { ReopenChoice } from "./work/reopen.js";
-export type { ActivityKind, DecisionStatus, DiffView, Priority, RelationKind, SearchKind, StatusCategory, Verification } from "../shared/values.js";
+export type { ActivityKind, DecisionStatus, DiffView, Priority, RelationKind, ReopenChoice, SearchKind, StatusCategory, Verification } from "../shared/values.js";
 export type { SearchResult };
 export type { RecordedActor, TicketName, TicketRef, UserRef };
 
@@ -119,6 +120,8 @@ export type Project = Serialized<StoredProject> & {
 
 export type Ticket = Serialized<StoredTicket>;
 export type Relations = Serialized<StoredRelations>;
+/** A Ticket a Reopen would reach, with the choices it takes (GET /api/tickets/:key/reopen). */
+export type DependentChoice = Serialized<StoredDependentChoice>;
 /** Another Ticket at the other end of a block, with who added it from a Discovered Ticket and why. */
 export type BlockingRef = Relations["blocks"][number];
 
@@ -139,8 +142,14 @@ export interface TicketDetail {
   relations: Relations;
   documents: LinkedDocument[];
   mentions: Mention[];
+  transcripts: TranscriptLink[];
   claim: Claim | null;
 }
+
+/** The verbatim chat that led an Agent to change things, with what it led to. */
+export type Transcript = Serialized<StoredTranscript>;
+/** A Transcript an item came from ("From Transcript"), with the turn where the item first appears. */
+export type TranscriptLink = Serialized<StoredTranscriptLink>;
 
 export type RecordedChange = Serialized<StoredRecordedChange>;
 

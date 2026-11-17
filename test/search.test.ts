@@ -73,8 +73,8 @@ describe("Searching", () => {
     expect(found).toHaveLength(2);
     expect(found).toEqual(
       expect.arrayContaining([
-        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null },
-        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null },
+        { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: ticket, decisionKey: null, transcriptId: null, turn: null, protected: false },
+        { kind: "term", title: "Ticket label", excerpt: "Groups related work.", projectKey: "CRONK", ticketKey: null, documentId: null, termId: label, decisionKey: null, transcriptId: null, turn: null, protected: false },
       ]),
     );
   });
@@ -83,7 +83,7 @@ describe("Searching", () => {
     const { admin } = await startInstalledCronk();
     const term = (await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work tracked within a Project.", avoid: ["Issue", "chore"] })).body
       .term.id;
-    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null };
+    const asResult = { kind: "term", title: "Ticket", excerpt: "A unit of work tracked within a Project.", projectKey: null, ticketKey: null, documentId: null, termId: term, decisionKey: null, transcriptId: null, turn: null, protected: false };
 
     expect((await admin.get("/api/search?q=tracking")).body.results).toEqual([asResult]);
     expect((await admin.get("/api/search?q=issues")).body.results).toEqual([asResult]);
@@ -107,6 +107,9 @@ describe("Searching", () => {
       documentId: null,
       termId: null,
       decisionKey,
+      transcriptId: null,
+      turn: null,
+      protected: false,
     });
     const rejected = asResult("Postgres for storage", "We keep everything in one database.", "CRONK", "CRONK-D1");
     const workspace = asResult("Self-hosted only", "Runs on our own servers and Postgres.", null, "D1");

@@ -16,6 +16,7 @@ export type Route =
   | { page: "triage" }
   | { page: "terms" }
   | { page: "term"; id: string }
+  | { page: "transcript"; id: string }
   | { page: "agents" }
   | { page: "search" }
   | { page: "guidance" }
@@ -48,6 +49,7 @@ const PATTERNS: [RegExp, (param: string) => Route][] = [
   [/^\/documents\/([^/]+)$/, (id) => ({ page: "document", id })],
   [/^\/decisions\/([^/]+)$/, (key) => ({ page: "decision", key })],
   [/^\/terms\/([^/]+)$/, (id) => ({ page: "term", id })],
+  [/^\/transcripts\/([^/]+)$/, (id) => ({ page: "transcript", id })],
 ];
 
 /** The page at `path`; any other address, or a malformed one, is the Projects page. */

@@ -21,6 +21,10 @@ export type Verification = (typeof VERIFICATIONS)[number];
 export const DIFF_VIEWS = ["unified", "split"] as const;
 export type DiffView = (typeof DIFF_VIEWS)[number];
 
+/** What a Reopen does to a Ticket it blocks that already continued on the work. */
+export const REOPEN_CHOICES = ["keep", "pause", "reopen"] as const;
+export type ReopenChoice = (typeof REOPEN_CHOICES)[number];
+
 /** A Ticket's Priority, most urgent first. */
 export const PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
 export type Priority = (typeof PRIORITIES)[number];
@@ -71,7 +75,7 @@ export const SHOWN_MEDIA_TYPES = {
   text: ["text/plain"],
 } as const;
 
-export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term", "decision"] as const;
+export const SEARCH_KINDS = ["ticket", "document", "report", "comment", "term", "decision", "transcript"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** The files a Markdown folder import reads, by name; the web client packs only these, the server imports only these. */

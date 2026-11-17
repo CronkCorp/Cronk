@@ -3,7 +3,7 @@ import { Actor, agentActor, SessionName, userActor } from "./components/actor.js
 import { Button } from "./components/button.js";
 import { LiveIndicator, useLiveState } from "./components/live.js";
 import { FieldPicker, type PickerOption } from "./components/picker.js";
-import { Chip, PRIORITY_NAMES, PriorityTag, StatusPill } from "./components/tags.js";
+import { Chip, PRIORITY_NAMES, PriorityTag, ProtectedMark, StatusPill } from "./components/tags.js";
 import { ReopenDialog } from "./components/reopen-dialog.js";
 import { RelativeTime, useNow } from "./components/time.js";
 import {
@@ -24,6 +24,7 @@ import {
 import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
 import { MentionList } from "./mentions.js";
+import { FromTranscripts } from "./transcripts.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
 import { AttachmentThumbnails, AttachmentViewer, FilesPanel, PageAttachments, type AttachmentsView, useAttach, usePageDrop } from "./attachments.js";
@@ -211,6 +212,7 @@ function TicketView(props: {
               <h3>Mentioned in</h3>
               <MentionList mentions={props.detail.mentions} what="its key" />
             </div>
+            <FromTranscripts links={props.detail.transcripts} heading="h3" />
           </section>
         </aside>
       </div>
@@ -577,7 +579,8 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
         <ul className="side-list" aria-label="Documents">
           {documents.map((d) => (
             <li key={d.id}>
-              <Link to={`/documents/${d.id}`} className="link">{d.title}</Link>{" "}
+              <Link to={`/documents/${d.id}`} className="link">{d.title}</Link>
+              {d.protected && <> <ProtectedMark compact /></>}{" "}
               <span className="muted">{whereDocumentIs(d)}</span> <Chip>Linked</Chip>
               {!props.readOnly && (
                 <Button variant="ghost" aria-label={`Unlink ${d.title}`} disabled={unlink.busy} onClick={() => void unlink.run(d.id)}>
@@ -607,7 +610,8 @@ function TicketDocuments(props: { detail: TicketDetail; readOnly: boolean }) {
           <ul className="side-list" aria-label="Documents to link">
             {found.map((r) => (
               <li key={r.documentId}>
-                {r.title} <span className="muted">{whereDocumentIs(r)}</span>{" "}
+                {r.title}
+                {r.protected && <> <ProtectedMark compact /></>} <span className="muted">{whereDocumentIs(r)}</span>{" "}
                 <Button variant="ghost" aria-label={`Link ${r.title}`} disabled={link.busy} onClick={() => void link.run(r.documentId!)}>
                   Link
                 </Button>

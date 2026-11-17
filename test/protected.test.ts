@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, joinAs, startInstalledCronk } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, startInstalledCronk } from "./harness.js";
 
 describe("marking a Document Protected", () => {
   it("is done and undone by a User with Write, each recorded in its protection history", async () => {
@@ -114,6 +114,110 @@ describe("protecting a Document", () => {
     expect(out.body.document).toMatchObject({ protected: false, protectedBy: null });
     const into = await admin.post(`/api/documents/${handbook.id}/move`, { parentId: architecture.id });
     expect(into.body.document).toMatchObject({ protected: true, protectedBy: { id: architecture.id } });
+  });
+});
+
+describe("lists that show a Document", () => {
+  it("say a Ticket's linked Documents are Protected when marked or under a marked one, on reading the Ticket and on linking", async () => {
+    const { admin, architecture, storage, backups, handbook } = await pageTree();
+    await admin.post("/api/projects/CRONK/tickets", { title: "Ticket 1" });
+    await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
+    await admin.patch(`/api/documents/${storage.id}`, { baseVersion: storage.version, body: "Before CRONK-1." });
+    await admin.post(`/api/tickets/CRONK-1/documents/${architecture.id}`);
+    await admin.post(`/api/tickets/CRONK-1/documents/${handbook.id}`);
+
+    const linked = await admin.post(`/api/tickets/CRONK-1/documents/${backups.id}`);
+    const expected = ["Architecture: true", "Handbook: false", "Backups: true"];
+    const marks = (documents: { title: string; protected: boolean }[]) => documents.map((d) => `${d.title}: ${d.protected}`);
+    expect(marks(linked.body.documents)).toEqual(expected);
+    const read = (await admin.get("/api/tickets/CRONK-1")).body;
+    expect(marks(read.documents)).toEqual(expected);
+    expect(read.documents[0]).not.toHaveProperty("protectedBy");
+    expect(read.documents[0]).not.toHaveProperty("covers");
+    // A Document mentioning the Ticket's key is among its mentions, with its mark.
+    expect(read.mentions.map((m: { kind: string; title: string; protected: boolean | null }) => `${m.kind}: ${m.title}: ${m.protected}`)).toEqual([
+      "document: Storage: true",
+    ]);
+  });
+
+  it("say which search results are Protected: Documents and Reports by the same rule, Terms and Decisions by their mark, never Tickets or Comments", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "The zebra cache." })).body.report;
+    const add = async (title: string, parentId?: string) =>
+      (await admin.post("/api/projects/CRONK/documents", { title, body: "About the zebra.", parentId })).body.document as { id: string };
+    const architecture = await add("Architecture");
+    await add("Storage", architecture.id);
+    const handbook = await add("Handbook");
+    await admin.post(`/api/documents/${handbook.id}/comments`, { body: "A zebra note." });
+    const term = (await admin.post("/api/projects/CRONK/terms", { name: "Zebra", definition: "A striped thing." })).body.term;
+    await admin.post("/api/projects/CRONK/terms", { name: "Zebra crossing", definition: "Where a zebra crosses." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Zebras first", body: "Always." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Zebras last", body: "Never." });
+    await admin.post("/api/decisions/CRONK-D1/protection", { protected: true });
+    await admin.patch("/api/tickets/CRONK-1", { title: "Zebra work" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "A zebra comment." });
+    for (const id of [architecture.id, report.id]) await admin.post(`/api/documents/${id}/protection`, { protected: true });
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+
+    const results = (await admin.get("/api/search?q=zebra&limit=50")).body.results as { kind: string; title: string; protected: boolean | null }[];
+    expect(results.map((r) => `${r.kind}: ${r.title}: ${r.protected}`).sort()).toEqual([
+      "comment: Handbook: null",
+      "comment: Zebra work: null",
+      "decision: Zebras first: true",
+      "decision: Zebras last: false",
+      "document: Architecture: true",
+      "document: Handbook: false",
+      "document: Storage: true",
+      "report: Findings: true",
+      "term: Zebra crossing: false",
+      "term: Zebra: true",
+      "ticket: Zebra work: null",
+    ]);
+  });
+
+  /** What mentions a Term or Decision, as `path` lists it: each one's kind, title and Protected flag. */
+  const mentionMarks = async (admin: Awaited<ReturnType<typeof pageTree>>["admin"], path: string) => {
+    const res = await admin.get(path);
+    expect(res.status).toBe(200);
+    return res.body.mentions.map((m: { kind: string; title: string; protected: boolean | null }) => `${m.kind}: ${m.title}: ${m.protected}`).sort();
+  };
+
+  it("say which of what mentions a Term or Decision is Protected: Documents by the same rule, Terms and Decisions by their mark", async () => {
+    const { admin, architecture, storage, handbook } = await pageTree();
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold on a Ticket." })).body.term;
+    for (const { id, version } of [architecture, storage, handbook]) await admin.patch(`/api/documents/${id}`, { baseVersion: version, body: "Each Claim." });
+    const lapse = (await admin.post("/api/projects/CRONK/terms", { name: "Lapse", definition: "When a Claim ends unasked." })).body.term;
+    await admin.post("/api/projects/CRONK/terms", { name: "Release", definition: "Giving up a Claim." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Claims lapse", body: "A Claim lapses." });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Claims are released", body: "A Claim is released." });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse a stale Claim" });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "That Claim again." });
+    await admin.post(`/api/documents/${architecture.id}/protection`, { protected: true });
+    await admin.post(`/api/terms/${lapse.id}/protection`, { protected: true });
+    await admin.post("/api/decisions/CRONK-D1/protection", { protected: true });
+
+    expect(await mentionMarks(admin, `/api/terms/${claim.id}/mentions`)).toEqual([
+      "comment: Lapse a stale Claim: null",
+      "decision: Claims are released: false",
+      "decision: Claims lapse: true",
+      "document: Architecture: true",
+      "document: Handbook: false",
+      "document: Storage: true",
+      "term: Lapse: true",
+      "term: Release: false",
+      "ticket: Lapse a stale Claim: null",
+    ]);
+
+    await admin.post("/api/workspace/decisions", { title: "Claims", body: "Per CRONK-D1." });
+    await admin.patch(`/api/documents/${storage.id}`, { baseVersion: 2, body: "Per CRONK-D1." });
+    await admin.post("/api/tickets/CRONK-1/comments", { body: "See CRONK-D1." });
+    expect(await mentionMarks(admin, "/api/decisions/CRONK-D1/mentions")).toEqual([
+      "comment: Lapse a stale Claim: null",
+      "decision: Claims: false",
+      "document: Storage: true",
+    ]);
   });
 });
 

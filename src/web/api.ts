@@ -48,6 +48,7 @@ import type {
   BlockingRef,
   Report,
   ReopenChoice,
+  DependentChoice,
   Role,
   SearchKind,
   Storage,
@@ -64,6 +65,8 @@ import type {
   TicketDetail,
   TicketName,
   TicketRef,
+  Transcript,
+  TranscriptLink,
   User,
   UserRef,
   Version,
@@ -121,6 +124,7 @@ export type {
   BlockingRef,
   Report,
   ReopenChoice,
+  DependentChoice,
   Role,
   SearchKind,
   Storage,
@@ -137,6 +141,8 @@ export type {
   TicketDetail,
   TicketName,
   TicketRef,
+  Transcript,
+  TranscriptLink,
   User,
   UserRef,
   Version,
@@ -183,12 +189,17 @@ const documentPath = (id: string) => `/api/documents/${encodeURIComponent(id)}`;
 const artifactPath = (id: string) => `/api/artifacts/${encodeURIComponent(id)}`;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
-    body: body === undefined ? null : JSON.stringify(body),
-    credentials: "same-origin",
-  });
+  const send = () =>
+    fetch(path, {
+      method,
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? null : JSON.stringify(body),
+      credentials: "same-origin",
+    });
+  // A browser drops requests in flight when the machine's network changes (Chromium's ERR_NETWORK_CHANGED: a laptop
+  // joining another network, a VPN or a container coming up). A read is safe to send again, so it is, once; a write is
+  // not, as it may have gone through. A server that is really down fails the second time too.
+  const res = await send().catch((err: unknown) => (method === "GET" ? send() : Promise.reject(err)));
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
@@ -257,6 +268,11 @@ export const api = {
   /** Imports a .zip, .tar.gz or .tar of a folder of Markdown files as Documents of a Project's tree, or the Workspace's. */
   importDocuments: (projectKey: string | undefined, file: Blob) =>
     upload<{ documents: DocumentTreeEntry[] }>(`${scopePath(projectKey)}/documents/import`, file).then((r) => r.documents),
+  /** A Transcript, with its text, for its Owner and those with Read everywhere its Agent Sessions changed things. */
+  transcript: (id: string) => request<{ transcript: Transcript }>("GET", `/api/transcripts/${encodeURIComponent(id)}`).then((r) => r.transcript),
+  /** The Transcripts an item came from ("From Transcript"): a Ticket or Decision by key, a Document or Term by id. */
+  transcriptsOf: (kind: "tickets" | "documents" | "terms" | "decisions", keyOrId: string) =>
+    request<{ transcripts: TranscriptLink[] }>("GET", `/api/${kind}/${encodeURIComponent(keyOrId)}/transcripts`).then((r) => r.transcripts),
   /** Full-text search across what the signed-in User may read, best match first, optionally of one kind or in one Project. */
   search: (q: string, filter: { kind?: SearchKind | undefined; project?: string | undefined } = {}) =>
     request<{ results: SearchResult[] }>(
@@ -532,6 +548,9 @@ export const api = {
   /** Rejects a Suggestion; the reason reaches its Agent as Waiting Work. */
   rejectSuggestion: (id: string, reason: string) =>
     request<{ suggestion: Suggestion }>("POST", `/api/suggestions/${encodeURIComponent(id)}/reject`, { reason }).then((r) => r.suggestion),
+  /** What a Reopen of an Unverified completion would ask about each Ticket it blocks: its choices, whether the User may change it, where a Pause moves it. */
+  reopenChoices: (key: string) =>
+    request<{ dependents: DependentChoice[] }>("GET", `/api/tickets/${encodeURIComponent(key)}/reopen`).then((r) => r.dependents),
   /**
    * Reopens an Agent's Unverified completion back to its Delegate in a Started Status, with a Comment saying why, and a choice
    * for each Ticket it blocks that already continued on the work.

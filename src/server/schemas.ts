@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { WORKSPACE_SETTINGS } from "./workspace/workspaces.js";
-import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
+import { ACTIVITY_KINDS, DECISION_STATUSES, LINK_REASONS, MENTION_KINDS, PRIORITIES, RELATION_KINDS, REOPEN_CHOICES, SEARCH_KINDS, STATUS_CATEGORIES, SUGGESTION_KINDS, SUGGESTION_STATES, VERIFICATIONS, DIFF_VIEWS, EXTRA_ORIGIN_USES, WAITING_REASONS } from "../shared/values.js";
 
 /** JSON schemas for request fields used by more than one route. */
 
@@ -44,6 +44,7 @@ export type SharedSchemaName =
   | "Ticket"
   | "TicketRef"
   | "BlockingRef"
+  | "DependentChoice"
   | "Relations"
   | "RecordedChange"
   | "Activity"
@@ -67,6 +68,7 @@ export type SharedSchemaName =
   | "Mention"
   | "Transcript"
   | "TranscriptSummary"
+  | "TranscriptLink"
   | "AgentRecordEntry"
   | "Decision"
   | "DecisionSummary"
@@ -103,6 +105,15 @@ const object = (properties: Record<string, object>, optional: string[] = []) => 
 const named = object({ id, name: { type: "string" } });
 const nullable = (schema: object) => ({ anyOf: [schema, { type: "null" }] });
 
+/** The turn of a Transcript where an item first appears. */
+const firstTurn = {
+  ...nullable({ type: "integer", minimum: 1 }),
+  description:
+    "The turn of the latest text where the item's key or id first appears: each `## User` or `## Assistant` heading outside a fenced block " +
+    "starts one, numbered from 1. Null when no turn names it, so a link points at the top.",
+};
+/** What a Transcript is called; only the Transcript itself carries it, as it is chat text. */
+const transcriptTitle = { type: "string", description: "What it is called: the first line of its first `## User` turn, shortened, or its chat id when it has none." };
 /** What a Transcript and its summary share. */
 const transcriptFields = {
   id,
@@ -114,22 +125,22 @@ const transcriptFields = {
   sessions: { type: "array", items: object({ id }), description: "The uploading Agent's Agent Sessions it names, in the order they started." },
   tickets: {
     type: "array",
-    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    items: object({ key: { type: "string" }, title: { type: "string" }, turn: firstTurn }),
     description: "The Tickets its Sessions changed, wrote Activities or Comments on, or attached files to, that the caller can read.",
   },
   documents: {
     type: "array",
-    items: object({ id, title: { type: "string" } }),
+    items: object({ id, title: { type: "string" }, turn: firstTurn }),
     description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
   },
   terms: {
     type: "array",
-    items: object({ id, name: { type: "string" } }),
+    items: object({ id, name: { type: "string" }, turn: firstTurn }),
     description: "The Terms its Sessions saved, that the caller can read.",
   },
   decisions: {
     type: "array",
-    items: object({ key: { type: "string" }, title: { type: "string" } }),
+    items: object({ key: { type: "string" }, title: { type: "string" }, turn: firstTurn }),
     description: "The Decisions its Sessions proposed or refined, that the caller can read.",
   },
   createdAt: timestamp,
@@ -477,6 +488,30 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       },
     }),
   },
+  DependentChoice: {
+    description: "A Ticket the Reopened one blocks, as a Reopen asks about it: what it is, what may be chosen for it, and whether the caller may change it.",
+    ...object(
+      {
+        ticket: object({
+          key: { type: "string" },
+          title: { type: "string" },
+          status: ref("Status"),
+          verification: { ...nullable({ type: "string", enum: VERIFICATIONS }), description: "As on the Ticket: `unverified` for an Agent's completion awaiting a User." },
+          delegate: { ...nullable(named), description: "The Agent the Ticket is delegated to." },
+        }),
+        claim: { ...nullable(object({ agent: named })), description: "Its live Claim's Agent; null for none." },
+        choices: {
+          type: "array",
+          items: { type: "string", enum: REOPEN_CHOICES },
+          description:
+            "What the Reopen accepts for it, the first being the default: `keep` or `pause` for a Started one, `keep` or `reopen` for an Unverified one, none for any other.",
+        },
+        canChange: { type: "boolean", description: "Whether the caller has Write in its Project. Without it, the Reopen accepts only `keep` for it." },
+        pausesTo: { ...ref("Status"), description: "Only for a Started one: the Status a `pause` moves it into, its Project's first Unstarted Status." },
+      },
+      ["pausesTo"],
+    ),
+  },
   Relations: {
     description: "A Ticket's relations to other Tickets, each list in key order.",
     ...object({
@@ -759,6 +794,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         enum: LINK_REASONS,
         description: "Why the Ticket lists it: one of its Reports, or linked to it.",
       },
+      protected: { type: "boolean", description: protectedDescription("it, or a Document above it, is marked Protected (a Report counts only its own mark)") },
     }),
   },
   EmbeddedIn: {
@@ -788,6 +824,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       documentId: { ...nullable(id), description: "For a Comment on a Document: the Document's id." },
       artifactId: { ...nullable(id), description: "For a Comment on an Artifact: the Artifact's id." },
       at: { ...timestamp, description: "When it last changed; for a Comment or Activity, when it was posted." },
+      protected: {
+        ...nullable({ type: "boolean" }),
+        description: `${protectedDescription("a Document, or one above it, is marked Protected; a Term or Decision is marked itself")} Null for a Ticket, Comment or Activity.`,
+      },
     }),
   },
   DocumentTreeEntry: {
@@ -1024,6 +1064,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       "and so to everything those Sessions changed.",
     ...object({
       ...transcriptFields,
+      title: transcriptTitle,
       markdown: {
         type: "string",
         description:
@@ -1037,8 +1078,18 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   TranscriptSummary: {
-    description: "A Transcript without its text.",
+    description: "A Transcript without its text, title included, since that is the first line of a turn.",
     ...object(transcriptFields),
+  },
+  TranscriptLink: {
+    description:
+      "A Transcript an item came from (\"From Transcript\"): one whose Agent Sessions changed the item, without its text (title included), with the turn where the item first appears.",
+    ...object({
+      id,
+      agent: { ...object({ id, name: { type: "string" } }), description: "The Agent that uploaded it." },
+      turn: firstTurn,
+      updatedAt: timestamp,
+    }),
   },
   Suggestion: {
     description:
@@ -1122,14 +1173,32 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   SearchResult: {
     description: "One thing a search found, with an excerpt of its text around the match.",
     ...object({
-      kind: { type: "string", enum: SEARCH_KINDS, description: "A Ticket, a Document in a page tree, a Report, a Comment, a Term, or a Decision." },
-      title: { type: "string", description: "The title of the Ticket, Document or Decision; for a Comment, of the Ticket or Document it is on; for a Term, its name." },
+      kind: {
+        type: "string",
+        enum: SEARCH_KINDS,
+        description: "A Ticket, a Document in a page tree, a Report, a Comment, a Term, a Decision, or a Transcript. Transcripts come after every other kind.",
+      },
+      title: {
+        type: "string",
+        description: "The title of the Ticket, Document, Decision or Transcript; for a Comment, of the Ticket or Document it is on; for a Term, its name.",
+      },
       excerpt: { type: "string", description: "The text around the match, as written (Markdown), without markers around the matching words." },
       projectKey: { ...nullable({ type: "string" }), description: "Null for something in the Workspace outside any Project." },
       ticketKey: { ...nullable({ type: "string" }), description: "The Ticket; a Report's or a Comment's Ticket; otherwise null." },
       documentId: { ...nullable(id), description: "The Document or Report; a Comment's Document; otherwise null." },
       termId: { ...nullable(id), description: "The Term; otherwise null." },
       decisionKey: { ...nullable({ type: "string" }), description: "The Decision, by its key, such as CRONK-D7 (D7 in the Workspace); otherwise null." },
+      transcriptId: { ...nullable(id), description: "The Transcript; otherwise null." },
+      turn: {
+        ...nullable({ type: "integer", minimum: 1 }),
+        description: "The Transcript's turn that matches best, the excerpt's, numbered from 1 as GET /api/transcripts/{id} numbers them; otherwise null.",
+      },
+      protected: {
+        ...nullable({ type: "boolean" }),
+        description: `${protectedDescription(
+          "a Document, or one above it, is marked Protected; a Report, Term or Decision is marked itself",
+        )} Null for a Ticket, Comment or Transcript.`,
+      },
     }),
   },
 };
