@@ -117,13 +117,16 @@ async function record(db: Queryable, source: SourceRow): Promise<void> {
   await db.query(`DELETE FROM mentions WHERE ${column} = $1`, [source.id]);
   const texts = [source.title, ...proseTexts(source.body)];
   const ownTicket = source.kind === "ticket" ? await ownTicketKey(db, source.id) : undefined;
-  const ticketKeys = keysIn(texts, TICKET_REFERENCE).filter((k) => k !== ownTicket);
-  await db.query(`INSERT INTO mentions (${column}, ticket_key) SELECT $1, unnest($2::text[])`, [source.id, ticketKeys]);
   const ownDecision = source.kind === "decision" ? await ownDecisionKey(db, source.id) : undefined;
-  const decisionKeys = keysIn(texts, DECISION_REFERENCE).filter((k) => k !== ownDecision);
-  await db.query(`INSERT INTO mentions (${column}, decision_key) SELECT $1, unnest($2::text[])`, [source.id, decisionKeys]);
-  const termIds = termIdsIn(texts, await applicableTerms(db, source.workspace_id, source.project_id)).filter((id) => id !== source.id);
-  await db.query(`INSERT INTO mentions (${column}, mentioned_term_id) SELECT $1, unnest($2::uuid[])`, [source.id, termIds]);
+  const terms = await applicableTerms(db, source.workspace_id, source.project_id);
+  const targets: [target: string, type: string, values: string[]][] = [
+    ["ticket_key", "text", keysIn(texts, TICKET_REFERENCE).filter((k) => k !== ownTicket)],
+    ["decision_key", "text", keysIn(texts, DECISION_REFERENCE).filter((k) => k !== ownDecision)],
+    ["mentioned_term_id", "uuid", termIdsIn(texts, terms).filter((id) => id !== source.id)],
+  ];
+  for (const [target, type, values] of targets) {
+    await db.query(`INSERT INTO mentions (${column}, ${target}) SELECT $1, unnest($2::${type}[])`, [source.id, values]);
+  }
 }
 
 /**
@@ -202,21 +205,20 @@ const MENTIONS_LIMIT = 50;
 export type MentionTarget = { decisionKey: string } | { termId: string } | { ticketKey: string; ticketId: string };
 
 /**
- * The condition picking `target`'s rows of `mentions m`, given its key or id as $1 (and a Ticket's id as $4). A Ticket's
+ * The condition picking `target`'s rows of `mentions m`, with the query parameters it numbers from $1. A Ticket's
  * own Comments, Activities and Reports and the Documents linked to it are left out, as the Ticket shows them already.
  */
-function mentionsOf(target: MentionTarget): [condition: string, ...values: string[]] {
-  if ("decisionKey" in target) return ["m.decision_key = $1", target.decisionKey];
-  if ("termId" in target) return ["m.mentioned_term_id = $1", target.termId];
-  return [
-    `m.ticket_key = $1
-     AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id = m.comment_id AND c.ticket_id = $4)
-     AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = m.activity_id AND a.ticket_id = $4)
-     AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = m.document_id AND d.ticket_id = $4)
-     AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.document_id = m.document_id AND l.ticket_id = $4)`,
-    target.ticketKey,
-    target.ticketId,
-  ];
+function mentionsOf(target: MentionTarget): { condition: string; params: string[] } {
+  if ("decisionKey" in target) return { condition: "m.decision_key = $1", params: [target.decisionKey] };
+  if ("termId" in target) return { condition: "m.mentioned_term_id = $1", params: [target.termId] };
+  return {
+    condition: `m.ticket_key = $1
+     AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id = m.comment_id AND c.ticket_id = $2)
+     AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = m.activity_id AND a.ticket_id = $2)
+     AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = m.document_id AND d.ticket_id = $2)
+     AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.document_id = m.document_id AND l.ticket_id = $2)`,
+    params: [target.ticketKey, target.ticketId],
+  };
 }
 
 /**
@@ -224,7 +226,8 @@ function mentionsOf(target: MentionTarget): [condition: string, ...values: strin
  * lies where `readable` doesn't let its reader read.
  */
 export async function listMentions(db: Queryable, target: MentionTarget, readable: Readable): Promise<Mention[]> {
-  const [condition, value, ...ticket] = mentionsOf(target);
+  const { condition, params } = mentionsOf(target);
+  const n = params.length;
   const { rows } = await db.query<Mention>(
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
@@ -253,9 +256,9 @@ export async function listMentions(db: Queryable, target: MentionTarget, readabl
        FROM m JOIN activities a ON a.id = m.activity_id JOIN tickets t ON t.id = a.ticket_id JOIN projects p ON p.id = t.project_id
      )
      SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at
-     FROM found f WHERE ${documentReadableSql("f", "$2::uuid[]", "$3::uuid")}
+     FROM found f WHERE ${documentReadableSql("f", `$${n + 1}::uuid[]`, `$${n + 2}::uuid`)}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
-    [value, readable.projectIds, readable.workspaceId, ...ticket],
+    [...params, readable.projectIds, readable.workspaceId],
   );
   return rows;
 }
