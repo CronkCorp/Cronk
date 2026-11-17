@@ -834,6 +834,19 @@ describe("the search tool", () => {
     expect(search.description).toMatch(/Terms[\s\S]*terms tool/);
     expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["term"]) } });
   });
+
+  it("finds Decisions, and says to get one with the decisions tool", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/workspace/decisions", { title: "Postgres for storage", body: "One database for everything." });
+    await admin.post("/api/workspace/documents", { title: "Postgres notes", body: "Tuning the pool." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const found = await callTool(mcp, "search", { query: "postgres", kind: ["decision"] });
+    expect(found.body.results).toEqual([expect.objectContaining({ kind: "decision", title: "Postgres for storage", decisionKey: "D1" })]);
+    const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
+    expect(search.description).toMatch(/Decisions[\s\S]*decisions tool by its decisionKey/);
+    expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["decision"]) } });
+  });
 });
 
 describe("work waiting for an Agent over MCP", () => {
