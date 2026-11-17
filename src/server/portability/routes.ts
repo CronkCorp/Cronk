@@ -11,6 +11,7 @@ import { isExportMarkdown, streamedFileLimit } from "./streamed-files.js";
 import { ARCHIVE_TYPES, MAX_PACKED_BYTES, archiveBody, packFolderStream, unpackFolder, unpackFolderStream, type StoredFolder } from "./archive.js";
 import { exportDecisionsFolder, exportFolder } from "./export.js";
 import { importExport } from "./import.js";
+import { termsChanged } from "../knowledge/term-routes.js";
 import { importMarkdownFolder } from "./markdown-folder.js";
 import { listRenamedIds } from "./renamed-ids.js";
 
@@ -198,7 +199,9 @@ function importRoute(app: FastifyInstance, ctx: AppContext) {
           isMarkdown: isExportMarkdown,
           limit: (path, markdown) => streamedFileLimit(path, markdown, workspace),
         });
-        const imported = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
+        const { imported, termPlaces } = await transaction(ctx.db, (tx) => importExport(tx, user.workspaceId, folder, ctx.clock.now(), { store: ctx.files, stored }));
+        // Committed now: Terms pages already open learn of the imported Terms, which may override Workspace Terms.
+        for (const place of termPlaces) termsChanged(ctx.live, place);
         return reply.code(201).send(imported);
       } catch (err) {
         await removeFiles(request, ctx, stored);
