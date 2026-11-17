@@ -1,7 +1,7 @@
 import type { Queryable } from "./database.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 import { recordAllEmbeds } from "../files/artifact-embeds.js";
-import { storeAllTurns } from "../transcripts/transcripts.js";
+import { scrubAllStored, storeAllTurns } from "../transcripts/transcripts.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -1027,5 +1027,14 @@ export const migrations: Migration[] = [
       -- The Diff view each User last chose (identity/users.ts), so it follows them across browsers. Unified until they choose.
       ALTER TABLE users ADD COLUMN diff_view text NOT NULL DEFAULT 'unified' CHECK (diff_view IN ('unified', 'split'));
     `,
+  },
+  {
+    id: "0044_scrub_stored_transcripts",
+    sql: `
+      -- No schema change: the backfill rewrites the texts of Transcripts stored before uploads were scrubbed (ADR 0013) to what an
+      -- upload keeps now, secrets scrubbed and hand redactions applied, so a re-upload continuing one replaces it.
+      SELECT 1;
+    `,
+    backfill: (db) => scrubAllStored(db),
   },
 ];
