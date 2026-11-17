@@ -353,6 +353,9 @@ export const api = {
     request<{ merge: GuidanceMerge }>("POST", `${guidancePath(projectKey)}/merge`, input).then((r) => r.merge),
 
   agents: (all = false) => request<{ agents: Agent[] }>("GET", `/api/agents${all ? "?all=true" : ""}`).then((r) => r.agents),
+  /** The removed Agents, whose Agent Records stay readable: the signed-in User's own, or with `all` every User's, for an Admin. */
+  removedAgents: (all = false) =>
+    request<{ agents: Agent[] }>("GET", `/api/agents?removed=true${all ? "&all=true" : ""}`).then((r) => r.agents),
   createAgent: (name: string) => request<{ agent: Agent }>("POST", "/api/agents", { name }).then((r) => r.agent),
   renameAgent: (id: string, name: string) =>
     request<{ agent: Agent }>("PATCH", `/api/agents/${encodeURIComponent(id)}`, { name }).then((r) => r.agent),
