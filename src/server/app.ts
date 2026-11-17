@@ -3,7 +3,8 @@ import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import swagger from "@fastify/swagger";
 import type { Clock } from "./clock.js";
-import { HttpError, isReading, SIGN_IN_COOKIE, type AppContext } from "./context.js";
+import { HttpError, isReading, requestActor, SIGN_IN_COOKIE, type AppContext } from "./context.js";
+import { forReader } from "./identity/readable-only-in.js";
 import { createDatabase, migrate } from "./db/database.js";
 import { addSharedSchemas, answer, errors, publicRoute } from "./schemas.js";
 import { coordinationRoutes } from "./coordination/routes.js";
@@ -121,6 +122,8 @@ export async function buildApp(opts: {
       response: { ...errors(400), ...(isWrite(route.method) && errors(403)), ...(schema.response as object | undefined) },
     };
   });
+  // No answer carries what its reader can't read, such as a Discovered Ticket's source in a Project they can't (see `readableOnlyIn`).
+  app.addHook("preSerialization", async (request, _reply, payload) => forReader(db, requestActor(request), payload));
   // Every API error has the same shape: `{ error: "<message>" }`.
   app.setErrorHandler((err: unknown, request, reply) => {
     if (err instanceof HttpError) return reply.code(err.statusCode).send({ ...err.details, error: err.message });

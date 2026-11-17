@@ -87,6 +87,36 @@ describe("A Discovered Ticket filed in another Project than its source", () => {
   });
 });
 
+describe("A Discovered Ticket's source in a Project its reader can't read", () => {
+  it("shows as null on the Ticket's reads and Inbox and Triage items, and in full to a reader who can read it", async () => {
+    const { cronk, admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/projects/OPS/tickets", { title: "Found" });
+    const source = { key: "CRONK-1", title: "Ticket 1" };
+
+    expect((await admin.get("/api/tickets/OPS-1")).body.ticket.discovered.sourceTicket).toEqual(source);
+    const read = (await bob.get("/api/tickets/OPS-1")).body.ticket.discovered;
+    expect(read).toMatchObject({ agent: { name: "claude-laptop" }, sourceTicket: null });
+    expect((await bob.get("/api/projects/OPS/tickets")).body.tickets[0].discovered.sourceTicket).toBeNull();
+    expect(JSON.stringify((await bob.get("/api/tickets/OPS-1")).body)).not.toContain("CRONK-1");
+
+    await admin.patch("/api/tickets/OPS-1", { assigneeId: null });
+    const triage = (await bob.get("/api/triage")).body.items;
+    expect(triage[0].ticket).toMatchObject({ key: "OPS-1", discovered: { sourceTicket: null } });
+    expect((await admin.get("/api/triage")).body.items[0].ticket.discovered.sourceTicket).toEqual(source);
+
+    await bob.patch("/api/tickets/OPS-1", { assigneeId: bobId });
+    const inbox = (await bob.get("/api/inbox?kind=discovered")).body.items;
+    expect(inbox[0].ticket).toMatchObject({ key: "OPS-1", discovered: { sourceTicket: null } });
+    expect(JSON.stringify(inbox)).not.toContain("CRONK-1");
+  });
+});
+
 describe("Routing a Discovered Ticket filed in another Project than its source", () => {
   it("goes to the source's Assignee, and waits in Triage once they can't see its Project", async () => {
     const { cronk, admin } = await startInstalledCronk();

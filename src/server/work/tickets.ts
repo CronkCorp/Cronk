@@ -3,6 +3,7 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Priority, RelationKind, StatusCategory, Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
+import { readableOnlyIn } from "../identity/readable-only-in.js";
 
 /** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
 export const ticketKeySql = (project: string, ticket: string) => `${project}.key || '-' || ${ticket}.number`;
@@ -116,6 +117,13 @@ interface TicketRow {
   updated_at: Date;
 }
 
+/** A Discovered Ticket's source Ticket; one of another Project only for those who can read that Project. */
+function sourceTicketOf(row: TicketRow): TicketName | null {
+  if (row.source_number === null) return null;
+  const source = { key: `${row.source_project_key}-${row.source_number}`, title: row.source_title! };
+  return row.source_project_id === row.project_id ? source : readableOnlyIn(row.source_project_id!, source);
+}
+
 const toTicket = (row: TicketRow): Ticket => ({
   id: row.id,
   projectId: row.project_id,
@@ -138,7 +146,7 @@ const toTicket = (row: TicketRow): Ticket => ({
       : {
           agent: { id: row.discovered_by_agent_id, name: row.discovered_by_agent_name! },
           session: row.discovered_session_id === null ? null : { id: row.discovered_session_id },
-          sourceTicket: row.source_number === null ? null : { key: `${row.source_project_key}-${row.source_number}`, title: row.source_title! },
+          sourceTicket: sourceTicketOf(row),
           kept: row.discovery_kept,
         },
   createdAt: row.created_at,
