@@ -304,9 +304,10 @@ export interface Cronk {
   queries(during: () => Promise<unknown>): Promise<number>;
   /**
    * The tables some query the server sends while `during` runs would read whole, rather than look rows up in an index by what the
-   * query knows, even with Postgres told to avoid reading tables whole wherever an index could serve: so a table listed has no index
-   * the query can use, whatever the tables hold. Each query is planned again afterwards with the values it was sent; plans are not run.
-   * Sorted, each table once. As `queriesOn`, keep the harness's own queries out of `during`.
+   * query knows, even with Postgres told to avoid reading tables whole wherever an index could serve: so for a table listed, the query
+   * has no index to look its rows up in, or found walking all of a small partial index cheaper. Each query is planned again afterwards, on a connection of its own, with the values it
+   * was sent; plans are not run. Only reads (SELECT and WITH) are planned, so what a write looks up is left out. Sorted, each table once.
+   * As `queriesOn`, keep the harness's own queries out of `during`.
    */
   tablesReadWhole(during: () => Promise<unknown>): Promise<string[]>;
   /**
@@ -469,7 +470,7 @@ export async function startCronk(
       await client.connect();
       try {
         // Reading a table whole then costs more than any plan through an index, so a plan reads one whole only where no index serves.
-        for (const off of ["enable_seqscan", "enable_hashjoin", "enable_mergejoin"]) await client.query(`SET ${off} = off`);
+        for (const setting of ["enable_seqscan", "enable_hashjoin", "enable_mergejoin"]) await client.query(`SET ${setting} = off`);
         const whole = new Set<string>();
         for (const { text, values } of sent) {
           if (!/^\s*(SELECT|WITH)\b/i.test(text)) continue;
@@ -708,34 +709,29 @@ export async function projectWithTickets(client: Client, key: string, count: num
   for (let i = 1; i <= count; i++) await client.post(`/api/projects/${key}/tickets`, { title: `Ticket ${i}` });
 }
 
-/**
- * How many queries the server sends that `matching` matches while `during` runs. The server and this harness share the pg module,
- * and the Pool sends every query through a Client.
- */
+/** How many queries the server sends that `matching` matches while `during` runs. */
 async function countQueries(matching: RegExp, during: () => Promise<unknown>): Promise<number> {
-  const query = pg.Client.prototype.query;
-  let n = 0;
-  pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
-    const config = args[0] as string | { text?: string };
-    if (matching.test(typeof config === "string" ? config : (config?.text ?? ""))) n++;
-    return (query as (...a: unknown[]) => unknown).apply(this, args);
-  } as typeof query;
-  try {
-    await during();
-  } finally {
-    pg.Client.prototype.query = query;
-  }
-  return n;
+  return (await sentQueries(during)).filter((q) => matching.test(q.text)).length;
 }
 
-/** The text and values of every query the server sends while `during` runs, in order; as `countQueries`. */
-async function sentQueries(during: () => Promise<unknown>): Promise<{ text: string; values: unknown[] | undefined }[]> {
+/** A query the server sent: its text and the values bound to it. */
+interface SentQuery {
+  text: string;
+  values: unknown[] | undefined;
+}
+
+/**
+ * The queries the server sends while `during` runs, in order. The server and this harness share the pg module, and the Pool sends
+ * every query through a Client.
+ */
+async function sentQueries(during: () => Promise<unknown>): Promise<SentQuery[]> {
   const query = pg.Client.prototype.query;
-  const sent: { text: string; values: unknown[] | undefined }[] = [];
+  const sent: SentQuery[] = [];
   pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
     const config = args[0] as string | { text?: string; values?: unknown[] };
-    if (typeof config === "string") sent.push({ text: config, values: Array.isArray(args[1]) ? args[1] : undefined });
-    else if (config?.text) sent.push({ text: config.text, values: config.values ?? (Array.isArray(args[1]) ? args[1] : undefined) });
+    const values = Array.isArray(args[1]) ? args[1] : undefined;
+    if (typeof config === "string") sent.push({ text: config, values });
+    else sent.push({ text: config?.text ?? "", values: config?.values ?? values });
     return (query as (...a: unknown[]) => unknown).apply(this, args);
   } as typeof query;
   try {
