@@ -2,8 +2,56 @@ import pg from "pg";
 import type { LiveEvent } from "../live/live-updates.js";
 import { migrations as allMigrations, type Migration } from "./migrations.js";
 
-export type Database = pg.Pool;
 export type Queryable = pg.Pool | pg.PoolClient;
+
+/**
+ * A connection pool that knows which of its connections are in use, so closing it can cut off work
+ * that would otherwise keep it open: `end` waits, with no limit, for every connection in use to come back.
+ */
+export class Database extends pg.Pool {
+  private readonly inUse = new Set<pg.PoolClient>();
+  /** Set once closing ran out of time: every connection in use is cut off, including any taken after. */
+  private cuttingOff = false;
+
+  constructor(config: pg.PoolConfig) {
+    super(config);
+    this.on("acquire", (client) => {
+      this.inUse.add(client);
+      if (this.cuttingOff) void this.cutOff([client]);
+    });
+    this.on("release", (_err, client) => this.inUse.delete(client));
+  }
+
+  /**
+   * Gives the work using the pool `withinMs` from now to finish, so that ending the pool, which waits for every connection
+   * in use to come back, takes no longer. Connections still in use then, and any taken after, are cut off: Postgres ends
+   * their sessions, rolling back what they hadn't committed and freeing the locks they held, and their queries fail as on
+   * a lost connection, so the work running on them fails and the pool can end. Does nothing once the pool has ended.
+   */
+  cutOffAfter(withinMs: number): void {
+    setTimeout(() => {
+      if (this.ended) return;
+      this.cuttingOff = true;
+      void this.cutOff([...this.inUse]);
+    }, withinMs).unref();
+  }
+
+  /** Has Postgres end the sessions of `clients`, then drops each connection, in case Postgres could not be reached. */
+  private async cutOff(clients: pg.PoolClient[]): Promise<void> {
+    if (clients.length === 0) return;
+    const pids = clients.map((client) => (client as pg.PoolClient & { processID: number }).processID);
+    const admin = new pg.Client({ ...this.options, connectionTimeoutMillis: 1_000, query_timeout: 1_000 });
+    try {
+      await admin.connect();
+      await admin.query("SELECT pg_terminate_backend(pid) FROM unnest($1::int[]) AS pid", [pids]);
+    } catch {
+      // Dropping the connections below still frees the pool; Postgres ends their sessions once it notices.
+    } finally {
+      await admin.end().catch(() => {});
+    }
+    for (const client of clients) client.connection.stream.destroy();
+  }
+}
 
 /** Postgres's error code for a unique index refusing a row. */
 export const UNIQUE_VIOLATION = "23505";
@@ -14,7 +62,7 @@ export const UNIQUE_VIOLATION = "23505";
  * new one when needed, and the error goes to `onIdleError` instead of crashing the process.
  */
 export function createDatabase(databaseUrl: string, onIdleError: (err: Error) => void): Database {
-  const pool = new pg.Pool({ connectionString: databaseUrl });
+  const pool = new Database({ connectionString: databaseUrl });
   pool.on("error", onIdleError);
   return pool;
 }
