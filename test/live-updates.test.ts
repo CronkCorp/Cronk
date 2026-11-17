@@ -494,3 +494,80 @@ describe("A Project's Terms' live updates", () => {
   });
 });
 
+
+describe("A Decision's live updates", () => {
+  it("tell its watchers of each new Version: who saved which", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use Postgres", body: "v1" });
+    const bob = await joinAs(cronk, admin, "bob@example.com", "member", "Bob");
+    const stream = await admin.events("/api/decisions/CRONK-D1/events");
+    expect(stream.status).toBe(200);
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await bob.patch("/api/decisions/CRONK-D1", { baseVersion: 1, body: "v2" })).status).toBe(200);
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 2, by: expect.objectContaining({ kind: "user", name: "Bob" }) } });
+  });
+
+  it("tell of the new Version a change of status makes", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use Postgres" });
+    const stream = await admin.events("/api/decisions/CRONK-D1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" })).status).toBe(200);
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 2, by: expect.objectContaining({ kind: "user", name: "Ada" }) } });
+  });
+
+  it("tell of the new Version that marks a Decision superseded, on its own stream only", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use MySQL" });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use Postgres", supersedes: ["CRONK-D1"] });
+    const older = await admin.events("/api/decisions/CRONK-D1/events");
+    const newer = await admin.events("/api/decisions/CRONK-D2/events");
+    expect((await older.next())?.event).toBe("ready");
+    expect((await newer.next())?.event).toBe("ready");
+
+    expect((await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" })).status).toBe(200);
+    expect(await older.next()).toEqual({ event: "version", data: { version: 3, by: expect.objectContaining({ name: "Ada" }) } });
+    expect(await newer.next()).toEqual({ event: "version", data: { version: 2, by: expect.objectContaining({ name: "Ada" }) } });
+    await expectQuiet(older);
+    await expectQuiet(newer);
+  });
+
+  it("tell of the new Version an accepted Suggestion makes", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use Postgres", body: "v1" });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    await claude.post("/api/tickets/CRONK-1/claim");
+    const made = await claude.post("/api/suggestions", { item: { kind: "decision", key: "CRONK-D1" }, baseVersion: 2, content: { body: "v3" }, reasoning: "Clearer." });
+    expect(made.status).toBe(201);
+    const stream = await admin.events("/api/decisions/CRONK-D1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`)).status).toBe(200);
+    expect(await stream.next()).toEqual({ event: "version", data: { version: 3, by: expect.objectContaining({ kind: "agent", name: "claude-laptop" }) } });
+  });
+
+  it("are refused to whoever can't see the Decision, and end once the watcher no longer can", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET", visibility: "private" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use Postgres" });
+    await admin.post("/api/projects/SECRET/decisions", { title: "Hidden" });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    expect((await bob.events("/api/decisions/SECRET-D1/events")).status).toBe(404);
+    const stream = await bob.events("/api/decisions/CRONK-D1/events");
+    expect((await stream.next())?.event).toBe("ready");
+
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    await admin.patch("/api/decisions/CRONK-D1", { baseVersion: 1, body: "Secret." });
+    expect(await stream.next()).toBeNull();
+  });
+});
