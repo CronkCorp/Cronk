@@ -4,8 +4,6 @@ import { actingUser } from "../actor.js";
 import { termsChanged } from "./term-routes.js";
 import { transaction } from "../db/database.js";
 import { waitingItemsChanged } from "../inbox/inbox.js";
-import { decisionVersionSaved } from "./decision-routes.js";
-import { findDecisionById } from "./decisions.js";
 import { agentTopic, documentTopic } from "../live/topics.js";
 import { markSuggestionRejected, suggestionRejectionOf, waitingEvent, withWaitingWork } from "../coordination/waiting-work.js";
 import { answer, errors, holding, listing, pathParams, ref } from "../schemas.js";
@@ -93,16 +91,13 @@ export function suggestionRoutes(ctx: AppContext) {
     /**
      * Tells whoever a change to `suggestion`, in the Workspace with this id, concerns: its reviewer's Inbox; the watchers of
      * a Term's Terms, whenever its count of open Suggestions or (once accepted) the Term changes; and, once accepted, the
-     * watchers of a Document or Decision it changed.
+     * watchers of a Document it changed. A Decision's watchers hear of the Version it made from `saveDecision`.
      */
-    const changed = async (suggestion: Suggestion, workspaceId: string) => {
+    const changed = (suggestion: Suggestion, workspaceId: string) => {
       waitingItemsChanged(ctx.live, [suggestion.reviewer?.id]);
       if (suggestion.item.kind === "term") termsChanged(ctx.live, { workspaceId, projectId: suggestion.item.projectId });
       if (suggestion.state !== "accepted") return;
-      if (suggestion.item.kind === "decision") {
-        const decision = await findDecisionById(ctx.db, suggestion.item.id!);
-        if (decision && suggestion.resultVersion !== null) await decisionVersionSaved(ctx, decision, suggestion.resultVersion);
-      } else if (suggestion.item.kind === "document") {
+      if (suggestion.item.kind === "document") {
         ctx.live.publish(documentTopic(suggestion.item.id!), { event: "version", data: { version: suggestion.resultVersion } });
       }
     };
@@ -121,7 +116,7 @@ export function suggestionRoutes(ctx: AppContext) {
       async (request, reply) => {
         const actor = await requireActor(ctx, request);
         const suggestion = await transaction(ctx.db, (tx) => createSuggestion(tx, actor, request.body, ctx.clock.now()));
-        await changed(suggestion, actingUser(actor).workspaceId);
+        changed(suggestion, actingUser(actor).workspaceId);
         return reply.code(201).send({ suggestion });
       },
     );
@@ -208,8 +203,8 @@ export function suggestionRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const suggestion = await transaction(ctx.db, (tx) => acceptSuggestion(tx, user, request.params.id, request.body ?? {}, ctx.clock.now()));
-        await changed(suggestion, user.workspaceId);
+        const suggestion = await transaction(ctx, (tx) => acceptSuggestion(tx, user, request.params.id, request.body ?? {}, ctx.clock.now()));
+        changed(suggestion, user.workspaceId);
         return { suggestion };
       },
     );
@@ -242,7 +237,7 @@ export function suggestionRoutes(ctx: AppContext) {
             if (seq !== undefined) ctx.live.publish(agentTopic(suggestion.proposedBy.id), waitingEvent(seq, suggestionRejectionOf(suggestion)));
           },
         );
-        await changed(suggestion, user.workspaceId);
+        changed(suggestion, user.workspaceId);
         return { suggestion };
       },
     );

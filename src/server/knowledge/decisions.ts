@@ -1,5 +1,6 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
-import type { Queryable } from "../db/database.js";
+import type { PublishingTransaction, Queryable } from "../db/database.js";
+import { decisionTopic } from "../live/topics.js";
 import { PROJECT_KEY_PATTERN } from "../work/projects.js";
 import { ticketKeySql } from "../work/tickets.js";
 import type { DecisionStatus } from "../../shared/values.js";
@@ -260,11 +261,11 @@ export const contentOf = (decision: Decision): DecisionContent => ({
 const sameNumbers = (a: number[], b: number[]) => a.length === b.length && a.every((n) => b.includes(n));
 
 /**
- * Saves a new Version of a Decision holding `content`, unless it would change nothing. Pass a
- * Decision locked with `forUpdate`, inside a transaction. Changes nothing else: superseding others
- * on acceptance is the caller's.
+ * Saves a new Version of a Decision holding `content`, unless it would change nothing, and tells the
+ * Decision's watchers of it, who saved which, once `db` commits. Pass a Decision locked with `forUpdate`.
+ * Changes nothing else: superseding others on acceptance is the caller's.
  */
-export async function saveDecision(db: Queryable, decision: Decision, content: DecisionContent, actor: Actor | StoredActor, now: Date): Promise<Decision> {
+export async function saveDecision(db: PublishingTransaction, decision: Decision, content: DecisionContent, actor: Actor | StoredActor, now: Date): Promise<Decision> {
   const current = contentOf(decision);
   const unchanged =
     content.title === current.title &&
@@ -284,7 +285,10 @@ export async function saveDecision(db: Queryable, decision: Decision, content: D
     [decision.id, content.title, content.body, content.status, content.group, content.supersedes, number, now, content.statusReason],
   );
   await recordMentions(db, { kind: "decision", id: decision.id });
-  return (await findDecisionById(db, decision.id))!;
+  const saved = (await findDecisionById(db, decision.id))!;
+  const version = (await findDecisionVersion(db, saved, number))!;
+  db.publish(decisionTopic(decision.id), { event: "version", data: { version: number, by: version.actor } });
+  return saved;
 }
 
 /** One saved state of a Decision, with the Actor who saved it. */
@@ -378,7 +382,7 @@ async function scopeKey(db: Queryable, projectId: string): Promise<string> {
  * transaction that saved it. Returns the Decisions it changed.
  */
 export async function applySuperseding(
-  db: Queryable,
+  db: PublishingTransaction,
   scope: DecisionScope,
   before: DecisionContent,
   decision: Decision,

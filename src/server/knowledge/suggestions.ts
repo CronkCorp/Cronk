@@ -1,6 +1,6 @@
 import { actingUser, userActor, type Actor, type AgentActor, type RecordedActor, type StoredActor } from "../actor.js";
 import { HttpError } from "../context.js";
-import type { Queryable } from "../db/database.js";
+import type { PublishingTransaction, Queryable } from "../db/database.js";
 import { canRead, requireAdmin, requireProjectAccess, requireWorkspaceAccess, type Access } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { findProjectById, findProjectByKey } from "../work/projects.js";
@@ -116,7 +116,7 @@ interface Suggestable {
    * Saves `content` as its next Version by `actor`; returns its number, and the id of the Document it created for a new one, or
    * why it was refused.
    */
-  save(db: Queryable, content: SuggestedContent, actor: Actor | StoredActor, now: Date): Promise<{ version: number; documentId?: string } | string>;
+  save(db: PublishingTransaction, content: SuggestedContent, actor: Actor | StoredActor, now: Date): Promise<{ version: number; documentId?: string } | string>;
   /** For a new Document, or one a Suggestion created: the Document it goes, or went, under (see `Suggestion.parent`). */
   parent?: { id: string; title: string } | null;
 }
@@ -641,7 +641,7 @@ export interface Acceptance {
  * clean merges take the side that changed each part, and conflicting parts need the User's `content`.
  * Accepting an outdated one needs `onto`, the Version the User saw it merged onto. Run inside a transaction. Returns the accepted Suggestion.
  */
-export async function acceptSuggestion(db: Queryable, user: User, id: string, acceptance: Acceptance, now: Date): Promise<Suggestion> {
+export async function acceptSuggestion(db: PublishingTransaction, user: User, id: string, acceptance: Acceptance, now: Date): Promise<Suggestion> {
   const { suggestion, item } = await lockOpen(db, user, id);
   const { content: edited, onto } = acceptance;
   const name = capitalize(nameOf(item.item));

@@ -593,6 +593,37 @@ describe("A Decision's live updates", () => {
     expect(await stream.next()).toEqual({ event: "version", data: { version: 3, by: expect.objectContaining({ kind: "agent", name: "claude-laptop" }) } });
   });
 
+  it("tell nothing of a write that is refused or rolls back", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use MySQL" });
+    await admin.post("/api/decisions/CRONK-D1/status", { status: "accepted" });
+    await admin.post("/api/projects/CRONK/decisions", { title: "Use Postgres", supersedes: ["CRONK-D1"] });
+    const claude = await agentOf(cronk, admin, "claude-laptop");
+    const older = await admin.events("/api/decisions/CRONK-D1/events");
+    const newer = await admin.events("/api/decisions/CRONK-D2/events");
+    expect((await older.next())?.event).toBe("ready");
+    expect((await newer.next())?.event).toBe("ready");
+
+    expect((await admin.patch("/api/decisions/CRONK-D2", { baseVersion: 7, body: "Stale." })).status).toBe(409);
+    expect((await claude.post("/api/decisions/CRONK-D2/status", { status: "accepted" })).status).toBe(403);
+    expect((await admin.post("/api/decisions/CRONK-D2/status", { status: "superseded" })).status).toBe(400);
+    expect((await admin.post("/api/decisions/CRONK-D2/status", { status: "rejected" })).status).toBe(400);
+    // Accepting saves both Decisions' new Versions, then fails marking the accepted one Protected, as on a database blip.
+    let accepting!: Promise<{ status: number }>;
+    await cronk.interruptQueriesOn("protection_markings", async () => {
+      accepting = admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" });
+    });
+    expect((await accepting).status).toBe(500);
+    expect((await admin.get("/api/decisions/CRONK-D2")).body.decision.version).toBe(1);
+
+    expect((await admin.post("/api/decisions/CRONK-D2/status", { status: "accepted" })).status).toBe(200);
+    expect(await older.next()).toEqual({ event: "version", data: { version: 3, by: expect.objectContaining({ name: "Ada" }) } });
+    expect(await newer.next()).toEqual({ event: "version", data: { version: 2, by: expect.objectContaining({ name: "Ada" }) } });
+    await expectQuiet(older);
+    await expectQuiet(newer);
+  });
+
   it("are refused to whoever can't see the Decision, and end once the watcher no longer can", async () => {
     const { cronk, admin } = await startInstalledCronk();
     await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
