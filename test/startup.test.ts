@@ -21,10 +21,11 @@ describe("starting the application", () => {
 
 describe("stopping the application", () => {
   it("waits for a look for lapsed Claims still running, and live updates work after it starts again", async () => {
-    const { cronk, admin, session } = await delegatedSetup(1);
+    // The server looks for lapsed Claims only when told to, so the look running is the one the test starts.
+    const { cronk, admin, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000 });
     const threshold = (await admin.get("/api/workspace")).body.silenceThresholdSeconds;
     expect((await (await session()).post("/api/tickets/CRONK-1/claim")).status).toBe(200);
-    // Every look stalls on the held table, and the one after the clock moves finds the Claim lapsed, so it goes on to tell of it.
+    // The look stalls on the held table; it finds the Claim lapsed, so once let through it goes on to tell of it.
     const held = await cronk.holdTable("tickets");
     cronk.clock.advance(threshold * 1000 + 1);
     const looking = cronk.lookForLapses();
