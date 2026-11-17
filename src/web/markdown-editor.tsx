@@ -56,12 +56,12 @@ const EMBEDS_DELAY_MS = 300;
 /**
  * What `text` embeds, as the API answers for it once the text has rested; none until the first answer, and the last
  * answer while the next is on its way or when asking fails. An answer for text that has changed since is dropped.
- * Asks nothing while `on` is false.
+ * Asks nothing while `enabled` is false.
  */
-function useDraftEmbeds(text: string, on: boolean): ArtifactAt[] {
+function useDraftEmbeds(text: string, enabled: boolean): ArtifactAt[] {
   const [embeds, setEmbeds] = useState<ArtifactAt[]>([]);
   useEffect(() => {
-    if (!on) return;
+    if (!enabled) return;
     let current = true;
     const timer = setTimeout(() => {
       api.draftEmbeds(text).then(
@@ -74,14 +74,14 @@ function useDraftEmbeds(text: string, on: boolean): ArtifactAt[] {
       current = false;
       clearTimeout(timer);
     };
-  }, [text, on]);
+  }, [text, enabled]);
   return embeds;
 }
 
 /**
  * A Markdown editor: a textarea with a formatting toolbar beside a live preview, rendered as the
  * Document will read. It only ever edits the Markdown, so what is saved is exactly what it shows.
- * Given `attach`, files dropped or pasted into it are attached and embedded at the cursor. With `embeds`, the
+ * Given `attach`, files dropped or pasted into it are attached and embedded at the cursor. With `previewEmbeds`, the
  * preview shows Artifacts in place where saving the text as a Document or Report would embed them, as the API answers.
  */
 export function MarkdownEditor(props: {
@@ -94,12 +94,12 @@ export function MarkdownEditor(props: {
   /** Attaches files to what is being edited, answering those that attached; without it, files dropped or pasted are left alone. */
   attach?: (files: File[]) => Promise<Attachment[]>;
   /** Whether the preview shows embedded Artifacts, as a Document's or Report's body does; off, their addresses stay links. */
-  embeds?: boolean;
+  previewEmbeds?: boolean;
   ref?: Ref<MarkdownEditorHandle>;
 }) {
   const area = useRef<HTMLTextAreaElement>(null);
   const id = useId();
-  const embeds = useDraftEmbeds(props.value, props.embeds ?? false);
+  const embeds = useDraftEmbeds(props.value, props.previewEmbeds ?? false);
 
   /** Applies an edit through the browser's own text input, so it can be undone like typing. */
   const apply = (action: Action) => {

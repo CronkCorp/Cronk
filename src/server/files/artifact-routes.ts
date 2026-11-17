@@ -255,6 +255,7 @@ export function artifactRoutes(ctx: AppContext) {
       return { artifacts: await Promise.all(artifacts.map((a) => shown(request, a))) };
     });
 
+    // Answers for any Markdown, but what it answers is which Artifacts embed, so it sits with them.
     app.post<{ Body: { body: string } }>(
       "/api/markdown/embeds",
       {
