@@ -4,7 +4,7 @@ import { agentTopic } from "../live/topics.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import type { Actor, AgentActor, RecordedActor } from "../actor.js";
 import { actingUser } from "../actor.js";
-import { lockUntilCommit, transaction, type Database, type Queryable } from "../db/database.js";
+import { lockUntilCommit, transaction, type Database, type PublishingTransaction, type Queryable } from "../db/database.js";
 import { agentReading, canRead } from "../identity/access.js";
 import { listAgents, type Agent } from "../identity/agents.js";
 import type { User } from "../identity/users.js";
@@ -194,19 +194,19 @@ function mentionedAgents(agents: { agent: Agent; owner: User }[], actor: Actor, 
 export type Positioned = (agentId: string, seq: string) => void;
 
 /**
- * Runs `fn` in a transaction, passing it what to tell `markWaiting` or `markRejected` about the positions
+ * Runs `fn` in a transaction that can publish once committed, passing it what to tell `markWaiting` or `markRejected` about the positions
  * it takes, then `committed` with its result. Each position is expected on its Agent's stream
  * (`LiveUpdates.expect`) before it commits, until `committed` pushes it. If the transaction rolls back
  * or `committed` throws, they are forgotten, so they never hold a stream's `ready` back for good.
  */
 export async function withWaitingWork<T>(
   ctx: { db: Database; live: LiveUpdates },
-  fn: (tx: Queryable, positioned: Positioned) => Promise<T>,
+  fn: (tx: PublishingTransaction, positioned: Positioned) => Promise<T>,
   committed: (result: T) => void,
 ): Promise<T> {
   const forget: (() => void)[] = [];
   try {
-    const result = await transaction(ctx.db, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
+    const result = await transaction(ctx, (tx) => fn(tx, (agentId, seq) => forget.push(ctx.live.expect(agentTopic(agentId), seq))));
     committed(result);
     return result;
   } catch (err) {

@@ -1,4 +1,5 @@
 import pg from "pg";
+import type { LiveEvent } from "../live/live-updates.js";
 import { migrations as allMigrations, type Migration } from "./migrations.js";
 
 export type Database = pg.Pool;
@@ -18,28 +19,73 @@ export function createDatabase(databaseUrl: string, onIdleError: (err: Error) =>
   return pool;
 }
 
+/** A connection inside a transaction, which can also hold work back until the transaction commits. */
+export interface Transaction extends pg.PoolClient {
+  /**
+   * Runs `work` once the transaction has committed, after any registered before it; never if it
+   * rolls back or its commit fails. Work that throws is logged and passed over: what committed stands.
+   */
+  afterCommit(work: () => void): void;
+}
+
+/** Where live updates are published (see `LiveUpdates`). */
+export interface Publisher {
+  publish(topic: string, event: LiveEvent): void;
+}
+
+/** A transaction that can tell watchers of its changes, once they are committed. */
+export interface PublishingTransaction extends Transaction {
+  /** Publishes `event` on `topic` once the transaction has committed, never before (ADR 0012), and never if it rolls back. */
+  publish(topic: string, event: LiveEvent): void;
+}
+
 /**
- * Runs `fn` in a transaction, committing on success and rolling back on error. A connection
- * Postgres drops meanwhile fails the transaction and is discarded instead of going back to the pool.
+ * Runs `fn` in a transaction, committing on success and rolling back on error, then the work `fn`
+ * registered with `afterCommit`. A connection Postgres drops meanwhile fails the transaction and is
+ * discarded instead of going back to the pool. Given a `live` to publish on, `fn` can also `publish`.
  */
-export async function transaction<T>(db: Database, fn: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
+export function transaction<T>(db: Database, fn: (tx: Transaction) => Promise<T>): Promise<T>;
+export function transaction<T>(on: { db: Database; live: Publisher }, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T>;
+export async function transaction<T>(on: Database | { db: Database; live: Publisher }, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T> {
+  const { db, live } = on instanceof pg.Pool ? { db: on, live: undefined } : on;
   const client = await db.connect();
   // The pool listens for a lost connection only while it is idle; the query running when it is lost fails instead.
   let lost: Error | undefined;
   const onError = (err: Error) => (lost = err);
   client.on("error", onError);
+  const pending: (() => void)[] = [];
+  const afterCommit = (work: () => void) => void pending.push(work);
+  // The handle is the pooled connection itself, so what is added to it here is taken off again before it goes back to the pool.
+  const tx = Object.assign(client, {
+    afterCommit,
+    publish: (topic: string, event: LiveEvent) => {
+      if (!live) throw new Error("This transaction has nowhere to publish");
+      afterCommit(() => live.publish(topic, event));
+    },
+  });
+  let result: T;
   try {
     await client.query("BEGIN");
-    const result = await fn(client);
+    result = await fn(tx);
     await client.query("COMMIT");
-    return result;
   } catch (err) {
     await client.query("ROLLBACK").catch((rollbackErr: Error) => (lost ??= rollbackErr));
     throw err;
   } finally {
+    const added = client as unknown as Partial<PublishingTransaction>;
+    delete added.afterCommit;
+    delete added.publish;
     client.removeListener("error", onError);
     client.release(lost);
   }
+  for (const work of pending) {
+    try {
+      work();
+    } catch (err) {
+      console.error("Work after a commit failed", err);
+    }
+  }
+  return result;
 }
 
 /** Takes a lock named `name` until the transaction ends, so work under the same name runs one at a time. */
