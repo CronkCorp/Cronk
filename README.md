@@ -158,4 +158,4 @@ npm run test:e2e     # Playwright smoke test (run `npx playwright install chromi
 
 Read `docs/testing.md` before writing tests. API tests use `startCronk()` from `test/harness.ts`: it starts the app in-process on a fresh database and gives you API clients with their own cookie jars and a controllable clock (`cronk.clock.advance(ms)`). Set `TEST_POSTGRES_URL` to use an existing Postgres server instead of a container.
 
-The Files storage contract (`test/file-store.test.ts`) runs against local disk and against a disposable MinIO that the tests start with Testcontainers; set `TEST_S3_ENDPOINT`, `TEST_S3_ACCESS_KEY_ID` and `TEST_S3_SECRET_ACCESS_KEY` to use an existing S3-compatible server instead. When neither is available, the S3 tests are skipped.
+The Files storage contract (`test/file-store.test.ts`) runs against local disk and against a disposable MinIO that the tests start with Testcontainers; set `TEST_S3_ENDPOINT`, `TEST_S3_ACCESS_KEY_ID` and `TEST_S3_SECRET_ACCESS_KEY` to use an existing S3-compatible server instead. When neither is available, the S3 tests are skipped, except in CI (with `CI` set), where the run fails instead.
