@@ -579,7 +579,8 @@ export function workRoutes(ctx: AppContext) {
           let ticket: Ticket;
           const blocked: Ticket[] = [];
           if (actor.kind === "agent") {
-            // The blocked Tickets first, locked with the source in id order before adding the blocks takes the Workspace's blocking lock.
+            // With blocks, the Workspace's blocking lock before the source is locked (see lockBlocking); the blocked Tickets are then locked with it in id order.
+            if (request.body.blocks?.length) await lockBlocking(tx, actor.owner.workspaceId);
             const blocks: { other: Ticket; reason: string }[] = [];
             for (const { ticketKey, reason } of request.body.blocks ?? []) blocks.push({ other: await otherTicketFor(tx, actor, ticketKey), reason });
             const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now, { blockedIds: blocks.map((b) => b.other.id) });

@@ -47,8 +47,8 @@ export function sourceClaimOf(
  * (see `Discovery.sourceTicket`), so unlike `sourceClaimOf` any held Claim fits. None for a User, who may not name one.
  * Run inside the caller's transaction, once it has locked the Project the Ticket is filed in: it locks the Claim's
  * Ticket as `sourceClaimOf` does. With it, in id order, it takes the key-share lock of the Tickets with ids `blockedIds`,
- * which the Discovered Ticket blocks, as adding those blocks takes it after the Workspace's blocking lock: so two filings
- * each blocking the other's source queue rather than deadlock, and a block onto the same Ticket added meanwhile isn't held up.
+ * which the Discovered Ticket blocks, as adding those blocks would take it later, without keeping out a block onto the same
+ * Ticket added meanwhile. With `blockedIds`, the caller takes the Workspace's blocking lock first (see `lockBlocking`).
  */
 export function discoverySourceClaimOf(
   db: Queryable,

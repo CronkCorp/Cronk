@@ -141,6 +141,25 @@ describe("Blocks added at once by holders of the Tickets' Claims", () => {
     expect((await byUser).status).toBe(201);
     expect([(await first).status, (await second).status].sort()).toEqual([201, 409]);
   });
+
+  it("queue rather than deadlock when an Agent files a Discovered Ticket with blocks while a User blocks its source", async () => {
+    const { cronk, admin, session } = await delegatedSetup(3);
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const backlog = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "backlog").id;
+
+    // The filing waits to file its Ticket in Backlog, then the User's block waits on the filing's source.
+    const held = await cronk.holdRow("statuses", backlog);
+    const filing = agent.post("/api/projects/CRONK/tickets", { title: "Found", ticket: "CRONK-1", blocks: [{ ticketKey: "CRONK-3", reason }] });
+    await held.waiters(1);
+    const blocking = admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1" });
+    await held.waiters(2);
+    await held.release();
+
+    expect([(await filing).status, (await blocking).status]).toEqual([201, 201]);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-2" }]);
+    expect((await admin.get("/api/tickets/CRONK-3")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+  });
 });
 
 describe("Removing a block from a Discovered Ticket", () => {
