@@ -81,7 +81,7 @@ export function knowledgeRoutes(ctx: AppContext) {
     /** Creates a Document in `tree`, which the caller has Write in. */
     const create = async (tx: Queryable, actor: Actor, tree: Tree, input: NewDocument) => {
       const parentId = input.parentId ?? null;
-      await requireOpenToAgentsUnder(tx, actor, parentId, "add Documents under it", suggestNewDocumentInstead);
+      if (parentId !== null) await requireOpenToAgentsUnder(tx, actor, parentId, "add Documents under it", suggestNewDocumentInstead(parentId));
       const created = await insertDocument(tx, { tree, parentId, title: input.title.trim(), body: input.body ?? "", actor, now: ctx.clock.now() });
       if (created === "no such parent") throw notInTree();
       return { document: created, avoidedWords: await avoidedWordsIn(tx, actor, tree.projectId, titleAndBody(input)) };
@@ -90,12 +90,12 @@ export function knowledgeRoutes(ctx: AppContext) {
     /**
      * Refuses an Agent's putting a Document under `parentId` when the branch there is Protected, so
      * Agents can't add to a protected branch, or move a Document into one, pointing it to what it may
-     * do instead, given the parent's id (a move's pointer names the moved Document instead). A parent that isn't a Document of the tree is left for the caller to refuse.
+     * do `instead`. A parent that isn't a Document of the tree is left for the caller to refuse.
      */
-    const requireOpenToAgentsUnder = async (tx: Queryable, actor: Actor, parentId: string | null, change: string, instead?: (parentId: string) => string) => {
+    const requireOpenToAgentsUnder = async (tx: Queryable, actor: Actor, parentId: string | null, change: string, instead: string) => {
       if (actor.kind !== "agent" || parentId === null) return;
       const parent = await findDocument(tx, actingUser(actor).workspaceId, parentId);
-      if (parent) requireUnprotected(actor, parent, parent.title, change, instead?.(parentId));
+      if (parent) requireUnprotected(actor, parent, parent.title, change, instead);
     };
 
     /**
@@ -412,7 +412,7 @@ export function knowledgeRoutes(ctx: AppContext) {
           // Moving it would move a protected branch under it along with it.
           const protectedUnder = actor.kind === "agent" ? await findProtectedUnder(tx, document.id) : undefined;
           if (protectedUnder) requireUnprotected(actor, { protected: true }, protectedUnder.title, "move it, or a Document above it", askToMove);
-          await requireOpenToAgentsUnder(tx, actor, parentId, "move Documents under it", () => askToMove);
+          await requireOpenToAgentsUnder(tx, actor, parentId, "move Documents under it", askToMove);
           const moved = await moveDocument(tx, treeFor(actor, document.projectId), document, { parentId, position });
           if (moved === "a report") throw new HttpError(400, "A Report lives with its Ticket, outside the page tree, so it can't be moved");
           if (moved === "no such parent") throw notInTree();

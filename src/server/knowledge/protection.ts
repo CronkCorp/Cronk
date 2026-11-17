@@ -82,8 +82,8 @@ export const askToMoveInstead = (documentId: string) =>
   "saying where it should go and why";
 
 /**
- * Refuses an Agent's change to a Protected item (a 403) with a pointer to Suggestions, the way an
- * Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3",
+ * Refuses an Agent's change to a Protected item (a 403) with a pointer to what it does instead: by
+ * default a Suggestion, the way an Agent proposes a change to one. `what` names the item, such as "Architecture" or "CRONK-D3",
  * `change` what the Agent may not do, such as "delete it", and `instead` what it does instead.
  */
 export function requireUnprotected(actor: Actor, item: { protected: boolean }, what: string, change = "change it", instead = SUGGEST_INSTEAD): void {
