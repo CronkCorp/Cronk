@@ -83,7 +83,7 @@ const SELECTS = [
    FROM document_versions v JOIN documents d ON d.id = v.document_id LEFT JOIN tickets t ON t.id = d.ticket_id
      LEFT JOIN projects p ON p.id = coalesce(t.project_id, d.project_id)
    WHERE v.actor_agent_id = $1 AND (CASE WHEN t.id IS NULL THEN ${placeReadableSql("d", "$2", "$3")} ELSE t.project_id = ANY($2) END)`,
-  // An Artifact lies where a Document would: in a Project, or in the Workspace outside any.
+  // An Artifact lies in a Project, or in the Workspace outside any.
   `SELECT 'comment', c.at, c.actor_session_id, p.key, NULL, NULL, NULL::uuid, NULL, a.id, a.title, c.artifact_version,
      jsonb_build_object('id', c.id, 'body', c.body), c.seq
    FROM comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id

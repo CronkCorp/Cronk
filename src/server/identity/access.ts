@@ -159,7 +159,7 @@ export interface Readable {
  * SQL for whether the place of the row aliased `alias` (its Project, or the Workspace outside any
  * Project) lies where a `Readable` lets its Actor read, given SQL for its `projectIds` (a uuid[]) and
  * its `workspaceId` (a uuid, NULL when the Workspace isn't readable). Works for any row with a
- * `project_id` (NULL in the Workspace) and a `workspace_id`: Documents, Artifacts, Terms, Decisions.
+ * `project_id` (NULL in the Workspace) and a `workspace_id`, such as a Document, Artifact, Term or Decision.
  */
 export const placeReadableSql = (alias: string, projectIds: string, workspaceId: string) =>
   `(${alias}.project_id = ANY(${projectIds}) OR (${alias}.project_id IS NULL AND ${alias}.workspace_id = ${workspaceId}))`;

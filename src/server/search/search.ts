@@ -126,7 +126,7 @@ const SELECTS: { kind: SearchKind; sql: string }[] = [
       WHERE ${placeReadableSql("d", "q.projects", "q.workspace_id")} AND to_tsvector(${CONFIG}, ${COMMENT_TEXT}) @@ q.query`,
   },
   {
-    // Artifacts are placed like Documents: in a Project, or in the Workspace outside any.
+    // An Artifact lies in a Project, or in the Workspace outside any.
     kind: "comment",
     sql: `${columns({ kind: "comment", title: "a.title", projectKey: "p.key", ticketKey: "NULL", documentId: "NULL", termId: "NULL", decisionKey: "NULL", artifactId: "a.id", protected: "NULL", excerptOf: ["''", "c.body"], text: COMMENT_TEXT, at: "c.at" })}
       FROM q, comments c JOIN artifacts a ON a.id = c.artifact_id LEFT JOIN projects p ON p.id = a.project_id
