@@ -197,3 +197,44 @@ describe("Where an address embeds", () => {
     expect((await admin.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn).toEqual([expect.objectContaining({ id: doc.id, version: 2 })]);
   });
 });
+
+describe("Previewing what a draft embeds", () => {
+  it("answers the same embeds, in order, as saving a Document with that body", async () => {
+    const { admin, artifact } = await setup();
+    const second = (await admin.upload("/api/projects/CRONK/artifacts?title=Second", await tarGz({ "index.html": "<p>2</p>" }))).body.artifact;
+    const body = [artifact.url, "", second.versionUrl, "", `In a sentence: ${second.url} stays a link.`, "", artifact.url].join("\n");
+
+    const previewed = await admin.post("/api/markdown/embeds", { body });
+    expect(previewed.status).toBe(200);
+    expect(previewed.body.embeds).toEqual([
+      { artifactId: artifact.id, version: null },
+      { artifactId: second.id, version: 1 },
+    ]);
+
+    const created = (await admin.post("/api/projects/CRONK/documents", { title: "Limits", body: "Draft." })).body.document;
+    const saved = (await admin.patch(`/api/documents/${created.id}`, { baseVersion: 1, body })).body.document;
+    expect(previewed.body.embeds).toEqual(saved.embeds);
+    expect((await admin.post("/api/projects/CRONK/documents", { title: "Limits again", body })).body.document.embeds).toEqual(previewed.body.embeds);
+  });
+
+  it("leaves out an address naming an Artifact of another Workspace, no Artifact, or a Version not published yet", async () => {
+    const { admin, artifact } = await setup();
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    await elsewhere.post("/api/projects", { name: "Other", key: "OTHER" });
+    const theirs = (await elsewhere.upload("/api/projects/OTHER/artifacts?title=Theirs", await tarGz({ "index.html": "<p>t</p>" }))).body.artifact;
+    const body = [theirs.url, "", `${OWN_ORIGIN}/artifacts/00000000-0000-4000-8000-000000000000`, "", `${OWN_ORIGIN}/artifacts/${artifact.id}?version=2`].join("\n");
+
+    const previewed = await admin.post("/api/markdown/embeds", { body });
+    expect(previewed.status).toBe(200);
+    expect(previewed.body.embeds).toEqual([]);
+  });
+
+  it("answers 401 without a sign-in, and records nothing", async () => {
+    const { cronk, admin, artifact } = await setup();
+
+    expect((await cronk.client().post("/api/markdown/embeds", { body: artifact.url })).status).toBe(401);
+    expect((await admin.post("/api/markdown/embeds", { body: artifact.url })).body.embeds).toEqual([{ artifactId: artifact.id, version: null }]);
+
+    expect((await admin.get(`/api/artifacts/${artifact.id}/embedded-in`)).body.embeddedIn).toEqual([]);
+  });
+});
