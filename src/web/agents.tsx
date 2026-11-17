@@ -18,6 +18,11 @@ export function AgentsPage(props: { me: User }) {
   const admin = props.me.role === "admin";
   const [agents, reload] = useLoad(() => api.agents(), []);
   const [everyone, reloadEveryone] = useLoad(() => (admin ? api.agents(true) : Promise.resolve([])), [admin]);
+  const [removed, reloadRemoved] = useLoad(() => api.removedAgents(admin), [admin]);
+  const changed = () => {
+    reload();
+    reloadRemoved();
+  };
   const [live, onLive] = useLiveState();
   const [registering, setRegistering] = useState(false);
   useEffect(
@@ -25,6 +30,7 @@ export function AgentsPage(props: { me: User }) {
       watchAgents({
         ready: () => {
           reload();
+          reloadRemoved();
           if (admin) reloadEveryone();
         },
         onLive,
@@ -56,13 +62,14 @@ export function AgentsPage(props: { me: User }) {
           ) : (
             <ul className="agent-cards" aria-label="Your Agents">
               {list.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} onChanged={reload} />
+                <AgentCard key={agent.id} agent={agent} onChanged={changed} />
               ))}
             </ul>
           )
         }
       </Show>
       {admin && <OthersAgents me={props.me} agents={everyone} />}
+      <RemovedAgents me={props.me} agents={removed} />
     </section>
   );
 }
@@ -158,7 +165,7 @@ function AgentCard(props: { agent: Agent; onChanged: () => void }) {
         open={removing}
         onOpenChange={setRemoving}
         title={`Remove ${a.name}?`}
-        description="Its tokens are revoked and its live Agent Sessions end. What it did stays on the Tickets and Documents it was on, but its Agent Record goes with it."
+        description="Its tokens are revoked and its live Agent Sessions end. What it did stays on the Tickets and Documents it was on, and on its Agent Record, which you can still open under Removed Agents."
         confirmLabel="Remove Agent"
         busy={remove.busy}
         onConfirm={() => void remove.run().then(() => setRemoving(false))}
@@ -442,6 +449,45 @@ function OthersAgents(props: { me: User; agents: Loaded<Agent[]> }) {
           );
         }}
       </Show>
+    </div>
+  );
+}
+
+/**
+ * Removed Agents, whose Agent Records outlast them: the User's own, and for an Admin every User's, collapsed until opened.
+ * Each shows its name, its Owner where it isn't the User's own, when it was removed and what it did; nothing manages them.
+ * Hidden when there are none.
+ */
+function RemovedAgents(props: { me: User; agents: Loaded<Agent[]> }) {
+  const [open, setOpen] = useState(false);
+  if (props.agents.kind !== "loaded" || props.agents.value.length === 0) return null;
+  const list = props.agents.value;
+  return (
+    <div className="removed-agents">
+      <Button variant="ghost" className="removed-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Removed Agents <span className="muted">({list.length})</span>
+      </Button>
+      {open && (
+        <ul className="agent-cards" aria-label="Removed Agents">
+          {list.map((a) => (
+            <li key={a.id} className="agent-card removed-agent" aria-label={a.name}>
+              <div className="agent-card-head">
+                <Avatar actor={agentActor(a)} large />
+                <div className="grow">
+                  <div className="agent-name">
+                    {a.name}
+                    {a.owner.id !== props.me.id && <span className="muted removed-owner"> for {a.owner.name}</span>}
+                  </div>
+                  <div className="agent-summary muted">
+                    Removed <RelativeTime at={a.removedAt!} />
+                  </div>
+                </div>
+              </div>
+              <RecordLog agent={a} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
