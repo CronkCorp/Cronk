@@ -2,6 +2,14 @@
 
 How Cronk is tested, in every phase. Background: ADR 0010.
 
+## Running tests
+
+Every command's output lands in the agent's context, so keep each run small and its output short:
+
+- While working, run the one file you are changing: `npx vitest run test/<file>.test.ts --reporter=agent`, adding `-t "<test name>"` for a single test. The `agent` reporter prints only failures and the summary.
+- `npm run test:e2e` rebuilds the web client every run. For a series of smoke runs, run `npm run build:web` once, then `npx playwright test -g "<test name>" --reporter=line -x`, and rebuild only after changing `src/web/`. The server runs from source, so server changes need no rebuild.
+- Run `npm run check` once, before opening the PR.
+
 ## What a good test is
 
 A test exercises external behaviour only. It calls the HTTP API (or the MCP protocol) as a real User or Agent token would, and asserts on responses and on what later API calls return. It never reaches into database tables, internal modules or private functions, so internals can be refactored freely.
