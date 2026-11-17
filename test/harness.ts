@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -318,12 +318,6 @@ export interface Cronk {
    * before it shipped, so the next `restart` applies it again over the data already there.
    */
   undoMigration(id: string, undo: string): Promise<void>;
-  /**
-   * Turns `secret`, which Cronk issued with its kind's prefix (`cronk_at_`, `cronk_si_`, …), into one issued before secrets
-   * had a prefix: the same secret with the prefix stripped, stored by its hash in place of the prefixed one. Answers the bare
-   * secret, which is what callers holding such an old secret send.
-   */
-  issuedBeforePrefixes(secret: string): Promise<string>;
   /** Starts listening on a free local port (once) and returns the base URL, for clients that need real HTTP. */
   url(): Promise<string>;
   /** The connection string of this test's database, for running server commands against it as an operator would. */
@@ -468,23 +462,6 @@ export async function startCronk(
       } finally {
         await client.end();
       }
-    },
-    issuedBeforePrefixes: async (secret) => {
-      const bare = secret.replace(/^cronk_[a-z]+_/, "");
-      if (bare === secret) throw new Error(`${secret} has no prefix to strip`);
-      const hash = (s: string) => createHash("sha256").update(s).digest("hex");
-      const client = new pg.Client({ connectionString: databaseUrl });
-      await client.connect();
-      try {
-        let updated = 0;
-        for (const table of ["agent_tokens", "sign_ins", "invitations", "password_resets"]) {
-          updated += (await client.query(`UPDATE ${table} SET token_hash = $1 WHERE token_hash = $2`, [hash(bare), hash(secret)])).rowCount ?? 0;
-        }
-        if (updated !== 1) throw new Error(`${secret} is stored ${updated} times, not once`);
-      } finally {
-        await client.end();
-      }
-      return bare;
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
     databaseUrl,

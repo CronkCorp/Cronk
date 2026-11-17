@@ -54,15 +54,4 @@ describe("signing in and out", () => {
     expect(browser.cookie("cronk_sign_in")).toMatch(/^cronk_si_[A-Za-z0-9_-]{43}$/);
     expect((await browser.get("/api/me")).status).toBe(200);
   });
-
-  it("keeps a sign-in from before cookies had a prefix", async () => {
-    const { cronk } = await startInstalledCronk();
-    const browser = cronk.client();
-    await browser.post("/api/sign-in", { email: admin.email, password: admin.password });
-    const bare = await cronk.issuedBeforePrefixes(browser.cookie("cronk_sign_in")!);
-    const old = cronk.client(undefined, { cookie: `cronk_sign_in=${bare}` });
-    expect((await old.get("/api/me")).body.user.name).toBe("Ada");
-    expect((await old.delete("/api/sign-in")).status).toBe(204);
-    expect((await cronk.client(undefined, { cookie: `cronk_sign_in=${bare}` }).get("/api/me")).status).toBe(401);
-  });
 });

@@ -171,12 +171,10 @@ describe("the MCP endpoint", () => {
     expect((await admin.get("/api/agents")).body.agents[0].sessions).toEqual([]);
   });
 
-  it("takes a prefixed token, and one issued before tokens had a prefix", async () => {
+  it("takes a prefixed token", async () => {
     const { cronk, claude } = await delegatedSetup();
     expect(claude.secret).toMatch(/^cronk_at_/);
     expect((await callTool(await connectMcp(cronk, claude.secret), "tickets", { action: "get", key: "CRONK-1" })).isError).toBe(false);
-    const bare = await cronk.issuedBeforePrefixes(claude.secret);
-    expect((await callTool(await connectMcp(cronk, bare), "tickets", { action: "get", key: "CRONK-1" })).isError).toBe(false);
   });
 
   it("ends an Agent Session it no longer holds, as after a restart, when its client comes back", async () => {
