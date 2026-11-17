@@ -12,6 +12,7 @@ import { glossaryHeading, glossaryMarkdown } from "./glossary.js";
 import { listMentions } from "./mentions.js";
 import { listProtectionMarkings, requireUnprotected, setProtected } from "./protection.js";
 import {
+  answeredTerms,
   deleteTerm,
   findProtectedWorkspaceTerm,
   findTerm,
@@ -20,7 +21,6 @@ import {
   listTerms,
   listTermVersions,
   saveTermVersion,
-  withOverrides,
   type StoredTerm,
   type Term,
   type TermFields,
@@ -97,7 +97,7 @@ export function termRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     /** Answers Terms with their overrides as the caller may see them. */
     const answerTerms = async (actor: Actor, terms: StoredTerm[]) =>
-      withOverrides(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
+      answeredTerms(ctx.db, actingUser(actor).workspaceId, terms, await readablePlaces(ctx.db, actor));
     const answerTerm = async (actor: Actor, term: StoredTerm): Promise<Term> => (await answerTerms(actor, [term]))[0]!;
 
     /**

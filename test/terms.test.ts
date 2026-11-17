@@ -183,3 +183,48 @@ describe("deleting a Term", () => {
     expect((await admin.get("/api/workspace/terms")).body.terms).toEqual([]);
   });
 });
+
+/** Ada with the Project CRONK holding the Protected Term Claim, and claude-laptop holding the Claim on CRONK-1 to suggest from. */
+async function protectedProjectTerm() {
+  const { cronk, admin } = await startInstalledCronk();
+  await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+  const term = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold." })).body.term;
+  await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+  await admin.post("/api/projects/CRONK/tickets", { title: "Word it better" });
+  const claude = await agentOf(cronk, admin, "claude-laptop");
+  const adaId = (await admin.get("/api/me")).body.user.id;
+  await admin.patch("/api/tickets/CRONK-1", { assigneeId: adaId, delegateId: (await admin.get("/api/agents")).body.agents[0].id });
+  expect((await claude.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  const suggest = async (definition: string): Promise<string> => {
+    const made = await claude.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { definition }, reasoning: "Better." });
+    expect(made.status).toBe(201);
+    return made.body.suggestion.id;
+  };
+  return { cronk, admin, term, suggest };
+}
+
+describe("a Term's Suggestion count", () => {
+  it("counts its open Suggestions, wherever the Term is answered, leaving out accepted and rejected ones", async () => {
+    const { admin, term, suggest } = await protectedProjectTerm();
+    const counts = async () => [
+      (await admin.get(`/api/terms/${term.id}`)).body.term.suggestions,
+      (await admin.get("/api/projects/CRONK/terms")).body.terms[0].suggestions,
+    ];
+    expect(await counts()).toEqual([0, 0]);
+
+    const accepted = await suggest("A temporary hold.");
+    const rejected = await suggest("A lock.");
+    await suggest("A lapsing hold.");
+    expect(await counts()).toEqual([3, 3]);
+
+    expect((await admin.post(`/api/suggestions/${rejected}/reject`, { reason: "Not a lock." })).status).toBe(200);
+    expect((await admin.post(`/api/suggestions/${accepted}/accept`)).status).toBe(200);
+    expect(await counts()).toEqual([1, 1]);
+  });
+
+  it("is answered on Workspace Terms too", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." });
+    expect((await admin.get("/api/workspace/terms")).body.terms[0]).toMatchObject({ suggestions: 0 });
+  });
+});

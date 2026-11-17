@@ -904,6 +904,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         items: object({ id, name: { type: "string" }, projectKey: { type: "string" } }),
         description: "For a Workspace Term: the Project Terms of the same name that replace it within their Projects, in Projects the caller can read, by Project key.",
       },
+      suggestions: { type: "integer", description: "How many of its Suggestions are open, waiting for a User to accept or reject them." },
     }),
   },
   TermVersion: {
