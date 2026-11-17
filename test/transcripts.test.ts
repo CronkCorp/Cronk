@@ -817,6 +817,36 @@ describe("From Transcript links", () => {
     expect((await admin.get("/api/tickets/CRONK-2/transcripts")).status).toBe(404);
   });
 
+  it("list, on an Artifact, the Transcripts whose Sessions published a Version of it, commented on it or attached to such a Comment, by its id alone", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup();
+    const site = await tarGz({ "index.html": "<h1>Limits</h1>" });
+    const publisher = await session();
+    const limits = (await publisher.upload("/api/projects/CRONK/artifacts?title=Limits", site)).body.artifact;
+    const other = (await admin.upload("/api/projects/CRONK/artifacts?title=Other", site)).body.artifact;
+    const commenter = await session();
+    const comment = (await commenter.post(`/api/artifacts/${limits.id}/comments`, { body: "The legend overlaps." })).body.comment;
+    const attacher = await session();
+    expect((await attacher.upload(`/api/comments/${comment.id}/attachments?name=phone.txt`, Buffer.from("legend wraps"), "text/plain")).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    const published = (
+      await upload(hook, "chat-1", `## User\n\nChart the limits\n\n## Assistant\n\nAgent Session ${publisher.sessionId}\n\n## Assistant\n\nPublished ${limits.id}\n`)
+    ).body.transcript.id;
+    cronk.clock.advance(1000);
+    const commented = (await upload(hook, "chat-2", chat("Review the chart", commenter.sessionId))).body.transcript.id;
+    cronk.clock.advance(1000);
+    const attached = (await upload(hook, "chat-3", chat("Attach the screenshot", attacher.sessionId))).body.transcript.id;
+
+    const res = await admin.get(`/api/artifacts/${limits.id}/transcripts`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.transcripts).toEqual([
+      { id: attached, agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) },
+      { id: commented, agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) },
+      { id: published, agent: { id: claude.agentId, name: "claude-laptop" }, turn: 3, updatedAt: expect.any(String) },
+    ]);
+    expect((await admin.get(`/api/artifacts/${other.id}/transcripts`)).body.transcripts).toEqual([]);
+    expect((await admin.get("/api/artifacts/00000000-0000-0000-0000-000000000000/transcripts")).status).toBe(404);
+  });
+
   it("leave out the Transcripts the caller may not read, and answer only for items they can read", async () => {
     const { admin, carol, carolId, id } = await transcriptAcrossProjects();
     expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
@@ -827,6 +857,27 @@ describe("From Transcript links", () => {
     expect((await carol.get("/api/tickets/SECRET-1/transcripts")).status).toBe(404);
     await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
     expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([id]);
+  });
+
+  it("leave out, on an Artifact, the Transcripts the caller may not read, and answer only for Artifacts they can read", async () => {
+    const { cronk, admin, carol, carolId, claude } = await transcriptAcrossProjects();
+    const site = await tarGz({ "index.html": "<h1>Limits</h1>" });
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/SECRET-1/comments", { body: "Charting it" })).status).toBe(201);
+    const open = (await agent.upload("/api/projects/CRONK/artifacts?title=Open", site)).body.artifact.id;
+    const secret = (await agent.upload("/api/projects/SECRET/artifacts?title=Secret", site)).body.artifact.id;
+    const id = (await upload(cronk.client(claude.secret), "chat-2", chat("Chart both", agent.sessionId))).body.transcript.id;
+    const ids = async (client: Client, artifact: string) => (await client.get(`/api/artifacts/${artifact}/transcripts`)).body.transcripts.map((t: { id: string }) => t.id);
+
+    expect(await ids(admin, open)).toEqual([id]);
+    // Carol reads the Open Artifact but not SECRET, where the same Transcript's Session changed things too.
+    const carols = await carol.get(`/api/artifacts/${open}/transcripts`);
+    expect(carols.status).toBe(200);
+    expect(carols.body.transcripts).toEqual([]);
+    expect((await carol.get(`/api/artifacts/${secret}/transcripts`)).status).toBe(404);
+    await admin.put(`/api/projects/SECRET/members/${carolId}`, { access: "read" });
+    expect(await ids(carol, open)).toEqual([id]);
+    expect(await ids(carol, secret)).toEqual([id]);
   });
 });
 
