@@ -167,7 +167,7 @@ export function termRoutes(ctx: AppContext) {
       200: {
         description:
           `A server-sent event stream of changes to ${what} as they happen, for as long as the caller can read there. It opens with a ` +
-          "`ready` event; whenever a Term there is created, saved, deleted, or marked Protected or unmarked, a `changed` event arrives " +
+          "`ready` event; whenever a Term there is created, saved, deleted, or marked Protected or unmarked, or a Suggestion on one is made, accepted or rejected, a `changed` event arrives " +
           "whose data is `{}`, so the caller reads the Terms again.",
         content: { "text/event-stream": { schema: { type: "string" } } },
       },
