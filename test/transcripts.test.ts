@@ -156,7 +156,7 @@ describe("Scrubbing secrets on upload", () => {
     // What each was stays readable, and so do the Agent Session ids that link it.
     expect(read.markdown).toContain("- [scrubbed: GitHub token]\n");
     expect(read.markdown).toContain("- [scrubbed: AWS access key]\n");
-    expect(read.markdown).toContain("- Cronk: [scrubbed: Cronk Agent Token]\n");
+    expect(read.markdown).toContain("- Cronk: [scrubbed: Cronk Token]\n");
     expect(read.markdown).toContain(`curl -H "Authorization: Bearer [scrubbed]" -H 'authorization: Basic [scrubbed]' $CRONK/api/me`);
     expect(read.markdown).toContain('{ "Authorization": "token [scrubbed]" }');
     expect(read.markdown).toContain("```\n[scrubbed: private key]\n```");
@@ -218,11 +218,11 @@ describe("Scrubbing secrets on upload", () => {
     expect(scrubbed).toBe(
       chat("Fix CRONK-1", agent.sessionId) +
         "\n## User\n\n" +
-        "- agent: [scrubbed: Cronk Agent Token]\n" +
-        "- agent with no digit: [scrubbed: Cronk Agent Token]\n" +
+        "- agent: [scrubbed: Cronk Token]\n" +
+        "- agent with no digit: [scrubbed: Cronk Token]\n" +
         "- sign-in: cookie cronk_sign_in=[scrubbed: Cronk sign-in];\n" +
-        "- invitation: https://cronk.example/invitations/[scrubbed: Cronk invitation]\n" +
-        '- reset: "[scrubbed: Cronk password reset]"\n' +
+        "- invitation: https://cronk.example/invitations/[scrubbed: Cronk Invitation]\n" +
+        '- reset: "[scrubbed: Cronk Password reset link]"\n' +
         `- too short to be one: cronk_at_${noDigit.slice(1)}\n`,
     );
 

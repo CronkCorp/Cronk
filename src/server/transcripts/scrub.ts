@@ -45,18 +45,20 @@ const AUTHORIZATION =
 /** A bearer credential outside an `Authorization` header. */
 const BEARER = /\b(bearer[ \t]+)(?![[$])[A-Za-z0-9._~+/-]{16,}=*/gi;
 
+/** What each kind of Cronk's own secrets is called in its scrubbed note, in the Glossary's terms. */
+const CRONK_TOKEN_NAMES: Record<TokenKind, string> = {
+  agentToken: "Cronk Token",
+  signIn: "Cronk sign-in",
+  invitation: "Cronk Invitation",
+  passwordReset: "Cronk Password reset link",
+};
+
 /**
  * A secret of Cronk's own, by the prefix of its kind (`newToken`): the prefix, then 32 random bytes as base64url (43 characters,
  * any of them, digits or not).
  */
-const CRONK_TOKEN_NAMES: Record<TokenKind, string> = {
-  agentToken: "Cronk Agent Token",
-  signIn: "Cronk sign-in",
-  invitation: "Cronk invitation",
-  passwordReset: "Cronk password reset",
-};
-const PREFIXED_CRONK_TOKENS = Object.entries(TOKEN_PREFIXES).map(
-  ([kind, prefix]): [RegExp, string] => [token(`${prefix}[${TOKEN_CHAR}]{43}`), CRONK_TOKEN_NAMES[kind as TokenKind]],
+const PREFIXED_CRONK_TOKENS = (Object.keys(TOKEN_PREFIXES) as TokenKind[]).map(
+  (kind): [RegExp, string] => [token(`${TOKEN_PREFIXES[kind]}[${TOKEN_CHAR}]{43}`), CRONK_TOKEN_NAMES[kind]],
 );
 
 /**
