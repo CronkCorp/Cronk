@@ -313,7 +313,6 @@ describe("Triage's unattended Tickets", () => {
   });
 });
 
-
 /** As `carolsDelegatedTicket`, with CRONK-1 under Autonomous Delegation and carol-bot having completed it with a Report, leaving it Unverified. */
 async function carolsUnverifiedCompletion() {
   const setup = await carolsDelegatedTicket();

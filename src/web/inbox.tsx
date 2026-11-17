@@ -786,14 +786,16 @@ function UnattendedDetail(props: DetailProps<UnattendedItem>) {
   const active = users.kind === "loaded" ? users.value.filter((u) => u.active && u.id !== ticket.assignee?.id) : [];
   // The signed-in User first, as the one most likely to take it.
   const candidates = [...active.filter((u) => u.id === props.me.id), ...active.filter((u) => u.id !== props.me.id)];
-  const verify = useVerifyActions(props, ticket.verification === "unverified" ? ticket : undefined);
+  const unverified = ticket.verification === "unverified";
+  const verify = useVerifyActions(props, unverified ? ticket : undefined);
+  const error = verify.error ?? reassign.error;
 
   return (
     <div className="inbox-detail-body">
       <DetailHead item={props.item} />
       {props.resolved && <ResolvedElsewhere />}
       <Banner tone="warn" role="status">
-        <p>{`${unattendedBecause(props.item)}, so nobody would act on this Ticket. ${verify.buttons ? "Accept it, or reassign" : "Reassign"} it to someone who can.`}</p>
+        <p>{`${unattendedBecause(props.item)}, so nobody would act on this Ticket. ${unverified ? "Accept it, or reassign" : "Reassign"} it to someone who can.`}</p>
       </Banner>
       <div className="inbox-detail-who">
         <StatusPill status={ticket.status} />
@@ -806,13 +808,13 @@ function UnattendedDetail(props: DetailProps<UnattendedItem>) {
       ) : (
         <p className="muted">No Report.</p>
       )}
-      {(verify.error ?? reassign.error) && <p className="error" role="alert">{verify.error ?? reassign.error}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
       <div className="actions">
         {verify.buttons}
         <Menu
           label="Reassign to"
           trigger={
-            <Button variant={verify.buttons ? "secondary" : undefined} disabled={props.resolved || reassign.busy}>
+            <Button variant={unverified ? "secondary" : undefined} disabled={props.resolved || reassign.busy}>
               Reassign to…
             </Button>
           }
