@@ -140,15 +140,6 @@ function hasWord(text: string, word: string): boolean {
   return false;
 }
 
-/**
- * Everything Agent Sessions did, by the Session that did it and the Ticket, Document, Term, Decision or Artifact each record is on:
- * the Ticket changes they made, the Activities, Comments and Attachments they added and the Document, Term, Decision and Artifact
- * Versions they saved or published. Each branch reads from one table, looking an Attachment's Comment up by its id rather than
- * joining it, so Postgres can look each branch up by Session in its actor_session_id index (migration 0046).
- *
- * Besides actor_session_id, RECORDS has one `{kind}_id` column (recordColumn) per LinkedKind, in LINKED_KINDS' order, and each
- * branch says what it puts in each (RecordsBranch), so a kind added to LINKED_KINDS without its column in every branch is a type error.
- */
 /** The column of RECORDS that holds the id of the item of a LinkedKind a record is on. */
 const recordColumn = (kind: LinkedKind) => `${kind}_id` as const;
 
@@ -162,8 +153,9 @@ interface RecordsBranch {
 }
 
 /** SQL for the `column` of the Comment that the Attachment aliased `x` is on, if any. */
-const attachmentsComments = (column: string) => `(SELECT c.${column} FROM comments c WHERE c.id = x.comment_id)`;
+const attachmentCommentColumn = (column: string) => `(SELECT c.${column} FROM comments c WHERE c.id = x.comment_id)`;
 
+/** The branches of RECORDS, one per table it reads. */
 const RECORDS_BRANCHES: RecordsBranch[] = [
   { from: "ticket_changes", on: { ticket: "ticket_id", document: null, term: null, decision: null, artifact: null } },
   { from: "activities", on: { ticket: "ticket_id", document: null, term: null, decision: null, artifact: null } },
@@ -172,17 +164,27 @@ const RECORDS_BRANCHES: RecordsBranch[] = [
   {
     from: "attachments x",
     on: {
-      ticket: `coalesce(x.ticket_id, ${attachmentsComments("ticket_id")})`,
-      document: `coalesce(x.document_id, ${attachmentsComments("document_id")})`,
+      ticket: `coalesce(x.ticket_id, ${attachmentCommentColumn("ticket_id")})`,
+      document: `coalesce(x.document_id, ${attachmentCommentColumn("document_id")})`,
       term: null,
       decision: null,
-      artifact: attachmentsComments("artifact_id"),
+      artifact: attachmentCommentColumn("artifact_id"),
     },
   },
   { from: "term_versions", on: { ticket: null, document: null, term: "term_id", decision: null, artifact: null } },
   { from: "decision_versions", on: { ticket: null, document: null, term: null, decision: "decision_id", artifact: null } },
   { from: "artifact_versions", on: { ticket: null, document: null, term: null, decision: null, artifact: "artifact_id" } },
 ];
+
+/**
+ * Everything Agent Sessions did, by the Session that did it and the Ticket, Document, Term, Decision or Artifact each record is on:
+ * the Ticket changes they made, the Activities, Comments and Attachments they added and the Document, Term, Decision and Artifact
+ * Versions they saved or published. Each branch reads from one table, looking an Attachment's Comment up by its id rather than
+ * joining it, so Postgres can look each branch up by Session in its actor_session_id index (migration 0046).
+ *
+ * Besides actor_session_id, RECORDS has one `{kind}_id` column (recordColumn) per LinkedKind, in LINKED_KINDS' order, and each
+ * branch says what it puts in each (RecordsBranch), so a kind added to LINKED_KINDS without its column in every branch is a type error.
+ */
 const RECORDS = RECORDS_BRANCHES.map(
   ({ from, on }) =>
     `SELECT actor_session_id, ${LINKED_KIND_NAMES.map((kind) => `${on[kind] ?? "NULL::uuid"} AS ${recordColumn(kind)}`).join(", ")} FROM ${from}`,
