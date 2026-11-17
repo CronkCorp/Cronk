@@ -55,7 +55,7 @@ const artifactPlaceSql = (artifact: string, version: string) =>
   `jsonb_build_object('artifact', jsonb_build_object('id', ${artifact}.id, 'title', ${artifact}.title, 'version', ${version}))`;
 
 /** SQL for the values the SELECTS read, each bound as a query parameter. */
-interface RecordParams {
+interface RecordParamSql {
   /** The Agent's id (a uuid). */
   agent: string;
   /** The ids of the Projects the reader may read (a uuid[]). */
@@ -65,7 +65,7 @@ interface RecordParams {
 }
 
 /** One SELECT per kind of record, each giving the same columns: `place` holds only the places its kind fills. */
-const selects = ({ agent, projectIds, workspaceId }: RecordParams) => [
+const selects = ({ agent, projectIds, workspaceId }: RecordParamSql) => [
   `SELECT 'change' AS kind, c.at, c.actor_session_id AS session_id, p.key AS project_key, ${ticketPlaceSql("p", "t")} AS place,
      jsonb_build_object('change', c.change) || c.data AS data, c.id AS seq
    FROM ticket_changes c JOIN tickets t ON t.id = c.ticket_id JOIN projects p ON p.id = t.project_id
@@ -121,14 +121,14 @@ export async function listAgentRecord(
   const params: unknown[] = [];
   /** Binds `value` as the next parameter, returning SQL that reads it. */
   const param = (value: unknown, type: string) => `$${params.push(value)}::${type}`;
-  const record = selects({
+  const recordSelects = selects({
     agent: param(agent.id, "uuid"),
     projectIds: param(readable.projectIds, "uuid[]"),
     workspaceId: param(readable.workspaceId, "uuid"),
   });
   const since = param(input.since ?? null, "timestamptz");
   const { rows } = await db.query<RecordRow>(
-    `SELECT * FROM (${record.join("\n UNION ALL ")}) entries
+    `SELECT * FROM (${recordSelects.join("\n UNION ALL ")}) entries
      WHERE ${since} IS NULL OR entries.at >= ${since}
      ORDER BY entries.at DESC, entries.kind, entries.seq DESC
      LIMIT ${param(input.limit, "int")}`,
