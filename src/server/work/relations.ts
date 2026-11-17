@@ -18,9 +18,20 @@ export interface NewDiscoveredBlock {
   reason: string;
 }
 
-/** A Ticket on the other end of a block, with the Agent and reason if the block came from a Discovered Ticket (else null). */
+/**
+ * A Ticket on the other end of a block, with the block's opaque id and the Agent and reason if the block came from a
+ * Discovered Ticket (else null).
+ */
 export interface BlockingRef extends TicketRef {
+  blockId: string;
   block: DiscoveredBlock | null;
+}
+
+/** A block from a Discovered Ticket the reader can't see: the block's opaque id, the Agent and why, but nothing of the Ticket. */
+export interface HiddenBlocker {
+  hidden: true;
+  blockId: string;
+  block: DiscoveredBlock;
 }
 
 /** A Ticket's relations to other Tickets, each list in key order. */
@@ -28,6 +39,11 @@ export interface Relations {
   blocks: BlockingRef[];
   blockedBy: BlockingRef[];
   relatesTo: TicketRef[];
+}
+
+/** A Ticket's relations as a reader is shown them: `blockedBy` ends with placeholders for the blocks from Discovered Tickets they can't see. */
+export interface ShownRelations extends Omit<Relations, "blockedBy"> {
+  blockedBy: (BlockingRef | HiddenBlocker)[];
 }
 
 /** A relation change: `ticket` relating to `other` as `kind`, made by `actor` at `now`. */
@@ -117,6 +133,15 @@ export async function isDiscoveredBlock(db: Queryable, blocker: string, blocked:
   return rowCount !== 0;
 }
 
+/** The Ticket blocking `blockedId` by the block from a Discovered Ticket with this id, if there is one. */
+export async function findDiscoveredBlocker(db: Queryable, blockId: string, blockedId: string): Promise<string | undefined> {
+  const { rows } = await db.query<{ id: string }>(
+    "SELECT from_ticket_id AS id FROM ticket_relations WHERE id = $1 AND kind = 'blocks' AND to_ticket_id = $2 AND added_by_agent_id IS NOT NULL",
+    [blockId, blockedId],
+  );
+  return rows[0]?.id;
+}
+
 /** Removes a relation, recording it in both Tickets' history. Returns false if there was no such relation. Run inside a transaction. */
 export async function removeRelation(db: Queryable, input: RelationChange): Promise<boolean> {
   const row = storedRow(input.ticket, input.kind, input.other);
@@ -137,20 +162,22 @@ async function recordBothSides(db: Queryable, change: "relation added" | "relati
 }
 
 /**
- * The Tickets `ticketId` blocks (`side` "from") or is blocked by ("to"), in key order, each with the Agent and reason of a
- * block from a Discovered Ticket.
+ * The Tickets `ticketId` blocks (`side` "from") or is blocked by ("to"), in key order, each with the block's id and the Agent
+ * and reason of a block from a Discovered Ticket.
  */
 async function blockingRefs(db: Queryable, ticketId: string, side: "from" | "to"): Promise<BlockingRef[]> {
   const [end, other] = side === "from" ? ["from_ticket_id", "to_ticket_id"] : ["to_ticket_id", "from_ticket_id"];
-  const { rows } = await db.query<{ id: string; agent_id: string | null; agent_name: string | null; reason: string | null }>(
-    `SELECT r.${other} AS id, r.added_by_agent_id AS agent_id, a.name AS agent_name, r.reason
+  const { rows } = await db.query<{ id: string; block_id: string; agent_id: string | null; agent_name: string | null; reason: string | null }>(
+    `SELECT r.${other} AS id, r.id AS block_id, r.added_by_agent_id AS agent_id, a.name AS agent_name, r.reason
      FROM ticket_relations r LEFT JOIN agents a ON a.id = r.added_by_agent_id
      WHERE r.kind = 'blocks' AND r.${end} = $1`,
     [ticketId],
   );
-  const blocks = new Map(rows.map((r) => [r.id, r.agent_id === null ? null : { agent: { id: r.agent_id, name: r.agent_name! }, reason: r.reason! }]));
+  const blocks = new Map(
+    rows.map((r) => [r.id, { blockId: r.block_id, block: r.agent_id === null ? null : { agent: { id: r.agent_id, name: r.agent_name! }, reason: r.reason! } }]),
+  );
   const refs = await listIdentifiedTicketRefs(db, "t.id = ANY($1::uuid[])", [[...blocks.keys()]]);
-  return refs.map(({ id, ...ref }) => ({ ...ref, block: blocks.get(id)! }));
+  return refs.map(({ id, ...ref }) => ({ ...ref, ...blocks.get(id)! }));
 }
 
 /** A Ticket's relations, each with the Tickets at its other end in key order; blocks carry who added one from a Discovered Ticket, and why. */

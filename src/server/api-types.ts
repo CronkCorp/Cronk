@@ -15,7 +15,7 @@ import type { publicInvitation } from "./identity/invitations.js";
 import type { Guidance as StoredGuidance, GuidanceVersion as StoredGuidanceVersion } from "./knowledge/guidance.js";
 import type { publicUser } from "./identity/users.js";
 import type { Project as StoredProject } from "./work/projects.js";
-import type { Relations as StoredRelations } from "./work/relations.js";
+import type { ShownRelations as StoredRelations } from "./work/relations.js";
 import type { DependentChoice as StoredDependentChoice } from "./work/reopen.js";
 import type {
   RecordedActor,
@@ -124,6 +124,8 @@ export type Relations = Serialized<StoredRelations>;
 export type DependentChoice = Serialized<StoredDependentChoice>;
 /** Another Ticket at the other end of a block, with who added it from a Discovered Ticket and why. */
 export type BlockingRef = Relations["blocks"][number];
+/** A block from a Discovered Ticket the caller can't see, in place of that Ticket among a Ticket's blockers. */
+export type HiddenBlocker = Extract<Relations["blockedBy"][number], { hidden: true }>;
 
 /** An Agent Session's hold on a Ticket. */
 export type Claim = Serialized<StoredClaim>;

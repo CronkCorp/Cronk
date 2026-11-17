@@ -1036,7 +1036,8 @@ const ticketCount = (n: number) => (n === 1 ? "1 Ticket" : `${n} Tickets`);
 /** Who found a Discovered Ticket and where, as its list item says it: "By claude-laptop · from CRONK-12". */
 function foundBy(item: DiscoveredItem): string {
   const { agent, sourceTicket } = item.ticket.discovered!;
-  const pauses = item.blocks.length === 0 ? "" : ` · pauses ${ticketCount(item.blocks.length)}`;
+  const paused = item.blocks.length + item.hiddenBlocks;
+  const pauses = paused === 0 ? "" : ` · pauses ${ticketCount(paused)}`;
   return `By ${agent.name}${sourceTicket ? ` · from ${sourceTicket.key}` : ""}${pauses}`;
 }
 
@@ -1047,7 +1048,7 @@ function foundBy(item: DiscoveredItem): string {
  * User and moves it to their Inbox, and Cancel.
  */
 function DiscoveredDetail(props: DetailProps<DiscoveredItem>) {
-  const { ticket, blocks } = props.item;
+  const { ticket, blocks, hiddenBlocks } = props.item;
   const { agent, session, sourceTicket } = ticket.discovered!;
   // An Inbox holds only the User's own; Triage, those with no Assignee or one who can't act on them.
   const inTriage = ticket.assignee?.id !== props.me.id;
@@ -1092,22 +1093,27 @@ function DiscoveredDetail(props: DetailProps<DiscoveredItem>) {
           )}
         </span>
       </div>
-      {blocks.length > 0 && (
+      {blocks.length + hiddenBlocks > 0 && (
         <Banner tone="warn" role="status">
-          <p>{`Pauses ${ticketCount(blocks.length)} until it is finished:`}</p>
-          <ul className="paused-list" aria-label="Paused Tickets">
-            {blocks.map((b) => (
-              <li key={b.key}>
-                <div className="paused-ticket">
-                  <Link to={`/tickets/${b.key}`} className="link"><span className="mono">{b.key}</span> {b.title}</Link>
-                  <button type="button" className="link-button" aria-label={`Remove the block on ${b.key}`} disabled={busy} onClick={() => void unblock.run(b.key)}>
-                    Remove block
-                  </button>
-                </div>
-                {b.block && <p className="muted small">{b.block.reason}</p>}
-              </li>
-            ))}
-          </ul>
+          <p>{`Pauses ${ticketCount(blocks.length + hiddenBlocks)} until it is finished:`}</p>
+          {blocks.length > 0 && (
+            <ul className="paused-list" aria-label="Paused Tickets">
+              {blocks.map((b) => (
+                <li key={b.key}>
+                  <div className="paused-ticket">
+                    <Link to={`/tickets/${b.key}`} className="link"><span className="mono">{b.key}</span> {b.title}</Link>
+                    {b.canRemove && (
+                      <button type="button" className="link-button" aria-label={`Remove the block on ${b.key}`} disabled={busy} onClick={() => void unblock.run(b.key)}>
+                        Remove block
+                      </button>
+                    )}
+                  </div>
+                  {b.block && <p className="muted small">{b.block.reason}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {hiddenBlocks > 0 && <p className="muted small">{`${blocks.length > 0 ? "And " : ""}${ticketCount(hiddenBlocks)} you can't see.`}</p>}
         </Banner>
       )}
       {ticket.description.trim() ? (

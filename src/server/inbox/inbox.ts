@@ -8,7 +8,7 @@ import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { listRelations, type BlockingRef } from "../work/relations.js";
-import { visibleRelations } from "../work/ticket-reads.js";
+import { projectKeyOf } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -39,7 +39,12 @@ export type UnverifiedItem = TicketItem<"unverified">;
  * A Discovered Ticket waiting for its Assignee to delegate it, keep it in Backlog or cancel it, with the Tickets it blocks
  * that the User can see: what it pauses. `at` is when it was filed.
  */
-export type DiscoveredItem = TicketItem<"discovered"> & { blocks: BlockingRef[] };
+export type DiscoveredItem = TicketItem<"discovered"> & {
+  /** The Tickets it blocks that the viewer can see, each saying whether the viewer may remove the block. */
+  blocks: (BlockingRef & { canRemove: boolean })[];
+  /** How many Tickets it blocks that the viewer can't see. */
+  hiddenBlocks: number;
+};
 
 /** An open question of one of the User's Agents, with the Ticket it is on. `at` is when it was asked. */
 export interface QuestionItem {
@@ -208,11 +213,24 @@ export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
   return asTicketItems(db, kind, rows);
 }
 
-/** Discovered items, each with the Tickets it blocks that `user` can see. */
+/**
+ * Discovered items, each with the Tickets it blocks that `user` can see, saying whether `user` may remove each block, and
+ * how many it blocks that they can't see.
+ */
 export async function withBlocks(db: Queryable, user: User, items: TicketItem<"discovered">[]): Promise<DiscoveredItem[]> {
-  const viewer = userActor(user);
+  const access = new Map((await visibleProjects(db, userActor(user), await listAllProjects(db, user.workspaceId))).map((p) => [p.key, p.access]));
+  const writable = (ticketKey: string) => access.get(projectKeyOf(ticketKey)) === "write";
   return Promise.all(
-    items.map(async (item) => ({ ...item, blocks: (await visibleRelations(db, viewer, await listRelations(db, item.ticket.id))).blocks })),
+    items.map(async (item) => {
+      const { blocks } = await listRelations(db, item.ticket.id);
+      const visible = blocks.filter((b) => access.has(projectKeyOf(b.key)));
+      return {
+        ...item,
+        // As DELETE /api/tickets/:key/relations/blocked_by/:otherKey allows: Write on the blocked Ticket, and on this one too unless an Agent added the block from it.
+        blocks: visible.map((b) => ({ ...b, canRemove: writable(b.key) && (b.block !== null || writable(item.ticket.key)) })),
+        hiddenBlocks: blocks.length - visible.length,
+      };
+    }),
   );
 }
 
