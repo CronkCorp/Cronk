@@ -1,7 +1,7 @@
 import { actorColumns, toRecordedActor, type Actor, type RecordedActor, type RecordedActorRow, type StoredActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
 import type { Readable } from "../identity/access.js";
-import { recordMentions, recordMentionsOfNames } from "./mentions.js";
+import { countTermMentions, recordMentions, recordMentionsOfNames } from "./mentions.js";
 import { withSuggestions, type VersionSuggestion } from "./version-suggestions.js";
 
 /**
@@ -44,6 +44,8 @@ export interface Term extends TermFields {
   overriddenBy: { id: string; name: string; projectKey: string }[];
   /** How many of its Suggestions are open. */
   suggestions: number;
+  /** How many things the reader can read mention it. */
+  mentions: number;
 }
 
 interface TermRow {
@@ -62,7 +64,7 @@ interface TermRow {
 }
 
 /** A Term's own fields, before its overrides are looked up. */
-export type StoredTerm = Omit<Term, "overrides" | "overriddenBy" | "suggestions">;
+export type StoredTerm = Omit<Term, "overrides" | "overriddenBy" | "suggestions" | "mentions">;
 
 const toTerm = (row: TermRow): StoredTerm => ({
   id: row.id,
@@ -189,14 +191,21 @@ export async function listApplicableTerms(db: Queryable, place: TermPlace & { pr
 }
 
 /**
- * Terms as the API answers them to the reader `readable` describes: with how many open Suggestions each has, and what
+ * Terms as the API answers them to the reader `readable` describes: with how many open Suggestions each has, how many
+ * things the reader can read mention it (as `listMentions` lists them, but every one), and what
  * overrides it or what it overrides, as far as the reader can see: a Project Term names the Workspace Term it replaces,
  * and a Workspace Term the Project Terms replacing it.
  */
 export async function answeredTerms(db: Queryable, workspaceId: string, terms: StoredTerm[], readable: Readable): Promise<Term[]> {
   if (terms.length === 0) return [];
-  const suggestions = await openSuggestionCounts(db, terms.map((t) => t.id));
-  return (await withOverrides(db, workspaceId, terms, readable)).map((term) => ({ ...term, suggestions: suggestions.get(term.id) ?? 0 }));
+  const ids = terms.map((t) => t.id);
+  const suggestions = await openSuggestionCounts(db, ids);
+  const mentions = await countTermMentions(db, ids, readable);
+  return (await withOverrides(db, workspaceId, terms, readable)).map((term) => ({
+    ...term,
+    suggestions: suggestions.get(term.id) ?? 0,
+    mentions: mentions.get(term.id) ?? 0,
+  }));
 }
 
 /** How many open Suggestions each of these Terms has, by id; Terms without any are left out. */
@@ -209,7 +218,7 @@ async function openSuggestionCounts(db: Queryable, termIds: string[]): Promise<M
 }
 
 /** Adds to each Term what overrides it or what it overrides, as far as `readable` lets its reader see. */
-async function withOverrides(db: Queryable, workspaceId: string, terms: StoredTerm[], readable: Readable): Promise<Omit<Term, "suggestions">[]> {
+async function withOverrides(db: Queryable, workspaceId: string, terms: StoredTerm[], readable: Readable): Promise<Omit<Term, "suggestions" | "mentions">[]> {
   if (terms.length === 0) return [];
   const names = [...new Set(terms.map((t) => t.name.toLowerCase()))];
   const { rows } = await db.query<{ id: string; name: string; definition: string; project_key: string | null }>(

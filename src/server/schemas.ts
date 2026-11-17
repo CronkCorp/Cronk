@@ -905,6 +905,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
         description: "For a Workspace Term: the Project Terms of the same name that replace it within their Projects, in Projects the caller can read, by Project key.",
       },
       suggestions: { type: "integer", description: "How many of its Suggestions are open, waiting for a User to accept or reject them." },
+      mentions: {
+        type: "integer",
+        description: "How many things the caller can read mention it: every one of what `GET /api/terms/{id}/mentions` lists, beyond the 50 that lists.",
+      },
     }),
   },
   TermVersion: {

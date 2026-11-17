@@ -228,3 +228,36 @@ describe("a Term's Suggestion count", () => {
     expect((await admin.get("/api/workspace/terms")).body.terms[0]).toMatchObject({ suggestions: 0 });
   });
 });
+
+describe("a Term's mention count", () => {
+  it("counts what mentions it that the reader can read, wherever the Term is answered", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects", { name: "Secret", key: "SECRET" });
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    expect(claim.mentions).toBe(0);
+    await admin.post("/api/projects/CRONK/documents", { title: "Open notes", body: "Each Claim lapses." });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Lapse a Claim" });
+    await admin.post("/api/projects/SECRET/documents", { title: "Secret notes", body: "Each Claim." });
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+
+    const counts = async (reader: typeof admin) => [
+      (await reader.get(`/api/terms/${claim.id}`)).body.term.mentions,
+      (await reader.get("/api/workspace/terms")).body.terms[0].mentions,
+      (await reader.get("/api/projects/CRONK/terms")).body.terms[0].mentions,
+    ];
+    expect(await counts(admin)).toEqual([3, 3, 3]);
+    expect(await counts(bob)).toEqual([2, 2, 2]);
+  });
+
+  it("counts every mention, beyond the 50 its mentions list shows", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    const claim = (await admin.post("/api/workspace/terms", { name: "Claim", definition: "A hold." })).body.term;
+    for (let i = 1; i <= 51; i++) await admin.post("/api/projects/CRONK/tickets", { title: `Claim ${i}` });
+
+    expect((await admin.get(`/api/terms/${claim.id}/mentions`)).body.mentions).toHaveLength(50);
+    expect((await admin.get(`/api/terms/${claim.id}`)).body.term.mentions).toBe(51);
+  });
+});
