@@ -423,10 +423,12 @@ export async function transcriptsOf(db: Queryable, workspaceId: string, item: Li
   return rows.map(toStored);
 }
 
-/** A Transcript as an item it led to links to it ("From Transcript"): without its text, with the turn where the item first appears. */
+/**
+ * A Transcript as an item it led to links to it ("From Transcript"): without its text, not even its title, so context on claim
+ * never holds any of the chat; with the turn where the item first appears.
+ */
 export interface TranscriptLink {
   id: string;
-  title: string;
   agent: { id: string; name: string };
   /** The turn where the item's key or id first appears; null for the top. */
   turn: number | null;
@@ -441,13 +443,13 @@ export async function transcriptLinks(db: Queryable, actor: Actor, item: LinkedI
     if (!transcript) continue;
     // Found as readTranscript finds each item's turn.
     const turn = firstTurnNaming(turnsOf(stored.markdown), item.key ? [item.key, item.id] : [item.id]);
-    links.push({ id: transcript.id, title: transcript.title, agent: { id: transcript.agent.id, name: transcript.agent.name }, turn, updatedAt: transcript.updatedAt });
+    links.push({ id: transcript.id, agent: { id: transcript.agent.id, name: transcript.agent.name }, turn, updatedAt: transcript.updatedAt });
   }
   return links;
 }
 
-/** A Transcript without its text, as listings show it. */
-export const transcriptSummary = ({ markdown: _m, earlier: _e, ...summary }: Transcript) => summary;
+/** A Transcript without its text, as listings show it: its title, the first line of a turn, is text too. */
+export const transcriptSummary = ({ markdown: _m, earlier: _e, title: _t, ...summary }: Transcript) => summary;
 
 /** Deletes a Transcript and its links. */
 export async function deleteTranscript(db: Queryable, id: string): Promise<void> {

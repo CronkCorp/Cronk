@@ -142,9 +142,9 @@ export function FromTranscripts(props: { links: TranscriptLink[]; heading: "h3" 
       <ul className="side-list" aria-label="From Transcript">
         {props.links.map((l) => (
           <li key={l.id}>
-            <Link to={transcriptAddress(l.id, l.turn)} className="link">{l.title}</Link>
-            <span className="muted">{l.turn === null ? "by" : `turn ${l.turn}, by`}</span>
             <Actor actor={agentActor(l.agent)} owner={false} />
+            <Link to={transcriptAddress(l.id, l.turn)} className="link">{l.turn === null ? "chat" : `chat, turn ${l.turn}`}</Link>
+            <RelativeTime at={l.updatedAt} className="muted" />
           </li>
         ))}
       </ul>

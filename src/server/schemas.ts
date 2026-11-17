@@ -108,10 +108,11 @@ const firstTurn = {
     "The turn of the latest text where the item's key or id first appears: each `## User` or `## Assistant` heading outside a fenced block " +
     "starts one, numbered from 1. Null when no turn names it, so a link points at the top.",
 };
+/** What a Transcript is called; only the Transcript itself carries it, as it is chat text. */
+const transcriptTitle = { type: "string", description: "What it is called: the first line of its first `## User` turn, shortened, or its chat id when it has none." };
 /** What a Transcript and its summary share. */
 const transcriptFields = {
   id,
-  title: { type: "string", description: "What it is called: the first line of its first `## User` turn, shortened, or its chat id when it has none." },
   chatId: { type: "string", description: "The client's id for the chat, such as Claude Code's `session_id`; one Transcript per Agent and chat." },
   agent: {
     ...object({ id, name: { type: "string" }, owner: named }),
@@ -1026,6 +1027,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       "and so to everything those Sessions changed.",
     ...object({
       ...transcriptFields,
+      title: transcriptTitle,
       markdown: {
         type: "string",
         description:
@@ -1039,15 +1041,14 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
     }),
   },
   TranscriptSummary: {
-    description: "A Transcript without its text.",
+    description: "A Transcript without its text, title included, since that is the first line of a turn.",
     ...object(transcriptFields),
   },
   TranscriptLink: {
     description:
-      "A Transcript an item came from (\"From Transcript\"): one whose Agent Sessions changed the item, without its text, with the turn where the item first appears.",
+      "A Transcript an item came from (\"From Transcript\"): one whose Agent Sessions changed the item, without its text (title included), with the turn where the item first appears.",
     ...object({
       id,
-      title: transcriptFields.title,
       agent: { ...object({ id, name: { type: "string" } }), description: "The Agent that uploaded it." },
       turn: firstTurn,
       updatedAt: timestamp,

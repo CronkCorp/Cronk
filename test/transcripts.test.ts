@@ -569,6 +569,7 @@ describe("Listing Transcripts", () => {
     const mine = (await bob.get("/api/transcripts")).body.transcripts;
     expect(mine.map((t: { id: string }) => t.id)).toEqual([second, id]);
     expect(mine[0]).not.toHaveProperty("markdown");
+    expect(mine[0]).not.toHaveProperty("title");
     expect(mine[0]).toMatchObject({ chatId: "chat-2", tickets: [{ key: "CRONK-1" }] });
     expect((await carol.get("/api/transcripts")).body.transcripts.map((t: { id: string }) => t.id)).toEqual([second]);
   });
@@ -678,7 +679,7 @@ describe("From Transcript links", () => {
     expect(await links(`/api/terms/${term}/transcripts`)).toEqual([[unnamed, null], [named, 3]]);
     expect(await links("/api/decisions/CRONK-D1/transcripts")).toEqual([[unnamed, null], [named, 3]]);
     const [link] = (await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts;
-    expect(link).toEqual({ id: unnamed, title: "Carry on", agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) });
+    expect(link).toEqual({ id: unnamed, agent: { id: claude.agentId, name: "claude-laptop" }, turn: null, updatedAt: expect.any(String) });
     expect((await admin.get("/api/tickets/CRONK-2/transcripts")).status).toBe(404);
   });
 
@@ -707,9 +708,10 @@ describe("Context on claim", () => {
     const claimed = await (await session()).post("/api/tickets/CRONK-1/claim");
     expect(claimed.status, JSON.stringify(claimed.body)).toBe(200);
     expect(claimed.body.transcripts).toEqual([
-      { id, title: "Start on CRONK-1", agent: { id: claude.agentId, name: "claude-laptop" }, turn: 1, updatedAt: expect.any(String) },
+      { id, agent: { id: claude.agentId, name: "claude-laptop" }, turn: 1, updatedAt: expect.any(String) },
     ]);
-    expect(JSON.stringify(claimed.body)).not.toContain("tool-result");
+    // Nothing of the chat, not even its first line.
+    expect(JSON.stringify(claimed.body)).not.toMatch(/tool-result|Start on/);
   });
 });
 
