@@ -1094,6 +1094,23 @@ describe("Upgrading an installation", () => {
     await cronk.restart();
     expect((await bob.get("/api/search?q=done&kind=transcript")).body.results).toMatchObject([{ transcriptId: id, turn: 2 }]);
   });
+
+  it("indexes the changes Agent Sessions already made, and who may read each Transcript stays the same", async () => {
+    const { cronk, admin, bob, carol, handbook, id } = await transcriptAcrossProjects();
+    await cronk.undoMigration(
+      "0046_session_record_indexes",
+      ["ticket_changes", "activities", "comments", "document_versions", "attachments", "term_versions", "decision_versions", "artifact_versions"]
+        .map((table) => `DROP INDEX ${table}_actor_session;`)
+        .join(" "),
+    );
+    await cronk.restart();
+    const items = { tickets: [{ key: "CRONK-1" }, { key: "SECRET-1" }], documents: [{ id: handbook, title: "Handbook" }] };
+    expect((await bob.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject(items);
+    expect((await admin.get(`/api/transcripts/${id}`)).body.transcript).toMatchObject(items);
+    expect((await carol.get(`/api/transcripts/${id}`)).status).toBe(404);
+    expect((await admin.get("/api/search?q=done&kind=transcript")).body.results).toMatchObject([{ transcriptId: id }]);
+    expect((await carol.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
+  });
 });
 
 describe("Upgrading a Transcript stored before scrubbing", () => {
