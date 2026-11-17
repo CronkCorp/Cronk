@@ -185,7 +185,7 @@ export function agentRoutes(ctx: AppContext) {
           },
           response: {
             200: answer(
-              "The Agent Record: what the Agent did, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved, " +
+              "The Agent Record: what the Agent did, newest first: the Changes it made, the Activities and Comments it wrote, the Document Versions it saved and the Artifact Versions it published, " +
                 "leaving out what the caller can't read. It stays readable to its Owner and Admins after the Agent is removed",
               listing("record", ref("AgentRecordEntry")),
             ),
