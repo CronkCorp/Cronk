@@ -252,6 +252,26 @@ export async function storeAllTurns(db: Queryable): Promise<void> {
   }
 }
 
+/**
+ * Rewrites every Transcript's texts to what an upload keeps of them now (`textToKeep`), as an upgrade does for those stored before
+ * scrubbing: one Transcript at a time, as each may hold megabytes. Only texts that change are written, and nothing else is: not
+ * when it was updated, its Sessions or its redactions. The Workspace's size limit isn't applied, as a scrub note may be longer than
+ * what it replaces. Running it again changes nothing, as scrubbing and redacting leave their own output alone.
+ */
+export async function scrubAllStored(db: Queryable): Promise<void> {
+  const { rows: ids } = await db.query<{ id: string }>("SELECT id FROM transcripts");
+  for (const { id } of ids) {
+    const { rows } = await db.query<{ markdown: string; earlier: string[] }>("SELECT markdown, earlier FROM transcripts WHERE id = $1", [id]);
+    const stored = rows[0]!;
+    const redactions = await redactionsOf(db, id);
+    const markdown = textToKeep(stored.markdown, redactions);
+    const earlier = stored.earlier.map((t) => textToKeep(t, redactions));
+    if (markdown === stored.markdown && earlier.every((t, i) => t === stored.earlier[i])) continue;
+    await db.query("UPDATE transcripts SET markdown = $2, earlier = $3 WHERE id = $1", [id, markdown, earlier]);
+    if (markdown !== stored.markdown) await storeTurns(db, id, markdown);
+  }
+}
+
 /** The bytes a Transcript's texts take, as the Workspace's limit counts them. */
 export const sizeOf = (upload: Upload): number => [upload.markdown, ...upload.earlier].reduce((n, t) => n + Buffer.byteLength(t, "utf8"), 0);
 
