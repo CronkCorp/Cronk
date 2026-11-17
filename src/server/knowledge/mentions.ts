@@ -262,16 +262,16 @@ const FOUND_SQL = `
  */
 export async function listMentions(db: Queryable, target: MentionTarget, readable: Readable): Promise<Mention[]> {
   const { condition, params } = mentionsOf(target);
-  const isReadable = readableClause("f", readable, params.length + 1);
+  const readableWhere = readableClause("f", readable, params.length + 1);
   const { rows } = await db.query<Mention>(
     `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
      found AS (
 ${FOUND_SQL}
      )
      SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
-     FROM found f WHERE ${isReadable.sql}
+     FROM found f WHERE ${readableWhere.sql}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
-    [...params, ...isReadable.params],
+    [...params, ...readableWhere.params],
   );
   return rows;
 }
@@ -281,14 +281,14 @@ ${FOUND_SQL}
  * unlike `listMentions`, every one is counted. Terms nothing readable mentions are left out.
  */
 export async function countTermMentions(db: Queryable, termIds: string[], readable: Readable): Promise<Map<string, number>> {
-  const isReadable = readableClause("f", readable, 2);
+  const readableWhere = readableClause("f", readable, 2);
   const { rows } = await db.query<{ term_id: string; n: number }>(
     `WITH m AS (SELECT * FROM mentions m WHERE m.mentioned_term_id = ANY($1::uuid[])),
      found AS (${FOUND_SQL})
      SELECT mentioned_term_id AS term_id, count(*)::int AS n
-     FROM found f WHERE ${isReadable.sql}
+     FROM found f WHERE ${readableWhere.sql}
      GROUP BY mentioned_term_id`,
-    [termIds, ...isReadable.params],
+    [termIds, ...readableWhere.params],
   );
   return new Map(rows.map((r) => [r.term_id, r.n]));
 }

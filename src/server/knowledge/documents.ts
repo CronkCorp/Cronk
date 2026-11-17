@@ -404,13 +404,13 @@ export async function listLinkedDocuments(
     `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason,
        ${documentProtectedSql("d")} AS protected
      FROM (${SELECT_DOCUMENTS}) d`;
-  const isReadable = readableClause("d", readable, 2);
+  const readableWhere = readableClause("d", readable, 2);
   const reports = await db.query<LinkedDocument>(`${select("report")} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
   const linked = await db.query<LinkedDocument>(
     `${select("linked")} JOIN ticket_document_links l ON l.document_id = d.id AND l.ticket_id = $1
-     WHERE d.ticket_id IS DISTINCT FROM $1 AND ${isReadable.sql}
+     WHERE d.ticket_id IS DISTINCT FROM $1 AND ${readableWhere.sql}
      ORDER BY l.seq`,
-    [ticket.id, ...isReadable.params],
+    [ticket.id, ...readableWhere.params],
   );
   return [...reports.rows, ...linked.rows];
 }

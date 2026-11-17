@@ -140,7 +140,7 @@ const EMBEDDED_IN_LIMIT = 50;
 
 /** Where an Artifact is embedded, most recently changed first (at most 50), leaving out what lies where `readable` doesn't let its reader read. */
 export async function listEmbeddedIn(db: Queryable, artifactId: string, readable: Readable): Promise<EmbeddedIn[]> {
-  const isReadable = readableClause("f", readable, 2);
+  const readableWhere = readableClause("f", readable, 2);
   const { rows } = await db.query<EmbeddedIn>(
     `WITH e AS (SELECT * FROM artifact_embeds e WHERE e.artifact_id = $1),
      found AS (
@@ -156,9 +156,9 @@ export async function listEmbeddedIn(db: Queryable, artifactId: string, readable
          LEFT JOIN artifacts x ON x.id = c.artifact_id LEFT JOIN projects xp ON xp.id = x.project_id
      )
      SELECT kind, id, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", version, at
-     FROM found f WHERE ${isReadable.sql}
+     FROM found f WHERE ${readableWhere.sql}
      ORDER BY at DESC, id, version NULLS FIRST LIMIT ${EMBEDDED_IN_LIMIT}`,
-    [artifactId, ...isReadable.params],
+    [artifactId, ...readableWhere.params],
   );
   return rows;
 }
