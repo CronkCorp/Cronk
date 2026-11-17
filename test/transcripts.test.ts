@@ -1053,6 +1053,34 @@ describe("Who may read Transcripts, decided for many at once", () => {
     expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toEqual([]);
     expect(await listing()).toEqual(withOne);
   });
+
+  it("lists them in a fixed number of queries, however many there are, each as reading it shows", async () => {
+    const { cronk, admin, bob, carol, claude } = await transcriptAcrossProjects(QUIET);
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "More" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    // Carol may read none of them; Ada all of them; Bob owns them.
+    const listing = async () => ({
+      carol: await cronk.queries(() => carol.get("/api/transcripts")),
+      admin: await cronk.queries(() => admin.get("/api/transcripts")),
+      bob: await cronk.queries(() => bob.get("/api/transcripts")),
+    });
+    const withOne = await listing();
+
+    for (let i = 2; i <= 6; i++) expect((await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId))).status).toBe(200);
+    // Bob loses Read in CRONK, so what his Transcripts list of it is left out.
+    await admin.patch("/api/projects/CRONK", { visibility: "private" });
+    expect((await admin.get("/api/transcripts")).body.transcripts).toHaveLength(6);
+    expect((await carol.get("/api/transcripts")).body.transcripts).toEqual([]);
+    const bobs = (await bob.get("/api/transcripts")).body.transcripts;
+    expect(bobs).toHaveLength(6);
+    expect(bobs.flatMap((t: { tickets: { key: string }[] }) => t.tickets.map((k) => k.key))).toEqual(["SECRET-1"]);
+    for (const summary of bobs) {
+      const { markdown: _m, earlier: _e, title: _t, ...read } = (await bob.get(`/api/transcripts/${summary.id}`)).body.transcript;
+      expect(summary).toEqual(read);
+    }
+    expect(await listing()).toEqual(withOne);
+  });
 });
 
 describe("Upgrading an installation", () => {

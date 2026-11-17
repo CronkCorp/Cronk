@@ -14,7 +14,7 @@ import {
   changedAnything,
   findForUpdate,
   findTranscript,
-  listTranscripts,
+  readableTranscripts,
   transcriptSummary,
   transcriptLinks,
   type LinkedItem,
@@ -190,12 +190,7 @@ export function transcriptRoutes(ctx: AppContext) {
       },
       async (request) => {
         const actor = await requireActor(ctx, request);
-        const transcripts = [];
-        for (const stored of await listTranscripts(ctx.db, actingUser(actor).workspaceId, "newest")) {
-          const transcript = await readTranscript(ctx.db, actor, stored);
-          if (transcript) transcripts.push(transcriptSummary(transcript));
-        }
-        return { transcripts };
+        return { transcripts: (await readableTranscripts(ctx.db, actor)).map(transcriptSummary) };
       },
     );
 
