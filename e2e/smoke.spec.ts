@@ -1757,7 +1757,7 @@ test("paste an image into a Document's editor, and see it in the rendered body a
   await page.goto(`/documents/${id}`);
   await page.getByRole("button", { name: "Edit" }).click();
 
-  // Pasting a file uploads it and puts its Markdown where the cursor is; undo (Ctrl+Z, or Cmd+Z on macOS) takes the Markdown out again.
+  // Pasting a file uploads it and puts its Markdown where the cursor is; undo (Ctrl/Cmd+Z) takes the Markdown out again.
   const editor = page.getByLabel("Body (Markdown)");
   await editor.evaluate((el: HTMLTextAreaElement) => {
     el.focus();
