@@ -258,6 +258,34 @@ export function unwrapFolder<F extends Map<string, unknown>>(folder: F): F {
   }
 }
 
+/** How many stored files `checkStoredFiles` asks the store about at once. */
+const STORED_FILE_CHECKS_AT_ONCE = 16;
+
+/**
+ * Checks that every file of `folder` kept in `store` is there and holds the bytes the folder records, so an archive
+ * is never sent that would stop partway; throws a 500 naming the first file found missing or the wrong size.
+ */
+export async function checkStoredFiles(folder: StoredFolder, store: FileStore): Promise<void> {
+  const stored = [...folder].filter((entry): entry is [string, StoredFile] => isStored(entry[1]));
+  let next = 0;
+  let failed = false;
+  const check = async () => {
+    // Once one file fails, the others are left unasked.
+    while (!failed && next < stored.length) {
+      const [path, { key, size }] = stored[next++]!;
+      try {
+        const found = await store.size(key);
+        if (found === null) throw new HttpError(500, `The file of ${path} is missing from the file store`);
+        if (found !== size) throw new HttpError(500, `The file of ${path} holds ${found} bytes in the file store, not the ${size} recorded`);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(STORED_FILE_CHECKS_AT_ONCE, stored.length) }, check));
+}
+
 /**
  * `folder` packed as a gzipped tar archive, written as it is read: files in memory as they are, and files in `store`
  * each read as a stream when its turn comes, so neither a whole stored file nor the whole archive is ever held.

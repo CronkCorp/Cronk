@@ -78,6 +78,16 @@ export class S3Store implements FileStore {
     return out;
   }
 
+  async size(key: string): Promise<number | null> {
+    try {
+      const { ContentLength } = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: checkKey(key) }));
+      return ContentLength ?? 0;
+    } catch (err) {
+      if ((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null;
+      throw err;
+    }
+  }
+
   async list(prefix: string): Promise<string[]> {
     const keys: string[] = [];
     let ContinuationToken: string | undefined;
