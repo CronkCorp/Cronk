@@ -352,7 +352,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       "out of the page tree, and you need one written during your current Claim before moving the Ticket to In Review. " +
       "You may update or replace_section a Report only while you hold its Ticket's Claim. You can't delete any Document, a Report or not: a User decides. " +
       "A Document with `protected` true, marked itself or sitting under a marked one (`protectedBy`), you may read and comment on but not change, " +
-      "move, or create Documents under; propose a change to it, or a new Document under it, with the `suggestions` tool instead.",
+      "move, or create Documents under. Propose a change to it, or a new Document under it, with the `suggestions` tool instead. " +
+      "A Suggestion can't carry a move: to move it, a Document with one under it, or a Document into or out of a protected branch, ask a User to make the move instead, " +
+      "in a Comment on the Document you are moving with the `comments` tool, saying where it should go and why.",
     parameters: {
       project: z.string().optional().describe("Project key, such as CRONK; leave out for the Workspace (tree, create)"),
       key: z.string().optional().describe("Ticket key, such as CRONK-12, of the Ticket you hold the Claim on (write_report)"),
@@ -792,10 +794,11 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
     server,
     ctx,
     "search",
-    "Full-text search across the Tickets, Documents, Reports, Comments, Terms and Decisions you may read, best match first, each result " +
-      "with an excerpt around the match; a Term is found by its name, definition or words to avoid, a Decision of any status by its title " +
-      "or body, and a Ticket or Decision key such as CRONK-12 or CRONK-D3 puts that one first. Get a result with the tickets or documents " +
-      "tool by its ticketKey or documentId, a Term with the terms tool by its termId, or a Decision with the decisions tool by its decisionKey. " +
+    "Full-text search across the Tickets, Documents, Reports, Comments (on Tickets, Documents and Artifacts), Terms and Decisions you may read, " +
+      "best match first, each result with an excerpt around the match; a Term is found by its name, definition or words to avoid, a Decision of " +
+      "any status by its title or body, and a Ticket or Decision key such as CRONK-12 or CRONK-D3 puts that one first. Get a result with the " +
+      "tickets or documents tool by its ticketKey or documentId, a Comment's Artifact with the artifacts tool by its artifactId, a Term with " +
+      "the terms tool by its termId, or a Decision with the decisions tool by its decisionKey. " +
       "Transcripts (the chats that led Agents to change things) are found too, after everything else, each by its transcriptId with the turn that matches.",
     inputSchema,
     (api, { query: q, kind, project, limit }) =>

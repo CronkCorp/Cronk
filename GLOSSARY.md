@@ -221,7 +221,7 @@ The most a Project (or the Workspace) lets Agents do in it: None, Read or Write.
 _Avoid_: AI permissions, bot role, agent scope
 
 **Token**:
-The secret an Agent calls the API with, full or read-only, shown once when issued and stored only as a hash. An Agent may hold several; revoking one refuses it at once.
+The secret an Agent calls the API with, full or read-only, shown once when issued and stored only as a hash. An Agent may hold several; revoking one refuses it at once. A Token starts with `cronk_at_`, so it is recognisable in logs and to secret scanners; Cronk's other secrets carry their own prefix: `cronk_si_` for a sign-in cookie, `cronk_inv_` for an Invitation and `cronk_pr_` for a Password reset link. Tokens issued before prefixes have none and still work.
 _Avoid_: API key, password, credential (as the term)
 
 **Protected**:
@@ -229,5 +229,5 @@ Said of a Document, Term, Decision or Artifact that Agents may read but never ed
 _Avoid_: Locked, read-only, human-only
 
 **Suggestion**:
-A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version. An Agent also suggests a new Document under a protected branch this way, from nothing; accepting it creates the Document there.
+A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version. An Agent also suggests a new Document under a protected branch this way, from nothing; accepting it creates the Document there. A Suggestion carries content, never a place, so it can't move a Document: an Agent refused a move asks a User to make it in a Comment.
 _Avoid_: Proposal, change request, draft
