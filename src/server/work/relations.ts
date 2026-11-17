@@ -137,28 +137,31 @@ async function recordBothSides(db: Queryable, change: "relation added" | "relati
 }
 
 /**
- * The Tickets `ticketId` blocks (`side` "from") or is blocked by ("to"), in key order, each with the Agent and reason of a
- * block from a Discovered Ticket.
+ * For each of `ticketIds`, the Tickets it blocks (`side` "from") or is blocked by ("to"), in key order, each with the Agent and
+ * reason of a block from a Discovered Ticket. Two queries, however many Tickets are asked about.
  */
-async function blockingRefs(db: Queryable, ticketId: string, side: "from" | "to"): Promise<BlockingRef[]> {
+export async function blockingRefsOf(db: Queryable, ticketIds: string[], side: "from" | "to"): Promise<Map<string, BlockingRef[]>> {
   const [end, other] = side === "from" ? ["from_ticket_id", "to_ticket_id"] : ["to_ticket_id", "from_ticket_id"];
-  const { rows } = await db.query<{ id: string; agent_id: string | null; agent_name: string | null; reason: string | null }>(
-    `SELECT r.${other} AS id, r.added_by_agent_id AS agent_id, a.name AS agent_name, r.reason
+  const { rows } = await db.query<{ end_id: string; id: string; agent_id: string | null; agent_name: string | null; reason: string | null }>(
+    `SELECT r.${end} AS end_id, r.${other} AS id, r.added_by_agent_id AS agent_id, a.name AS agent_name, r.reason
      FROM ticket_relations r LEFT JOIN agents a ON a.id = r.added_by_agent_id
-     WHERE r.kind = 'blocks' AND r.${end} = $1`,
-    [ticketId],
+     WHERE r.kind = 'blocks' AND r.${end} = ANY($1::uuid[])`,
+    [ticketIds],
   );
-  const blocks = new Map(rows.map((r) => [r.id, r.agent_id === null ? null : { agent: { id: r.agent_id, name: r.agent_name! }, reason: r.reason! }]));
-  const refs = await listIdentifiedTicketRefs(db, "t.id = ANY($1::uuid[])", [[...blocks.keys()]]);
-  return refs.map(({ id, ...ref }) => ({ ...ref, block: blocks.get(id)! }));
+  const blocks = new Map<string, Map<string, DiscoveredBlock | null>>(ticketIds.map((id) => [id, new Map()]));
+  for (const r of rows) blocks.get(r.end_id)!.set(r.id, r.agent_id === null ? null : { agent: { id: r.agent_id, name: r.agent_name! }, reason: r.reason! });
+  const refs = rows.length === 0 ? [] : await listIdentifiedTicketRefs(db, "t.id = ANY($1::uuid[])", [[...new Set(rows.map((r) => r.id))]]);
+  return new Map(
+    [...blocks].map(([id, theirs]) => [id, refs.flatMap(({ id: refId, ...ref }) => (theirs.has(refId) ? [{ ...ref, block: theirs.get(refId)! }] : []))]),
+  );
 }
 
 /** A Ticket's relations, each with the Tickets at its other end in key order; blocks carry who added one from a Discovered Ticket, and why. */
 export async function listRelations(db: Queryable, ticketId: string): Promise<Relations> {
   const related = (sql: string) => listTicketRefs(db, `t.id IN (${sql})`, [ticketId]);
   return {
-    blocks: await blockingRefs(db, ticketId, "from"),
-    blockedBy: await blockingRefs(db, ticketId, "to"),
+    blocks: (await blockingRefsOf(db, [ticketId], "from")).get(ticketId)!,
+    blockedBy: (await blockingRefsOf(db, [ticketId], "to")).get(ticketId)!,
     relatesTo: await related(
       `SELECT to_ticket_id FROM ticket_relations WHERE kind = 'relates_to' AND from_ticket_id = $1
        UNION SELECT from_ticket_id FROM ticket_relations WHERE kind = 'relates_to' AND to_ticket_id = $1`,

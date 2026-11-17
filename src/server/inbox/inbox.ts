@@ -7,8 +7,8 @@ import { userActor } from "../actor.js";
 import { listTicketReports, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
-import { listRelations, type BlockingRef } from "../work/relations.js";
-import { visibleRelations } from "../work/ticket-reads.js";
+import { blockingRefsOf, type BlockingRef } from "../work/relations.js";
+import { visibleTicketsTo } from "../work/ticket-reads.js";
 import { listOpenQuestions, type Activity } from "../coordination/activities.js";
 import { findDecisionById, type Decision } from "../knowledge/decisions.js";
 import { findSuggestionsByIds, reviewerSql, type Suggestion } from "../knowledge/suggestions.js";
@@ -210,10 +210,12 @@ export async function ticketItems<K extends keyof typeof TICKET_KINDS>(
 
 /** Discovered items, each with the Tickets it blocks that `user` can see. */
 export async function withBlocks(db: Queryable, user: User, items: TicketItem<"discovered">[]): Promise<DiscoveredItem[]> {
-  const viewer = userActor(user);
-  return Promise.all(
-    items.map(async (item) => ({ ...item, blocks: (await visibleRelations(db, viewer, await listRelations(db, item.ticket.id))).blocks })),
-  );
+  if (items.length === 0) return [];
+  const [blocks, visible] = await Promise.all([
+    blockingRefsOf(db, items.map((item) => item.ticket.id), "from"),
+    visibleTicketsTo(db, userActor(user)),
+  ]);
+  return items.map((item) => ({ ...item, blocks: visible(blocks.get(item.ticket.id)!) }));
 }
 
 /** When the Ticket `t` entered its Status, as SQL. */
@@ -250,10 +252,25 @@ export function waitingItemsChanged(live: LiveUpdates, userIds: (string | null |
 }
 
 /**
+ * The Assignees of the waiting Discovered Tickets (see `isWaitingDiscovery`) that block any of the Tickets `ticketIds` selects,
+ * as SQL: their items show those Tickets' titles and Statuses, and only those the User can see.
+ */
+const ASSIGNEES_WAITING_ON = (ticketIds: string) =>
+  `SELECT d.assignee_id FROM ticket_relations r JOIN tickets d ON d.id = r.from_ticket_id JOIN statuses ds ON ds.id = d.status_id
+   WHERE r.kind = 'blocks' AND r.to_ticket_id IN (${ticketIds}) AND ${isWaitingDiscoverySql("d", "ds")} AND d.assignee_id IS NOT NULL`;
+
+/** Ids of the Assignees of the waiting Discovered Tickets that block any of these Tickets, whose items show them. */
+export async function assigneesWaitingOn(db: Queryable, ticketIds: string[]): Promise<string[]> {
+  if (ticketIds.length === 0) return [];
+  const { rows } = await db.query<{ id: string }>(`SELECT DISTINCT w.assignee_id AS id FROM (${ASSIGNEES_WAITING_ON("SELECT unnest($1::uuid[])")}) w`, [ticketIds]);
+  return rows.map((r) => r.id);
+}
+
+/**
  * Ids of the Users with items on the Tickets of a Project, or of a Status: the Assignees of those
- * in an In Review Status, Unverified or Discovered and waiting, and the Owners of Agents with open questions on them; and for a
- * Project, the Users reviewing its proposed Decisions and open Suggestions. Keep it in step
- * with the item kinds `listInbox` gathers.
+ * in an In Review Status, Unverified or Discovered and waiting, the Owners of Agents with open questions on them, and the
+ * Assignees of waiting Discovered Tickets, of any Project, that block them; and for a Project, the Users reviewing its proposed
+ * Decisions and open Suggestions. Keep it in step with the item kinds `listInbox` gathers.
  */
 export async function usersWithItemsOn(db: Queryable, scope: { projectId: string } | { statusId: string }): Promise<string[]> {
   const [column, id] = "projectId" in scope ? ["t.project_id", scope.projectId] : ["t.status_id", scope.statusId];
@@ -266,7 +283,9 @@ export async function usersWithItemsOn(db: Queryable, scope: { projectId: string
      UNION
      SELECT d.reviewer_id FROM (${PROPOSED_DECISIONS}) d WHERE $2 AND d.project_id = $1
      UNION
-     SELECT s.reviewer_id FROM (${OPEN_SUGGESTIONS}) s WHERE $2 AND s.project_id = $1 AND s.reviewer_id IS NOT NULL`,
+     SELECT s.reviewer_id FROM (${OPEN_SUGGESTIONS}) s WHERE $2 AND s.project_id = $1 AND s.reviewer_id IS NOT NULL
+     UNION
+     ${ASSIGNEES_WAITING_ON(`SELECT t.id FROM tickets t WHERE ${column} = $1`)}`,
     [id, "projectId" in scope],
   );
   return rows.map((r) => r.id);
