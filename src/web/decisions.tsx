@@ -429,7 +429,6 @@ function EditDecision(props: { decision: Decision; newerVersion: number | undefi
     save: (draft, baseVersion) => api.saveDecision(d.key, { baseVersion, ...edit(draft) }),
     merge: async (draft, baseVersion) => {
       const [merge, started] = await Promise.all([api.mergeDecision(d.key, { baseVersion, ...edit(draft) }), api.decisionVersion(d.key, baseVersion)]);
-      const saved = (v: DecisionVersion) => ({ number: v.number, title: v.title, body: v.body, fields: fieldsOf(v) });
       const fields = [
         mergedField(GROUP, merge.group, merge.groupConflict, (g) => g ?? "", false),
         mergedField(SUPERSEDES, merge.supersedes, merge.supersedesConflict, (keys) => keys.join(", "), true),

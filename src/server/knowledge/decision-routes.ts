@@ -129,14 +129,14 @@ export function decisionRoutes(ctx: AppContext) {
       waitingItemsChanged(ctx.live, await Promise.all(decisions.map((d) => decisionReviewer(ctx.db, d.id))));
 
     /** Tells of a save that gave `versioned` new Versions, `decision` among them unless it changed nothing: their watchers, and their reviewers' Inboxes. */
-    const saveTold = async (decision: Decision, versioned: Decision[]) => {
+    const announceSave = async (decision: Decision, versioned: Decision[]) => {
       await reviewersHear([decision, ...versioned]);
       for (const d of versioned) await decisionVersionSaved(ctx, d);
     };
 
     /**
      * Saves `content` as `current`'s next Version, then keeps the Decisions it supersedes in step, adding
-     * every Decision it gave a new Version to `versioned`, to tell of once committed (see `saveTold`).
+     * every Decision it gave a new Version to `versioned`, to tell of once committed (see `announceSave`).
      */
     const save = async (tx: Queryable, actor: Actor, current: Decision, content: DecisionContent, versioned: Decision[]) => {
       const now = ctx.clock.now();
@@ -324,7 +324,7 @@ export function decisionRoutes(ctx: AppContext) {
             avoidedWords: await avoidedWordsIn(tx, actor, current.projectId, titleAndBody(request.body)),
           };
         });
-        await saveTold(saved.decision, versioned);
+        await announceSave(saved.decision, versioned);
         return saved;
       },
     );
@@ -429,7 +429,7 @@ export function decisionRoutes(ctx: AppContext) {
             if (told) ctx.live.publish(agentTopic(told.agentId), waitingEvent(told.seq, told.work));
           },
         );
-        await saveTold(decision, versioned);
+        await announceSave(decision, versioned);
         return { decision };
       },
     );

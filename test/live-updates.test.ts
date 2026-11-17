@@ -494,7 +494,6 @@ describe("A Project's Terms' live updates", () => {
   });
 });
 
-
 describe("A Decision's live updates", () => {
   it("tell its watchers of each new Version: who saved which", async () => {
     const { cronk, admin } = await startInstalledCronk();
