@@ -3,6 +3,7 @@ import { actingUser } from "../actor.js";
 import { HttpError } from "../context.js";
 import { findLiveClaim } from "../coordination/claims.js";
 import type { Queryable } from "../db/database.js";
+import { transcriptLinks } from "../transcripts/transcripts.js";
 import { canRead, readablePlaces, requireProjectAccess, visibleProjects, type Access } from "../identity/access.js";
 import { listLinkedDocuments } from "../knowledge/documents.js";
 import { listMentions } from "../knowledge/mentions.js";
@@ -28,7 +29,7 @@ export async function ticketFor(db: Queryable, actor: Actor, key: string, need: 
 /** A Ticket with the Tickets and Documents around it and its live Claim, as its page and a Claim show it. */
 export const ticketDetailSchema = {
   type: "object",
-  required: ["ticket", "subTickets", "relations", "documents", "mentions", "claim"],
+  required: ["ticket", "subTickets", "relations", "documents", "mentions", "transcripts", "claim"],
   properties: {
     ticket: ref("Ticket"),
     subTickets: { type: "array", items: ref("TicketRef") },
@@ -45,11 +46,20 @@ export const ticketDetailSchema = {
       description:
         "What the caller can read whose current text names its key, as the web client links it, most recently changed first (at most 50): Tickets, Documents (other Tickets' Reports included), Comments, Terms, Decisions and Activities. Its own text, Comments, Activities and Reports and the Documents linked to it are left out.",
     },
+    transcripts: {
+      type: "array",
+      items: ref("TranscriptLink"),
+      description:
+        "The Transcripts it came from that the caller may read (see GET /api/tickets/{key}/transcripts), most recently uploaded first, never with their text.",
+    },
     claim: { anyOf: [ref("Claim"), { type: "null" }], description: "Null unless an Agent Session holds a live Claim." },
   },
 } as const;
 
-/** The Ticket with its Sub-Tickets, the relations, linked Documents and mentions `actor` can see, and its live Claim at `now`. */
+/**
+ * The Ticket with its Sub-Tickets, the relations, linked Documents, mentions and Transcripts `actor` can see, and its live Claim at
+ * `now`. It is what claiming answers, so an Agent starts with this context.
+ */
 export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, now: Date) {
   const readable = await readablePlaces(db, actor);
   return {
@@ -58,6 +68,7 @@ export async function ticketDetail(db: Queryable, actor: Actor, ticket: Ticket, 
     relations: await visibleRelations(db, actor, await listRelations(db, ticket.id)),
     documents: await listLinkedDocuments(db, ticket, readable),
     mentions: await listMentions(db, { ticketKey: ticket.key, ticketId: ticket.id }, readable),
+    transcripts: await transcriptLinks(db, actor, { kind: "ticket", id: ticket.id, key: ticket.key }),
     claim: (await findLiveClaim(db, ticket.id, now)) ?? null,
   };
 }

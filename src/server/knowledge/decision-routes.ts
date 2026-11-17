@@ -47,7 +47,7 @@ const baseVersion = {
 } as const;
 
 const projectParams = pathParams({ key: projectKeyParam });
-const decisionKeyParam = { type: "string", description: "The Decision's key, such as `CRONK-D7`, or `D7` in the Workspace; any case." } as const;
+export const decisionKeyParam = { type: "string", description: "The Decision's key, such as `CRONK-D7`, or `D7` in the Workspace; any case." } as const;
 const decisionParams = pathParams({ key: decisionKeyParam });
 const versionParams = pathParams({
   key: decisionKeyParam,

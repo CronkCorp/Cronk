@@ -81,7 +81,7 @@ The app keeps its own small component set in `src/web/components/`, styled with 
 - **Status** (`<StatusPill>`): dot and name. **Priority** (`<PriorityTag>`): a small uppercase tag. Urgent is filled `--danger`, High is `--danger` on `--danger-soft`, Medium is `--warn` on `--warn-soft`, Low is muted, and None shows nothing.
 - **Label** (`<Chip>`): a neutral chip on `--surface-2`. Markers such as "Private" and "Current" use the same chip. A state marker takes a tone: `ok` ("Answered") is filled `--ok-soft`, and `warn` or `danger` ("Waiting for an answer" on a question or blocking question) is an outlined pill in that colour. The `danger` pill also marks a merge's "Both changed".
 - **Banner** (`<Banner tone>`): a full-width box above an editor. `info` (`--info-soft` with an `--info` border) says what to settle, such as a refused save to merge. `warn` (`--warn-soft` with a `--warn` border) says what to heed, such as a Version saved meanwhile.
-- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report, Decision and Suggestion `--agent`, Comment `--accent`, To review and Unverified `--info`, and Unattended and Discovered `--warn`.
+- **Kind label** (`<KindLabel>`): 11px uppercase, coloured by kind. Plan is muted, Progress `--info`, Finding `--ok`, Question `--warn`, Blocking question and Error `--danger`, Report, Decision and Suggestion `--agent`, Comment `--accent`, To review and Unverified `--info`, Unattended and Discovered `--warn`, and a Transcript's turns: User `--accent` and Assistant `--agent`.
 - **Buttons** (`<Button variant>`, or `buttonClass` for a link or file picker that looks like one):
   - Primary is filled `--accent`, one per form or action bar. It comes first in forms and action bars, and last in the page head and in dialogs. A dialog's action row (`.dialog-actions`), including one closing a form, is right-aligned: the button that dismisses it, such as Cancel, comes first and the primary or danger button last.
   - Secondary is `--surface` with a border.
@@ -259,6 +259,13 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Players in rendered Markdown:** where a page has loaded its Attachments (a Document or Report, its Versions and editor preview, a Ticket's timeline), an embedded image whose address is the file of one that is MP4/WebM video or audio plays in place, video at most 360px tall like the files under a Comment. Images, and addresses of anything else, show as images.
 - **A Comment box** has "Attach files…": the picked files are attached to the Comment once it is posted. Only whoever posted a Comment may attach to it; any User with Write may delete its files.
 - **Where they were posted:** a Comment's files sit under its text, and a Report's under its body in the Ticket's timeline: images and MP4/WebM video at most 360px tall, video and audio playing in place, anything else by type and name. Opening one shows the same dialog as a thumbnail.
+
+### Transcript
+
+- **A Transcript's page** (`/transcripts/:id`): "Transcript" as its crumb, its title (the first line of its first User turn) as the `h1`, then the Agent that uploaded it, its Owner, when it was last uploaded and how many turns it has. A **Led to** panel lists everything its Agent Sessions changed that the reader can read, each as a chip (key or kind, then name) opening the item, with a link to the turn where it first appears, or "not named in the chat".
+- **Turns** follow in order, each under a kind label (`USER` or `ASSISTANT`) and its number, which links to `#turn-n`. Chips for the items that first appear in a turn sit next to its label. A coloured 3px left border marks the turn the address points at. Texts of earlier uploads that a later one didn't continue fold away under "Earlier texts" at the end.
+- **From Transcript** is a side group on a Ticket's and a Decision's page, and sits under a Term's definition and a Document's head: each Transcript the item came from, opening at the turn where the item first appears (or the top), with its Agent.
+- **Search** lists Transcripts after every other kind, with a `Transcript` chip and the turn that matched, opening at that turn.
 
 ## Live updates
 

@@ -565,7 +565,8 @@ mark.highlight:focus-visible { outline: 2px solid var(--accent); }
 .kind-label.question, .kind-label.unattended, .kind-label.discovered { color: var(--warn); }
 .kind-label.blocking, .kind-label.error { color: var(--danger); }
 .kind-label.report, .kind-label.decision, .kind-label.suggestion { color: var(--agent); }
-.kind-label.comment { color: var(--accent); }
+.kind-label.comment, .kind-label.user { color: var(--accent); }
+.kind-label.assistant { color: var(--agent); }
 .priority { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; color: var(--muted); }
 .priority.urgent { color: var(--on-accent); background: var(--danger); }
 .priority.high { color: var(--danger); background: var(--danger-soft); }
@@ -765,3 +766,26 @@ a.register-row:hover { background: var(--bg); }
 .artifact-embed-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .artifact-embed-title { font-weight: 600; }
 .artifact-embed-frame { display: block; width: 100%; height: 420px; border: none; background: var(--surface); }
+
+/* A Transcript (docs/ui.md § Transcript): its turns in order, each marked with chips for the items that first appear there. */
+.transcript { display: flex; flex-direction: column; gap: 16px; max-width: 880px; }
+.transcript .page-head { margin-bottom: 0; }
+.transcript-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.transcript-led-to { margin-bottom: 0; }
+.transcript-led-to h2 { font-size: 16px; margin: 0 0 12px; }
+.transcript-turns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.transcript-turn { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 16px; border-left: 3px solid transparent; padding-left: 12px; }
+.transcript-turn:target { border-left-color: var(--accent); }
+.transcript-turn:target .transcript-turn-body { border-color: var(--accent); }
+.transcript-turn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.transcript-turn-number { font-family: var(--font-mono); font-size: 12px; text-decoration: none; }
+.transcript-turn-number:hover { color: var(--accent); }
+.transcript-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.transcript-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 1px 8px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); text-decoration: none; max-width: 320px; }
+.transcript-chip:hover { text-decoration: underline; }
+.transcript-chip-key { font-family: var(--font-mono); }
+.transcript-chip-kind { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.transcript-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.transcript-earlier summary { cursor: pointer; font-weight: 600; }
+.transcript-earlier-text { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 6px; padding: 12px; max-height: 480px; overflow: auto; }
+.document > .from-transcripts { margin-bottom: 12px; }

@@ -784,7 +784,7 @@ function artifactRules(rules: Welcome["artifacts"]): string {
 function registerSearchTool(server: McpServer, ctx: ToolContext): void {
   const inputSchema = z.object({
     query: z.string().describe('What to look for, as typed into a search box: words, "quoted phrases", and -words to leave out'),
-    kind: z.array(z.enum(SEARCH_KINDS)).optional().describe("Only these kinds: ticket, document (in a page tree), report, comment, term, decision"),
+    kind: z.array(z.enum(SEARCH_KINDS)).optional().describe("Only these kinds: ticket, document (in a page tree), report, comment, term, decision, transcript"),
     project: z.array(z.string()).optional().describe("Only in these Projects, by key such as CRONK; leaves out the Workspace outside any Project"),
     limit: z.number().int().optional().describe("At most this many results, up to 100; 20 if left out"),
   });
@@ -795,7 +795,8 @@ function registerSearchTool(server: McpServer, ctx: ToolContext): void {
     "Full-text search across the Tickets, Documents, Reports, Comments, Terms and Decisions you may read, best match first, each result " +
       "with an excerpt around the match; a Term is found by its name, definition or words to avoid, a Decision of any status by its title " +
       "or body, and a Ticket or Decision key such as CRONK-12 or CRONK-D3 puts that one first. Get a result with the tickets or documents " +
-      "tool by its ticketKey or documentId, a Term with the terms tool by its termId, or a Decision with the decisions tool by its decisionKey.",
+      "tool by its ticketKey or documentId, a Term with the terms tool by its termId, or a Decision with the decisions tool by its decisionKey. " +
+      "Transcripts (the chats that led Agents to change things) are found too, after everything else, each by its transcriptId with the turn that matches.",
     inputSchema,
     (api, { query: q, kind, project, limit }) =>
       api("GET", `/api/search${query({ q: [q], kind, project, limit: limit === undefined ? undefined : [String(limit)] })}`),

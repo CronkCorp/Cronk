@@ -27,12 +27,13 @@ export function searchRoutes(ctx: AppContext) {
               kind: {
                 type: "array",
                 items: { type: "string", enum: SEARCH_KINDS },
-                description: "Only results of these kinds: `ticket`, `document` (in a page tree), `report`, `comment`, `term`, `decision`.",
+                description: "Only results of these kinds: `ticket`, `document` (in a page tree), `report`, `comment`, `term`, `decision`, `transcript`.",
               },
               project: {
                 type: "array",
                 items: { type: "string", maxLength: 50 },
-                description: "Only results in these Projects, by key in any case; leaves out the Workspace outside any Project.",
+                description:
+                  "Only results in these Projects, by key in any case; leaves out the Workspace outside any Project. Transcripts whose Agent Sessions changed something in one of them are kept.",
               },
               limit: { type: "integer", minimum: 1, maximum: 100, description: `At most this many results; ${DEFAULT_LIMIT} if left out.` },
             },

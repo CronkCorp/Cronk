@@ -20,6 +20,7 @@ import {
 } from "./api.js";
 import { DiscardMine, ResolveMerge, StaleSaveNotice, VersionDiff, useStaleSave } from "./merge.js";
 import { DocumentMargin, PassageCommentForm } from "./timeline.js";
+import { LoadFromTranscripts } from "./transcripts.js";
 import { attachmentMarkdown, AttachmentThumbnails, AttachmentViewer, PageAttachments, useAttach, usePageDrop, type AttachmentsView } from "./attachments.js";
 import { packMarkdownFolder } from "./folder-archive.js";
 import { CronkMarkdown, highlightIds, MarkdownPlace, type Highlight } from "./markdown.js";
@@ -372,6 +373,7 @@ function DocumentView(props: { document: Document; startEditing: boolean; onChan
                 Protected as part of <Link to={`/documents/${d.protectedBy.id}`} className="link">{d.protectedBy.title}</Link>, which covers the Documents under it.
               </p>
             )}
+            <LoadFromTranscripts kind="documents" keyOrId={d.id} heading="h4" reloadOn={d.version} />
             {remove.error && <p className="error" role="alert">{remove.error}</p>}
             {protect.error && <p className="error" role="alert">{protect.error}</p>}
             {panel === "new" && <NewDocument projectKey={d.projectKey ?? undefined} parentId={d.id} onCancel={() => setPanel("none")} />}

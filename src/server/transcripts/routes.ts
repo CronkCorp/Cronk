@@ -1,8 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import { actingUser } from "../actor.js";
+import { actingUser, type Actor } from "../actor.js";
 import { HttpError, requireActor, requireUserActor, type AppContext } from "../context.js";
 import { lockUntilCommit, transaction } from "../db/database.js";
-import { answer, errors, holding, listing, noContent, pathParams, ref } from "../schemas.js";
+import { answer, documentIdParam, errors, holding, listing, noContent, pathParams, ref, termIdParam, ticketKeyParam } from "../schemas.js";
+import { ticketFor } from "../work/ticket-reads.js";
+import { documentFor } from "../knowledge/document-reads.js";
+import { termFor } from "../knowledge/term-routes.js";
+import { decisionFor, decisionKeyParam } from "../knowledge/decision-routes.js";
 import { getWorkspace, MAX_TRANSCRIPT_BYTES } from "../workspace/workspaces.js";
 import {
   afterUpload,
@@ -11,6 +15,8 @@ import {
   findTranscript,
   listTranscripts,
   transcriptSummary,
+  transcriptLinks,
+  type LinkedItem,
   readTranscript,
   deleteTranscript,
   sessionsNamedIn,
@@ -29,6 +35,47 @@ const MARKDOWN_TYPES = ["text/markdown", "text/plain"];
 const tooBig = (size: number, limit: number) => new HttpError(413, `This Transcript would hold ${size} bytes; the Workspace allows at most ${limit}`);
 
 const transcriptParams = pathParams({ id: { type: "string", format: "uuid", description: "The Transcript's id." } });
+
+/**
+ * The items a Transcript may lead to, each with its address under `/api` and how a reader finds it there: the item's
+ * `/transcripts` route lists the Transcripts it came from ("From Transcript").
+ */
+const LINKED: { path: string; name: string; param: "key" | "id"; params: ReturnType<typeof pathParams>; find: (ctx: AppContext, actor: Actor, param: string) => Promise<LinkedItem> }[] = [
+  {
+    path: "/api/tickets/:key/transcripts",
+    param: "key",
+    name: "Ticket",
+    params: pathParams({ key: ticketKeyParam }),
+    find: async (ctx, actor, key) => {
+      const ticket = await ticketFor(ctx.db, actor, key, "read");
+      return { kind: "ticket", id: ticket.id, key: ticket.key };
+    },
+  },
+  {
+    path: "/api/documents/:id/transcripts",
+    param: "id",
+    name: "Document or Report",
+    params: pathParams({ id: documentIdParam }),
+    find: async (ctx, actor, id) => ({ kind: "document", id: (await documentFor(ctx.db, actor, id, "read")).id }),
+  },
+  {
+    path: "/api/terms/:id/transcripts",
+    param: "id",
+    name: "Term",
+    params: pathParams({ id: termIdParam }),
+    find: async (ctx, actor, id) => ({ kind: "term", id: (await termFor(ctx.db, actor, id, "read")).id }),
+  },
+  {
+    path: "/api/decisions/:key/transcripts",
+    param: "key",
+    name: "Decision",
+    params: pathParams({ key: decisionKeyParam }),
+    find: async (ctx, actor, key) => {
+      const decision = await decisionFor(ctx.db, actor, key, "read");
+      return { kind: "decision", id: decision.id, key: decision.key };
+    },
+  },
+];
 
 /** Transcripts (ADR 0013): uploading a chat from the client side, reading it, and its Owner deleting it. */
 export function transcriptRoutes(ctx: AppContext) {
@@ -96,6 +143,26 @@ export function transcriptRoutes(ctx: AppContext) {
         return { transcript };
       },
     );
+
+    for (const linked of LINKED) {
+      app.get<{ Params: Record<string, string> }>(
+        linked.path,
+        {
+          schema: {
+            description:
+              `The Transcripts the ${linked.name} came from ("From Transcript"): those linked to an Agent Session that changed it, and that the caller ` +
+              "may read (see GET /api/transcripts/{id}), most recently uploaded first, without their text. Each names the turn where the item's key " +
+              "or id first appears, or none, for the top.",
+            params: linked.params,
+            response: { 200: answer("The Transcripts", listing("transcripts", ref("TranscriptLink"))), ...errors(400, 401, 403, 404, 410) },
+          },
+        },
+        async (request) => {
+          const actor = await requireActor(ctx, request);
+          return { transcripts: await transcriptLinks(ctx.db, actor, await linked.find(ctx, actor, request.params[linked.param]!)) };
+        },
+      );
+    }
 
     app.get(
       "/api/transcripts",

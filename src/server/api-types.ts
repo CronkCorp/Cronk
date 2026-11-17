@@ -33,6 +33,7 @@ import type { DecisionMerge as StoredDecisionMerge, MarkdownMerge, Merge as Stor
 import type { Report as StoredReport } from "./knowledge/reports.js";
 import type { AvoidedWord } from "./knowledge/avoided-words.js";
 import type { SearchResult } from "./search/search.js";
+import type { Transcript as StoredTranscript, TranscriptLink as StoredTranscriptLink } from "./transcripts/transcripts.js";
 import type { Mention as StoredMention } from "./knowledge/mentions.js";
 import type { EmbeddedIn as StoredEmbeddedIn } from "./files/artifact-embeds.js";
 import type { Term as StoredTerm, TermVersion as StoredTermVersion } from "./knowledge/terms.js";
@@ -141,8 +142,14 @@ export interface TicketDetail {
   relations: Relations;
   documents: LinkedDocument[];
   mentions: Mention[];
+  transcripts: TranscriptLink[];
   claim: Claim | null;
 }
+
+/** The verbatim chat that led an Agent to change things, with what it led to. */
+export type Transcript = Serialized<StoredTranscript>;
+/** A Transcript an item came from ("From Transcript"), with the turn where the item first appears. */
+export type TranscriptLink = Serialized<StoredTranscriptLink>;
 
 export type RecordedChange = Serialized<StoredRecordedChange>;
 

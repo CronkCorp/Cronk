@@ -24,6 +24,7 @@ import {
 import { PRIORITIES } from "../shared/values.js";
 import { CronkMarkdown, MarkdownPlace } from "./markdown.js";
 import { MentionList } from "./mentions.js";
+import { FromTranscripts } from "./transcripts.js";
 import { Link } from "./router.js";
 import { TicketTimeline } from "./timeline.js";
 import { AttachmentThumbnails, AttachmentViewer, FilesPanel, PageAttachments, type AttachmentsView, useAttach, usePageDrop } from "./attachments.js";
@@ -211,6 +212,7 @@ function TicketView(props: {
               <h3>Mentioned in</h3>
               <MentionList mentions={props.detail.mentions} what="its key" />
             </div>
+            <FromTranscripts links={props.detail.transcripts} heading="h3" />
           </section>
         </aside>
       </div>
