@@ -75,6 +75,29 @@ describe("Blocks from a Discovered Ticket", () => {
     // Only an Agent's Discovered Ticket is filed with blocks.
     expect((await admin.post("/api/projects/CRONK/tickets", { title: "Mine", blocks: [{ ticketKey: "CRONK-1", reason }] })).status).toBe(400);
   });
+
+  it("are added when two filed at once, each from a Claim the other blocks, would otherwise wait on each other", async () => {
+    const { cronk, admin, adaId, claude, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.post("/api/projects/OPS/tickets", { title: "Deploy" });
+    await admin.patch("/api/tickets/OPS-1", { assigneeId: adaId, delegateId: claude.agentId });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    await agent.post("/api/tickets/OPS-1/claim");
+    const projectId = async (key: string) => (await admin.get(`/api/projects/${key}`)).body.project.id;
+
+    // Both filings wait on their Project, so each goes on to lock its source while the other does.
+    const heldCronk = await cronk.holdRow("projects", await projectId("CRONK"));
+    const heldOps = await cronk.holdRow("projects", await projectId("OPS"));
+    const fromCronk = agent.post("/api/projects/CRONK/tickets", { title: "Found in CRONK", ticket: "CRONK-1", blocks: [{ ticketKey: "OPS-1", reason }] });
+    const fromOps = agent.post("/api/projects/OPS/tickets", { title: "Found in OPS", ticket: "OPS-1", blocks: [{ ticketKey: "CRONK-1", reason }] });
+    await heldCronk.waiters(2);
+    await Promise.all([heldCronk.release(), heldOps.release()]);
+
+    expect([(await fromCronk).status, (await fromOps).status]).toEqual([201, 201]);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-2", block: { reason } }]);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toMatchObject([{ key: "OPS-2", block: { reason } }]);
+  });
 });
 
 describe("Removing a block from a Discovered Ticket", () => {
