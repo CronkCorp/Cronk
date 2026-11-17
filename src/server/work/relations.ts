@@ -98,9 +98,36 @@ export const isBlocking = (kind: RelationKind): boolean => kind !== "relates_to"
  * added at once can't close a cycle between them. A transaction adding a block takes it before locking any Ticket, since
  * the block's row then takes both Tickets' key-share lock: one holding a Ticket while it waits for this lock would deadlock
  * with one holding this lock while it waits for that Ticket. Taking it again in the same transaction is a no-op.
+ * Outside production, taking it first after locking a Ticket throws, so a path with the order wrong fails in tests.
  */
 export async function lockBlocking(db: Queryable, workspaceId: string): Promise<void> {
-  await lockUntilCommit(db, `ticket-blocking:${workspaceId}`);
+  const name = `ticket-blocking:${workspaceId}`;
+  if (checkLockOrder) await requireNoTicketLockBefore(db, name);
+  await lockUntilCommit(db, name);
+}
+
+const checkLockOrder = process.env.NODE_ENV !== "production";
+
+/**
+ * Throws if the transaction holds a lock on a Ticket row (a row lock, or a write) but not yet the lock `name`. Postgres
+ * records a transaction's row locks on a table as its RowShareLock, and its writes as its RowExclusiveLock, on that table.
+ */
+async function requireNoTicketLockBefore(db: Queryable, name: string): Promise<void> {
+  const { rows } = await db.query<{ held: boolean; ticket_locked: boolean }>(
+    `WITH own AS (SELECT * FROM pg_locks WHERE pid = pg_backend_pid() AND granted), k AS (SELECT hashtextextended($1, 0) AS key)
+     SELECT
+       EXISTS (SELECT 1 FROM own, k WHERE locktype = 'advisory' AND objsubid = 1
+               AND classid::bigint = (k.key >> 32) & 4294967295 AND objid::bigint = k.key & 4294967295) AS held,
+       EXISTS (SELECT 1 FROM own WHERE locktype = 'relation' AND relation = 'tickets'::regclass
+               AND mode IN ('RowShareLock', 'RowExclusiveLock')) AS ticket_locked`,
+    [name],
+  );
+  if (!rows[0]!.held && rows[0]!.ticket_locked) {
+    const err = new Error("Took the Workspace's blocking lock after locking a Ticket, which can deadlock: take lockBlocking before locking any Ticket");
+    // Printed too, as a request answers only "Something went wrong" and tests run without a logger.
+    console.error(err);
+    throw err;
+  }
 }
 
 /**
