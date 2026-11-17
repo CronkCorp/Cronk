@@ -445,8 +445,8 @@ export async function startCronk(
       // that reaches the table after the first look would otherwise never be seen waiting.
       const watcher = new pg.Client({ connectionString: databaseUrl });
       await admin.connect();
-      await watcher.connect();
       try {
+        await watcher.connect();
         await admin.query("BEGIN");
         await admin.query(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
         await cause();
@@ -460,9 +460,9 @@ export async function startCronk(
           ).rows[0]!.n > 0;
         await pollUntil(terminated, `No query waited on ${table}`);
       } finally {
+        await watcher.end().catch(() => {});
         await admin.query("ROLLBACK").catch(() => {});
         await admin.end();
-        await watcher.end();
       }
     },
     holdRow: (table, id) => hold(`SELECT 1 FROM ${table} WHERE id = $1 FOR UPDATE`, [id]),
