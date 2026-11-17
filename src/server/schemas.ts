@@ -44,6 +44,7 @@ export type SharedSchemaName =
   | "Ticket"
   | "TicketRef"
   | "BlockingRef"
+  | "HiddenBlocker"
   | "DependentChoice"
   | "Relations"
   | "RecordedChange"
@@ -488,6 +489,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       key: { type: "string" },
       title: { type: "string" },
       status: ref("Status"),
+      blockId: { type: "string", format: "uuid", description: "The block's own opaque id, which says nothing of either Ticket." },
       block: {
         ...nullable(object({ agent: { ...named, description: "The Agent that added it." }, reason: { type: "string" } })),
         description: "Set on a block an Agent added from its own Discovered Ticket: the Agent that added it, and why. Null on any other block.",
@@ -518,11 +520,25 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
       ["pausesTo"],
     ),
   },
+  HiddenBlocker: {
+    description:
+      "A block an Agent added from its own Discovered Ticket in a Project the caller can't see: who added it and why, but nothing of that Ticket. " +
+      "A User with Write on the blocked Ticket removes it with DELETE /api/tickets/{key}/blocked-by/{blockId}.",
+    ...object({
+      hidden: { type: "boolean", enum: [true] },
+      blockId: { type: "string", format: "uuid", description: "The block's own opaque id, which says nothing of the Ticket behind it." },
+      block: object({ agent: { ...named, description: "The Agent that added it." }, reason: { type: "string" } }),
+    }),
+  },
   Relations: {
-    description: "A Ticket's relations to other Tickets, each list in key order.",
+    description: "A Ticket's relations to the Tickets the caller can see, each list in key order.",
     ...object({
       blocks: { type: "array", items: ref("BlockingRef") },
-      blockedBy: { type: "array", items: ref("BlockingRef") },
+      blockedBy: {
+        type: "array",
+        items: { anyOf: [ref("BlockingRef"), ref("HiddenBlocker")] },
+        description: "The Tickets blocking it in key order, then a HiddenBlocker for each block from a Discovered Ticket the caller can't see.",
+      },
       relatesTo: { type: "array", items: ref("TicketRef") },
     }),
   },
