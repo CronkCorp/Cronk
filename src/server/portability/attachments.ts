@@ -65,6 +65,7 @@ export async function importAttachments(ctx: ImportContext, base: string, target
       throw new HttpError(413, `${path} is larger than ${formatBytes(attachmentMaxBytes)}, the most an Attachment may take in this Workspace`);
     }
     const id = await freeId(ctx, entry.id);
+    if (typeof entry.id === "string") ctx.attachmentIds.set(entry.id.toLowerCase(), id);
     const size = await ctx.storeFile(attachmentKey(id), contents);
     await insertAttachment(ctx.db, {
       id,

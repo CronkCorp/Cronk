@@ -291,6 +291,21 @@ export function AttachmentViewer(props: { attachment: Attachment | undefined; ca
 export const PageAttachments = createContext<{ attachments: Attachment[]; onOpen: (attachment: Attachment) => void } | undefined>(undefined);
 
 /**
+ * A file a Ticket's change line names: a button opening it while it is still on the Ticket, in a page that provides
+ * `PageAttachments`; otherwise, once deleted or where nothing can open it, its name alone.
+ */
+export function ChangedAttachment(props: { attachment: { id: string; name: string } }) {
+  const page = useContext(PageAttachments);
+  const found = page?.attachments.find((a) => a.id === props.attachment.id && a.on === "ticket");
+  if (!page || !found) return <span className="changed-file">{props.attachment.name}</span>;
+  return (
+    <button type="button" className="link-button changed-file" onClick={() => page.onOpen(found)}>
+      {found.name}
+    </button>
+  );
+}
+
+/**
  * The Attachments on one Comment, or on one Document or Report itself, shown where they were posted: images and video in
  * the page, audio playing, other files by name. Opening one shows it in the page's dialog. Nothing outside a page that
  * provides `PageAttachments`.

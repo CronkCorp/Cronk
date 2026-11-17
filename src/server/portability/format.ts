@@ -16,9 +16,9 @@ export type ActorRef = string | { agent: string; session: string | null };
  * What a field of a Ticket change holds in `<KEY>.history.md`. Records are written as Cronk recorded them, with the
  * names they had at the time, plus what an import finds them by: a `user` by its `email`, an `agent` by its id in
  * `people.md`, and a `status` by its `current` name in the Project, when it still has one. A `flag` is written only when true;
- * a `boolean` always.
+ * a `boolean` always. An `attachment` is written as recorded, by the id it had; an import follows it to the id its file got here.
  */
-type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag" | "boolean" | "verification";
+type ChangeField = "title" | "text" | "priority" | "labels" | "relation kind" | "ticket" | "document" | "user" | "agent" | "status" | "flag" | "boolean" | "verification" | "attachment";
 
 const fromTo = (holds: ChangeField, nullable = false) => ({ from: { holds, nullable }, to: { holds, nullable } });
 const relation = { kind: { holds: "relation kind" }, ticket: { holds: "ticket" } } as const;
@@ -42,6 +42,8 @@ export const CHANGE_FIELDS: Record<TicketChange["change"], Record<string, { hold
   "relation removed": relation,
   "document linked": { document: { holds: "document" } },
   "document unlinked": { document: { holds: "document" } },
+  "attachment added": { attachment: { holds: "attachment" } },
+  "attachment removed": { attachment: { holds: "attachment" } },
 };
 
 export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -86,7 +88,8 @@ export const README = `This is an export from Cronk: Markdown files with YAML fr
   or \`verified\`); a Project's \`autonomousByDefault\` is written when on.
   \`<KEY>.attachments/\` holds its Attachments as the files themselves, each named \`<n>-<name>\` in the order they were
   attached, and \`index.md\`, whose frontmatter lists each file's id, name, media type, size, when and by whom it was attached;
-  an import keeps the id unless it is taken. A Report's Attachments are beside it the same way, and a Comment's, of a Ticket,
+  an import keeps the id unless it is taken. Attaching a file to the Ticket and deleting it are in its history, with the file's
+  id, name, media type and size; a deleted file is only that record, and an imported record names the file by the id it has here. A Report's Attachments are beside it the same way, and a Comment's, of a Ticket,
   a Document or an Artifact, in \`<n>.attachments/\` beside its \`<n>.md\`.
 - \`artifacts/<n>-<title>.md\`: an Artifact, numbered in the order they were created (the Workspace's at the top, a Project's in
   \`projects/<KEY>/artifacts/\`). Its frontmatter holds its id, title, latest Version and Protected mark, and each Version

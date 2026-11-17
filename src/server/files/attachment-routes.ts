@@ -14,7 +14,7 @@ import { artifactFor } from "./artifact-routes.js";
 import { answer, artifactIdParam, attachmentIdParam, commentIdParam, documentIdParam, errors, holding, listing, noContent, pathParams, ref, ticketKeyParam } from "../schemas.js";
 import { ticketsChanged } from "../work/ticket-changes.js";
 import { ticketFor } from "../work/ticket-reads.js";
-import { findTicketByKey, type Ticket } from "../work/tickets.js";
+import { findTicketByKey, recordChange, type Ticket } from "../work/tickets.js";
 import { getWorkspace } from "../workspace/workspaces.js";
 import { SHOWN_MEDIA_TYPES } from "../../shared/values.js";
 import { FileTooLarge, type ByteRange } from "./store.js";
@@ -60,8 +60,9 @@ export function attachmentRoutes(ctx: AppContext) {
         throw err instanceof FileTooLarge ? tooLarge() : err;
       });
       try {
-        const attachment = await transaction(ctx.db, async (tx) =>
-          insertAttachment(tx, {
+        const attachment = await transaction(ctx.db, async (tx) => {
+          const now = ctx.clock.now();
+          const attachment = await insertAttachment(tx, {
             id,
             workspaceId: actingUser(actor).workspaceId,
             target: await toAttachTo(tx, actor),
@@ -69,9 +70,11 @@ export function attachmentRoutes(ctx: AppContext) {
             contentType: mediaType(request.headers["content-type"]),
             size,
             actor,
-            now: ctx.clock.now(),
-          }),
-        );
+            now,
+          });
+          await recordAttachmentChange(tx, "attachment added", attachment, actor, now);
+          return attachment;
+        });
         attachmentsChanged(ctx, attachment);
         return reply.code(201).send({ attachment: publicAttachment(attachment) });
       } catch (err) {
@@ -248,6 +251,7 @@ export function attachmentRoutes(ctx: AppContext) {
           else if (attachment.on === "document") await documentToAttachTo(tx, actor, attachment.documentId!, now);
           else await commentToAttachTo(tx, actor, attachment.commentId!, { orUserWithWrite: true });
           if (!(await deleteAttachment(tx, attachment.id))) throw new HttpError(404, "No such Attachment");
+          await recordAttachmentChange(tx, "attachment removed", attachment, actor, now);
           return attachment;
         });
         // Only once the record is gone, so a failed delete never leaves a record without its file.
@@ -271,6 +275,16 @@ function attachmentsChanged(ctx: AppContext, attachment: Attachment): void {
   if (attachment.ticketId) ticketsChanged(ctx.live, [{ id: attachment.ticketId, key: attachment.ticketKey!, projectId: attachment.projectId! }]);
   if (attachment.documentId) ctx.live.publish(documentTopic(attachment.documentId), { event: "attachments", data: {} });
   if (attachment.artifactId) ctx.live.publish(artifactTopic(attachment.artifactId), { event: "attachments", data: {} });
+}
+
+/**
+ * Records attaching or deleting `attachment` in its Ticket's history, if it is on the Ticket itself: one in a Comment
+ * or Report shows in the timeline with them already. Run inside the transaction that inserts or deletes it.
+ */
+async function recordAttachmentChange(tx: Queryable, change: "attachment added" | "attachment removed", attachment: Attachment, actor: Actor, now: Date): Promise<void> {
+  if (attachment.on !== "ticket") return;
+  const { id, name, contentType, size } = attachment;
+  await recordChange(tx, attachment.ticketId!, actor, now, { change, attachment: { id, name, contentType, size } });
 }
 
 /**

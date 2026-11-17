@@ -32,6 +32,14 @@ export interface DocumentName {
   projectKey: string | null;
 }
 
+/** An Attachment as a Ticket's history names it: kept as it was when attached, even once the file is deleted. */
+export interface AttachmentName {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+}
+
 /** Another Ticket, as a Ticket lists it among its Sub-Tickets or relations. */
 export interface TicketRef {
   key: string;
@@ -419,7 +427,9 @@ export type TicketChange =
   /** A User kept a Discovered Ticket in Backlog. */
   | { change: "kept" }
   | { change: "relation added" | "relation removed"; kind: RelationKind; ticket: TicketName }
-  | { change: "document linked" | "document unlinked"; document: DocumentName };
+  | { change: "document linked" | "document unlinked"; document: DocumentName }
+  /** A file attached to the Ticket itself, or deleted from it; not those in its Comments or Reports. */
+  | { change: "attachment added" | "attachment removed"; attachment: AttachmentName };
 
 export type { ChangeActor, RecordedActor };
 
