@@ -1159,6 +1159,47 @@ describe("Attachments in an export", () => {
   });
 });
 
+describe("Attachment Changes in an export", () => {
+  /** A Ticket's `attachment added` and `attachment removed` Changes, as the file and its id. */
+  const attachmentChanges = async (admin: Client, key: string) =>
+    (await admin.get(`/api/tickets/${key}/changes`)).body.changes
+      .filter((c: { change: string }) => c.change.startsWith("attachment"))
+      .map((c: { change: string; attachment: { id: string; name: string; contentType: string; size: number }; actor: { name: string } }) => ({
+        change: c.change,
+        attachment: c.attachment,
+        by: c.actor.name,
+      }));
+
+  it("keep attaching and deleting, a deleted file as its record only, and follow a file the import gave a new id", async () => {
+    const { admin } = await startInstalledCronk();
+    await admin.post("/api/projects", { name: "Cronk", key: "CRONK" });
+    await admin.post("/api/projects/CRONK/tickets", { title: "Build it" });
+    const kept = (await admin.upload("/api/tickets/CRONK-1/attachments?name=sign-in-flood.log", Buffer.from("429 x 50\n"), "text/plain")).body.attachment.id;
+    const gone = (await admin.upload("/api/tickets/CRONK-1/attachments?name=proxy-ip.png", Buffer.from([0x89, 0x50]), "image/png")).body.attachment.id;
+    await admin.delete(`/api/attachments/${gone}`);
+    const before = await attachmentChanges(admin, "CRONK-1");
+    expect(before).toEqual([
+      { change: "attachment added", attachment: { id: kept, name: "sign-in-flood.log", contentType: "text/plain", size: 9 }, by: "Ada" },
+      { change: "attachment added", attachment: { id: gone, name: "proxy-ip.png", contentType: "image/png", size: 2 }, by: "Ada" },
+      { change: "attachment removed", attachment: { id: gone, name: "proxy-ip.png", contentType: "image/png", size: 2 }, by: "Ada" },
+    ]);
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    expect(Object.keys(files).filter((path) => path.includes("proxy-ip"))).toEqual([]);
+
+    const elsewhere = (await startInstalledCronk("Elsewhere")).admin;
+    expect((await elsewhere.upload("/api/import", await tarGz(files))).status).toBe(201);
+    expect(await attachmentChanges(elsewhere, "CRONK-1")).toEqual(before);
+    expect((await elsewhere.get("/api/tickets/CRONK-1/attachments")).body.attachments.map((a: { id: string }) => a.id)).toEqual([kept]);
+
+    // The same export again under another key: the kept file's id is taken now, so it gets a new one, and its Change follows it.
+    const copy = await tarGz(Object.fromEntries(Object.entries(files).map(([path, text]) => [path.replaceAll("CRONK", "COPY"), text.replaceAll("CRONK", "COPY")])));
+    expect((await elsewhere.upload("/api/import", copy)).status).toBe(201);
+    const [copied] = (await elsewhere.get("/api/tickets/COPY-1/attachments")).body.attachments;
+    expect(copied.id).not.toBe(kept);
+    expect((await attachmentChanges(elsewhere, "COPY-1")).map((c: { attachment: { id: string } }) => c.attachment.id)).toEqual([copied.id, gone, gone]);
+  });
+});
+
 describe("Artifacts in an export", () => {
   it("keep their ids and Version numbers, so links to them still work after the move, with only the latest Version unless asked for all", async () => {
     const { admin } = await startInstalledCronk();

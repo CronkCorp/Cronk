@@ -1,7 +1,7 @@
 import { PRIORITIES, RELATION_KINDS, STATUS_CATEGORIES, VERIFICATIONS } from "../../shared/values.js";
 import { recordChange, type TicketChange } from "../work/tickets.js";
 import { iso, type ActorColumns, type ExportContext } from "./export-context.js";
-import { date, isUuid, list, oneOf, refuse, text, type File } from "./fields.js";
+import { date, integer, isUuid, list, oneOf, refuse, text, type File } from "./fields.js";
 import { CHANGE_FIELDS, isRecord } from "./format.js";
 import type { ImportContext } from "./import-context.js";
 
@@ -65,6 +65,8 @@ interface Finders {
   status: Finder;
   /** A Document or Report this import brought in, by the path of its file. */
   document: (path: string) => string | undefined;
+  /** An Attachment this import brought in, by the id it had in the export. */
+  attachment: (id: string) => string | undefined;
 }
 
 /**
@@ -77,6 +79,7 @@ export async function importHistory(ctx: ImportContext, file: File, ticketId: st
     agent: async (id) => ctx.agentIds.get(id)?.id,
     status: async (name) => statusIds.get(name.toLowerCase()),
     document: (path) => ctx.documentIds.get(path),
+    attachment: (id) => ctx.attachmentIds.get(id.toLowerCase()),
   };
   for (const [i, entry] of list(file, "changes").entries()) {
     const where = `${file.path} changes[${i}]`;
@@ -92,7 +95,7 @@ export async function importHistory(ctx: ImportContext, file: File, ticketId: st
 /**
  * A Ticket change's fields as Cronk records them, from those the export wrote (see `CHANGE_FIELDS`), refusing any
  * that isn't what its kind holds. Users, Agents and Statuses get the id they have here, keeping the names recorded
- * at the time; one with nothing here to map to keeps the id it was written with.
+ * at the time; one with nothing here to map to keeps the id it was written with. An Attachment follows the id its file got here.
  */
 async function importedChange(change: TicketChange["change"], fields: Record<string, unknown>, find: Finders, where: string): Promise<Record<string, unknown>> {
   const recorded: Record<string, unknown> = {};
@@ -122,6 +125,15 @@ async function importedChange(change: TicketChange["change"], fields: Record<str
         const imported = typeof value.path === "string" ? find.document(value.path) : undefined;
         const id = imported ?? (isUuid(value.id) ? value.id : refuse(`${at} names no Document here and has no id`));
         recorded[field] = { id, title: text(value.title, `${at}.title`), projectKey };
+      } else if (holds === "attachment") {
+        // A deleted Attachment, or one the export left out, keeps the id it had; one this import brought in, the id it has here.
+        const exported = isUuid(value.id) ? value.id : refuse(`${at}.id must be an Attachment's id`);
+        recorded[field] = {
+          id: find.attachment(exported) ?? exported,
+          name: text(value.name, `${at}.name`),
+          contentType: text(value.contentType, `${at}.contentType`),
+          size: integer(value.size, `${at}.size`),
+        };
       } else {
         const foundBy = { user: value.email, agent: value.id, status: value.current }[holds];
         const id = (typeof foundBy === "string" ? await find[holds](foundBy) : undefined) ?? (isUuid(value.id) ? value.id : refuse(`${at} names no record here and has no id`));

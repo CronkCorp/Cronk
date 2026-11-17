@@ -34,13 +34,23 @@ const agentBody = { type: "object", required: ["name"], additionalProperties: fa
 export function agentRoutes(ctx: AppContext) {
   return async (app: FastifyInstance) => {
     // Each User's own Agents with their live Agent Sessions; with `all`, an Admin sees every User's.
-    app.get<{ Querystring: { all?: boolean } }>(
+    // With `removed`, the removed Agents instead, whose Agent Records stay readable.
+    app.get<{ Querystring: { all?: boolean; removed?: boolean } }>(
       "/api/agents",
       {
         schema: {
-          querystring: { type: "object", properties: { all: { type: "boolean" } } },
+          querystring: {
+            type: "object",
+            properties: {
+              all: { type: "boolean", description: "Every User's Agents, not just the caller's; only for an Admin." },
+              removed: {
+                type: "boolean",
+                description: "The removed Agents, each with when it was removed, instead of the live ones. Their Agent Records stay readable.",
+              },
+            },
+          },
           response: {
-            200: answer("The Agents, by Owner then name", listing("agents", ref("Agent"))),
+            200: answer("The Agents, by Owner then name; live ones unless `removed` is set", listing("agents", ref("Agent"))),
             ...errors(400, 401, 403, 410),
           },
         },
@@ -48,7 +58,7 @@ export function agentRoutes(ctx: AppContext) {
       async (request) => {
         const user = await requireUser(ctx, request);
         if (request.query.all) requireAdmin(user, "see every User's Agents");
-        const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id);
+        const agents = await listAgents(ctx.db, user.workspaceId, request.query.all ? undefined : user.id, { removed: request.query.removed });
         const agentIds = agents.map((a) => a.agent.id);
         const now = ctx.clock.now();
         const sessions = await liveAgentSessions(ctx.db, agentIds, now);
@@ -160,7 +170,7 @@ export function agentRoutes(ctx: AppContext) {
       },
     );
 
-    // The Agent Record: what an Agent did across the Workspace, for its Owner or an Admin.
+    // The Agent Record: what an Agent did across the Workspace, for its Owner or an Admin, even once the Agent is removed.
     app.get<{ Params: { id: string }; Querystring: { since?: string; limit: number } }>(
       "/api/agents/:id/record",
       {
@@ -176,7 +186,7 @@ export function agentRoutes(ctx: AppContext) {
           response: {
             200: answer(
               "The Agent Record: what the Agent did, newest first: the Changes it made, the Activities and Comments it wrote and the Versions it saved, " +
-                "leaving out what the caller can't read",
+                "leaving out what the caller can't read. It stays readable to its Owner and Admins after the Agent is removed",
               listing("record", ref("AgentRecordEntry")),
             ),
             ...errors(400, 401, 403, 404, 410),
@@ -185,7 +195,7 @@ export function agentRoutes(ctx: AppContext) {
       },
       async (request) => {
         const user = await requireUser(ctx, request);
-        const agent = await findAgent(ctx.db, user.workspaceId, request.params.id);
+        const agent = await findAgent(ctx.db, user.workspaceId, request.params.id, { evenRemoved: true });
         if (!agent || (agent.ownerId !== user.id && user.role !== "admin")) throw new HttpError(404, "No such Agent");
         const owner = (await findUserById(ctx.db, agent.ownerId))!;
         const { since, limit } = request.query;
