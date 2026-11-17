@@ -1311,6 +1311,19 @@ describe("the transcripts tool", () => {
     expect(await callTool(mcp, "transcripts", { action: "from", kind: "term", key: "CRONK-1" })).toEqual({ isError: true, body: "The from action needs an itemId" });
   });
 
+  it("lists the Transcripts an Artifact came from, as the API does", async () => {
+    let artifact = "";
+    const { admin, mcp, id } = await uploadedTranscript({
+      alsoChange: async (agent) => {
+        artifact = (await agent.upload("/api/projects/CRONK/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
+      },
+    });
+
+    const from = await callTool(mcp, "transcripts", { action: "from", kind: "artifact", itemId: artifact });
+    expect(from).toEqual({ isError: false, body: (await admin.get(`/api/artifacts/${artifact}/transcripts`)).body });
+    expect(from.body.transcripts).toEqual([expect.objectContaining({ id })]);
+  });
+
   it("answers a Transcript the Agent may not read as no such Transcript, and leaves it out of list and from", async () => {
     // The reader may still read CRONK-1, but not the Handbook outside any Project, so not the Transcript.
     const { admin, mcp, id } = await uploadedTranscript({
