@@ -27,7 +27,7 @@ export function searchRoutes(ctx: AppContext) {
               kind: {
                 type: "array",
                 items: { type: "string", enum: SEARCH_KINDS },
-                description: "Only results of these kinds: `ticket`, `document` (in a page tree), `report`, `comment`, `term`.",
+                description: "Only results of these kinds: `ticket`, `document` (in a page tree), `report`, `comment`, `term`, `decision`.",
               },
               project: {
                 type: "array",

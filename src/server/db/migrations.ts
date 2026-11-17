@@ -979,4 +979,11 @@ export const migrations: Migration[] = [
         CHECK ((added_by_agent_id IS NULL) = (reason IS NULL) AND (added_by_agent_id IS NULL OR kind = 'blocks'));
     `,
   },
+  {
+    id: "0040_decision_search",
+    sql: `
+      -- Full-text search (search/search.ts) matches this exact expression, as 0014_search's indexes do.
+      CREATE INDEX decisions_search ON decisions USING gin (to_tsvector('english', title || ' ' || body));
+    `,
+  },
 ];
