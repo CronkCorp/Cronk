@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectWithTickets, startInstalledCronk } from "./harness.js";
+import { joinAs, projectWithTickets, startInstalledCronk } from "./harness.js";
 
 const keys = (refs: { key: string }[]) => refs.map((r) => r.key);
 
@@ -152,5 +152,32 @@ describe("Ticket relations", () => {
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
     const one = (await admin.get("/api/tickets/CRONK-1")).body.relations;
     expect(one.blocks.length + one.blockedBy.length).toBe(1);
+  });
+
+  it("refuse a block naming a missing or hidden Ticket, or one the User can only read, without waiting for another block being added", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    await projectWithTickets(admin, "CRONK", 3);
+    await projectWithTickets(admin, "SECRET", 1);
+    await admin.patch("/api/projects/SECRET", { visibility: "private" });
+    await projectWithTickets(admin, "DOCS", 1);
+    await admin.put(`/api/projects/DOCS/members/${(await bob.get("/api/me")).body.user.id}`, { access: "read" });
+
+    // A block waiting on CRONK-3 holds the Workspace's blocking lock until CRONK-3 is let go.
+    const held = await cronk.holdRow("tickets", (await admin.get("/api/tickets/CRONK-3")).body.ticket.id);
+    const waiting = admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-3" });
+    await held.waiters(1);
+
+    for (const kind of ["blocks", "blocked_by"]) {
+      expect((await bob.post("/api/tickets/CRONK-9/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(404);
+      expect((await bob.post("/api/tickets/SECRET-1/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(404);
+      expect((await bob.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "CRONK-9" })).status, kind).toBe(400);
+      expect((await bob.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "SECRET-1" })).status, kind).toBe(400);
+      expect((await bob.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(400);
+      expect((await bob.post("/api/tickets/DOCS-1/relations", { kind, ticketKey: "CRONK-1" })).status, kind).toBe(403);
+      expect((await bob.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "DOCS-1" })).status, kind).toBe(403);
+    }
+    await held.release();
+    expect((await waiting).status).toBe(201);
   });
 });
