@@ -1071,7 +1071,8 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
   SuggestionMerge: {
     description:
       "An outdated Suggestion's content merged with its item's current Version, with the Version the Suggestion started from as the common ancestor: " +
-      "the Markdown field (a Document's or Decision's `body`, a Term's `definition`, Guidance's `markdown`) section by section, every other field whole. " +
+      "the Markdown field (a Document's or Decision's `body`, a Term's `definition`, Guidance's `markdown`) section by section, a Term's `avoid` " +
+      "word by word (each side's additions kept, each side's removals holding), and every other field whole. " +
       "Only conflicts need a User's choice. Nothing is saved.",
     ...object({
       onto: { type: "integer", description: "The item's current Version merged onto; accept the settled result with it as `onto`." },

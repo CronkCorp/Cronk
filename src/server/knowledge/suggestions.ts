@@ -554,15 +554,29 @@ export interface SuggestionMerge {
 const conflicted = (f: MergedContentField) => f.conflict !== null || (f.sections ?? []).some((s) => s.conflict !== null);
 
 /**
+ * Three-way merges two edits of a Term's words to avoid, word by word and ignoring case, so it never conflicts: `theirs`, less
+ * the words `mine` removed from `base`, then the words only `mine` added.
+ */
+function mergeWords(base: string[], mine: string[], theirs: string[]): string[] {
+  const has = (list: string[], word: string) => list.some((w) => w.toLowerCase() === word.toLowerCase());
+  const removedByMine = base.filter((w) => !has(mine, w));
+  const addedByMine = mine.filter((w) => !has(base, w) && !has(theirs, w));
+  return [...theirs.filter((w) => !has(removedByMine, w)), ...addedByMine];
+}
+
+/**
  * Three-way merges `mine` (the Suggestion's content) and `theirs` (the item's current content), both changed from `base`: the
- * Markdown field section by section, every other field whole, each taken from the side that changed it, or a conflict when
- * both did, differently.
+ * Markdown field section by section, a Term's words to avoid word by word, and every other field whole, taken from the side
+ * that changed it, or a conflict when both did, differently.
  */
 function mergeContent(kind: SuggestionKind, base: SuggestedContent, mine: SuggestedContent, theirs: SuggestedContent, onto: number): SuggestionMerge {
   const fields = CONTENT_FIELDS[kind].map((field): MergedContentField => {
     if (field === TEXT_FIELD[kind]) {
       const m = mergeMarkdown(textOf(base[field] ?? ""), textOf(mine[field]), textOf(theirs[field]));
       return { field, value: m.markdown, conflict: null, sections: m.sections };
+    }
+    if (field === "avoid") {
+      return { field, value: mergeWords(base.avoid as string[], mine.avoid as string[], theirs.avoid as string[]), conflict: null, sections: null };
     }
     const m = mergeField(base[field] ?? null, mine[field] ?? null, theirs[field] ?? null, (a, b) => JSON.stringify(a) === JSON.stringify(b));
     return { field, value: m.merged, conflict: m.conflict, sections: null };

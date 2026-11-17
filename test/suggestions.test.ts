@@ -231,6 +231,19 @@ describe("accepting an outdated Suggestion", () => {
     expect((await admin.get(`/api/terms/${term.id}/versions`)).body.versions[0]).toMatchObject({ actor: { kind: "user" }, suggestion: { id: made.body.suggestion.id, acceptedWithEdits: true } });
   });
 
+  it("on a Term, merges the words to avoid word by word: each side's additions are kept and each side's removals hold", async () => {
+    const { admin, agent } = await protectedDocument();
+    const { term } = (await admin.post("/api/projects/CRONK/terms", { name: "Claim", definition: "A hold.", avoid: ["Lock", "Mutex"] })).body;
+    await admin.post(`/api/terms/${term.id}/protection`, { protected: true });
+    const made = await agent.post("/api/suggestions", { item: { kind: "term", id: term.id }, baseVersion: 1, content: { avoid: ["Lock", "Mutex", "Lease"] }, reasoning: "Lease too." });
+    await admin.patch(`/api/terms/${term.id}`, { baseVersion: 1, avoid: ["Lock", "hold"] });
+
+    const merged = (await admin.post(`/api/suggestions/${made.body.suggestion.id}/merge`)).body.merge;
+    expect(merged).toMatchObject({ conflicts: 0, content: { avoid: ["Lock", "hold", "Lease"] } });
+    expect((await admin.post(`/api/suggestions/${made.body.suggestion.id}/accept`, { onto: 2 })).status).toBe(200);
+    expect((await admin.get(`/api/terms/${term.id}`)).body.term.avoid).toEqual(["Lock", "hold", "Lease"]);
+  });
+
   it("on Guidance and a Decision, merges their Markdown by sections and their other fields whole", async () => {
     const { admin, agent } = await protectedDocument();
     await admin.put("/api/projects/CRONK/guidance", { markdown: "## Tools\n\nUse npm.\n\n## Style\n\nBe brief.\n", baseVersion: 0 });
