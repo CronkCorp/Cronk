@@ -18,10 +18,7 @@ export interface Database {
   end(): Promise<void>;
 }
 
-/**
- * The pool, kept apart from the rest of the server, with a note of which of its connections are in use, so closing can cut
- * off work that would otherwise keep it open: ending the pool waits, with no limit, for every connection in use to come back.
- */
+/** A `Database` over pg's pool, which notes which of its connections are in use so that closing can cut them off. */
 class PgDatabase implements Database {
   private readonly pool: pg.Pool;
   private readonly inUse = new Set<pg.PoolClient>();
@@ -89,8 +86,8 @@ function pgInternals(client: pg.PoolClient): { processID: number; connection: { 
 export const UNIQUE_VIOLATION = "23505";
 
 /**
- * Opens a connection pool. Postgres may drop an idle connection at any time (a
- * restart, an admin terminating it); the pool discards that connection and opens a
+ * Opens a database, over a pool of connections. Postgres may drop an idle connection at any time (a
+ * restart, an admin terminating it); the database discards that connection and opens a
  * new one when needed, and the error goes to `onIdleError` instead of crashing the process.
  */
 export function createDatabase(databaseUrl: string, onIdleError: (err: Error) => void): Database {
@@ -132,6 +129,7 @@ export interface PublishingTransaction extends Transaction {
 export function transaction<T>(db: Database, fn: (tx: Transaction) => Promise<T>): Promise<T>;
 export function transaction<T>(on: LiveDatabase, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T>;
 export async function transaction<T>(on: Database | LiveDatabase, fn: (tx: PublishingTransaction) => Promise<T>): Promise<T> {
+  // Told apart by shape: a `LiveDatabase` holds its database as `db`, which a `Database` has no member named.
   const { db, live, log } = "db" in on ? on : { db: on, live: undefined, log: undefined };
   const client = await db.connect();
   // The pool listens for a lost connection only while it is idle; the query running when it is lost fails instead.
