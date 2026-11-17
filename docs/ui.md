@@ -247,7 +247,8 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Under the description:** the Ticket's own Attachments as 168px thumbnails (a frame for video, the type for other files) with name, size and who attached them, and a drop zone.
 - **Files** in the side panel: every Attachment on the Ticket, in Comments and Reports too, and the Artifacts from its work, each with type, size and Actor.
 - **Dropping a file anywhere** on the Ticket page attaches it to the Ticket, as does pasting one. Video and images posted in a Comment or Report show inline where they were posted.
-- **Opening one** (a thumbnail or a Files entry) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
+- **In the timeline:** attaching a file to the Ticket and deleting one are Change lines, "claude-laptop attached sign-in-flood.log (220 KB)" and "Ada removed proxy-ip.png". The attached file's name opens it while it is still on the Ticket; once deleted it is plain text. Files in Comments and Reports make no Change line, as they show with them.
+- **Opening one** (a thumbnail, a Files entry or a change line) shows it in a wide dialog: images in full, MP4 and WebM video and audio playing with seeking, anything else as its type with Download. Delete sits in that dialog for those with Write, behind a confirmation.
 - **Workspace settings** hold the Attachment size limit, the Artifact limits (size and files per Version), the Artifact allow-list (one origin per line) and whether publishes may declare extra origins, and show Admins the storage Attachments and Artifacts use.
 
 ### Attachments on Documents, Reports and Comments

@@ -488,6 +488,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           ...["created", "title", "description", "status", "priority", "labels", "assignee", "delegate", "parent", "autonomous", "verification", "kept"],
           ...["relation added", "relation removed"],
           ...["document linked", "document unlinked"],
+          ...["attachment added", "attachment removed"],
         ],
       },
     }),
@@ -521,6 +522,21 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           projectKey: { ...nullable({ type: "string" }), description: "Null for a Workspace Document." },
         }),
       }),
+      {
+        ...object({
+          change: { type: "string", enum: ["attachment added", "attachment removed"] },
+          attachment: {
+            ...object({
+              id,
+              name: { type: "string", description: "Its file name, as attached." },
+              contentType: { type: "string", description: "Its media type, as attached." },
+              size: { type: "integer", description: "Its size in bytes." },
+            }),
+            description: "The Attachment as it was when attached. After `attachment removed` its file is gone, and only this record remains.",
+          },
+        }),
+        description: "An Attachment attached to the Ticket itself, or deleted from it. Attachments in its Comments and Reports record no Change.",
+      },
     ],
   },
   Activity: {

@@ -29,6 +29,8 @@ export class ImportContext {
   readonly sessionIds = new Map<string, string>();
   /** The Agents and Agent Sessions that got a new id here, because theirs was taken. */
   readonly renamedIds: RenamedId[] = [];
+  /** Attachments imported so far: their id here by the id they had in the export, which differ when that one was taken. */
+  readonly attachmentIds = new Map<string, string>();
   /** Documents and Reports imported so far, by the path of their file in the export. */
   readonly documentIds = new Map<string, string>();
   /** Suggestions imported so far that came from a Ticket, by its key, to link once the Tickets are in. */
