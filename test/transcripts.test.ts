@@ -924,6 +924,27 @@ describe("Who may read Transcripts, decided for many at once", () => {
     expect((await carol.get("/api/search?q=done&kind=transcript")).body.results).toEqual([]);
     expect(await searching()).toEqual(withOne);
   });
+
+  it("lets an item and its detail list the Transcripts it came from in a fixed number of queries, however many there are", async () => {
+    const { cronk, admin, carol, claude } = await transcriptAcrossProjects(QUIET);
+    const agent = await startSession(cronk, claude.secret);
+    expect((await agent.post("/api/tickets/CRONK-1/comments", { body: "More" })).status).toBe(201);
+    expect((await agent.post("/api/tickets/SECRET-1/comments", { body: "More" })).status).toBe(201);
+    const hook = cronk.client(claude.secret);
+    // Carol reads CRONK-1 but none of the Transcripts it came from; Ada all of them.
+    const listing = async () => ({
+      carol: await cronk.queries(() => carol.get("/api/tickets/CRONK-1/transcripts")),
+      admin: await cronk.queries(() => admin.get("/api/tickets/CRONK-1/transcripts")),
+      detail: await cronk.queries(() => admin.get("/api/tickets/CRONK-1")),
+    });
+    const withOne = await listing();
+
+    for (let i = 2; i <= 6; i++) expect((await upload(hook, `chat-${i}`, chat(`Again ${i}`, agent.sessionId))).status).toBe(200);
+    expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toHaveLength(6);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.transcripts).toHaveLength(6);
+    expect((await carol.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toEqual([]);
+    expect(await listing()).toEqual(withOne);
+  });
 });
 
 describe("Upgrading an installation", () => {

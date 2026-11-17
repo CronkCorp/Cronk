@@ -423,16 +423,7 @@ async function accessTo(db: Queryable, actor: Actor, stored: StoredTranscript, o
   const everywhere = places.projectIds.every((p) => canReadIn(p)) && (!places.workspace || canReadIn(null));
   // With nothing left that its Sessions changed, nobody but its Owner is shown to have Read there.
   if (!readsAnyway && !(somewhere && everywhere)) return undefined;
-  return { items, places, canReadIn };
-}
-
-/**
- * Whether `actor` may read the Transcript and, when `projectIds` narrows a search to Projects, whether its Sessions changed
- * something in one of them.
- */
-export async function findable(db: Queryable, actor: Actor, stored: StoredTranscript, projectIds?: string[]): Promise<boolean> {
-  const access = await accessTo(db, actor, stored);
-  return access !== undefined && (!projectIds || access.places.projectIds.some((p) => projectIds.includes(p)));
+  return { items, canReadIn };
 }
 
 /**
@@ -486,17 +477,6 @@ export async function listTranscripts(db: Queryable, workspaceId: string, order:
 /** An item a Transcript may have led to: a Ticket, Document (or Report), Term or Decision, by its id, and its key if it has one. */
 export type LinkedItem = { kind: "ticket" | "document" | "term" | "decision"; id: string; key?: string };
 
-/** The Transcripts linked to an Agent Session that changed `item`, most recently uploaded first, whoever may read them. */
-export async function transcriptsOf(db: Queryable, workspaceId: string, item: LinkedItem): Promise<StoredTranscript[]> {
-  const { rows } = await db.query<TranscriptRow>(
-    `${SELECT_TRANSCRIPTS} WHERE tr.workspace_id = $1 AND tr.id IN (
-       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
-     ORDER BY ${ORDERS.newest}`,
-    [workspaceId, item.id],
-  );
-  return rows.map(toStored);
-}
-
 /**
  * A Transcript as an item it led to links to it ("From Transcript"): without its text, not even its title, so context on claim
  * never holds any of the chat; with the turn where the item first appears.
@@ -509,17 +489,29 @@ export interface TranscriptLink {
   updatedAt: Date;
 }
 
-/** The Transcripts `item` came from that `actor` may read, most recently uploaded first. */
+/**
+ * The Transcripts `item` came from (linked to an Agent Session that changed it) that `actor` may read, most recently uploaded first.
+ * Who may read each is decided in the same query (transcriptReadableSql), so this takes the same few queries however many there are.
+ */
 export async function transcriptLinks(db: Queryable, actor: Actor, item: LinkedItem): Promise<TranscriptLink[]> {
-  const links: TranscriptLink[] = [];
-  for (const stored of await transcriptsOf(db, actingUser(actor).workspaceId, item)) {
-    const transcript = await readTranscript(db, actor, stored);
-    if (!transcript) continue;
-    // Found as readTranscript finds each item's turn.
-    const turn = firstTurnNaming(turnsOf(stored.markdown), item.key ? [item.key, item.id] : [item.id]);
-    links.push({ id: transcript.id, agent: { id: transcript.agent.id, name: transcript.agent.name }, turn, updatedAt: transcript.updatedAt });
-  }
-  return links;
+  const readable = await readablePlaces(db, actor);
+  const { rows } = await db.query<{ id: string; agent_id: string; agent_name: string; markdown: string; updated_at: Date }>(
+    `SELECT tr.id, tr.agent_id, a.name AS agent_name, tr.markdown, tr.updated_at
+     FROM transcripts tr JOIN agents a ON a.id = tr.agent_id
+     WHERE tr.workspace_id = $1 AND tr.id IN (
+       SELECT ts.transcript_id FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id WHERE r.${item.kind}_id = $2)
+       AND ${transcriptReadableSql("tr", "a.owner_id", "$3::uuid[]", "$4::uuid", "$5::uuid")}
+     ORDER BY ${ORDERS.newest}`,
+    [actingUser(actor).workspaceId, item.id, readable.projectIds, readable.workspaceId, actor.kind === "user" ? actor.user.id : null],
+  );
+  // Found as readTranscript finds each item's turn.
+  const named = item.key ? [item.key, item.id] : [item.id];
+  return rows.map((row) => ({
+    id: row.id,
+    agent: { id: row.agent_id, name: row.agent_name },
+    turn: firstTurnNaming(turnsOf(row.markdown), named),
+    updatedAt: row.updated_at,
+  }));
 }
 
 /** A Transcript without its text, as listings show it: its title, the first line of a turn, is text too. */
