@@ -265,12 +265,19 @@ const STORED_FILE_CHECKS_AT_ONCE = 16;
 export async function checkStoredFiles(folder: StoredFolder, store: FileStore): Promise<void> {
   const stored = [...folder].filter((entry): entry is [string, StoredFile] => isStored(entry[1]));
   let next = 0;
+  let failed = false;
   const check = async () => {
-    while (next < stored.length) {
+    // Once one file fails, the others are left unasked.
+    while (!failed && next < stored.length) {
       const [path, { key, size }] = stored[next++]!;
-      const found = await store.size(key);
-      if (found === null) throw new HttpError(500, `The file of ${path} is missing from the file store`);
-      if (found !== size) throw new HttpError(500, `The file of ${path} holds ${found} bytes in the file store, not the ${size} recorded`);
+      try {
+        const found = await store.size(key);
+        if (found === null) throw new HttpError(500, `The file of ${path} is missing from the file store`);
+        if (found !== size) throw new HttpError(500, `The file of ${path} holds ${found} bytes in the file store, not the ${size} recorded`);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(STORED_FILE_CHECKS_AT_ONCE, stored.length) }, check));

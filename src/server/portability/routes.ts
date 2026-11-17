@@ -140,7 +140,11 @@ async function sendArchive(ctx: AppContext, reply: FastifyReply, name: string, b
     await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     return build(tx, now);
   });
-  await checkStoredFiles(folder, ctx.files);
+  await checkStoredFiles(folder, ctx.files).catch((err: unknown) => {
+    // A file the records name but the store lacks, or holds at another size, is for an operator to look into; other errors are logged as any are.
+    if (err instanceof HttpError) reply.log.error(err);
+    throw err;
+  });
   const stamp = now.toISOString().slice(0, 19).replaceAll(":", "-");
   return reply
     .header("content-type", "application/gzip")
