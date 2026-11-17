@@ -898,6 +898,7 @@ const LINKED_PATHS = {
   document: { collection: "documents", by: "id" },
   term: { collection: "terms", by: "id" },
   decision: { collection: "decisions", by: "key" },
+  artifact: { collection: "artifacts", by: "id" },
 } as const;
 const LINKED_KINDS = Object.keys(LINKED_PATHS) as [keyof typeof LINKED_PATHS, ...(keyof typeof LINKED_PATHS)[]];
 
