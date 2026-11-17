@@ -133,6 +133,11 @@ const transcriptFields = {
     items: object({ id, title: { type: "string" }, turn: firstTurn }),
     description: "The Documents and Reports its Sessions saved or commented on, that the caller can read.",
   },
+  artifacts: {
+    type: "array",
+    items: object({ id, title: { type: "string" }, turn: firstTurn }),
+    description: "The Artifacts its Sessions published a Version of, commented on or attached files to Comments on, that the caller can read.",
+  },
   terms: {
     type: "array",
     items: object({ id, name: { type: "string" }, turn: firstTurn }),
