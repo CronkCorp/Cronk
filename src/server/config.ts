@@ -29,8 +29,7 @@ export interface ServerConfig extends AppConfig {
  * - `ARTIFACTS_URL` (optional, recommended): the address of the hostname Artifacts are served from, such as
  *   `https://artifacts.cronk.example`, pointed at this same server; it needs `PUBLIC_URL` too. Without it, Artifacts are
  *   served from Cronk's own hostname in a stricter sandbox (ADR 0007).
- * - `NODE_ENV`: unless `production`, adding a block checks that the Workspace's blocking lock was taken before any Ticket lock,
- *   which costs a query or two (see `lockBlocking`).
+ * - `NODE_ENV`: unless `production`, the lock order is checked (`checkLockOrder` in `AppConfig`).
  */
 export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): ServerConfig {
   const databaseUrl = env.DATABASE_URL;

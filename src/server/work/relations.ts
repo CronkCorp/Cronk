@@ -3,7 +3,7 @@ import { holdsLockUntilCommit, lockUntilCommit, type Queryable } from "../db/dat
 import type { RelationKind } from "../../shared/values.js";
 import { findTicketById, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
 
-/** Whether taking the Workspace's blocking lock checks it comes before any Ticket lock, as `AppContext` says. */
+/** Whether `lockBlocking` checks the lock order (see `AppConfig`); `AppContext` has it. */
 export interface LockOrderCheck {
   checkLockOrder: boolean;
 }
@@ -139,11 +139,11 @@ export async function addRelation(
   db: Queryable,
   workspaceId: string,
   input: RelationChange & { block?: NewDiscoveredBlock },
-  check: LockOrderCheck,
+  lockOrder: LockOrderCheck,
 ): Promise<boolean> {
   const row: StoredRelation = { ...storedRow(input.ticket, input.kind, input.other), block: input.block ?? null };
   if (row.kind === "blocks") {
-    await lockBlocking(db, workspaceId, check);
+    await lockBlocking(db, workspaceId, lockOrder);
     if (await wouldCycle(db, row.from, row.to)) return false;
   }
   if (await storeRelation(db, row)) await recordBothSides(db, "relation added", input);

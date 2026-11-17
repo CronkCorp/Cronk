@@ -56,10 +56,9 @@ export async function discoverySourceClaimOf(
   actor: Actor,
   key: string | undefined,
   now: Date,
-  { blockedIds }: { blockedIds: string[] },
-  check: LockOrderCheck,
+  { blockedIds, checkLockOrder }: { blockedIds: string[] } & LockOrderCheck,
 ): Promise<SourceClaim | null> {
-  if (actor.kind === "agent" && blockedIds.length > 0) await lockBlocking(db, actor.owner.workspaceId, check);
+  if (actor.kind === "agent" && blockedIds.length > 0) await lockBlocking(db, actor.owner.workspaceId, { checkLockOrder });
   return heldSourceClaim(db, actor, key, now, "a Discovered Ticket", { projectId: null, keyShare: blockedIds });
 }
 

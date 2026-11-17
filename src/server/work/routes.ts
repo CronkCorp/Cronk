@@ -582,7 +582,7 @@ export function workRoutes(ctx: AppContext) {
             // The blocked Tickets first, locked with the source in id order after the Workspace's blocking lock.
             const blocks: { other: Ticket; reason: string }[] = [];
             for (const { ticketKey, reason } of request.body.blocks ?? []) blocks.push({ other: await otherTicketFor(tx, actor, ticketKey), reason });
-            const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now, { blockedIds: blocks.map((b) => b.other.id) }, ctx);
+            const source = await discoverySourceClaimOf(tx, actor, request.body.ticket, now, { blockedIds: blocks.map((b) => b.other.id), checkLockOrder: ctx.checkLockOrder });
             const sourceTicket = source && (await findTicketsByIds(tx, [source.ticketId]))[0]!;
             const created = await insertTicket(tx, {
               ...input,
@@ -713,7 +713,7 @@ export function workRoutes(ctx: AppContext) {
         const actor = await requireActor(ctx, request);
         const { kind, reason } = request.body;
         const { ends, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now(), ctx);
+          const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now(), { checkLockOrder: ctx.checkLockOrder });
           if (discoveredBlock && reason === undefined) throw new HttpError(400, `Say why ${ticket.key} blocks ${other.key} with a reason`);
           if (!discoveredBlock && reason !== undefined) {
             throw new HttpError(400, "Only an Agent gives a reason, for a block from its own Discovered Ticket no User has delegated or finished yet");
@@ -764,7 +764,7 @@ export function workRoutes(ctx: AppContext) {
       async (request) => {
         const actor = await requireActor(ctx, request);
         const { ends, readyBefore, relations } = await transaction(ctx.db, async (tx) => {
-          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, request.params.kind, ctx.clock.now(), ctx, { removing: true });
+          const { ticket, other } = await relationEnds(tx, actor, request.params.key, request.params.otherKey, request.params.kind, ctx.clock.now(), { checkLockOrder: ctx.checkLockOrder, removing: true });
           // Removing a blocking relation may unblock either end.
           const readyBefore = await readyNow(tx, [ticket.id, other.id], ctx.clock.now());
           const removed = await removeRelation(tx, { ticket, kind: request.params.kind, other, actor: actor, now: ctx.clock.now() });
@@ -1107,8 +1107,7 @@ async function relationEnds(
   otherKey: string,
   kind: RelationKind,
   now: Date,
-  check: LockOrderCheck,
-  opts: { removing?: boolean } = {},
+  opts: LockOrderCheck & { removing?: boolean },
 ): Promise<{ ticket: Ticket; other: Ticket; discoveredBlock: AgentActor | null }> {
   // The checks that lock nothing come first, so a block they refuse doesn't queue behind every other block in the Workspace.
   const unlocked = await ticketFor(tx, actor, key, "write");
@@ -1119,7 +1118,7 @@ async function relationEnds(
   if (userAdding) await ticketFor(tx, actor, otherKey, "write");
   // Before an Agent's Ticket is locked, as the block's row then waits on both Tickets (see lockBlocking).
   const locking = isBlocking(kind) && !opts.removing;
-  if (locking) await lockBlocking(tx, actingUser(actor).workspaceId, check);
+  if (locking) await lockBlocking(tx, actingUser(actor).workspaceId, opts);
   // Read again once the lock is held, as the Ticket may have changed while waiting for it.
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.
   const ticket = locking || actor.kind === "agent" ? await ticketFor(tx, actor, key, "write", { forUpdate: actor.kind === "agent" }) : unlocked;
