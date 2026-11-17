@@ -7,19 +7,20 @@ import { transcriptAddress } from "./transcripts.js";
 import { Show, useLoad } from "./ui.js";
 import { FilterSelect } from "./work.js";
 
-/** Where a Document opens. */
+/** Where a Ticket and a Document open. */
+const ticketPath = (r: SearchResult) => `/tickets/${r.ticketKey}`;
 const documentPath = (r: SearchResult) => `/documents/${r.documentId}`;
 
 /** For each kind of result: its name, where it opens, and the key shown beside its title (if it has one). */
 const KINDS: Record<SearchKind, { name: string; path: (r: SearchResult) => string; key: (r: SearchResult) => string | null }> = {
-  ticket: { name: "Ticket", path: (r) => `/tickets/${r.ticketKey}`, key: (r) => r.ticketKey },
+  ticket: { name: "Ticket", path: ticketPath, key: (r) => r.ticketKey },
   document: { name: "Document", path: documentPath, key: () => null },
   // A Report opens as its Document, under its Ticket's key.
   report: { name: "Report", path: documentPath, key: (r) => r.ticketKey },
   // A Comment opens what it is on: its Artifact, its Document or its Ticket.
   comment: {
     name: "Comment",
-    path: (r) => (r.artifactId ? `/artifacts/${r.artifactId}` : r.documentId ? documentPath(r) : `/tickets/${r.ticketKey}`),
+    path: (r) => (r.artifactId ? `/artifacts/${r.artifactId}` : r.documentId ? documentPath(r) : ticketPath(r)),
     key: (r) => r.ticketKey,
   },
   term: { name: "Term", path: (r) => `/terms/${r.termId}`, key: () => null },

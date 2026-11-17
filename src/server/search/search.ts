@@ -59,7 +59,7 @@ const excerpt = (title: string, body: string) => `ts_headline(${CONFIG}, CASE WH
  * The fields of a result that some kinds leave null, in `SearchResult`'s order, each with the SQL type its column is cast to.
  * Every kind's SELECT gives them all, so the SELECTs line up in the UNION; a kind names only those it sets.
  */
-const OPTIONAL_FIELDS = {
+const NULLABLE_FIELDS = {
   projectKey: "text",
   ticketKey: "text",
   documentId: "uuid",
@@ -71,14 +71,14 @@ const OPTIONAL_FIELDS = {
   protected: "boolean",
 } as const satisfies Record<Exclude<keyof SearchResult, "kind" | "title" | "excerpt">, string>;
 
-type OptionalField = keyof typeof OPTIONAL_FIELDS;
+type NullableField = keyof typeof NULLABLE_FIELDS;
 
-/** A result with none of its optional fields set, for a kind to set its own over. */
-const EMPTY_RESULT = Object.fromEntries(Object.keys(OPTIONAL_FIELDS).map((field) => [field, null])) as Record<OptionalField, null>;
+/** A result with none of its nullable fields set, for a kind to set its own over. */
+const EMPTY_RESULT = Object.fromEntries(Object.keys(NULLABLE_FIELDS).map((field) => [field, null])) as Record<NullableField, null>;
 
 /**
  * The columns every kind's SELECT gives, in order: a result's fields, its rank, and when it last changed.
- * Of the optional fields, a kind passes SQL for those it sets (`protected`: whether it is Protected); the rest are NULL.
+ * Of the nullable fields, a kind passes SQL for those it sets (`protected`: whether it is Protected); the rest are NULL.
  */
 const columns = (
   c: {
@@ -91,10 +91,10 @@ const columns = (
     at: string;
     /** SQL added to the rank, to put some results first. */
     boost?: string;
-  } & Partial<Record<OptionalField, string>>,
+  } & Partial<Record<NullableField, string>>,
 ) =>
   `SELECT '${c.kind}' AS kind, ${c.title} AS title, ${excerpt(...c.excerptOf)} AS excerpt,
-     ${Object.entries(OPTIONAL_FIELDS).map(([field, type]) => `${c[field as OptionalField] ?? "NULL"}::${type} AS "${field}"`).join(", ")},
+     ${Object.entries(NULLABLE_FIELDS).map(([field, type]) => `${c[field as NullableField] ?? "NULL"}::${type} AS "${field}"`).join(", ")},
      ts_rank(to_tsvector(${CONFIG}, ${c.text}), q.query) + ${c.boost ?? "0"} AS rank, ${c.at} AS at`;
 
 /** Whether the key `keySql` gives is the one the search is for, typed in any case. */
