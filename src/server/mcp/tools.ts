@@ -773,8 +773,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     parameters: {
       id: z.string().optional().describe("The Transcript's id, such as a search hit's transcriptId (get)"),
       turn: z.number().int().optional().describe("Only this turn of the Transcript, numbered from 1, such as a search hit's turn (get)"),
-      kind: z.enum(["ticket", "document", "term", "decision"]).optional().describe("What kind of item `item` is; a Report is a document (from)"),
-      item: z.string().optional().describe("The Ticket's or Decision's key, such as CRONK-12 or CRONK-D3, or the Document's, Report's or Term's id (from)"),
+      kind: z.enum(LINKED_KINDS).optional().describe("What kind of item the Transcripts came from; a Report is a document (from)"),
+      key: z.string().optional().describe("The Ticket's or Decision's key, such as CRONK-12 or CRONK-D3 (from)"),
+      itemId: z.string().optional().describe("The Document's, Report's or Term's id (from)"),
     },
     actions: {
       get: {
@@ -802,9 +803,9 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
           "each with the turn where the item first appears, or null for none",
         writes: false,
         run: (api, a) => {
-          const kind = required(a.kind, "a kind", "from");
-          const item = required(a.item, "an item", "from");
-          return api("GET", `/api/${kind}s/${encodeURIComponent(item)}/transcripts`);
+          const { collection, by } = LINKED_PATHS[required(a.kind, "a kind", "from")];
+          const item = by === "key" ? required(a.key, "a key", "from") : required(a.itemId, "an itemId", "from");
+          return api("GET", `/api/${collection}/${encodeURIComponent(item)}/transcripts`);
         },
       },
     },
@@ -870,6 +871,15 @@ function attachmentsPath(a: { key?: string | undefined; documentId?: string | un
   if (a.documentId !== undefined) return `/api/documents/${encodeURIComponent(a.documentId)}/attachments`;
   return `/api/comments/${encodeURIComponent(a.commentId!)}/attachments`;
 }
+
+/** Where the API lists the Transcripts each kind of item came from, and whether the item is named by its key or its id. */
+const LINKED_PATHS = {
+  ticket: { collection: "tickets", by: "key" },
+  document: { collection: "documents", by: "id" },
+  term: { collection: "terms", by: "id" },
+  decision: { collection: "decisions", by: "key" },
+} as const;
+const LINKED_KINDS = Object.keys(LINKED_PATHS) as [keyof typeof LINKED_PATHS, ...(keyof typeof LINKED_PATHS)[]];
 
 /** Where a Project's API lives, for its page tree or Decisions, or the Workspace's when no Project is named. */
 const scopePath = (project: string | undefined) => (project === undefined ? "/api/workspace" : `/api/projects/${encodeURIComponent(project)}`);

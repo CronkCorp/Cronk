@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { McpConnection } from "./harness.js";
+import type { Client, McpConnection } from "./harness.js";
 import { connectMcp, delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, tarGz } from "./harness.js";
 
 /** A tool's raw result: whether it is an error, and the text of each content item. */
@@ -1167,17 +1167,25 @@ const fourTurnChat = (sessionId: string) =>
   "## User\n\nAlso tidy the zebra docs\n\n" +
   "## Assistant\n\nDone.\n";
 
-/** claude-laptop works on CRONK-1 and uploads the chat; a read-only Agent of the same Owner reads it over MCP. */
-async function uploadedTranscript() {
+/**
+ * claude-laptop works on CRONK-1 in a Session, does whatever `alsoChange` does there, and uploads the chat (`fourTurnChat`
+ * unless `chat` makes another); then a read-only Agent of the same Owner connects over MCP.
+ */
+async function uploadedTranscript({
+  chat = fourTurnChat,
+  alsoChange = async () => {},
+  beforeConnecting = async () => {},
+}: { chat?: (sessionId: string) => string; alsoChange?: (agent: Client) => Promise<void>; beforeConnecting?: (admin: Client) => Promise<unknown> } = {}) {
   const { cronk, admin, claude, session } = await delegatedSetup();
   const agent = await session();
   await agent.post("/api/tickets/CRONK-1/claim");
   await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
-  const markdown = fourTurnChat(agent.sessionId);
-  const uploaded = await cronk.client(claude.secret).upload("/api/transcripts/by-chat/chat-1", Buffer.from(markdown), "text/markdown", "PUT");
+  await alsoChange(agent);
+  const uploaded = await cronk.client(claude.secret).upload("/api/transcripts/by-chat/chat-1", Buffer.from(chat(agent.sessionId)), "text/markdown", "PUT");
   expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+  await beforeConnecting(admin);
   const mcp = await connectMcp(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
-  return { cronk, admin, mcp, markdown, id: uploaded.body.transcript.id as string };
+  return { admin, mcp, id: uploaded.body.transcript.id as string };
 }
 
 describe("the transcripts tool", () => {
@@ -1208,64 +1216,53 @@ describe("the transcripts tool", () => {
   });
 
   it("says a Transcript without turns has none", async () => {
-    const { cronk, admin, claude, session } = await delegatedSetup();
-    const agent = await session();
-    await agent.post("/api/tickets/CRONK-1/claim");
-    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
-    const markdown = `Agent Session ${agent.sessionId}\n`;
-    const uploaded = await cronk.client(claude.secret).upload("/api/transcripts/by-chat/chat-1", Buffer.from(markdown), "text/markdown", "PUT");
-    const mcp = await connectMcp(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
+    const { mcp, id } = await uploadedTranscript({ chat: (sessionId) => `Agent Session ${sessionId}\n` });
 
-    expect(await callTool(mcp, "transcripts", { action: "get", id: uploaded.body.transcript.id, turn: 1 })).toEqual({ isError: true, body: "This Transcript has no turns" });
+    expect(await callTool(mcp, "transcripts", { action: "get", id, turn: 1 })).toEqual({ isError: true, body: "This Transcript has no turns" });
   });
 
   it("lists the Transcripts, and those a Ticket, Document, Term or Decision came from, as the API does", async () => {
-    const { cronk, admin, claude, session } = await delegatedSetup();
-    const agent = await session();
-    await agent.post("/api/tickets/CRONK-1/claim");
-    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
-    const doc = (await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" })).body.document.id;
-    const term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
-    await agent.post("/api/workspace/decisions", { title: "Compose for installs" });
-    const uploaded = await cronk.client(claude.secret).upload("/api/transcripts/by-chat/chat-1", Buffer.from(fourTurnChat(agent.sessionId)), "text/markdown", "PUT");
-    const id = uploaded.body.transcript.id;
-    const mcp = await connectMcp(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
+    let doc = "";
+    let term = "";
+    const { admin, mcp, id } = await uploadedTranscript({
+      alsoChange: async (agent) => {
+        doc = (await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" })).body.document.id;
+        term = (await agent.post("/api/workspace/terms", { name: "Ticket", definition: "A unit of work." })).body.term.id;
+        await agent.post("/api/workspace/decisions", { title: "Compose for installs" });
+      },
+    });
 
     const list = await callTool(mcp, "transcripts", { action: "list" });
     expect(list.body).toEqual((await admin.get("/api/transcripts")).body);
     expect(list.body.transcripts).toEqual([expect.objectContaining({ id })]);
-    for (const [kind, item, url] of [
-      ["ticket", "CRONK-1", "/api/tickets/CRONK-1/transcripts"],
-      ["document", doc, `/api/documents/${doc}/transcripts`],
-      ["term", term, `/api/terms/${term}/transcripts`],
-      ["decision", "D1", "/api/decisions/D1/transcripts"],
+    for (const [args, url] of [
+      [{ kind: "ticket", key: "CRONK-1" }, "/api/tickets/CRONK-1/transcripts"],
+      [{ kind: "document", itemId: doc }, `/api/documents/${doc}/transcripts`],
+      [{ kind: "term", itemId: term }, `/api/terms/${term}/transcripts`],
+      [{ kind: "decision", key: "D1" }, "/api/decisions/D1/transcripts"],
     ] as const) {
-      const from = await callTool(mcp, "transcripts", { action: "from", kind, item });
-      expect({ kind, body: from.body }).toEqual({ kind, body: (await admin.get(url)).body });
+      const from = await callTool(mcp, "transcripts", { action: "from", ...args });
+      expect({ args, body: from.body }).toEqual({ args, body: (await admin.get(url)).body });
       expect(from.body.transcripts).toEqual([expect.objectContaining({ id })]);
     }
-    expect((await callTool(mcp, "transcripts", { action: "from", kind: "ticket", item: "CRONK-1" })).body.transcripts[0].turn).toBe(2);
-    expect(await callTool(mcp, "transcripts", { action: "from", item: "CRONK-1" })).toEqual({ isError: true, body: "The from action needs a kind" });
-    expect(await callTool(mcp, "transcripts", { action: "from", kind: "ticket" })).toEqual({ isError: true, body: "The from action needs an item" });
+    expect((await callTool(mcp, "transcripts", { action: "from", kind: "ticket", key: "CRONK-1" })).body.transcripts[0].turn).toBe(2);
+    expect(await callTool(mcp, "transcripts", { action: "from", key: "CRONK-1" })).toEqual({ isError: true, body: "The from action needs a kind" });
+    expect(await callTool(mcp, "transcripts", { action: "from", kind: "ticket", itemId: doc })).toEqual({ isError: true, body: "The from action needs a key" });
+    expect(await callTool(mcp, "transcripts", { action: "from", kind: "term", key: "CRONK-1" })).toEqual({ isError: true, body: "The from action needs an itemId" });
   });
 
   it("answers a Transcript the Agent may not read as no such Transcript, and leaves it out of list and from", async () => {
-    const { cronk, admin, claude, session } = await delegatedSetup();
-    const agent = await session();
-    await agent.post("/api/tickets/CRONK-1/claim");
-    await agent.post("/api/tickets/CRONK-1/activities", { kind: "plan", body: "Read the code" });
-    await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" });
-    const uploaded = await cronk.client(claude.secret).upload("/api/transcripts/by-chat/chat-1", Buffer.from(fourTurnChat(agent.sessionId)), "text/markdown", "PUT");
-    const id = uploaded.body.transcript.id;
     // The reader may still read CRONK-1, but not the Handbook outside any Project, so not the Transcript.
-    await admin.patch("/api/workspace", { agentAccess: "none" });
-    const mcp = await connectMcp(cronk, (await registerAgent(admin, "reader", { readOnly: true })).secret);
+    const { admin, mcp, id } = await uploadedTranscript({
+      alsoChange: async (agent) => void (await agent.post("/api/workspace/documents", { title: "Handbook", body: "Welcome" })),
+      beforeConnecting: (admin) => admin.patch("/api/workspace", { agentAccess: "none" }),
+    });
 
     for (const turn of [undefined, 2]) {
       expect(await callTool(mcp, "transcripts", { action: "get", id, turn })).toEqual({ isError: true, body: "No such Transcript" });
     }
     expect((await callTool(mcp, "transcripts", { action: "list" })).body).toEqual({ transcripts: [] });
-    expect(await callTool(mcp, "transcripts", { action: "from", kind: "ticket", item: "CRONK-1" })).toEqual({ isError: false, body: { transcripts: [] } });
+    expect(await callTool(mcp, "transcripts", { action: "from", kind: "ticket", key: "CRONK-1" })).toEqual({ isError: false, body: { transcripts: [] } });
     expect((await admin.get("/api/tickets/CRONK-1/transcripts")).body.transcripts).toEqual([expect.objectContaining({ id })]);
   });
 
