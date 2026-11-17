@@ -79,7 +79,12 @@ type KindView<K extends WaitingKind, I = Extract<WaitingItem, { kind: K }>> = {
   marks?: (item: I) => ReactNode;
   /** The detail pane that shows the item in full and acts on it. */
   Detail: (props: DetailProps<I & WaitingItem>) => ReactNode;
-} & (K extends InboxKind ? { empty: string } : { empty?: never });
+} & (K extends InboxKind
+  ? {
+      /** The Inbox's empty-state heading while it is narrowed to the kind. Having one is what makes it a kind the Inbox holds. */
+      empty: string;
+    }
+  : { empty?: never });
 
 /** What an item's kind label says, short in the list and in full in the detail pane, and how it is coloured. */
 interface KindLabelling {
@@ -192,12 +197,13 @@ export function kindNames<K extends WaitingKind>(kinds: Record<K, unknown>): Rec
   return Object.fromEntries(named) as Record<K, string>;
 }
 
-/** The empty state's heading of each kind an Inbox holds: the kinds that have one. */
-const INBOX_EMPTY = Object.fromEntries(Object.entries(KINDS).flatMap(([kind, view]) => (view.empty ? [[kind, view.empty]] : []))) as Record<InboxKind, string>;
+/** The empty state's heading of each kind an Inbox holds: the kinds whose KINDS entry has one. */
+const INBOX_EMPTY = Object.fromEntries(Object.entries(KINDS).flatMap(([kind, view]) => ("empty" in view ? [[kind, view.empty]] : []))) as Record<InboxKind, string>;
 
 /** The empty state's heading, by the kind the Inbox is narrowed to. */
 const NOTHING: Record<InboxKind | "all", string> = { all: "Nothing waiting on you", ...INBOX_EMPTY };
 
+/** The kinds an Inbox holds, by the names its chips give them. */
 const KIND_NAMES = kindNames(INBOX_EMPTY);
 
 /** An item's id in the address: stable across reloads, and readable for a review or a Decision. */
@@ -571,7 +577,7 @@ function ListItem(props: { item: WaitingItem; selected: boolean; arrived: boolea
   );
 }
 
-/** The detail pane's head: the item's kind, and its Ticket's key and title, linking to the Ticket, or else its Decision's. */
+/** The detail pane's head: the item's kind in full, then the key and title of what it is about, linking there, and its kind's marks. */
 function DetailHead(props: { item: WaitingItem }) {
   const { item } = props;
   const view = viewOf(item);
