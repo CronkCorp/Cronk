@@ -314,6 +314,11 @@ export interface Cronk {
    */
   heartbeat(): Promise<void>;
   /**
+   * Looks for lapsed Claims now, as the server does every `lapseCheckMs`, after any look already running, and waits until
+   * it is done (failing if that look fails); so a test knows the server has looked since the clock last moved, and its watchers have been told.
+   */
+  lookForLapses(): Promise<void>;
+  /**
    * Undoes migration `id` by running `undo` and forgets it was applied, as on a database from
    * before it shipped, so the next `restart` applies it again over the data already there.
    */
@@ -382,8 +387,15 @@ export async function startCronk(
   const storage = opts.storage ?? { kind: "disk", dir: filesDir };
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
+  let lookForLapses!: () => Promise<void>;
   const start = () =>
-    buildApp({ config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` }, clock, live: (live = new HoldableLiveUpdates()), lapseCheckMs: opts.lapseCheckMs ?? 50 });
+    buildApp({
+      config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}` },
+      clock,
+      live: (live = new HoldableLiveUpdates()),
+      lapseCheckMs: opts.lapseCheckMs ?? 50,
+      onLapseWatch: (lookNow) => (lookForLapses = lookNow),
+    });
 
   const cronk: Cronk = {
     app: await start(),
@@ -453,6 +465,7 @@ export async function startCronk(
       await new Promise((resolve) => setTimeout(resolve, 50));
       await live.heartbeat();
     },
+    lookForLapses: () => lookForLapses(),
     undoMigration: async (id, undo) => {
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();

@@ -73,6 +73,8 @@ export async function buildApp(opts: {
   live?: LiveUpdates;
   /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
   lapseCheckMs?: number;
+  /** Called once with a function that looks for lapsed Claims at once and resolves when that look is done; tests use it to know a look happened. */
+  onLapseWatch?: (lookNow: () => Promise<void>) => void;
 }): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
@@ -103,9 +105,10 @@ export async function buildApp(opts: {
 
   // Open live-update streams would otherwise keep the server from closing.
   app.addHook("preClose", async () => ctx.live.close());
-  const stopWatchingLapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
+  const lapses = watchSilence(ctx, opts.lapseCheckMs ?? 5_000);
+  opts.onLapseWatch?.(lapses.lookNow);
   app.addHook("onClose", async () => {
-    stopWatchingLapses();
+    lapses.stop();
     await Promise.all([db.end(), ctx.files.close()]);
   });
   // Every API route refuses query parameters it doesn't declare, including routes that declare none,
