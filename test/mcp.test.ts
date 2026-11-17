@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConnection } from "./harness.js";
-import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { connectMcp, delegatedSetup, projectWithTickets, registerAgent, startInstalledCronk, tarGz } from "./harness.js";
 
 /** A tool's raw result: whether it is an error, and the text of each content item. */
 async function rawResult(mcp: McpConnection, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; texts: string[] }> {
@@ -846,6 +846,19 @@ describe("the search tool", () => {
     const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
     expect(search.description).toMatch(/Decisions[\s\S]*decisions tool by its decisionKey/);
     expect(search.inputSchema.properties?.kind).toMatchObject({ items: { enum: expect.arrayContaining(["decision"]) } });
+  });
+
+  it("finds Comments on Artifacts, and says to get the Artifact with the artifacts tool by its artifactId", async () => {
+    const { cronk, admin } = await startInstalledCronk();
+    const artifact = (await admin.upload("/api/workspace/artifacts?title=Limits", await tarGz({ "index.html": "<h1>Limits</h1>" }))).body.artifact.id;
+    await admin.post(`/api/artifacts/${artifact}/comments`, { body: "Show the threshold as a line." });
+    const mcp = await connectMcp(cronk, (await registerAgent(admin, "claude-laptop")).secret);
+
+    const found = await callTool(mcp, "search", { query: "threshold", kind: ["comment"] });
+    expect(found.body).toEqual((await admin.get("/api/search?q=threshold&kind=comment")).body);
+    expect(found.body.results).toEqual([expect.objectContaining({ kind: "comment", title: "Limits", projectKey: null, artifactId: artifact })]);
+    const search = (await mcp.client.listTools()).tools.find((t) => t.name === "search")!;
+    expect(search.description).toMatch(/Comments[\s\S]*artifacts tool by its artifactId/);
   });
 });
 
