@@ -46,11 +46,18 @@ export function sourceClaimOf(
  * hold, or else the one Claim it holds, of any Project. A reader who can't read the source's Project doesn't see it
  * (see `Discovery.sourceTicket`), so unlike `sourceClaimOf` any held Claim fits. None for a User, who may not name one.
  * Run inside the caller's transaction, once it has locked the Project the Ticket is filed in: it locks the Claim's
- * Ticket as `sourceClaimOf` does, together with the Tickets `blocking` names (those the Discovered Ticket blocks), in
- * id order, so two filings each blocking the other's source queue rather than deadlock.
+ * Ticket as `sourceClaimOf` does. With it, in id order, it takes the key-share lock of the Tickets with ids `blockedIds`,
+ * which the Discovered Ticket blocks, as adding those blocks takes it after the Workspace's blocking lock: so two filings
+ * each blocking the other's source queue rather than deadlock, and a block onto the same Ticket added meanwhile isn't held up.
  */
-export function discoverySourceClaimOf(db: Queryable, actor: Actor, key: string | undefined, now: Date, blocking: string[]): Promise<SourceClaim | null> {
-  return heldSourceClaim(db, actor, key, now, "a Discovered Ticket", { projectId: null, alsoLock: blocking });
+export function discoverySourceClaimOf(
+  db: Queryable,
+  actor: Actor,
+  key: string | undefined,
+  now: Date,
+  { blockedIds }: { blockedIds: string[] },
+): Promise<SourceClaim | null> {
+  return heldSourceClaim(db, actor, key, now, "a Discovered Ticket", { projectId: null, keyShare: blockedIds });
 }
 
 /** Which held Claims `what` may come from, and why one named that doesn't fit is refused. */
@@ -62,8 +69,8 @@ interface SourceFit {
 /**
  * The Claim an Agent makes `what` from: that of the Ticket `key` names, which its Agent Session must hold, or else the one
  * Claim it holds; with `fit`, only a Claim that fits. None for a User, who may not name one. With `projectId`, takes that
- * Project's key-share lock before locking the Claim's Ticket (see `sourceClaimOf`). The Tickets with ids `alsoLock` are
- * locked with the Claim's Ticket, in id order.
+ * Project's key-share lock before locking the Claim's Ticket (see `sourceClaimOf`). With `keyShare`, takes those Tickets'
+ * key-share lock with the Claim's Ticket's lock, in id order.
  */
 async function heldSourceClaim(
   db: Queryable,
@@ -71,7 +78,7 @@ async function heldSourceClaim(
   key: string | undefined,
   now: Date,
   what: string,
-  { fit, projectId, alsoLock = [] }: { fit?: SourceFit; projectId: string | null; alsoLock?: string[] },
+  { fit, projectId, keyShare = [] }: { fit?: SourceFit; projectId: string | null; keyShare?: string[] },
 ): Promise<SourceClaim | null> {
   if (actor.kind === "user") {
     if (key !== undefined) throw new HttpError(400, `Only an Agent names the Ticket ${what} came from, as the one it holds the Claim on`);
@@ -84,7 +91,7 @@ async function heldSourceClaim(
   if (key === undefined) {
     const candidates = new Set((await loadClaimsHeld()).filter(fits).map((c) => c.ticketId));
     if (candidates.size === 0) return null;
-    await lockTicketsByIds(db, [...candidates, ...alsoLock]);
+    await lockTicketsByIds(db, [...candidates], { keyShare });
     // Only Claims seen before locking: one this Session took meanwhile was never locked here.
     const fitting = (await loadClaimsHeld()).filter((c) => candidates.has(c.ticketId) && fits(c));
     if (fitting.length > 1) {
@@ -93,7 +100,8 @@ async function heldSourceClaim(
     return fitting[0] ?? null;
   }
   const named = await ticketFor(db, actor, key, "read");
-  const ticket = (await lockTicketsByIds(db, [named.id, ...alsoLock])).find((t) => t.id === named.id) ?? named;
+  const [ticket] = await lockTicketsByIds(db, [named.id], { keyShare });
+  if (!ticket) throw new HttpError(404, "No such Ticket");
   const claimId = await requireClaimHolder(db, actor, ticket, now, `naming it as the Ticket ${what} came from`);
   const claim = (await loadClaimsHeld()).find((c) => c.claimId === claimId)!;
   if (fit && !fits(claim)) throw new HttpError(400, fit.misfit(ticket.key));

@@ -243,11 +243,25 @@ export async function findTicketsByIds(db: Queryable, ids: string[]): Promise<Ti
   return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
-/** The Tickets with these ids, locked for update in id order, so concurrent lockers queue rather than deadlock. Run inside a transaction. */
-export async function lockTicketsByIds(db: Queryable, ids: string[]): Promise<Ticket[]> {
-  if (ids.length === 0) return [];
-  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ANY($1::uuid[]) ORDER BY t.id FOR UPDATE OF t`, [ids]);
-  return rows.map(toTicket);
+/**
+ * The Tickets with these ids, locked for update in id order, so concurrent lockers queue rather than deadlock. With `keyShare`,
+ * those Tickets' key-share lock is taken in the same id order, as inserting a row referencing them would take it later, without
+ * keeping out others' such inserts. Run inside a transaction.
+ */
+export async function lockTicketsByIds(db: Queryable, ids: string[], { keyShare = [] }: { keyShare?: string[] } = {}): Promise<Ticket[]> {
+  if (keyShare.length === 0) {
+    if (ids.length === 0) return [];
+    const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ANY($1::uuid[]) ORDER BY t.id FOR UPDATE OF t`, [ids]);
+    return rows.map(toTicket);
+  }
+  // One row at a time, as a query takes one lock strength. Lowercase uuid text sorts as Postgres orders uuids.
+  const forUpdate = new Set(ids);
+  const locked: Ticket[] = [];
+  for (const id of [...new Set([...ids, ...keyShare])].sort()) {
+    const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE t.id = $1 FOR ${forUpdate.has(id) ? "UPDATE" : "KEY SHARE"} OF t`, [id]);
+    if (forUpdate.has(id) && rows[0]) locked.push(toTicket(rows[0]));
+  }
+  return locked;
 }
 
 export async function findTicketById(db: Queryable, id: string): Promise<Ticket | undefined> {
