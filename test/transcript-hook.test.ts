@@ -65,7 +65,7 @@ describe("The reference Claude Code Transcript hook", () => {
     expect(await convert(fixture("claude-code-entries.jsonl"))).toBe(await readFile(fixture("claude-code-entries.md"), "utf8"));
   });
 
-  it("puts each subagent's chat in the Assistant's turn where its parent learns it finished, once, nested ones inside their parent's", async () => {
+  it("puts each subagent's chat in the Assistant's turn where its parent learns it finished, nested ones inside their parent's", async () => {
     // Foreground (at its result), background (at its completion notification), nested, and an older side chain in the
     // main file; one claimed subagent's file is missing and one file no chat claims.
     expect(await convert(fixture("subagents.jsonl"))).toBe(await readFile(fixture("subagents.md"), "utf8"));
@@ -89,6 +89,33 @@ describe("The reference Claude Code Transcript hook", () => {
         expect(whole.startsWith(await convert(`${chat}.jsonl`)), `first ${n} lines, background subagent's first ${m}`).toBe(true);
       }
     }
+  });
+
+  it("gives a subagent that is resumed after it finished one block per run, each where its parent learns that run finished", async () => {
+    // Finished in the background, resumed in the foreground (a result naming resumedAgentId), then resumed in the background.
+    expect(await convert(fixture("resumed.jsonl"))).toBe(await readFile(fixture("resumed.md"), "utf8"));
+    expect(await convert(fixture("resumed.jsonl"))).toBe(await readFile(fixture("resumed.md"), "utf8"));
+  });
+
+  it("converts a resumed subagent's chat to text that continues each earlier upload as both chats grow", async () => {
+    // Replays the two files line by line in the order they were written, by timestamp, as uploads along the way saw them.
+    const lines = async (path: string) => (await readFile(path, "utf8")).split("\n").filter(Boolean);
+    const main = (await lines(fixture("resumed.jsonl"))).map((line) => ({ line, file: "main" }));
+    const subagent = (await lines(fixture("resumed/subagents/agent-ares.jsonl"))).map((line) => ({ line, file: "subagent" }));
+    const written = [...main, ...subagent].sort((a, b) => JSON.parse(a.line).timestamp.localeCompare(JSON.parse(b.line).timestamp));
+    const dir = await mkdtemp(join(tmpdir(), "cronk-hook-"));
+    let previous = "";
+    for (let n = 0; n <= written.length; n++) {
+      const chat = join(dir, String(n));
+      await mkdir(join(chat, "subagents"), { recursive: true });
+      const of = (file: string) => written.slice(0, n).filter((entry) => entry.file === file).map((entry) => `${entry.line}\n`).join("");
+      await writeFile(`${chat}.jsonl`, of("main"));
+      await writeFile(join(chat, "subagents", "agent-ares.jsonl"), of("subagent"));
+      const text = await convert(`${chat}.jsonl`);
+      expect(text.startsWith(previous), `first ${n} lines written`).toBe(true);
+      previous = text;
+    }
+    expect(previous).toBe(await readFile(fixture("resumed.md"), "utf8"));
   });
 
   it("converts the main chat when the subagents' folder or a subagent's file is missing, leaving those subagents out", async () => {
