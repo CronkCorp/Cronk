@@ -377,6 +377,34 @@ describe("where a Suggestion waits", () => {
     expect(await inboxLines(bob)).toEqual([]);
   });
 
+  it("while the Ticket's Assignee is deactivated, is the Agent's Owner's Inbox, whose open views are told both ways", async () => {
+    const { cronk, admin, session } = await delegatedSetup(1);
+    const bob = await joinAs(cronk, admin, "bob@example.com");
+    const carol = await joinAs(cronk, admin, "carol@example.com");
+    const bobId = (await bob.get("/api/me")).body.user.id;
+    const { document } = (await admin.post("/api/projects/CRONK/documents", { title: "Architecture", body: "v1" })).body;
+    await admin.post(`/api/documents/${document.id}/protection`, { protected: true });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+    const suggestion = await suggestBody(agent, document.id, "v2");
+    await admin.patch("/api/tickets/CRONK-1", { assigneeId: bobId });
+    expect(await inboxLines(admin)).toEqual([]);
+    const owners = await admin.events("/api/inbox/events");
+    const others = await carol.events("/api/inbox/events");
+    expect((await owners.next())?.event).toBe("ready");
+    expect((await others.next())?.event).toBe("ready");
+
+    expect((await admin.patch(`/api/users/${bobId}`, { active: false })).status).toBe(200);
+    expect((await owners.next())?.event).toBe("changed");
+    expect(await inboxLines(admin)).toEqual(["suggestion Architecture"]);
+    await expect(others.next(500)).rejects.toThrow("No server-sent event came in time");
+
+    expect((await admin.patch(`/api/users/${bobId}`, { active: true })).status).toBe(200);
+    expect((await owners.next())?.event).toBe("changed");
+    expect(await inboxLines(admin)).toEqual([]);
+    expect((await admin.get(`/api/suggestions/${suggestion.id}`)).body.suggestion.reviewer).toMatchObject({ id: bobId });
+  });
+
   it("on a Workspace item, is Triage: nobody's Inbox", async () => {
     const { cronk, admin } = await startInstalledCronk();
     const { document } = (await admin.post("/api/workspace/documents", { title: "Handbook", body: "v1" })).body;

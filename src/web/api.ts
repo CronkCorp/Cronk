@@ -1,5 +1,6 @@
 /** A thin client for the Cronk HTTP API. The UI holds no rules; the API decides. */
 
+import type { ArtifactAt } from "../shared/artifact-embeds.js";
 import type {
   Access,
   Activity,
@@ -46,6 +47,7 @@ import type {
   RelationKind,
   Relations,
   BlockingRef,
+  HiddenBlocker,
   Report,
   ReopenChoice,
   DependentChoice,
@@ -122,6 +124,7 @@ export type {
   RelationKind,
   Relations,
   BlockingRef,
+  HiddenBlocker,
   Report,
   ReopenChoice,
   DependentChoice,
@@ -354,6 +357,8 @@ export const api = {
     request<{ version: ArtifactVersion }>("GET", `${artifactPath(id)}/versions/${number}`).then((r) => r.version),
   /** Where an Artifact is embedded that the caller can read, most recently changed first. */
   artifactEmbeddedIn: (id: string) => request<{ embeddedIn: EmbeddedIn[] }>("GET", `${artifactPath(id)}/embedded-in`).then((r) => r.embeddedIn),
+  /** What a draft Markdown body would embed, as saving it as a Document, Report or Comment would answer; records nothing. */
+  draftEmbeds: (body: string) => request<{ embeds: ArtifactAt[] }>("POST", "/api/markdown/embeds", { body }).then((r) => r.embeds),
   /** Publishes a folder, packed as an archive, as a new Artifact. */
   publishArtifact: (projectKey: string | undefined, title: string, archive: Blob, extraOrigins: ExtraOrigin[] = []) =>
     upload<{ artifact: Artifact }>(`${scopePath(projectKey)}/artifacts?${publishQuery({ title }, extraOrigins)}`, archive, "application/gzip").then(
@@ -464,6 +469,9 @@ export const api = {
     request<{ relations: Relations }>("POST", `/api/tickets/${encodeURIComponent(key)}/relations`, { kind, ticketKey }).then(
       (r) => r.relations,
     ),
+  /** Removes a block an Agent added from its Discovered Ticket by the block's id, as for one from a Ticket the User can't see; answers the Ticket's relations. */
+  removeBlock: (key: string, blockId: string) =>
+    request<{ relations: Relations }>("DELETE", `/api/tickets/${encodeURIComponent(key)}/blocked-by/${encodeURIComponent(blockId)}`).then((r) => r.relations),
   removeRelation: (key: string, kind: RelationKind, otherKey: string) =>
     request<{ relations: Relations }>(
       "DELETE",

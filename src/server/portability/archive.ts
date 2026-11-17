@@ -75,6 +75,9 @@ const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
  */
 export const MAX_PACKED_BYTES = 200 * 1024 * 1024;
 
+/** The most one streamed import may write, to local disk and the file store together, unless configured otherwise: 50 GiB. */
+export const DEFAULT_IMPORT_MAX_BYTES = 50 * 1024 ** 3;
+
 /** Packs `folder` into a gzipped tar archive. */
 export async function packFolder(folder: Folder): Promise<Buffer> {
   const pack = tar.pack();
@@ -336,6 +339,8 @@ export interface Unpacking {
   isMarkdown(path: string): boolean;
   /** The most bytes the file at `path` may take, given the Markdown files unpacked so far, and what it is, for refusing it. */
   limit(path: string, markdown: StoredFolder): { maxBytes: number; of: string };
+  /** The most bytes the whole import may write, to local disk and the store together, before it is refused. */
+  importMaxBytes: number;
 }
 
 /**
@@ -343,21 +348,51 @@ export interface Unpacking {
  * `unpacking.isMarkdown` says they are Markdown: every other file is streamed into the store under a temporary key as it
  * arrives, capped at the size `unpacking.limit` allows, and stands in the folder as a `StoredFile`. The archive limits count only the Markdown files.
  * A gzipped or plain tar archive is read as it streams; a zip archive, whose directory is at its end, is written
- * to a temporary file on local disk first and read from there.
+ * to a temporary file on local disk first and read from there. Everything written, that file and every file in the store,
+ * counts towards `unpacking.importMaxBytes`: past it, the import stops reading and is refused with a 413.
  */
 export async function unpackFolderStream(body: Readable, unpacking: Unpacking): Promise<StoredFolder> {
+  const written = new WrittenBytes(unpacking.importMaxBytes);
   const [head, rest] = await peek(body, 4);
   if (signedAt(head, 0, ZIP_LOCAL) || signedAt(head, 0, ZIP_END)) {
     const dir = await mkdtemp(join(tmpdir(), "cronk-import-"));
     try {
       const path = join(dir, "upload.zip");
-      await pipeline(rest, createWriteStream(path));
-      return await unzipFileToStore(path, unpacking);
+      await pipeline(rest, written.counting(), createWriteStream(path));
+      return await unzipFileToStore(path, unpacking, written);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   }
-  return untarToStore(rest, head[0] === 0x1f && head[1] === 0x8b, unpacking);
+  return untarToStore(rest, head[0] === 0x1f && head[1] === 0x8b, unpacking, written);
+}
+
+/** Counts the bytes one streamed import writes, to local disk and the store, refusing it once they grow past `maxBytes`. */
+class WrittenBytes {
+  private bytes = 0;
+
+  constructor(private readonly maxBytes: number) {}
+
+  /** Whether the import has written more than it may. */
+  get exceeded(): boolean {
+    return this.bytes > this.maxBytes;
+  }
+
+  /** The refusal of an import that has written more than it may. */
+  tooLarge(): HttpError {
+    return new HttpError(413, `This archive is larger than ${formatBytes(this.maxBytes)}, the most an import may take`);
+  }
+
+  /** A stream passing on bytes about to be written, counting them, failing with `tooLarge()` before passing on any past the limit. */
+  counting(): Transform {
+    return new Transform({
+      transform: (chunk: Buffer, _encoding, done) => {
+        this.bytes += chunk.length;
+        if (this.exceeded) done(this.tooLarge());
+        else done(null, chunk);
+      },
+    });
+  }
 }
 
 /** Peeks at the start of `body`: its first `n` bytes (fewer if it is shorter), and `body` whole again, those bytes included. */
@@ -421,14 +456,21 @@ class MarkdownBudget {
   }
 }
 
-/** Streams the file at `path`, which `file` gives, into the store under a temporary key, refusing it past its cap with a 413 naming it. */
-async function storeUnpacked(path: string, file: Readable, unpacking: Unpacking, folder: StoredFolder): Promise<void> {
+/**
+ * Streams the file at `path`, which `file` gives, into the store under a temporary key, refusing it past its cap with a 413 naming it,
+ * or with the 413 of `written` once the import has written more than it may.
+ */
+async function storeUnpacked(path: string, file: Readable, unpacking: Unpacking, folder: StoredFolder, written: WrittenBytes): Promise<void> {
   const { maxBytes, of } = unpacking.limit(path, folder);
   const key = unpacking.temporaryKey();
+  const counted = written.counting();
+  // Either side failing ends the other: the store sees the failure, and the file is no longer read.
+  pipeline(file, counted).catch(() => {});
   try {
-    folder.set(path, { key, size: await unpacking.store.put(key, file, { maxBytes }) });
+    folder.set(path, { key, size: await unpacking.store.put(key, counted, { maxBytes }) });
   } catch (err) {
     if (err instanceof FileTooLarge) throw new HttpError(413, `${path} is larger than ${formatBytes(maxBytes)}, the most ${of} may take in this Workspace`);
+    if (written.exceeded) throw written.tooLarge();
     throw err;
   }
 }
@@ -446,7 +488,7 @@ function byteCounter(): { stream: Transform; count: () => number } {
 }
 
 /** The files of a tar archive, gzipped if `gzipped`, as `body` streams them in; see `unpackFolderStream`. */
-async function untarToStore(body: Readable, gzipped: boolean, unpacking: Unpacking): Promise<StoredFolder> {
+async function untarToStore(body: Readable, gzipped: boolean, unpacking: Unpacking, written: WrittenBytes): Promise<StoredFolder> {
   const folder: StoredFolder = new Map();
   const budget = new MarkdownBudget();
   // The packed bytes read so far, for what the Markdown files take packed, and the first 512 bytes of the tar inside.
@@ -480,7 +522,7 @@ async function untarToStore(body: Readable, gzipped: boolean, unpacking: Unpacki
         folder.set(path, await budget.read(file));
         budget.addPacked(packed.count() - start);
       } else {
-        await storeUnpacked(path, file, unpacking, folder);
+        await storeUnpacked(path, file, unpacking, folder, written);
       }
     }
     await feeding;
@@ -496,10 +538,10 @@ async function untarToStore(body: Readable, gzipped: boolean, unpacking: Unpacki
 }
 
 /** The files of the zip archive in the file at `path`, read from its central directory; see `unpackFolderStream`. */
-async function unzipFileToStore(path: string, unpacking: Unpacking): Promise<StoredFolder> {
+async function unzipFileToStore(path: string, unpacking: Unpacking, written: WrittenBytes): Promise<StoredFolder> {
   const file = await open(path);
   try {
-    return await readZipFile(file, path, unpacking);
+    return await readZipFile(file, path, unpacking, written);
   } catch (err) {
     if (err instanceof HttpError) throw err;
     // Reading past the end of the file, or inflating what doesn't inflate, means a damaged archive.
@@ -518,7 +560,7 @@ async function readAt(file: FileHandle, at: number, length: number): Promise<Buf
 }
 
 /** The files of the zip archive open as `file`, at `path`, read entry by entry from its central directory. */
-async function readZipFile(file: FileHandle, path: string, unpacking: Unpacking): Promise<StoredFolder> {
+async function readZipFile(file: FileHandle, path: string, unpacking: Unpacking, written: WrittenBytes): Promise<StoredFolder> {
   const { size } = await file.stat();
   const tailStart = Math.max(0, size - 22 - 0xffff);
   const tail = await readAt(file, tailStart, size - tailStart);
@@ -537,7 +579,7 @@ async function readZipFile(file: FileHandle, path: string, unpacking: Unpacking)
       budget.addPacked(entry.packedSize);
       folder.set(entry.path, await budget.read(data));
     } else {
-      await storeUnpacked(entry.path, data, unpacking, folder);
+      await storeUnpacked(entry.path, data, unpacking, folder, written);
     }
   }
   return folder;

@@ -53,6 +53,10 @@ export type WaitingReason = (typeof WAITING_REASONS)[number];
 export const LINK_REASONS = ["report", "linked"] as const;
 export type LinkReason = (typeof LINK_REASONS)[number];
 
+/** Why Cronk refuses to keep an uploaded Transcript with a 422: its chat names none of the Agent's Agent Sessions that changed anything. */
+export const TRANSCRIPT_REFUSAL_REASONS = ["nothing_changed"] as const;
+export type TranscriptRefusalReason = (typeof TRANSCRIPT_REFUSAL_REASONS)[number];
+
 /** What can mention a Ticket, a Decision or a Term: its text names the Ticket's or Decision's key or the Term's name. */
 export const MENTION_KINDS = ["ticket", "document", "comment", "term", "decision", "activity"] as const;
 export type MentionKind = (typeof MENTION_KINDS)[number];
