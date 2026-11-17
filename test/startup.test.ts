@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { ada, delegatedSetup, startCronk, startInstalledCronk } from "./harness.js";
 
@@ -15,6 +16,28 @@ async function expectWithin(ms: number, work: Promise<unknown>): Promise<void> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Bytes an endless upload sends before it stalls: more than the connection's buffers hold, so once they are all taken the server is reading them. */
+const SENT_BEFORE_STALLING = 32 * 1024 * 1024;
+
+/**
+ * An upload body that sends `SENT_BEFORE_STALLING` bytes and then never sends more nor ends, as a very slow client does;
+ * `read` resolves once all those bytes have been taken.
+ */
+function endlessUpload(): { body: Readable; read: Promise<void> } {
+  const chunk = Buffer.alloc(1024 * 1024);
+  let sent = 0;
+  let allRead!: () => void;
+  const read = new Promise<void>((resolve) => (allRead = resolve));
+  const body = new Readable({
+    read() {
+      if (sent >= SENT_BEFORE_STALLING) return allRead();
+      sent += chunk.length;
+      this.push(chunk);
+    },
+  });
+  return { body, read };
 }
 
 describe("starting the application", () => {
@@ -105,6 +128,21 @@ describe("stopping the application", () => {
 
     expect((await reading).statusCode).toBe(500);
     expect((await admin.send("/api/health")).statusCode).toBe(200);
+  });
+
+  it("finishes within its bound while an upload's body never finishes arriving, and answers after it starts again", async () => {
+    const { cronk, admin } = await delegatedSetup(1, { closeWithinMs: CLOSE_WITHIN_MS });
+    const upload = endlessUpload();
+    const uploading = admin.send("/api/tickets/CRONK-1/attachments?name=endless.bin", { method: "POST", body: upload.body, headers: { "content-type": "application/octet-stream" } });
+    uploading.catch(() => {});
+    await upload.read;
+
+    await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+
+    // The client mid-upload sees its connection end without an answer, and nothing of the upload is kept.
+    await expect(uploading).rejects.toThrow();
+    expect((await admin.send("/api/health")).statusCode).toBe(200);
+    expect((await admin.get("/api/tickets/CRONK-1/attachments")).body.attachments).toEqual([]);
   });
 });
 
