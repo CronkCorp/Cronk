@@ -355,7 +355,7 @@ function DiscoveredField(props: { ticket: Ticket }) {
   return (
     <div className="side-field">
       <span className="side-field-label">Discovered</span>
-      <span>
+      <span className="side-field-value">
         by <Actor actor={agentActor(agent)} owner={false} />
         {sourceTicket && (
           <>
