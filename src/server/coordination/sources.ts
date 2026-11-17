@@ -2,6 +2,7 @@ import type { Actor } from "../actor.js";
 import { HttpError } from "../context.js";
 import type { Queryable } from "../db/database.js";
 import { ticketFor } from "../work/ticket-reads.js";
+import { shareProject } from "../work/projects.js";
 import { lockTicketsByIds } from "../work/tickets.js";
 import { listSessionClaims, requireClaimHolder, type SessionClaim } from "./claims.js";
 
@@ -20,7 +21,8 @@ export interface SourceClaim {
  * Run inside the caller's transaction: it locks the returned Claim's Ticket and checks the Claim again once
  * locked, so a release, Delegate change or Claim-ending move waits until the caller commits, and one committed
  * first is seen. Without a named Ticket, the fitting Claims' Tickets are locked in id order, as other lockers of
- * several Tickets do.
+ * several Tickets do. A Project's `what` takes the Project's key-share lock first, as inserting `what` would after,
+ * so a Ticket is never locked ahead of its Project: creating Tickets and removing Statuses lock Project, then Ticket.
  */
 export async function sourceClaimOf(
   db: Queryable,
@@ -34,15 +36,16 @@ export async function sourceClaimOf(
     if (key !== undefined) throw new HttpError(400, `Only an Agent names the Ticket ${what} came from, as the one it holds the Claim on`);
     return null;
   }
+  if (projectId !== null) await shareProject(db, projectId);
   const sessionId = actor.session?.id;
-  const claimsHeld = async () => (sessionId ? await listSessionClaims(db, sessionId) : []);
+  const loadClaimsHeld = async () => (sessionId ? await listSessionClaims(db, sessionId) : []);
   const fits = (claim: SessionClaim) => (projectId === null ? !claim.private : claim.projectId === projectId);
   if (key === undefined) {
-    const candidates = new Set((await claimsHeld()).filter(fits).map((c) => c.ticketId));
+    const candidates = new Set((await loadClaimsHeld()).filter(fits).map((c) => c.ticketId));
     if (candidates.size === 0) return null;
     await lockTicketsByIds(db, [...candidates]);
     // Only Claims seen before locking: one this Session took meanwhile was never locked here.
-    const fitting = (await claimsHeld()).filter((c) => candidates.has(c.ticketId) && fits(c));
+    const fitting = (await loadClaimsHeld()).filter((c) => candidates.has(c.ticketId) && fits(c));
     if (fitting.length > 1) {
       throw new HttpError(400, `Your Agent Session holds the Claims on ${fitting.map((c) => c.ticketKey).join(", ")}; name the Ticket ${what} came from as \`ticket\``);
     }
@@ -50,7 +53,7 @@ export async function sourceClaimOf(
   }
   const ticket = await ticketFor(db, actor, key, "read", { forUpdate: true });
   const claimId = await requireClaimHolder(db, actor, ticket, now, `naming it as the Ticket ${what} came from`);
-  const claim = (await claimsHeld()).find((c) => c.claimId === claimId)!;
+  const claim = (await loadClaimsHeld()).find((c) => c.claimId === claimId)!;
   if (!fits(claim)) {
     const whole = what.replace(/^an? /, "");
     throw new HttpError(

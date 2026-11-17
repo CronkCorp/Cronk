@@ -203,18 +203,6 @@ export async function insertDecisionVersion(
   );
 }
 
-/**
- * Locks the row a scope's Decision numbers are kept on, as taking the next number does, until the transaction
- * ends. Creating a Decision takes it before locking its source Ticket, keeping Project before Ticket as creating
- * Tickets does, so the two can't deadlock. Other writes referencing the row aren't held up.
- */
-export async function lockDecisionNumbers(db: Queryable, scope: DecisionScope): Promise<void> {
-  await db.query(
-    scope.projectId === null ? "SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE" : "SELECT 1 FROM projects WHERE id = $1 FOR NO KEY UPDATE",
-    [scope.projectId ?? scope.workspaceId],
-  );
-}
-
 /** Takes the next Decision number of a scope. */
 async function nextNumber(db: Queryable, scope: DecisionScope): Promise<number> {
   const { rows } = await db.query<{ number: number }>(

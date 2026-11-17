@@ -18,7 +18,6 @@ import {
   findDecisionByKey,
   findDecisionVersion,
   insertDecision,
-  lockDecisionNumbers,
   listDecisions,
   listDecisionVersions,
   saveDecision,
@@ -146,7 +145,6 @@ export function decisionRoutes(ctx: AppContext) {
         group: groupOf(input.group),
         supersedes: await requireSuperseded(tx, scope, null, input.supersedes ?? []),
       };
-      await lockDecisionNumbers(tx, scope);
       const source = await sourceClaimOf(tx, actor, scope.projectId, input.ticket, ctx.clock.now(), "a Decision");
       const decision = await insertDecision(tx, scope, content, actor, ctx.clock.now(), source);
       return { decision, avoidedWords: await avoidedWordsIn(tx, actor, scope.projectId, titleAndBody(input)) };
