@@ -330,6 +330,12 @@ export interface Cronk {
    */
   heartbeat(): Promise<void>;
   /**
+   * Turns off the application's cut-off of the connections still open once closing has waited its bound, as a regression
+   * would: a request that never finishes (a download its client stops reading, say) then keeps closing from finishing.
+   * Applies to the application running now, for as long as it runs; a `restart` starts one that cuts them off again.
+   */
+  keepConnectionsOpenOnClose(): void;
+  /**
    * Looks for lapsed Claims now, as the server does every `lapseCheckMs`, after any look already running, and waits until
    * it is done (failing if that look fails); so a test knows the server has looked since the clock last moved, and its watchers have been told.
    */
@@ -568,6 +574,10 @@ export async function startCronk(
     heartbeat: async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       await live.heartbeat();
+    },
+    keepConnectionsOpenOnClose: () => {
+      // Left in place when the test ends, as teardown closes this same application and must find the cut-off still off.
+      cronk.app.server.closeAllConnections = () => {};
     },
     lookForLapses: () => lookForLapses(),
     holdLookBetweenReads: async () => {
