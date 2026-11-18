@@ -11,19 +11,22 @@ export interface FixtureRun {
 }
 
 /**
- * Runs the fixture test named `name` alone, as a test run of its own with the vitest config at `config`, on this run's
- * Postgres. With `within`, the run is killed once it has taken that many milliseconds, so a run that would wait out a
- * hook timeout fails the test reading it rather than outlasting it.
+ * Binds a fixture suite's vitest config at `config`, and any bound, once. The function returned runs the fixture test
+ * named `name` alone, as a test run of its own with that config, on this run's Postgres. With `within`, each run is
+ * killed once it has taken that many milliseconds, so a run that would wait out a hook timeout fails the test reading
+ * it rather than outlasting it.
  */
-export async function runFixture(config: string, name: string, { within }: { within?: number } = {}): Promise<FixtureRun> {
-  const started = Date.now();
-  const output = await new Promise<string>((resolve) =>
-    execFile(
-      process.execPath,
-      [VITEST, "run", "--config", config, "--reporter=default", "-t", name],
-      { env: { ...process.env, TEST_POSTGRES_URL: inject("postgresAdminUrl"), NO_COLOR: "1", FORCE_COLOR: "0" }, timeout: within },
-      (_err, stdout, stderr) => resolve(stdout + stderr),
-    ),
-  );
-  return { output, ms: Date.now() - started };
+export function fixtureRun(config: string, { within }: { within?: number } = {}): (name: string) => Promise<FixtureRun> {
+  return async (name) => {
+    const started = Date.now();
+    const output = await new Promise<string>((resolve) =>
+      execFile(
+        process.execPath,
+        [VITEST, "run", "--config", config, "--reporter=default", "-t", name],
+        { env: { ...process.env, TEST_POSTGRES_URL: inject("postgresAdminUrl"), NO_COLOR: "1", FORCE_COLOR: "0" }, timeout: within },
+        (_err, stdout, stderr) => resolve(stdout + stderr),
+      ),
+    );
+    return { output, ms: Date.now() - started };
+  };
 }

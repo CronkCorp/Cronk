@@ -2,11 +2,13 @@ import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { describe, expect, inject, it } from "vitest";
-import { runFixture } from "./fixture-run.js";
+import { fixtureRun } from "./fixture-run.js";
 
-const CONFIG = fileURLToPath(new URL("fixtures/close-never-finishes/vitest.config.ts", import.meta.url));
 /** How long a fixture run may take: starting the run and Cronk, the test's own bound, and teardown's bound on closing. */
 const RUN_WITHIN_MS = 30_000;
+const runFixture = fixtureRun(fileURLToPath(new URL("fixtures/close-never-finishes/vitest.config.ts", import.meta.url)), {
+  within: RUN_WITHIN_MS,
+});
 
 /** Whether the database and the directory of files that a fixture test printed are still there after its run. */
 async function placesLeft(output: string): Promise<{ database: boolean; files: boolean }> {
@@ -25,7 +27,7 @@ async function placesLeft(output: string): Promise<{ database: boolean; files: b
 
 describe("a test whose close never finishes", () => {
   it("fails on a restart with its own error, without waiting out the hook timeout", { timeout: RUN_WITHIN_MS + 10_000 }, async () => {
-    const { output, ms } = await runFixture(CONFIG, "fails on a restart whose close never finishes", { within: RUN_WITHIN_MS });
+    const { output, ms } = await runFixture("fails on a restart whose close never finishes");
 
     expect(ms).toBeLessThan(RUN_WITHIN_MS);
     expect(output).toContain("1 failed");
@@ -39,7 +41,7 @@ describe("a test whose close never finishes", () => {
   });
 
   it("fails a test that passed, saying so, without waiting out the hook timeout", { timeout: RUN_WITHIN_MS + 10_000 }, async () => {
-    const { output, ms } = await runFixture(CONFIG, "fails on a close that never finishes once it passes", { within: RUN_WITHIN_MS });
+    const { output, ms } = await runFixture("fails on a close that never finishes once it passes");
 
     expect(ms).toBeLessThan(RUN_WITHIN_MS);
     expect(output).toContain("1 failed");
@@ -52,7 +54,7 @@ describe("a test whose close never finishes", () => {
 
 describe("a test whose close finishes", () => {
   it("leaves neither its database nor its files behind", { timeout: RUN_WITHIN_MS + 10_000 }, async () => {
-    const { output } = await runFixture(CONFIG, "passes, closing as it should", { within: RUN_WITHIN_MS });
+    const { output } = await runFixture("passes, closing as it should");
 
     expect(output).toContain("1 passed");
     expect(await placesLeft(output)).toEqual({ database: false, files: false });

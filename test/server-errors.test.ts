@@ -1,14 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { runFixture } from "./fixture-run.js";
+import { fixtureRun } from "./fixture-run.js";
 
 /** The error `failCommitsWriting` fails a commit with. */
 const COMMIT_FAILED = "Commit failed by the test harness";
-const CONFIG = fileURLToPath(new URL("fixtures/server-errors/vitest.config.ts", import.meta.url));
+const runFixture = fixtureRun(fileURLToPath(new URL("fixtures/server-errors/vitest.config.ts", import.meta.url)));
 
 describe("a test run", () => {
   it("shows the error behind an answer of 500 in a test that fails", async () => {
-    const { output } = await runFixture(CONFIG, "fails on an answer of 500");
+    const { output } = await runFixture("fails on an answer of 500");
 
     expect(output).toContain("1 failed");
     // The error failCommitsWriting raises, with its stack down into the code that sent the query.
@@ -16,7 +16,7 @@ describe("a test run", () => {
   });
 
   it("shows nothing of an answer of 400", async () => {
-    const { output } = await runFixture(CONFIG, "fails on an answer of 400");
+    const { output } = await runFixture("fails on an answer of 400");
 
     expect(output).toContain("1 failed");
     // Neither the refusal ("body must have required property 'key'") nor a heading for errors the server logged.
@@ -24,7 +24,7 @@ describe("a test run", () => {
   });
 
   it("shows nothing of an answer of 500 a passing test provokes", async () => {
-    const { output } = await runFixture(CONFIG, "passes on an answer of 500 it provokes");
+    const { output } = await runFixture("passes on an answer of 500 it provokes");
 
     expect(output).toContain("1 passed");
     expect(output).not.toContain(COMMIT_FAILED);
