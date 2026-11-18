@@ -1,6 +1,6 @@
 import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type ChangeActorRow, type RecordedActor, type StoredActor, type SystemActor } from "../actor.js";
 import { lockUntilCommit, type Queryable } from "../db/database.js";
-import type { Priority, RelationKind, StatusCategory, Verification } from "../../shared/values.js";
+import { FINISHED_CATEGORIES, type Priority, type RelationKind, type StatusCategory, type Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
 import { readableOnlyIn } from "../identity/readable-only-in.js";
@@ -174,9 +174,14 @@ export const isWaitingDiscovery = (ticket: Ticket): boolean =>
 export const isWaitingDiscoverySql = (t: string, s: string) =>
   `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog')`;
 
-/** Whether a User ever delegated the Ticket, as its history records. */
-export async function wasEverDelegated(db: Queryable, ticketId: string): Promise<boolean> {
-  const { rowCount } = await db.query("SELECT 1 FROM ticket_changes WHERE ticket_id = $1 AND change = 'delegate' LIMIT 1", [ticketId]);
+/** Whether a User ever delegated the Ticket, or moved it to a finished Status, as its history records. */
+export async function wasEverDelegatedOrFinished(db: Queryable, ticketId: string): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `SELECT 1 FROM ticket_changes
+     WHERE ticket_id = $1 AND (change = 'delegate' OR (change = 'status' AND data->'to'->>'category' = ANY($2)))
+     LIMIT 1`,
+    [ticketId, FINISHED_CATEGORIES],
+  );
   return rowCount !== 0;
 }
 

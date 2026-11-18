@@ -106,7 +106,7 @@ export function attachmentRoutes(ctx: AppContext) {
       "/api/tickets/:key/attachments",
       {
         schema: uploadSchema(
-          "Attaches a file to the Ticket. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.",
+          "Attaches a file to the Ticket. Needs Write in the Ticket's Project; an Agent must also hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has ever delegated or finished.",
           pathParams({ key: ticketKeyParam }),
         ),
       },

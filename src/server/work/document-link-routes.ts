@@ -43,7 +43,7 @@ export function documentLinkRoutes(ctx: AppContext) {
         schema: {
           params: linkParams,
           response: {
-            201: answer("The Ticket's Documents, with the one linked, and what mentions it. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.", documentsAndMentions),
+            201: answer("The Ticket's Documents, with the one linked, and what mentions it. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has ever delegated or finished.", documentsAndMentions),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
@@ -67,7 +67,7 @@ export function documentLinkRoutes(ctx: AppContext) {
         schema: {
           params: linkParams,
           response: {
-            200: answer("The Ticket's remaining Documents, and what mentions it. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has delegated or finished yet.", documentsAndMentions),
+            200: answer("The Ticket's remaining Documents, and what mentions it. An Agent must hold the Ticket's Claim, unless it is the Agent's own Discovered Ticket no User has ever delegated or finished.", documentsAndMentions),
             ...errors(400, 401, 403, 404, 409, 410),
           },
         },
