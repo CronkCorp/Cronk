@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, statusIn } from "./harness.js";
 
 /** The `ticketReady` event telling an Agent that `key` became Ready for it. */
 const readyEvent = (key: string) => ({ event: "ticketReady", data: { ticket: expect.objectContaining({ key }) } });
@@ -54,8 +54,7 @@ describe("An Agent Session's event stream", () => {
     const agent = await session();
     const stream = await agent.events("/api/agent-sessions/current/events");
     expect((await stream.next())?.event).toBe("ready");
-    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses;
-    const completed = statuses.find((s: any) => s.category === "completed").id;
+    const completed = await statusIn(admin, "completed");
 
     await admin.patch("/api/tickets/CRONK-1", { title: "Still Ready" });
     await admin.delete("/api/tickets/CRONK-1/relations/blocks/CRONK-2");
@@ -88,7 +87,7 @@ describe("An Agent Session's event stream", () => {
 
   it("tells the Agent when its Ticket is Sent back from review, and not when it goes into review", async () => {
     const { admin, session } = await delegatedSetup(1);
-    const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
+    const inReview = await statusIn(admin, "in_review");
     const holder = await session();
     await holder.post("/api/tickets/CRONK-1/claim");
     await holder.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." });
@@ -122,7 +121,7 @@ describe("An Agent Session's event stream", () => {
     const stream = await agent.events("/api/agent-sessions/current/events");
     expect((await stream.next())?.event).toBe("ready");
 
-    const backlog = (await admin.get("/api/projects/CRONK")).body.statuses[0].id;
+    const backlog = await statusIn(admin, "backlog");
     expect((await admin.delete(`/api/projects/CRONK/statuses/${shelved.id}?moveTo=${backlog}`)).status).toBe(204);
     expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
   });
@@ -135,7 +134,7 @@ describe("An Agent Session's event stream", () => {
     const stream = await agent.events("/api/agent-sessions/current/events");
     expect((await stream.next())?.event).toBe("ready");
 
-    const started = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "started").id;
+    const started = await statusIn(admin, "started");
     expect((await admin.delete(`/api/projects/CRONK/statuses/${checking.id}?moveTo=${started}`)).status).toBe(204);
     expect(await stream.next()).toEqual(readyEvent("CRONK-1"));
   });
