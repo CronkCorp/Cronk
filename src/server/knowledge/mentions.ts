@@ -211,7 +211,7 @@ const MENTIONS_LIMIT = 50;
 export type MentionTarget = { decisionKey: string } | { termId: string } | { ticketKey: string; ticketId: string };
 
 /**
- * The condition picking `target`'s rows of `mentions m`, with the query parameters it numbers from $1. A Ticket's
+ * The condition picking `target`'s rows of `mentions m`, its values bound to `params`. A Ticket's
  * own Comments, Activities and Reports and the Documents linked to it are left out, as the Ticket shows them already.
  */
 function mentionsOf(target: MentionTarget, params: QueryParams): string {

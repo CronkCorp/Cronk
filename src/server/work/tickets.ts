@@ -531,7 +531,8 @@ export interface TicketFilter {
 
 /** A Project's Tickets matching `filter`, in key order. */
 export async function listTickets(db: Queryable, projectId: string, filter: TicketFilter = {}): Promise<Ticket[]> {
-  const { values, bind } = queryParams();
+  const params = queryParams();
+  const { bind } = params;
   const conditions = [`t.project_id = ${bind(projectId, "uuid")}`];
   if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${bind(filter.statusIds, "uuid[]")})`);
   if (filter.categories?.length) conditions.push(`s.category = ANY(${bind(filter.categories, "text[]")})`);
@@ -549,7 +550,7 @@ export async function listTickets(db: Queryable, projectId: string, filter: Tick
       `EXISTS (SELECT 1 FROM unnest(t.labels) AS l WHERE lower(l) = ANY(${bind(filter.labels.map((l) => l.trim().toLowerCase()), "text[]")}))`,
     );
   }
-  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, values);
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, params.values);
   return rows.map(toTicket);
 }
 
