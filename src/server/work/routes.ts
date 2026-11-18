@@ -702,7 +702,7 @@ export function workRoutes(ctx: AppContext) {
           response: {
             201: answer(
               "The Ticket's relations, with the new one. An Agent must hold the Ticket's Claim, except to add a block, with a reason, from its own Discovered Ticket " +
-                "no User has delegated or finished yet: that may block any Ticket the Agent can read.",
+                "no User has ever delegated or finished: that may block any Ticket the Agent can read.",
               holding("relations", "Relations"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -716,7 +716,7 @@ export function workRoutes(ctx: AppContext) {
           const { ticket, other, discoveredBlock } = await relationEnds(tx, actor, request.params.key, request.body.ticketKey, kind, ctx.clock.now(), { checkLockOrder: ctx.checkLockOrder });
           if (discoveredBlock && reason === undefined) throw new HttpError(400, `Say why ${ticket.key} blocks ${other.key} with a reason`);
           if (!discoveredBlock && reason !== undefined) {
-            throw new HttpError(400, "Only an Agent gives a reason, for a block from its own Discovered Ticket no User has delegated or finished yet");
+            throw new HttpError(400, "Only an Agent gives a reason, for a block from its own Discovered Ticket no User has ever delegated or finished");
           }
           const added = await addRelation(tx, actingUser(actor).workspaceId, {
             ticket,
@@ -754,7 +754,7 @@ export function workRoutes(ctx: AppContext) {
             200: answer(
               "The Ticket's remaining relations. Needs Write in both Tickets' Projects, except that a User removes a block an Agent added from its Discovered Ticket " +
                 "from the blocked Ticket's side with Write there and Read in the other. An Agent must hold the Ticket's Claim, except to remove a block from its own " +
-                "Discovered Ticket no User has delegated or finished yet.",
+                "Discovered Ticket no User has ever delegated or finished.",
               holding("relations", "Relations"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -842,7 +842,7 @@ export function workRoutes(ctx: AppContext) {
           },
           response: {
             200: answer(
-              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to move it, and to change its fields unless it is the Agent's own Discovered Ticket no User has delegated or finished yet, and can't assign or delegate it.",
+              "The changed Ticket, with the words to avoid in the title and description it was sent. An Agent must hold its Claim to move it, and to change its fields unless it is the Agent's own Discovered Ticket no User has ever delegated or finished, and can't assign or delegate it.",
               savedHolding("ticket", "Ticket"),
             ),
             ...errors(400, 401, 403, 404, 409, 410),
@@ -1097,7 +1097,7 @@ async function parentFor(tx: Queryable, workspaceId: string, ticket: Ticket, key
  * The two Tickets of a Relation being changed, if `actor` has Write in both Projects,
  * since the change shows on both. A missing or hidden `key` answers 404; a missing or
  * hidden `otherKey`, 400. An Agent must also hold the Claim on `key`'s Ticket (a 409), except for a
- * block from its own Discovered Ticket no User has delegated or finished yet (`discoveredBlock`), which
+ * block from its own Discovered Ticket no User has ever delegated or finished (`discoveredBlock`), which
  * may block any Ticket the Agent can read. Adding a block takes the Workspace's blocking lock (see lockBlocking).
  */
 async function relationEnds(
