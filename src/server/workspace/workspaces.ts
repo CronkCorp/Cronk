@@ -1,4 +1,4 @@
-import type { Queryable } from "../db/database.js";
+import { queryParams, type Queryable } from "../db/database.js";
 import type { AgentAccess } from "../identity/access.js";
 
 const MB = 1024 * 1024;
@@ -158,18 +158,16 @@ export async function updateWorkspace(
   id: string,
   changes: WorkspaceChanges,
 ): Promise<Workspace> {
-  const columns: [string, unknown][] = [
-    ["name", changes.name],
-    ["agent_access", changes.agentAccess],
-    ...WORKSPACE_SETTINGS.map((s): [string, unknown] => [s.column, changes[s.name]]),
-    ["artifact_allowed_origins", changes.artifactAllowedOrigins],
-    ["artifact_extra_origins_allowed", changes.artifactExtraOriginsAllowed],
+  const columns: [column: string, value: unknown, type: string][] = [
+    ["name", changes.name, "text"],
+    ["agent_access", changes.agentAccess, "text"],
+    ...WORKSPACE_SETTINGS.map((s): [column: string, value: unknown, type: string] => [s.column, changes[s.name], s.bigint ? "bigint" : "integer"]),
+    ["artifact_allowed_origins", changes.artifactAllowedOrigins, "text[]"],
+    ["artifact_extra_origins_allowed", changes.artifactExtraOriginsAllowed, "boolean"],
   ];
   // Column names come from this module, never from the caller; every value is a parameter.
-  const sets = columns.map(([column], i) => `${column} = coalesce($${i + 2}, ${column})`).join(", ");
-  const { rows } = await db.query<WorkspaceRow>(`UPDATE workspaces SET ${sets} WHERE id = $1 RETURNING *`, [
-    id,
-    ...columns.map(([, value]) => value ?? null),
-  ]);
+  const params = queryParams();
+  const sets = columns.map(([column, value, type]) => `${column} = coalesce(${params.bind(value ?? null, type)}, ${column})`).join(", ");
+  const { rows } = await db.query<WorkspaceRow>(`UPDATE workspaces SET ${sets} WHERE id = ${params.bind(id, "uuid")} RETURNING *`, params.values);
   return toWorkspace(rows[0]!);
 }
