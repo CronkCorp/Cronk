@@ -159,9 +159,12 @@ const toTicket = (row: TicketRow): Ticket => ({
   updatedAt: row.updated_at,
 });
 
-/** SQL condition: the Ticket change `c` moved its Ticket to a finished Status. */
+/**
+ * SQL condition: the Ticket change `c` is a User's move of its Ticket to a finished Status. Only a User's finish vets a
+ * Discovered Ticket (ADR 0002), so a finish an Agent made settles nothing.
+ */
 export const isFinishChangeSql = (c: string) =>
-  `(${c}.change = 'status' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
+  `(${c}.change = 'status' AND ${c}.actor_kind = 'user' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
 
 /** SQL condition: the history of the Ticket `t` records a move to a finished Status, whatever Status it is in now. */
 const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isFinishChangeSql("c")})`;
@@ -178,8 +181,8 @@ const SELECT_TICKETS = `
 
 /**
  * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated, not kept there and never
- * finished. Delegating, keeping or moving it out of Backlog settles it; finishing it (completing or cancelling) settles it
- * for good, so moved back to Backlog it doesn't wait again, as its history records. `isWaitingDiscoverySql` says the same in SQL.
+ * finished by a User. Delegating, keeping or moving it out of Backlog settles it; a User's finish (completing or cancelling)
+ * settles it for good, so moved back to Backlog it doesn't wait again, as its history records. `isWaitingDiscoverySql` says the same in SQL.
  */
 export const isWaitingDiscovery = (ticket: Ticket): boolean =>
   ticket.discovered !== null &&

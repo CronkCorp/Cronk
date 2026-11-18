@@ -1412,3 +1412,45 @@ describe("a block from a Discovered Ticket a User finished undelegated, in an ex
     expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "relation removed", kind: "blocked_by", ticket: { key: "CRONK-2" } });
   });
 });
+
+/**
+ * An export of a Discovered Ticket the Agent that filed it once finished undelegated, and moved back to Backlog, as its
+ * history records: no route lets an Agent make that finish, so only an export can say it happened.
+ */
+async function exportFinishedByItsAgent() {
+  const { admin, claude, session } = await delegatedSetup(1);
+  const agent = await session();
+  await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason: "Builds on it." }] });
+  const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+  const path = "projects/CRONK/tickets/CRONK-2.history.md";
+  const { changes } = markdown(files[path]).data;
+  const backlog = { id: await statusIn(admin, "backlog"), name: "Backlog", category: "backlog", current: "Backlog" };
+  const completed = { id: await statusIn(admin, "completed"), name: "Done", category: "completed", current: "Done" };
+  const by = { agent: claude.agentId, session: agent.sessionId };
+  const finishedAndBack = [
+    { at: "2099-01-01T09:00:00.000Z", by, change: "status", from: backlog, to: completed },
+    { at: "2099-01-01T09:01:00.000Z", by, change: "status", from: completed, to: backlog },
+  ];
+  return tarGz({ ...files, [path]: `---\n${stringify({ changes: [...changes, ...finishedAndBack] })}---\n` });
+}
+
+describe("a Discovered Ticket its Agent finished undelegated, in an export", () => {
+  it("is imported still blocking what the Agent blocked from it: only a User's finish vets it", async () => {
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", await exportFinishedByItsAgent())).status).toBe(201);
+
+    expect((await elsewhere.admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-2", block: { reason: "Builds on it." } }]);
+  });
+
+  it("is imported still the Agent's to change without a Claim: only a User's finish ends that", async () => {
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", await exportFinishedByItsAgent())).status).toBe(201);
+    const [claude] = (await elsewhere.admin.get("/api/agents")).body.agents;
+    const agent = await startSession(elsewhere.cronk, (await elsewhere.admin.post(`/api/agents/${claude.id}/tokens`, {})).body.secret);
+
+    const changed = await agent.patch("/api/tickets/CRONK-2", { title: "Migration leaves orphaned rows" });
+
+    expect(changed.status).toBe(200);
+    expect(changed.body.ticket.title).toBe("Migration leaves orphaned rows");
+  });
+});
