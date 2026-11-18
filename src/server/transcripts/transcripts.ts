@@ -212,8 +212,8 @@ interface ItemPlace {
 
 /**
  * Where an item of each LinkedKind lies, and how to read it: the one source of both the many-at-once check (transcriptPlacesSql) and
- * the table, joins and `project_id` of each CHANGED query, so the places the two find can't drift apart. Typed over the LinkedKinds, so a kind added to LINKED_KINDS without its place here is a
- * type error. A Report lies in its Ticket's Project.
+ * the table, joins and `project_id` of each CHANGED query, so the places the two find can't drift apart. Typed over the LinkedKinds,
+ * so a kind added to LINKED_KINDS without its place here is a type error. A Report lies in its Ticket's Project.
  */
 const ITEM_PLACES: Record<LinkedKind, ItemPlace> = {
   ticket: { table: "tickets", alias: "t", projectId: "t.project_id" },
