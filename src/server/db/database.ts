@@ -4,6 +4,19 @@ import { migrations as allMigrations, type Migration } from "./migrations.js";
 
 export type Queryable = Database | pg.PoolClient;
 
+/** A query's parameters, each bound where the SQL that reads it is written: pass `values` with the query. */
+export interface QueryParams {
+  readonly values: unknown[];
+  /** Binds `value` as the next parameter, returning SQL that reads it as `type` (a Postgres type, such as `uuid[]`). */
+  bind(value: unknown, type: string): string;
+}
+
+/** Parameters for one query, none bound yet. */
+export function queryParams(): QueryParams {
+  const values: unknown[] = [];
+  return { values, bind: (value, type) => `$${values.push(value)}::${type}` };
+}
+
 /** What the server uses of its database: queries, connections for transactions, and closing within a bound. */
 export interface Database {
   query: pg.Pool["query"];

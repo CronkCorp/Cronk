@@ -1,5 +1,5 @@
 import { actorColumns, toRecordedActor, type Actor, type StoredActor, type RecordedActor, type RecordedActorRow } from "../actor.js";
-import { lockUntilCommit, type PublishingTransaction, type Queryable } from "../db/database.js";
+import { lockUntilCommit, queryParams, type PublishingTransaction, type Queryable } from "../db/database.js";
 import { documentTopic } from "../live/topics.js";
 import { ticketKeySql } from "../work/tickets.js";
 import { readableClause, type Readable } from "../identity/access.js";
@@ -410,13 +410,14 @@ export async function listLinkedDocuments(
     `SELECT d.id, d.title, d.project_key AS "projectKey", d.ticket_key AS "ticketKey", d.version, d.updated_at AS "updatedAt", '${reason}' AS reason,
        ${documentProtectedSql("d")} AS protected
      FROM (${SELECT_DOCUMENTS}) d`;
-  const readableWhere = readableClause("d", readable, 2);
   const reports = await db.query<LinkedDocument>(`${select("report")} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticket.id]);
+  const params = queryParams();
+  const ticketId = params.bind(ticket.id, "uuid");
   const linked = await db.query<LinkedDocument>(
-    `${select("linked")} JOIN ticket_document_links l ON l.document_id = d.id AND l.ticket_id = $1
-     WHERE d.ticket_id IS DISTINCT FROM $1 AND ${readableWhere.sql}
+    `${select("linked")} JOIN ticket_document_links l ON l.document_id = d.id AND l.ticket_id = ${ticketId}
+     WHERE d.ticket_id IS DISTINCT FROM ${ticketId} AND ${readableClause("d", readable, params)}
      ORDER BY l.seq`,
-    [ticket.id, ...readableWhere.params],
+    params.values,
   );
   return [...reports.rows, ...linked.rows];
 }

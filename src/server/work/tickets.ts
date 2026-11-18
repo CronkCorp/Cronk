@@ -1,5 +1,5 @@
 import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type ChangeActorRow, type RecordedActor, type StoredActor, type SystemActor } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, queryParams, type Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, type Priority, type RelationKind, type StatusCategory, type Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
@@ -531,26 +531,25 @@ export interface TicketFilter {
 
 /** A Project's Tickets matching `filter`, in key order. */
 export async function listTickets(db: Queryable, projectId: string, filter: TicketFilter = {}): Promise<Ticket[]> {
-  const params: unknown[] = [projectId];
-  const conditions = ["t.project_id = $1"];
-  const param = (value: unknown) => `$${params.push(value)}`;
-  if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${param(filter.statusIds)}::uuid[])`);
-  if (filter.categories?.length) conditions.push(`s.category = ANY(${param(filter.categories)}::text[])`);
+  const { values, bind } = queryParams();
+  const conditions = [`t.project_id = ${bind(projectId, "uuid")}`];
+  if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${bind(filter.statusIds, "uuid[]")})`);
+  if (filter.categories?.length) conditions.push(`s.category = ANY(${bind(filter.categories, "text[]")})`);
   /** Adds the condition that `column` holds one of `values`, where null means it is empty. */
   const matchAnyOrNone = (column: string, values: (string | null)[]) => {
     const ids = values.filter((id) => id !== null);
     const orNone = ids.length < values.length;
-    conditions.push(`(${column} = ANY(${param(ids)}::uuid[])${orNone ? ` OR ${column} IS NULL` : ""})`);
+    conditions.push(`(${column} = ANY(${bind(ids, "uuid[]")})${orNone ? ` OR ${column} IS NULL` : ""})`);
   };
   if (filter.assigneeIds?.length) matchAnyOrNone("t.assignee_id", filter.assigneeIds);
   if (filter.delegateIds?.length) matchAnyOrNone("t.delegate_id", filter.delegateIds);
-  if (filter.priorities?.length) conditions.push(`t.priority = ANY(${param(filter.priorities)}::text[])`);
+  if (filter.priorities?.length) conditions.push(`t.priority = ANY(${bind(filter.priorities, "text[]")})`);
   if (filter.labels?.length) {
     conditions.push(
-      `EXISTS (SELECT 1 FROM unnest(t.labels) AS l WHERE lower(l) = ANY(${param(filter.labels.map((l) => l.trim().toLowerCase()))}::text[]))`,
+      `EXISTS (SELECT 1 FROM unnest(t.labels) AS l WHERE lower(l) = ANY(${bind(filter.labels.map((l) => l.trim().toLowerCase()), "text[]")}))`,
     );
   }
-  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, params);
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, values);
   return rows.map(toTicket);
 }
 
