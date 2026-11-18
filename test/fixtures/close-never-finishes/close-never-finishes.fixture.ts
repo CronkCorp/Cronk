@@ -1,6 +1,6 @@
 // Tests that `test/close-never-finishes.test.ts` runs, to read what the run prints. The first two fail on purpose.
 import { randomBytes } from "node:crypto";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { delegatedSetup, type Client, type Cronk } from "../../harness.js";
 
 /** The bound on closing these tests start Cronk with. */
@@ -18,7 +18,7 @@ const MORE_THAN_BUFFERED = 32 * 1024 * 1024;
 async function stallClosing(cronk: Cronk, client: Client): Promise<void> {
   const res = await client.upload("/api/tickets/CRONK-1/attachments?name=large.bin", randomBytes(MORE_THAN_BUFFERED), "application/octet-stream");
   expect(res.status, JSON.stringify(res.body)).toBe(201);
-  vi.spyOn(cronk.app.server, "closeAllConnections").mockImplementation(() => {});
+  cronk.keepConnectionsOpenOnClose();
   const download = await client.send(`/api/attachments/${res.body.attachment.id}/file`);
   expect(download.statusCode).toBe(200);
   await new Promise((resolve) => download.once("readable", resolve));
