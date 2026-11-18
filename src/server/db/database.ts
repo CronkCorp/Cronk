@@ -78,7 +78,7 @@ class PgDatabase implements Database {
 }
 
 /** The longest cutting off connections takes, past the bound, should Postgres not answer. */
-const CUT_OFF_MS = 1_000;
+export const CUT_OFF_MS = 1_000;
 
 /** What pg knows of a connection but doesn't declare: Postgres's process id for its session, and its socket. */
 function pgInternals(client: pg.PoolClient): { processID: number; connection: { stream: { destroy(): void } } } {
