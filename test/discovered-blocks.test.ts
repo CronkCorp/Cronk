@@ -202,6 +202,47 @@ describe("Blocks an Agent added from its Discovered Ticket before a User finishe
     expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blocks).toEqual([]);
     expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
   });
+
+  it("leave the Inbox and Triage block lists, and both Tickets' history records them ended by the User", async () => {
+    const { admin, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }, { ticketKey: "CRONK-2", reason }] });
+
+    await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "canceled") });
+    await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "backlog") });
+
+    const [item] = (await admin.get("/api/inbox?kind=discovered")).body.items;
+    expect(item).toMatchObject({ ticket: { key: "CRONK-3" }, blocks: [], hiddenBlocks: 0 });
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: null });
+    expect((await admin.get("/api/triage?kind=discovered")).body.items).toMatchObject([{ ticket: { key: "CRONK-3" }, blocks: [], hiddenBlocks: 0 }]);
+    const changes = async (key: string) => (await admin.get(`/api/tickets/${key}/changes`)).body.changes.filter((c: any) => c.change === "relation removed");
+    expect(await changes("CRONK-3")).toMatchObject([
+      { kind: "blocks", ticket: { key: "CRONK-1" }, actor: { kind: "user" } },
+      { kind: "blocks", ticket: { key: "CRONK-2" }, actor: { kind: "user" } },
+    ]);
+    expect(await changes("CRONK-1")).toMatchObject([{ kind: "blocked_by", ticket: { key: "CRONK-3" }, actor: { kind: "user" } }]);
+  });
+
+  it("leave blocks a User added from it, and those from a Discovered Ticket a User delegated, blocking once it is moved back", async () => {
+    const { admin, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+    await admin.post("/api/tickets/CRONK-3/relations", { kind: "blocks", ticketKey: "CRONK-2" });
+    await agent.post("/api/projects/CRONK/tickets", { title: "Docs are stale", blocks: [{ ticketKey: "CRONK-1", reason }] });
+    await admin.patch("/api/tickets/CRONK-4", { delegateId: claude.agentId });
+    await admin.patch("/api/tickets/CRONK-4", { delegateId: null });
+
+    for (const key of ["CRONK-3", "CRONK-4"]) {
+      await admin.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "completed") });
+      await admin.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "backlog") });
+    }
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-3", block: null }]);
+    const claim = await agent.post("/api/tickets/CRONK-2/claim");
+    expect(claim.status).toBe(409);
+    expect(claim.body.error).toContain("CRONK-2 is blocked by CRONK-3");
+  });
 });
 
 describe("Blocks added at once by holders of the Tickets' Claims", () => {
