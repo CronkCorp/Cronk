@@ -39,9 +39,9 @@ const healthSchema = { type: "object", required: ["status"], properties: { statu
 /** Where the OpenAPI description is served; it takes any query string. */
 const OPENAPI_PATH = "/api/openapi.json";
 /** How long closing waits on the database unless told otherwise; see `closeWithinMs`. */
-const DEFAULT_CLOSE_WITHIN_MS = 5_000;
+export const DEFAULT_CLOSE_WITHIN_MS = 5_000;
 /** How long closing gives a request cut off from the database to send its answer before ending every connection still open. */
-const ANSWER_CUT_OFF_WITHIN_MS = 250;
+export const ANSWER_CUT_OFF_WITHIN_MS = 250;
 
 export interface AppConfig {
   databaseUrl: string;

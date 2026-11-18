@@ -4,6 +4,19 @@ import { migrations as allMigrations, type Migration } from "./migrations.js";
 
 export type Queryable = Database | pg.PoolClient;
 
+/** A query's parameters, each bound where the SQL that reads it is written: pass `values` with the query. */
+export interface QueryParams {
+  readonly values: unknown[];
+  /** Binds `value` as the next parameter, returning SQL that reads it as `type` (a Postgres type, such as `uuid[]`). */
+  bind(value: unknown, type: string): string;
+}
+
+/** Parameters for one query, none bound yet. */
+export function queryParams(): QueryParams {
+  const values: unknown[] = [];
+  return { values, bind: (value, type) => `$${values.push(value)}::${type}` };
+}
+
 /** What the server uses of its database: queries, connections for transactions, and closing within a bound. */
 export interface Database {
   query: pg.Pool["query"];
@@ -78,7 +91,7 @@ class PgDatabase implements Database {
 }
 
 /** The longest cutting off connections takes, past the bound, should Postgres not answer. */
-const CUT_OFF_MS = 1_000;
+export const CUT_OFF_MS = 1_000;
 
 /** What pg knows of a connection but doesn't declare: Postgres's process id for its session, and its socket. */
 function pgInternals(client: pg.PoolClient): { processID: number; connection: { stream: { destroy(): void } } } {

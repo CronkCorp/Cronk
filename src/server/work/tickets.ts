@@ -1,5 +1,5 @@
 import { changeActorColumns, toChangeActor, type Actor, type ChangeActor, type ChangeActorRow, type RecordedActor, type StoredActor, type SystemActor } from "../actor.js";
-import { lockUntilCommit, type Queryable } from "../db/database.js";
+import { lockUntilCommit, queryParams, type Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, type Priority, type RelationKind, type StatusCategory, type Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
@@ -78,13 +78,15 @@ export interface Ticket {
 /**
  * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket, of
  * any Project, it was working on then, holding its Claim, if any; one of another Project is tagged `readableOnlyIn` it,
- * so only readers of that Project see it. `kept` records a User's Keep in Backlog.
+ * so only readers of that Project see it. `kept` records a User's Keep in Backlog; `everFinished` whether its history
+ * records a move to a finished Status (see `everFinishedSql`).
  */
 export interface Discovery {
   agent: AgentRef;
   session: { id: string } | null;
   sourceTicket: TicketName | null;
   kept: boolean;
+  everFinished: boolean;
 }
 
 interface TicketRow {
@@ -115,6 +117,7 @@ interface TicketRow {
   source_number: number | null;
   source_title: string | null;
   discovery_kept: boolean;
+  discovery_ever_finished: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -150,38 +153,53 @@ const toTicket = (row: TicketRow): Ticket => ({
           session: row.discovered_session_id === null ? null : { id: row.discovered_session_id },
           sourceTicket: sourceTicketOf(row),
           kept: row.discovery_kept,
+          everFinished: row.discovery_ever_finished,
         },
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
+/** SQL condition: the Ticket change `c` moved its Ticket to a finished Status. */
+export const isFinishChangeSql = (c: string) =>
+  `(${c}.change = 'status' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
+
+/** SQL condition: the history of the Ticket `t` records a move to a finished Status, whatever Status it is in now. */
+const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isFinishChangeSql("c")})`;
+
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
          a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title,
-         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.project_id AS source_project_id, sp.key AS source_project_key, st.number AS source_number, st.title AS source_title, t.discovery_kept
+         t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.project_id AS source_project_id, sp.key AS source_project_key, st.number AS source_number, st.title AS source_title, t.discovery_kept,
+         t.discovered_by_agent_id IS NOT NULL AND ${everFinishedSql("t")} AS discovery_ever_finished
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
   LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id
   LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id`;
 
 /**
- * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated and not kept there.
- * Delegating, keeping, cancelling or moving it out of Backlog settles it. `isWaitingDiscoverySql` says the same in SQL.
+ * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated, not kept there and never
+ * finished. Delegating, keeping or moving it out of Backlog settles it; finishing it (completing or cancelling) settles it
+ * for good, so moved back to Backlog it doesn't wait again, as its history records. `isWaitingDiscoverySql` says the same in SQL.
  */
 export const isWaitingDiscovery = (ticket: Ticket): boolean =>
-  ticket.discovered !== null && !ticket.discovered.kept && ticket.delegate === null && ticket.status.category === "backlog";
+  ticket.discovered !== null &&
+  !ticket.discovered.kept &&
+  !ticket.discovered.everFinished &&
+  ticket.delegate === null &&
+  ticket.status.category === "backlog";
 
 /** SQL condition: the Ticket `t`, in the Status `s`, is a Discovered Ticket waiting for a User (see `isWaitingDiscovery`). */
 export const isWaitingDiscoverySql = (t: string, s: string) =>
-  `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog')`;
-
-/** SQL condition: the Ticket change `c` moved its Ticket to a finished Status. */
-export const isFinishChangeSql = (c: string) =>
-  `(${c}.change = 'status' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
+  `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog'
+    AND NOT ${everFinishedSql(t)})`;
 
 /** Whether a User ever delegated the Ticket, or moved it to a finished Status, as its history records. */
 export async function wasEverDelegatedOrFinished(db: Queryable, ticketId: string): Promise<boolean> {
-  const { rowCount } = await db.query(`SELECT 1 FROM ticket_changes c WHERE c.ticket_id = $1 AND (c.change = 'delegate' OR ${isFinishChangeSql("c")}) LIMIT 1`, [ticketId]);
+  const { rowCount } = await db.query(
+    `SELECT 1 FROM tickets t WHERE t.id = $1
+       AND (EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change = 'delegate') OR ${everFinishedSql("t")})`,
+    [ticketId],
+  );
   return rowCount !== 0;
 }
 
@@ -534,26 +552,26 @@ export interface TicketFilter {
 
 /** A Project's Tickets matching `filter`, in key order. */
 export async function listTickets(db: Queryable, projectId: string, filter: TicketFilter = {}): Promise<Ticket[]> {
-  const params: unknown[] = [projectId];
-  const conditions = ["t.project_id = $1"];
-  const param = (value: unknown) => `$${params.push(value)}`;
-  if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${param(filter.statusIds)}::uuid[])`);
-  if (filter.categories?.length) conditions.push(`s.category = ANY(${param(filter.categories)}::text[])`);
+  const params = queryParams();
+  const { bind } = params;
+  const conditions = [`t.project_id = ${bind(projectId, "uuid")}`];
+  if (filter.statusIds?.length) conditions.push(`t.status_id = ANY(${bind(filter.statusIds, "uuid[]")})`);
+  if (filter.categories?.length) conditions.push(`s.category = ANY(${bind(filter.categories, "text[]")})`);
   /** Adds the condition that `column` holds one of `values`, where null means it is empty. */
   const matchAnyOrNone = (column: string, values: (string | null)[]) => {
     const ids = values.filter((id) => id !== null);
     const orNone = ids.length < values.length;
-    conditions.push(`(${column} = ANY(${param(ids)}::uuid[])${orNone ? ` OR ${column} IS NULL` : ""})`);
+    conditions.push(`(${column} = ANY(${bind(ids, "uuid[]")})${orNone ? ` OR ${column} IS NULL` : ""})`);
   };
   if (filter.assigneeIds?.length) matchAnyOrNone("t.assignee_id", filter.assigneeIds);
   if (filter.delegateIds?.length) matchAnyOrNone("t.delegate_id", filter.delegateIds);
-  if (filter.priorities?.length) conditions.push(`t.priority = ANY(${param(filter.priorities)}::text[])`);
+  if (filter.priorities?.length) conditions.push(`t.priority = ANY(${bind(filter.priorities, "text[]")})`);
   if (filter.labels?.length) {
     conditions.push(
-      `EXISTS (SELECT 1 FROM unnest(t.labels) AS l WHERE lower(l) = ANY(${param(filter.labels.map((l) => l.trim().toLowerCase()))}::text[]))`,
+      `EXISTS (SELECT 1 FROM unnest(t.labels) AS l WHERE lower(l) = ANY(${bind(filter.labels.map((l) => l.trim().toLowerCase()), "text[]")}))`,
     );
   }
-  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, params);
+  const { rows } = await db.query<TicketRow>(`${SELECT_TICKETS} WHERE ${conditions.join(" AND ")} ORDER BY t.number`, params.values);
   return rows.map(toTicket);
 }
 

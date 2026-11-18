@@ -369,12 +369,12 @@ async function busyWorkspace() {
   cronk.clock.advance(60_000);
   await admin.upload(`/api/comments/${answer.id}/attachments?name=disk.png`, Buffer.from([0x89, 0x50, 0x01]), "image/png");
   await agent.patch(`/api/documents/${report.id}`, { baseVersion: 1, body: "It was the disk cache." });
-  const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "in_review");
-  expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview.id })).status).toBe(200);
+  const inReview = await statusIn(admin, "in_review");
+  expect((await agent.patch("/api/tickets/CRONK-1", { statusId: inReview })).status).toBe(200);
   await agent.delete("/api/agent-sessions/current");
   // Ada sends it back once, then puts it In Review again herself.
   await admin.post("/api/tickets/CRONK-1/send-back", { comment: "Add a test." });
-  await admin.patch("/api/tickets/CRONK-1", { statusId: inReview.id });
+  await admin.patch("/api/tickets/CRONK-1", { statusId: inReview });
 
   // Autonomous Delegation: a Project default, and CRONK-2 completed by claude-laptop on its own, still Unverified.
   await admin.patch("/api/projects/CRONK", { autonomousByDefault: true });
@@ -384,14 +384,14 @@ async function busyWorkspace() {
   // It proposes a Decision from CRONK-2 on the way, which its Report lists.
   await autonomous.post("/api/projects/CRONK/decisions", { title: "Version the API", body: "Under /v1." });
   await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done", body: "Shipped the API." });
-  const done = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed");
-  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
+  const done = await statusIn(admin, "completed");
+  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done })).body.ticket.verification).toBe("unverified");
   // A minute later, Ada Reopens it once and claude-laptop completes it again; the minute keeps its two Reports in order.
   cronk.clock.advance(60_000);
   await admin.post("/api/tickets/CRONK-2/reopen", { comment: "Version it.", dependents: {} });
   await autonomous.post("/api/tickets/CRONK-2/claim");
   await autonomous.post("/api/tickets/CRONK-2/reports", { title: "Done again", body: "Versioned." });
-  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done.id })).body.ticket.verification).toBe("unverified");
+  expect((await autonomous.patch("/api/tickets/CRONK-2", { statusId: done })).body.ticket.verification).toBe("unverified");
   await autonomous.delete("/api/agent-sessions/current");
 
   // Documents with Versions and Comments, in both page trees, in the same minute.

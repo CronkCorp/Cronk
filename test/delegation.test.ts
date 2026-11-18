@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, statusIn } from "./harness.js";
 
 /** The id of the User named `name`, as `client` sees the Workspace's Users. */
 async function userId(client: { get: (path: string) => Promise<{ body: any }> }, name: string): Promise<string> {
@@ -142,8 +142,7 @@ describe("Ticket Delegate, further", () => {
     const bob = await joinAs(cronk, admin, "bob@example.com");
     const otherOfAdas = await registerAgent(admin, "claude-desktop");
     const bobsAgent = await registerAgent(bob, "bob-bot");
-    const statuses = (await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[];
-    await admin.patch("/api/tickets/CRONK-1", { statusId: statuses.find((s) => s.category === "completed")!.id });
+    await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, "completed") });
     await admin.patch("/api/tickets/CRONK-2", { delegateId: otherOfAdas.agentId });
     await admin.patch("/api/tickets/CRONK-3", { assigneeId: await userId(admin, "bob"), delegateId: bobsAgent.agentId });
     await projectWithTickets(admin, "OLD", 1);
