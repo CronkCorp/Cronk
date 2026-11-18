@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, statusIn } from "./harness.js";
 
 describe("Agent Sessions", () => {
   it("are started only by Agents, and shown with their Agent to its Owner and to Admins", async () => {
@@ -200,7 +200,7 @@ describe("Agents", () => {
     await projectWithTickets(admin, "SECRET", 1);
     const claude = await registerAgent(bob, "claude-laptop");
     for (const key of ["CRONK-1", "CRONK-2", "CRONK-3", "SECRET-1"]) await admin.patch(`/api/tickets/${key}`, { assigneeId: bobId, delegateId: claude.agentId });
-    const completed = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "completed").id;
+    const completed = await statusIn(admin, "completed");
     await admin.patch("/api/tickets/CRONK-3", { statusId: completed });
     await admin.patch("/api/projects/SECRET", { visibility: "private" });
 
