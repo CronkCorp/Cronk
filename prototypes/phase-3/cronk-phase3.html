@@ -499,6 +499,36 @@ td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font
 .k-pr { color: var(--agent); }
 .sc-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .ask { border: 1px dashed var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.mx { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mx th { font-size: 12px; font-weight: 500; color: var(--muted); padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mx th:first-child, .mx td:first-child { text-align: left; }
+.mx td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: center; }
+.mx tr:last-child td { border-bottom: none; }
+.mx input { width: 16px; height: 16px; accent-color: var(--accent); }
+.dest { display: flex; flex-direction: column; }
+.dest .dh { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.dest .db { padding: 12px 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 16px; font-size: 13px; }
+.dest .db label { display: flex; gap: 8px; align-items: center; }
+.dest .df { padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ev { display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+.ev + .ev { border-top: 1px solid var(--border); }
+.ev .t { flex: 1; min-width: 220px; display: flex; flex-direction: column; }
+.pick { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.pick button { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.bare { min-height: calc(100vh - 44px); display: grid; place-items: center; padding: 24px 16px; }
+.signin { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px; padding: 24px; }
+.signin .btn { justify-content: center; width: 100%; }
+.or { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.agent-card { display: flex; flex-direction: column; }
+.agent-card .ah { display: flex; align-items: center; gap: 10px; padding: 12px 16px; flex-wrap: wrap; }
+.agent-card .as { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+.agent-card .af { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px 16px; align-items: center; font-size: 13px; flex-wrap: wrap; background: var(--bg); }
+.agent-card .af .lbl { color: var(--muted); }
+.imp-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.imp-sum div { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--surface); display: flex; flex-direction: column; }
+.imp-sum b { font-size: 20px; }
 </style>
 
 <div class="proto-bar" role="navigation" aria-label="Prototype">
@@ -726,6 +756,151 @@ function prC() {
   return ticketPage("", sidePanel(chip), { opened: evt });
 }
 
+// ---------------------------------------------------------------- Account: Git host accounts and notifications
+const EVENTS = [
+  ["Blocking Question", "An Agent waits for your answer", true],
+  ["Unverified completion", "An Agent completed a Ticket of yours; Accept or Reopen it", true],
+  ["Any Question", "An Agent asked you something without waiting", false],
+  ["In Review", "A Ticket assigned to you moved to In Review", false],
+  ["Suggestion or proposed Decision", "Something waits for your review", false],
+  ["Discovered Ticket", "An Agent filed a Ticket for you", false],
+  ["@mention", "Someone @mentioned you", false],
+  ["Reply", "Someone replied to your Comment", false],
+  ["Checks failed", "A Pull Request on your Ticket failed its checks", false],
+  ["Claim lapsed", "An Agent Session ended while holding a Claim", false],
+];
+const DESTS = [
+  { k: "email", name: "Email", sub: "ada@acme.dev", hl: ["ok", "Sent 2 today"], on: [0, 1] },
+  { k: "ntfy", name: "ntfy · phone", sub: "https://ntfy.acme.dev/ada-cronk", hl: ["ok", "Delivered 3 min ago"], on: [0] },
+  { k: "n8n", name: "n8n · daily digest", sub: "https://n8n.acme.dev/webhook/cronk", hl: ["bad", "Failing since 08:14 · retrying"], on: [1, 4, 5, 6] },
+];
+function accountShell(active, body) {
+  const secs = ["Password", "Git host accounts", "Notifications"];
+  return `<div class="crumbs">Ada Lovelace</div><div class="page-head"><h1>Your account</h1></div>
+  <div class="settings"><nav class="settings-nav" aria-label="Sections">${secs.map(s => `<a class="nav-item${s === active ? " active" : ""}">${s}</a>`).join("")}</nav>
+  <div class="settings-body">${body}</div></div>`;
+}
+function gitAccounts() {
+  return `<section class="sec"><div class="sec-head"><h2>Git host accounts</h2><button class="btn secondary">Link an account…</button></div>
+    <p class="muted small">Cronk counts a merge by these accounts as yours, so it verifies an Agent's work.</p>
+    <div class="panel"><div class="rrow">${host("GH")}<div class="t"><span class="repo">@adalovelace</span><span class="muted small">github.com</span></div><button class="btn small ghost">Unlink</button></div>
+    <div class="rrow">${host("GL")}<div class="t"><span class="repo">@ada</span><span class="muted small">gitlab.acme.dev</span></div><button class="btn small ghost">Unlink</button></div></div></section>`;
+}
+function webhookList() {
+  return `<div class="panel">${DESTS.filter(d => d.k !== "email").map(d => `<div class="rrow"><span class="host">↗</span><div class="t"><b>${d.name}</b><span class="muted small mono">${d.sub}</span></div>${health(...d.hl)}<button class="btn small secondary" data-modal="deliv">Deliveries</button><button class="btn small ghost">…</button></div>`).join("")}</div>`;
+}
+function notifA() {
+  const head = `<tr><th>Event</th>${DESTS.map(d => `<th>${d.name}</th>`).join("")}</tr>`;
+  const rows = EVENTS.map((e, i) => `<tr><td><b>${e[0]}</b><div class="muted small">${e[1]}</div></td>${DESTS.map(d => `<td><input type="checkbox" ${d.on.includes(i) ? "checked" : ""} aria-label="${e[0]} by ${d.name}"></td>`).join("")}</tr>`).join("");
+  return accountShell("Notifications", `<section class="sec"><div class="sec-head"><h2>Notifications</h2><button class="btn secondary">Add a User Webhook…</button></div>
+    <p class="muted small">Cronk tells you outside the app when these happen. In the app, your Inbox always shows them.</p>
+    ${webhookList()}
+    <div class="panel tablewrap"><table class="mx"><thead>${head}</thead><tbody>${rows}</tbody></table></div></section>`);
+}
+function notifB() {
+  const cards = DESTS.map(d => `<div class="panel dest"><div class="dh"><span class="host">${d.k === "email" ? "@" : "↗"}</span><b>${d.name}</b><span class="muted small mono grow">${d.sub}</span>${health(...d.hl)}</div>
+    <div class="db">${EVENTS.map((e, i) => `<label><input type="checkbox" ${d.on.includes(i) ? "checked" : ""}>${e[0]}</label>`).join("")}</div>
+    <div class="df">${d.k === "email" ? "From SMTP set by your Admin" : `Signed with this webhook's secret · <a data-modal="deliv">Deliveries</a> · <a>Show secret</a> · <a>Remove</a>`}</div></div>`).join("");
+  return accountShell("Notifications", `<section class="sec"><div class="sec-head"><h2>Notifications</h2><button class="btn secondary">Add a User Webhook…</button></div>${cards}</section>`);
+}
+function notifC() {
+  const rows = EVENTS.map((e, i) => `<div class="ev"><div class="t"><b>${e[0]}</b><span class="muted small">${e[1]}</span></div><div class="pick">${DESTS.map(d => `<button aria-pressed="${d.on.includes(i)}">${d.name}</button>`).join("")}</div></div>`).join("");
+  return accountShell("Notifications", `<section class="sec"><div class="sec-head"><h2>Notifications</h2></div>
+    <div class="panel">${rows}</div>
+    <div class="sec-head"><h3>Where they go</h3><button class="btn small secondary">Add a User Webhook…</button></div>${webhookList()}</section>`);
+}
+function delivDialog() {
+  const rows = [["11:02", "Unverified completion · CRONK-14", "bad", "502 · retry 4 of ~12 at 11:34"], ["08:14", "Discovered Ticket · CRONK-31", "bad", "timeout · retrying"], ["yesterday", "Reply · CRONK-9", "ok", "200"], ["yesterday", "@mention · CRONK-12", "ok", "200"]];
+  return `<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" style="display:flex;flex-direction:column;gap:12px"><h2>Deliveries to n8n · daily digest</h2>
+    <div class="banner warn">Failing since 08:14. Cronk retries each delivery for about 24 hours, then marks the webhook failing.</div>
+    <div class="panel tablewrap"><table class="map"><thead><tr><th>When</th><th>Event</th><th>Result</th></tr></thead><tbody>${rows.map(r => `<tr><td class="mono small">${r[0]}</td><td>${r[1]}</td><td>${health(r[2], r[3])}</td></tr>`).join("")}</tbody></table></div>
+    <p class="muted small">Kept for 7 days.</p><div class="dialog-actions"><button class="btn secondary">Send a test</button><button class="btn" data-modal="">Close</button></div></div></div>`;
+}
+function workspaceHooks() {
+  return `<div class="crumbs">Workspace</div><div class="page-head"><h1>Settings</h1></div>
+    <section class="sec"><div class="sec-head"><h2>Workspace Webhooks</h2><button class="btn secondary">Add a Workspace Webhook…</button></div>
+    <p class="muted small">Triage events only, for a shared place such as a team channel. Everything else goes to each User's own webhooks.</p>
+    <div class="panel"><div class="rrow"><span class="host">↗</span><div class="t"><b>Discord · #cronk-triage</b><span class="muted small mono">https://discord.com/api/webhooks/…</span></div>
+    <div class="pick"><button aria-pressed="true">New in Triage</button><button aria-pressed="false">Left Triage</button></div>${health("ok", "Delivered 1 h ago")}<button class="btn small secondary" data-modal="deliv">Deliveries</button></div></div></section>
+    <section class="sec"><h2>Email</h2><div class="panel panel-pad small col"><span>${health("ok", "SMTP set: mail.acme.dev:587, from cronk@acme.dev")}</span><span class="muted">Set in the server environment. Invitations and password reset links are emailed too.</span></div></section>`;
+}
+
+// ---------------------------------------------------------------- Agents: webhook and Git host account
+function agentCardA() {
+  return `<div class="page-head"><h1>Agents</h1><button class="btn">Register an Agent</button></div>
+  <div class="panel agent-card"><div class="ah">${av("claude-laptop", true)}<b class="actor agent-name grow">claude-laptop</b><span class="muted small">No live Agent Session · Delegate on 3 Tickets</span><button class="btn small ghost">Rename</button><button class="btn small ghost">Remove</button></div>
+    <div class="as"><span class="offline">Not connected</span><span class="muted">last Agent Session ended 25 min ago · 2 Waiting Work</span></div>
+    <div class="af"><span><span class="lbl">Tokens</span> 2: full, read-only <a>Manage tokens</a></span>
+      <span><span class="lbl">Agent Webhook</span> ${health("ok", "runner.ada.home · called 25 min ago")} <a>Edit</a></span>
+      <span><span class="lbl">Git host accounts</span> ${host("GH")} <span class="repo">@ada-claude-bot</span> <a>Edit</a></span></div>
+    <div class="as"><a>Show what it did</a></div></div>`;
+}
+function agentCardB() {
+  const tab = state.atab || "webhook";
+  const tabs = [["tokens", "Tokens"], ["webhook", "Agent Webhook"], ["git", "Git host accounts"]].map(([k, n]) => `<button data-atab="${k}" aria-selected="${tab === k}">${n}</button>`).join("");
+  const body = tab === "webhook" ? `<p class="small">Cronk calls this address when work waits for claude-laptop and it has no live Agent Session, at most once a minute. It names the kinds of Waiting Work and the Ticket keys, never their text, so your runner starts an Agent Session to read them.</p>
+      <div class="col"><label class="label">Address</label><input class="input mono" value="https://runner.ada.home/cronk"></div>
+      <div class="col"><span class="label">Secret (signs each call)</span>${copy("whsec_a71…e0f")}</div>
+      <div class="col"><span class="label">Example body</span><pre class="copy" style="white-space:pre;display:block;padding:8px 10px;overflow-x:auto">{ "event": "waitingWork", "agentId": "ag_7f…", "kinds": { "answer": 1, "comment": 1 }, "tickets": ["CRONK-12", "CRONK-14"] }</pre></div>
+      <div class="row">${health("ok", "Last call 25 min ago, 200")}<span class="grow"></span><button class="btn secondary small">Send a test</button><button class="btn small">Save</button></div>`
+    : tab === "git" ? `<p class="small">Pull Requests and merges by these accounts are claude-laptop's, never yours, so its merges stay Unverified.</p>
+      <div class="panel"><div class="rrow">${host("GH")}<div class="t"><span class="repo">@ada-claude-bot</span><span class="muted small">github.com</span></div><button class="btn small ghost">Unlink</button></div></div><div><button class="btn secondary small">Link an account…</button></div>`
+    : `<p class="small muted">As today: issue and revoke tokens; the secret shows once.</p>`;
+  return `<div class="page-head"><h1>Agents</h1><button class="btn">Register an Agent</button></div>
+  <div class="panel agent-card"><div class="ah">${av("claude-laptop", true)}<b class="actor agent-name grow">claude-laptop</b><span class="muted small">Not connected · 2 Waiting Work</span><button class="btn small secondary">Connect…</button></div></div>
+  <div class="overlay" style="position:static;background:none;padding:0;justify-content:flex-start"><div class="dialog" style="display:flex;flex-direction:column;gap:12px;max-width:640px">
+    <h2>Connect claude-laptop</h2><div class="tabs">${tabs}</div>${body}</div></div>`;
+}
+
+// ---------------------------------------------------------------- Sign-in
+function signinA() {
+  const off = state.pwoff;
+  return `<div class="bare"><div class="panel signin"><div class="ws"><span class="ws-mark">A</span>Acme</div><h1>Sign in</h1>
+    <button class="btn">Sign in with Acme SSO</button>
+    ${off ? `<p class="muted small">Your Admin turned password sign-in off.</p>` : `<div class="or">or with a password</div>
+    <div class="col"><label class="label">Email</label><input class="input" value="ada@acme.dev"></div>
+    <div class="col"><div class="row"><label class="label grow">Password</label><a class="small">Forgot password?</a></div><input class="input" type="password" value="xxxxxxxx"></div>
+    <button class="btn secondary">Sign in</button>`}
+    <button class="proto-sim" data-pwoff="1">Simulate: password sign-in ${off ? "on" : "off"}</button></div></div>`;
+}
+function signinB() {
+  const pw = state.pwshow;
+  return `<div class="bare"><div class="panel signin"><div class="ws"><span class="ws-mark">A</span>Acme</div><h1>Sign in to Acme</h1>
+    <button class="btn">Continue with Acme SSO</button>
+    ${pw ? `<div class="col"><label class="label">Email</label><input class="input" value="ada@acme.dev"></div><div class="col"><label class="label">Password</label><input class="input" type="password" value="xxxxxxxx"></div><button class="btn secondary">Sign in</button><a class="small">Forgot password?</a>`
+      : `<button class="btn ghost" data-pwshow="1">Use a password instead</button>`}
+  </div></div>`;
+}
+function signinSettings() {
+  return `<div class="crumbs">Workspace</div><div class="page-head"><h1>Settings</h1></div>
+  <section class="sec"><h2>Sign-in</h2><div class="panel panel-pad col" style="gap:12px">
+    <span>${health("ok", "OIDC: Acme SSO (https://sso.acme.dev), set in the server environment")}</span>
+    <div class="col"><label class="label">Email domains that may join on their own (one per line)</label><textarea class="input" rows="2">acme.dev</textarea><span class="muted small">Anyone else needs an Invitation. A sign-in matches an existing User by verified email.</span></div>
+    ${toggle(true, "Allow password sign-in")}
+    <span class="muted small">Turning it off leaves SSO only. If the provider is down, the server's reset-password command lets an Admin back in with a password.</span>
+    <div><button class="btn">Save</button></div></div></section>`;
+}
+
+// ---------------------------------------------------------------- GitHub Issues importer
+function importA() {
+  return `<div class="crumbs">Projects / CRONK Cronk</div><div class="page-head"><h1>Cronk</h1><button class="btn secondary">…</button></div>
+  <div class="overlay" style="position:static;background:none;padding:0;justify-content:flex-start"><div class="dialog" style="display:flex;flex-direction:column;gap:12px">
+    <h2>Import GitHub Issues into CRONK</h2>
+    <div class="col"><label class="label">Repository</label><select class="input"><option>cronkcorp/cronk (listed by this Project)</option></select><span class="muted small">Uses the Repository's token. Only Repositories this Project lists.</span></div>
+    <div class="imp-sum"><div><b>214</b><span class="muted small">issues to import</span></div><div><b>38</b><span class="muted small">already imported, skipped</span></div><div><b>9</b><span class="muted small">people matched by Git host account</span></div><div><b>4</b><span class="muted small">people not matched</span></div></div>
+    <p class="small">Open → Backlog · closed as completed → Done · not planned → Canceled. Comments, Labels, sub-issues and dependencies come along; milestones and reactions don't. Unmatched authors stay as "@login on GitHub"; unmatched assignees are dropped.</p>
+    <div class="dialog-actions"><button class="btn secondary">Cancel</button><button class="btn">Import 214 issues</button></div></div></div>`;
+}
+function importB() {
+  const rows = [["#401", "Sign-in is slow on first load", "open", "Backlog", "@adalovelace → Ada Lovelace", ""], ["#388", "Board columns overflow", "completed", "Done", "@octocat", "not matched: kept as text"], ["#377", "Old export format", "not planned", "Canceled", "@grace → Grace Hopper", ""], ["#350", "Webhook retries", "open", "Backlog", "@mallory", "assignee not matched: dropped"]];
+  return `<div class="crumbs">Projects / CRONK Cronk / Import</div><div class="page-head"><h1>Import GitHub Issues</h1><button class="btn">Import 214 issues</button></div>
+    <div class="row wrap">${host("GH")}<span class="repo">cronkcorp/cronk</span><span class="muted small">· 252 issues · 38 already imported, skipped</span></div>
+    <div class="filters"><span class="chip" aria-pressed="true">All 214</span><span class="chip">Needs a look 4</span><span class="chip">Skipped 38</span></div>
+    <div class="panel tablewrap"><table class="map"><thead><tr><th>Issue</th><th>Title</th><th>State</th><th>Becomes</th><th>People</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td class="muted">${r[2]}</td><td>${status(r[3] === "Done" ? "completed" : r[3] === "Backlog" ? "backlog" : "unstarted", r[3])}</td><td>${r[4]}${r[5] ? `<div class="small" style="color:var(--warn)">${r[5]}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <div class="panel panel-pad col small"><b>People not matched (4)</b><span class="muted">They have no linked Git host account. Ask them to link one before importing, or go ahead: authors stay as text, assignees are dropped.</span><span class="mono">@octocat · @mallory · @trent · @peggy</span></div>`;
+}
+
 // ---------------------------------------------------------------- screens
 const SCREENS = {
   repos: { name: "Repositories", nav: "projects", variants: {
@@ -738,6 +913,26 @@ const SCREENS = {
     b: ["Card in the main column", "Pull Requests sit under the description as cards with branch, author and every check listed. The side panel stays as today.", prB],
     c: ["In the timeline", "A Pull Request is a timeline entry (PULL REQUEST kind) that updates in place with its state and checks, expanding the checks when one fails or runs. The side panel only names them.", prC],
   }},
+  notif: { name: "Notifications", nav: "", variants: {
+    a: ["Matrix", "Your account gets Git host accounts and Notifications sections. Notifications is one grid: an event kind per row, a column per place (email and each User Webhook). Webhooks are listed above with their health; Deliveries opens the last 7 days.", () => notifA()],
+    b: ["A card per place", "Each place (email, each User Webhook) is a card with its own event checklist, health and Deliveries. Easier to set up one webhook; harder to see who gets a blocking Question.", () => notifB()],
+    c: ["A row per event", "Each event kind is a row with the places it goes to as pills. Webhooks sit underneath.", () => notifC()],
+    d: ["Git host accounts", "Not a variant: the Git host accounts section, shown with any of A–C. Linking takes a login on a host.", () => accountShell("Git host accounts", gitAccounts())],
+    e: ["Workspace Webhooks (Admins)", "Not a variant: Workspace settings gain Workspace Webhooks for Triage events and say whether SMTP is set.", () => workspaceHooks()],
+  }},
+  agent: { name: "Agent page", nav: "agents", variants: {
+    a: ["On the card", "The Agent's card gains a footer line each for its Agent Webhook (with health) and Git host accounts, beside Tokens; Edit opens a small dialog for each.", () => agentCardA()],
+    b: ["One Connect dialog", "Tokens, the Agent Webhook (address, secret, an example body and Send a test) and Git host accounts live in one tabbed Connect dialog; the card only says Connect….", () => agentCardB()],
+  }},
+  signin: { name: "Sign-in", nav: "", bare: true, variants: {
+    a: ["SSO above the password", "SSO is the primary button, with the password form below it and Forgot password? beside the field (only once SMTP is set). Try turning password sign-in off.", () => signinA()],
+    b: ["SSO first", "Only the SSO button shows; Use a password instead unfolds the form.", () => signinB()],
+    c: ["Admin settings", "Not a variant: Workspace settings gain a Sign-in section with the provider, domains that may join, and the password switch.", () => frame("", signinSettings())],
+  }},
+  importer: { name: "Importer", nav: "projects", variants: {
+    a: ["Dialog with counts", "From the Project's … menu (Admins): pick a listed Repository, see counts of what comes, is skipped and who matched, then import.", () => importA()],
+    b: ["Preview page", "A page listing every issue with the Status it becomes and how its people match, filterable to what needs a look, before importing.", () => importB()],
+  }},
 };
 
 // ---------------------------------------------------------------- shell
@@ -746,7 +941,7 @@ function parseHash() {
   const m = /^#([a-z]+)-([a-z])$/.exec(location.hash);
   if (m && SCREENS[m[1]] && SCREENS[m[1]].variants[m[2]]) { state.screen = m[1]; state.variant = m[2]; }
 }
-function resetLocal() { Object.assign(state, { modal: "", step: 1 }); }
+function resetLocal() { Object.assign(state, { modal: "", step: 1, atab: "webhook", pwoff: false, pwshow: false }); }
 function go(screen, variant) { location.hash = `${screen}-${variant}`; }
 function render() {
   const s = SCREENS[state.screen];
@@ -754,8 +949,9 @@ function render() {
   document.getElementById("screens").innerHTML = Object.entries(SCREENS).map(([k, x]) => `<button data-screen="${k}" aria-current="${k === state.screen}">${x.name}</button>`).join("");
   const keys = Object.keys(s.variants);
   document.getElementById("vlabel").textContent = `${s.name} ${state.variant.toUpperCase()} of ${keys.length}: ${vname}`;
-  document.getElementById("app").innerHTML = frame(s.nav, `<div class="variant-note"><strong>${s.name} ${state.variant.toUpperCase()}, ${vname}.</strong> ${note}</div>${body()}`);
-  document.getElementById("modal").innerHTML = state.modal === "list" ? listDialog() : "";
+  const noteHtml = `<div class="variant-note"><strong>${s.name} ${state.variant.toUpperCase()}, ${vname}.</strong> ${note}</div>`;
+  document.getElementById("app").innerHTML = s.bare ? `<div style="padding:16px 16px 0">${noteHtml}</div>${body()}` : frame(s.nav, noteHtml + body());
+  document.getElementById("modal").innerHTML = state.modal === "list" ? listDialog() : state.modal === "deliv" ? delivDialog() : "";
 }
 function cycle(d) {
   const keys = Object.keys(SCREENS[state.screen].variants);
@@ -770,15 +966,19 @@ addEventListener("keydown", e => {
   if (e.key === "Escape" && state.modal) { state.modal = ""; render(); }
 });
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-screen],[data-t],[data-modal],[data-step],[data-sc],.toggle");
+  const t = e.target.closest("[data-screen],[data-t],[data-modal],[data-step],[data-sc],[data-atab],[data-pwoff],[data-pwshow],.toggle,.pick button");
   if (!t) return;
   const d = t.dataset;
+  if (t.matches(".pick button")) { t.setAttribute("aria-pressed", String(t.getAttribute("aria-pressed") !== "true")); return; }
   if (t.classList.contains("toggle")) { t.setAttribute("aria-pressed", String(t.getAttribute("aria-pressed") !== "true")); return; }
   if (d.screen) { resetLocal(); go(d.screen, "a"); return; }
   if (d.t !== undefined) { if (d.t) document.documentElement.dataset.theme = d.t; else delete document.documentElement.dataset.theme; markTheme(); return; }
   if (d.modal !== undefined) state.modal = d.modal;
   if (d.step) state.step = Number(d.step);
   if (d.sc) state.sc = d.sc;
+  if (d.atab) state.atab = d.atab;
+  if (d.pwoff) state.pwoff = !state.pwoff;
+  if (d.pwshow) state.pwshow = true;
   render();
 });
 function markTheme() {

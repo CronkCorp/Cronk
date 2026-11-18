@@ -8,5 +8,12 @@ Screens so far:
 
 - **Repositories** (Project settings): A rows + dialog, B guided setup, C health cards.
 - **Ticket · Pull Requests**: A side panel group, B cards in the main column, C timeline entries. The Scenario control shows Ready for review, Checks failed (Send back by Cronk), No Report yet, and Merged by a User.
+- **Notifications** (Your account): A matrix of events × places, B a card per place, C a row per event. D and E aren't variants: Git host accounts in Your account, and Workspace Webhooks with the SMTP state in Workspace settings.
+- **Agent page**: A Agent Webhook and Git host accounts on the card, B one tabbed Connect dialog.
+- **Sign-in**: A SSO above the password, B SSO first with the password behind a link. C isn't a variant: the Sign-in section of Workspace settings.
+- **Importer**: A a dialog with counts, B a preview page of every issue.
 
-Chosen: not yet.
+Chosen:
+
+- **Repositories**: C's health cards as the section in Project settings; listing a new one follows B's guided setup (address and token, webhook with a live wait for the ping, what events do).
+- **Pull Requests on a Ticket**: both A (side panel group) and B (cards in the main column), as a choice the User makes.
