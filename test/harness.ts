@@ -8,7 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 import tar from "tar-stream";
-import { inject, onTestFailed, onTestFinished } from "vitest";
+import { expect, inject, onTestFailed, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { ANSWER_CUT_OFF_WITHIN_MS, buildApp, DEFAULT_CLOSE_WITHIN_MS } from "../src/server/app.js";
 import { CUT_OFF_MS } from "../src/server/db/database.js";
@@ -373,6 +373,16 @@ export interface HeldLock {
   /** Lets the writes waiting on the row through. */
   release(): Promise<void>;
 }
+
+/**
+ * Matches what work waiting on the database fails with once closing Cronk cuts its connection off: Postgres ending the
+ * session on the server's behalf (`57P01`, admin_shutdown), or the connection dropped under it should that word not
+ * arrive before the socket goes. Use as `rejects.toEqual(DATABASE_CUT_OFF)`.
+ */
+export const DATABASE_CUT_OFF = expect.toSatisfy(
+  (err: unknown) => err instanceof Error && ((err as { code?: string }).code === "57P01" || err.message === "Connection terminated unexpectedly"),
+  "a database connection cut off",
+);
 
 /** Checks `done` every 10ms until it holds, failing with `failure` (or what it answers) after five seconds. */
 async function pollUntil(done: () => Promise<boolean>, failure: string | (() => Promise<string>)): Promise<void> {
