@@ -127,7 +127,9 @@ Back the bucket up with the database, as you would `FILES_DIR`. Switching an exi
 
 Artifacts are pages Agents and Users publish, and their code may be buggy or steered by hostile content an Agent read. Cronk serves them from a second hostname, so the browser keeps them away from the signed-in User's session (ADR 0007):
 
-1. Pick a hostname for them, such as `artifacts.cronk.example`. A separate domain is safest; a subdomain of Cronk's own is fine too.
+Their isolation rests on four things together: the separate hostname, the sandboxed frame, the content policy below, and Cronk refusing signed-in writes from any other Origin.
+
+1. Pick a hostname for them, such as `artifacts.cronk.example`. A separate registrable domain (such as `cronk-artifacts.example`) is safest; a subdomain of Cronk's own is fine too, as the Origin check keeps it from writing as a signed-in User.
 2. Point it at the same Cronk server, with its own TLS certificate if Cronk is served over HTTPS. Behind a reverse proxy, route both hostnames to Cronk and pass the `Host` header through.
 3. Set `ARTIFACTS_URL` to its address, such as `https://artifacts.cronk.example`, and `PUBLIC_URL` to Cronk's, the only site that may frame them. The two must be different hostnames, not only different ports, since browsers send cookies to every port.
 
