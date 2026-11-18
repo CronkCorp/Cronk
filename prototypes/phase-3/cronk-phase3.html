@@ -1,0 +1,790 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cronk Phase 3 Screens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* PROTOTYPE for Cronk Phase 3. Throwaway: fake data, nothing calls the API. Base CSS and Phase 2 additions copied from prototype/phase-2-ui;
+   Phase 3 additions are at the end. The dark bar on top picks a screen, the pill at the bottom (or ← →) cycles its variants. */
+/* PROTOTYPE for Thundernerd/Cronk#98. Throwaway: every screen is fake data, nothing calls the API.
+   Layout concept: the app frame (sidebar or top bar) hosts one screen at a time; a dark prototype bar on top
+   picks the screen, a floating pill at the bottom cycles that screen's variants (also ← →). */
+:root {
+  /* Proposed Cronk tokens, light */
+  --bg: #f3f4f1;          /* page ground, faintly green-grey */
+  --surface: #ffffff;     /* panels, rows, timeline entries */
+  --surface-2: #e9ece6;   /* sunken: inputs, code, Comment bubbles */
+  --text: #1b1f1c;
+  --muted: #5c655f;
+  --border: #d5dad2;
+  --accent: #116466;      /* ink teal: links, primary buttons, focus */
+  --accent-soft: #d7ebe9;
+  --on-accent: #ffffff;
+  --agent: #6247c2;       /* marks Agents as Actors, never decoration */
+  --agent-soft: #e9e4fb;
+  --danger: #b93a2b;  --danger-soft: #f8e1dd;
+  --warn: #a35f00;    --warn-soft: #fbecd2;
+  --ok: #2c7a42;      --ok-soft: #dcefe1;
+  --info: #2a65ad;    --info-soft: #dde9f7;
+  --cat-backlog: #8a938c; --cat-unstarted: #8a938c; --cat-started: #c98a12; --cat-review: #2a65ad; --cat-completed: #2c7a42; --cat-canceled: #b93a2b;
+  --proto-bg: #202422; --proto-fg: #f1f3ef; --proto-muted: #a9b2ab;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* spacing 4 8 12 16 24 32; radius 4 controls, 8 panels; type 12 13 14 16 20 24 */
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121513; --surface: #1a1e1b; --surface-2: #232825; --text: #e2e6e1; --muted: #98a29b; --border: #2e3430;
+  --accent: #4fb2aa; --accent-soft: #1d3634; --on-accent: #0c1514;
+  --agent: #a793f2; --agent-soft: #2b2545;
+  --danger: #ee7d6b; --danger-soft: #3d211d; --warn: #e3a447; --warn-soft: #3a2c15; --ok: #6cc284; --ok-soft: #1c3324; --info: #74a8ea; --info-soft: #1b2b40;
+  --cat-backlog: #7d877f; --cat-unstarted: #7d877f; --cat-started: #e3a447; --cat-review: #74a8ea; --cat-completed: #6cc284; --cat-canceled: #ee7d6b;
+  --proto-bg: #000000; --proto-fg: #f1f3ef; --proto-muted: #9aa39c;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #121513; --surface: #1a1e1b; --surface-2: #232825; --text: #e2e6e1; --muted: #98a29b; --border: #2e3430;
+  --accent: #4fb2aa; --accent-soft: #1d3634; --on-accent: #0c1514;
+  --agent: #a793f2; --agent-soft: #2b2545;
+  --danger: #ee7d6b; --danger-soft: #3d211d; --warn: #e3a447; --warn-soft: #3a2c15; --ok: #6cc284; --ok-soft: #1c3324; --info: #74a8ea; --info-soft: #1b2b40;
+  --cat-backlog: #7d877f; --cat-unstarted: #7d877f; --cat-started: #e3a447; --cat-review: #74a8ea; --cat-completed: #6cc284; --cat-canceled: #ee7d6b;
+  --proto-bg: #000000; --proto-fg: #f1f3ef; --proto-muted: #9aa39c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; padding-bottom: 72px; }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h1 { font-size: 20px; font-weight: 600; }
+h2 { font-size: 16px; font-weight: 600; }
+h3 { font-size: 14px; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--font-mono); font-size: 13px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.key { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.grow { flex: 1; min-width: 0; }
+.wrap { flex-wrap: wrap; }
+
+/* ---------- prototype chrome (not part of the design) ---------- */
+.proto-bar { background: var(--proto-bg); color: var(--proto-fg); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 13px; }
+.proto-bar strong { font-weight: 600; }
+.proto-bar .note { color: var(--proto-muted); }
+.proto-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.proto-tabs button { background: transparent; border: 1px solid #3a403c; color: var(--proto-fg); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.proto-tabs button[aria-current="true"] { background: var(--proto-fg); color: var(--proto-bg); border-color: var(--proto-fg); }
+.switcher { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; align-items: center; gap: 4px; background: var(--proto-bg); color: var(--proto-fg); border-radius: 999px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.35); max-width: calc(100% - 32px); }
+.switcher button { background: transparent; border: none; color: var(--proto-fg); width: 32px; height: 32px; border-radius: 999px; cursor: pointer; font-size: 16px; flex: none; }
+.switcher button:hover { background: #3a403c; }
+.switcher .vlabel { padding: 0 8px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proto-bar .seg { border-color: #3a403c; }
+.proto-bar .seg button { background: transparent; color: var(--proto-fg); }
+.proto-bar .seg button + button { border-left-color: #3a403c; }
+.proto-bar .seg button[aria-pressed="true"] { background: var(--proto-fg); color: var(--proto-bg); }
+.variant-note { margin-bottom: 16px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 13px; }
+.variant-note strong { color: var(--text); }
+
+/* ---------- app frame ---------- */
+.frame { display: flex; min-height: calc(100vh - 44px); }
+.frame.top { flex-direction: column; }
+.sidebar { width: 232px; flex: none; background: var(--surface); border-right: 1px solid var(--border); padding: 12px 8px; display: flex; flex-direction: column; gap: 16px; }
+.ws { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-weight: 600; }
+.ws-mark { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.search { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--muted); font-size: 13px; }
+.search kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 8px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--text); cursor: pointer; }
+.nav-item:hover { background: var(--surface-2); text-decoration: none; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.nav-item .count { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.nav-item .count.hot { color: var(--on-accent); background: var(--danger); border-radius: 999px; padding: 0 6px; }
+.nav-item .pkey { font-family: var(--font-mono); font-size: 11px; color: var(--muted); width: 44px; }
+.me { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 8px; border-top: 1px solid var(--border); font-size: 13px; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.topnav { display: flex; gap: 4px; flex-wrap: wrap; }
+.topnav .nav-item { padding: 4px 10px; }
+.topbar .search { width: 220px; }
+.main { flex: 1; min-width: 0; padding-block: 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.main-inner { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.crumbs { font-size: 13px; color: var(--muted); }
+.page-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.page-head h1 { flex: 1; min-width: 0; }
+@media (max-width: 760px) {
+  .frame { flex-direction: column; }
+  .sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .sidebar .nav-group { flex-direction: row; flex-wrap: wrap; }
+  .sidebar .nav-label, .sidebar .projects-group, .sidebar .me, .sidebar .search { display: none; }
+}
+
+/* ---------- components ---------- */
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; cursor: pointer; background: var(--accent); color: var(--on-accent); font-weight: 500; font-size: 13px; }
+.btn.secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+.btn.ghost { background: transparent; color: var(--accent); padding: 4px 8px; }
+.btn.danger { background: var(--danger); color: var(--on-accent); }
+.btn.small { padding: 3px 8px; font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.panel-pad { padding: 16px; }
+.input { width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+textarea.input { font-family: var(--font-mono); font-size: 13px; resize: vertical; min-height: 72px; }
+.label { font-size: 12px; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.chip.solid { background: var(--surface-2); border-color: transparent; color: var(--text); }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.status i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; display: inline-block; }
+.status.started { color: var(--cat-started); } .status.started i { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.status.review { color: var(--cat-review); } .status.review i { background: currentColor; box-shadow: inset 0 0 0 2px var(--surface); }
+.status.completed { color: var(--cat-completed); } .status.completed i { background: currentColor; }
+.status.unstarted { color: var(--cat-unstarted); }
+.status span { color: var(--text); }
+.prio { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; }
+.prio.urgent { background: var(--danger); color: var(--on-accent); }
+.prio.high { color: var(--danger); background: var(--danger-soft); }
+.prio.medium { color: var(--warn); background: var(--warn-soft); }
+.prio.low { color: var(--muted); background: var(--surface-2); }
+/* Actors: Users are round, Agents are square and violet, everywhere. */
+.av { width: 22px; height: 22px; flex: none; display: inline-grid; place-items: center; font-size: 10px; font-weight: 600; border-radius: 50%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.av.agent { border-radius: 5px; background: var(--agent-soft); color: var(--agent); border-color: transparent; }
+.av.lg { width: 32px; height: 32px; font-size: 12px; }
+.actor { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; white-space: nowrap; }
+.actor.agent-name { color: var(--agent); }
+.session { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ok); white-space: nowrap; }
+.live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.offline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.offline::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.kind { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.k-plan { color: var(--muted); } .k-progress { color: var(--info); } .k-finding { color: var(--ok); } .k-question { color: var(--warn); } .k-blocking { color: var(--danger); } .k-error { color: var(--danger); } .k-report { color: var(--agent); } .k-comment { color: var(--accent); } .k-review { color: var(--info); }
+.md p + p, .md p + ul, .md ul + p, .md p + ol { margin-top: 8px; }
+.md ul, .md ol { margin: 0; padding-left: 20px; }
+.md h4 { margin: 8px 0 4px; font-size: 14px; }
+.flash { animation: flash 2.4s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none; outline: 2px solid var(--accent); } }
+.empty-line { color: var(--muted); font-size: 13px; }
+.sep { width: 1px; align-self: stretch; background: var(--border); }
+.banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+.banner.warn { background: var(--warn-soft); color: var(--text); border: 1px solid var(--warn); }
+.banner.info { background: var(--info-soft); border: 1px solid var(--info); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; background: var(--surface); padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tabs button { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 10px; cursor: pointer; color: var(--muted); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
+.tabs .n { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+/* ---------- inbox ---------- */
+.ib-split { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; min-height: 560px; }
+.ib-list { width: 360px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.ib-group { padding: 8px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--border); }
+.ib-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
+.ib-item:hover { background: var(--bg); }
+.ib-item[aria-selected="true"] { background: var(--accent-soft); border-left-color: var(--accent); }
+.ib-item.blocking { border-left-color: var(--danger); }
+.ib-item .snip { font-size: 13px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ib-detail { flex: 1; min-width: 0; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.report-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; background: var(--bg); }
+.actionbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (max-width: 860px) { .ib-split { flex-direction: column; } .ib-list { width: auto; border-right: none; border-bottom: 1px solid var(--border); } }
+.ib-cards { display: flex; flex-direction: column; gap: 12px; }
+.pinned { border: 1px solid var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.pinned-head { display: flex; align-items: center; gap: 8px; color: var(--danger); font-weight: 600; font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.card-head .t { font-weight: 500; font-size: 14px; color: var(--text); }
+details.report summary { cursor: pointer; color: var(--agent); font-weight: 500; font-size: 13px; }
+details.report[open] summary { margin-bottom: 8px; }
+.ib-tickets { display: flex; flex-direction: column; gap: 12px; }
+.tk-group { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.tk-head .t { font-weight: 600; }
+.tk-entry { display: flex; gap: 12px; padding: 12px 16px; }
+.tk-entry + .tk-entry { border-top: 1px solid var(--border); }
+.tk-gutter { width: 92px; flex: none; }
+@media (max-width: 600px) { .tk-entry { flex-direction: column; gap: 4px; } .tk-gutter { width: auto; } }
+
+/* ---------- ticket ---------- */
+.tk-layout { display: flex; gap: 24px; align-items: flex-start; }
+.tk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.tk-side { width: 280px; flex: none; display: flex; flex-direction: column; gap: 12px; position: sticky; top: 16px; }
+@media (max-width: 900px) { .tk-layout { flex-direction: column-reverse; } .tk-side { width: 100%; position: static; } }
+.prop { display: flex; align-items: center; gap: 8px; padding: 6px 12px; min-height: 36px; font-size: 13px; }
+.prop + .prop { border-top: 1px solid var(--border); }
+.prop .label { width: 76px; flex: none; }
+.claim-card { border: 1px solid var(--agent); background: var(--agent-soft); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.meter { height: 4px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--agent); }
+.desc { padding: 12px 16px; }
+.tl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tl > li { position: relative; padding-left: 36px; padding-bottom: 12px; }
+.tl > li::before { content: ""; position: absolute; left: 11px; top: 24px; bottom: 0; width: 1px; background: var(--border); }
+.tl > li:last-child::before { display: none; }
+.tl .gut { position: absolute; left: 0; top: 0; }
+.tl .sys { font-size: 13px; color: var(--muted); padding-top: 2px; }
+.tl .sys .gut { left: 6px; top: 7px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); border: 2px solid var(--border); }
+.act { padding-top: 1px; }
+.act-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.act-body { margin-top: 4px; }
+.act.question .act-body, .act.blocking .act-body { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; }
+.act.blocking .act-body { background: var(--danger-soft); border-color: var(--danger); }
+.act.error .act-body { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); border-left: 3px solid var(--danger); padding: 8px 12px; border-radius: 4px; white-space: pre-wrap; }
+.bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 4px; }
+.reply { margin: 8px 0 0 16px; padding-left: 12px; border-left: 2px solid var(--border); }
+.report-card { margin-top: 4px; border: 1px solid var(--agent); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.report-card .rc-head { padding: 8px 12px; background: var(--agent-soft); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.report-card .rc-body { padding: 10px 12px; }
+.answer-box { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.composer { display: flex; flex-direction: column; gap: 8px; }
+.people-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; font-size: 13px; }
+.arrow { color: var(--muted); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filters .chip { cursor: pointer; padding: 2px 10px; }
+.filters .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.log { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.log li { display: flex; gap: 12px; padding: 6px 12px; align-items: baseline; }
+.log li + li { border-top: 1px solid var(--border); }
+.log .time { font-family: var(--font-mono); font-size: 12px; color: var(--muted); width: 44px; flex: none; }
+.log .kind { width: 72px; flex: none; }
+.lanes { display: flex; flex-direction: column; gap: 10px; }
+.lane-row { display: flex; }
+.lane-row.agent { justify-content: flex-start; }
+.lane-row.human { justify-content: flex-end; }
+.lane-row.center { justify-content: center; }
+.lane-card { max-width: 78%; min-width: 0; border-radius: 10px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface); }
+.lane-row.agent .lane-card { border-color: var(--agent-soft); border-left: 3px solid var(--agent); }
+.lane-row.human .lane-card { background: var(--accent-soft); border-color: transparent; }
+.lane-sys { font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 2px 10px; text-align: center; }
+.lane-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 0 4px; }
+@media (max-width: 600px) { .lane-card { max-width: 100%; } }
+
+/* ---------- document ---------- */
+.doc-layout { display: flex; gap: 24px; align-items: flex-start; }
+.doc-main { flex: 1; min-width: 0; }
+.doc-margin { width: 280px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 900px) { .doc-layout { flex-direction: column; } .doc-margin { width: 100%; } }
+.doc-body { padding: 24px 32px; max-width: 720px; font-size: 15px; line-height: 1.65; }
+.doc-body h2 { font-size: 18px; margin: 20px 0 8px; }
+.doc-body p + p { margin-top: 10px; }
+mark.anchor { background: var(--warn-soft); color: inherit; border-bottom: 2px solid var(--warn); padding: 0 1px; }
+mark.anchor.active { background: var(--accent-soft); border-bottom-color: var(--accent); }
+.sel { background: var(--info-soft); outline: 1px solid var(--info); }
+.pop { display: inline-flex; position: relative; top: -2px; margin-left: 4px; }
+.pop .btn { box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+.mc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.mc.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mc q { color: var(--muted); font-style: italic; }
+.toolbar { display: flex; gap: 2px; flex-wrap: wrap; padding: 4px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.toolbar button { border: none; background: transparent; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 13px; min-width: 30px; }
+.toolbar button:hover { background: var(--surface-2); }
+.toolbar .tsep { width: 1px; background: var(--border); margin: 4px; }
+.editor-split { display: flex; min-height: 420px; }
+.editor-split > * { flex: 1; min-width: 0; }
+.editor-split textarea { border: none; border-right: 1px solid var(--border); border-radius: 0; padding: 16px; background: var(--surface); line-height: 1.6; min-height: 420px; resize: none; }
+.editor-split .preview { padding: 16px 20px; background: var(--bg); font-size: 14px; }
+@media (max-width: 700px) { .editor-split { flex-direction: column; } .editor-split textarea { border-right: none; border-bottom: 1px solid var(--border); min-height: 240px; } }
+.conf { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.conf > div { flex: 1; min-width: 0; padding: 10px 12px; font-size: 13px; }
+.conf > div + div { border-left: 1px solid var(--border); }
+.conf pre { margin: 6px 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 700px) { .conf { flex-direction: column; } .conf > div + div { border-left: none; border-top: 1px solid var(--border); } }
+.choice { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); }
+.choice[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.choice pre { margin: 4px 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; }
+.diff { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.diff div { padding: 1px 10px; white-space: pre-wrap; }
+.diff .add { background: var(--ok-soft); } .diff .del { background: var(--danger-soft); } .diff .fold { color: var(--muted); font-style: italic; }
+
+/* ---------- agents ---------- */
+.agent-cards { display: flex; flex-direction: column; gap: 12px; }
+.agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.agent-card .ac-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; flex-wrap: wrap; }
+.sess { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); flex-wrap: wrap; font-size: 13px; }
+.sess .working { flex: 1; min-width: 200px; }
+.beat { width: 120px; display: flex; flex-direction: column; gap: 2px; }
+.ac-foot { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); background: var(--bg); font-size: 13px; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12px; }
+
+/* ---------- tokens screen ---------- */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.sw { width: 132px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); font-size: 12px; }
+.sw i { display: block; height: 40px; }
+.sw div { padding: 6px 8px; }
+.typescale > div { display: flex; gap: 16px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.typescale .label { width: 120px; flex: none; }
+
+/* ================= Phase 2 additions ================= */
+.reason { border-left: 3px solid var(--agent); background: var(--agent-soft); padding: 8px 12px; border-radius: 0 8px 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.reason .kind { color: var(--agent); }
+.lock { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--muted); white-space: nowrap; }
+.lock b { font-weight: 600; color: var(--text); }
+.dl { font-family: var(--font-mono); font-size: 13px; border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; background: var(--surface); }
+.dl > div { padding: 3px 12px; white-space: pre-wrap; display: flex; gap: 8px; }
+.dl > div > span:first-child { width: 12px; flex: none; color: var(--muted); }
+.dl .add { background: var(--ok-soft); }
+.dl .del { background: var(--danger-soft); }
+.dl .del > span + span { text-decoration: line-through; text-decoration-color: var(--danger); }
+.dl .hd { background: var(--surface-2); color: var(--muted); font-family: var(--font-ui); font-size: 12px; }
+.sxs { display: flex; gap: 12px; }
+.sxs > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sxs .pane { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.sxs .pane p { padding: 2px 6px; border-radius: 4px; }
+.sxs .pane p.was { background: var(--danger-soft); }
+.sxs .pane p.now { background: var(--ok-soft); }
+@media (max-width: 700px) { .sxs { flex-direction: column; } }
+.proto-sim { font-size: 12px; color: var(--muted); border: 1px dashed var(--border); border-radius: 6px; padding: 4px 8px; background: transparent; cursor: pointer; }
+.overlay { position: fixed; inset: 0; background: rgba(10, 14, 12, .45); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+.dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 100%; max-width: 640px; max-height: 90%; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, .3); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.deps { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.deps-head { padding: 8px 12px; background: var(--surface-2); font-size: 13px; font-weight: 500; }
+.dep { display: flex; gap: 8px 12px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.dep .t { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 2px; }
+.opt { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; flex: none; }
+.opt button { border: none; background: var(--surface); padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.opt button + button { border-left: 1px solid var(--border); }
+.opt button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tree { display: flex; flex-direction: column; gap: 0; font-size: 13px; }
+.tree .node { display: flex; align-items: center; gap: 8px; padding: 6px 0; flex-wrap: wrap; }
+.tree .node.l1 { padding-left: 20px; border-left: 2px solid var(--border); margin-left: 6px; }
+.tree .node.l2 { padding-left: 44px; border-left: 2px solid var(--border); margin-left: 6px; }
+.dst { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; white-space: nowrap; }
+.dst.proposed { color: var(--warn); }
+.dst.accepted { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-soft); }
+.dst.rejected { color: var(--muted); }
+.dst.deprecated { color: var(--muted); border-style: dashed; }
+.dst.superseded { color: var(--info); }
+.term-groups { display: flex; flex-direction: column; gap: 24px; }
+.term-group { display: flex; flex-direction: column; gap: 8px; }
+.term { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.term + .term { border-top: 1px solid var(--border); }
+.term-name { font-weight: 600; font-size: 15px; }
+.avoid { font-size: 12px; color: var(--muted); }
+.avoid span { text-decoration: line-through; text-decoration-color: var(--muted); }
+.override { font-size: 12px; color: var(--info); border: 1px solid var(--info); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.ld { display: flex; gap: 16px; align-items: flex-start; }
+.ld-list { width: 260px; flex: none; display: flex; flex-direction: column; }
+.ld-list .li { padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.ld-list .li:hover { background: var(--surface-2); }
+.ld-list .li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.ld-list .lh { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 12px 10px 4px; }
+.ld-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 860px) { .ld { flex-direction: column; } .ld-list { width: 100%; } }
+.side-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.dec-page { display: flex; gap: 16px; align-items: flex-start; }
+.dec-body { flex: 1; min-width: 0; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.65; font-size: 15px; max-width: 760px; }
+.dec-body h4 { margin: 8px 0 0; font-size: 14px; }
+.dec-side { width: 260px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 900px) { .dec-page { flex-direction: column; } .dec-side { width: 100%; } }
+.dtl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dtl li { display: flex; gap: 12px; position: relative; padding-bottom: 12px; cursor: pointer; }
+.dtl .rail { width: 14px; flex: none; display: flex; flex-direction: column; align-items: center; }
+.dtl .rail i { width: 12px; height: 12px; border-radius: 999px; border: 2px solid var(--border); background: var(--surface); margin-top: 12px; }
+.dtl .rail b { flex: 1; width: 2px; background: var(--border); }
+.dtl li.accepted .rail i { border-color: var(--ok); background: var(--ok); }
+.dtl li.proposed .rail i { border-color: var(--warn); }
+.dtl li.superseded .rail i, .dtl li.rejected .rail i { border-color: var(--muted); }
+.dtl .dcard { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.dtl li[aria-selected="true"] .dcard { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dtl li.superseded .dcard, .dtl li.rejected .dcard { opacity: .72; }
+.month { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 4px 0 8px 26px; }
+.af-wrap { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.af-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.af-frame { flex: 1; min-width: 0; background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 420px; }
+.drawer { width: 300px; flex: none; border-left: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+@media (max-width: 900px) { .af-wrap { flex-direction: column; } .drawer { width: auto; border-left: none; border-top: 1px solid var(--border); } }
+.fake { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.fake h5 { margin: 0; font-size: 15px; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; border-bottom: 1px solid var(--border); padding-top: 8px; }
+.bars i { flex: 1; background: var(--info); border-radius: 3px 3px 0 0; min-width: 6px; }
+.bars i.over { background: var(--danger); }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.extra { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--warn); border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 10px; }
+.embed { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.embed .eb { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: var(--surface-2); font-size: 12px; flex-wrap: wrap; }
+.embed .ef { padding: 12px; background: var(--bg); }
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.thumb { width: 168px; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); display: flex; flex-direction: column; }
+.thumb .img { height: 88px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.thumb .img.video { background: var(--text); color: var(--bg); font-size: 20px; }
+.thumb .cap { padding: 6px 8px; display: flex; flex-direction: column; font-size: 12px; }
+.drop { border: 1px dashed var(--border); border-radius: 8px; padding: 10px 12px; color: var(--muted); font-size: 13px; }
+.file-row { display: flex; gap: 8px; align-items: center; font-size: 13px; padding: 4px 0; }
+.file-row .ic { width: 28px; height: 28px; border-radius: 4px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; color: var(--muted); flex: none; }
+.file-row .ic.af { background: var(--agent-soft); color: var(--agent); }
+.player { border-radius: 8px; background: var(--text); color: var(--bg); height: 150px; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; max-width: 420px; }
+.player .pb { height: 4px; border-radius: 2px; background: var(--muted); }
+.player .pb i { display: block; width: 30%; height: 100%; background: var(--bg); border-radius: 2px; }
+.tri-table td .row { flex-wrap: wrap; }
+.status.backlog i { background: transparent; border: 1.5px dashed var(--cat-backlog); }
+/* ================= Phase 3 additions ================= */
+.host { display: inline-grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--text); }
+.repo { font-family: var(--font-mono); font-size: 13px; }
+.health { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.health::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.health.ok { color: var(--ok); } .health.bad { color: var(--danger); } .health.wait { color: var(--warn); }
+.health span { color: var(--text); }
+.toggle { border: none; background: none; padding: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.toggle i { width: 30px; height: 18px; border-radius: 999px; background: var(--border); position: relative; flex: none; }
+.toggle i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); transition: left .15s; }
+.toggle[aria-pressed="true"] i { background: var(--accent); }
+.toggle[aria-pressed="true"] i::after { left: 14px; }
+.settings { display: flex; gap: 24px; align-items: flex-start; }
+.settings-nav { width: 180px; flex: none; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; }
+.settings-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 760px) { .settings { flex-direction: column; } .settings-nav { width: 100%; flex-direction: row; flex-wrap: wrap; position: static; } }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+.sec-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sec-head h2 { flex: 1; min-width: 0; }
+.rrow { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
+.rrow + .rrow { border-top: 1px solid var(--border); }
+.rrow .t { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
+.copy { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 6px; padding: 4px 4px 4px 10px; font-family: var(--font-mono); font-size: 12px; min-width: 0; }
+.copy span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steps { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.steps button { flex: 1; border: none; background: none; padding: 10px 12px; text-align: left; cursor: pointer; display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); min-width: 0; }
+.steps button + button { border-left: 1px solid var(--border); }
+.steps button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.steps .n { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid currentColor; display: grid; place-items: center; font-size: 11px; flex: none; }
+.steps .done .n { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+@media (max-width: 700px) { .steps { flex-direction: column; } .steps button + button { border-left: none; border-top: 1px solid var(--border); } }
+.map { width: 100%; border-collapse: collapse; font-size: 13px; }
+.map th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.map td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.map tr:last-child td { border-bottom: none; }
+.tablewrap { overflow-x: auto; }
+.rcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.rcard { display: flex; flex-direction: column; }
+.rcard .rh { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.rcard .rb { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.rcard .rf { padding: 8px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; min-width: 0; }
+.deliv { display: flex; gap: 3px; align-items: flex-end; height: 22px; }
+.deliv i { width: 6px; border-radius: 2px; background: var(--ok); height: 100%; }
+.deliv i.f { background: var(--danger); } .deliv i.n { background: var(--border); height: 40%; }
+/* Pull Requests */
+.prs { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; white-space: nowrap; }
+.prs.draft { color: var(--muted); border-style: dashed; }
+.prs.open { color: var(--ok); }
+.prs.merged { color: var(--agent); background: var(--agent-soft); border-color: var(--agent-soft); }
+.prs.closed { color: var(--danger); }
+.checks { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.ck-ok { color: var(--ok); } .ck-bad { color: var(--danger); } .ck-run { color: var(--warn); }
+.pr-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; font-size: 13px; }
+.pr-row + .pr-row { border-top: 1px solid var(--border); }
+.pr-card { display: flex; flex-direction: column; }
+.pr-card .ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; flex-wrap: wrap; }
+.pr-card .pb { border-top: 1px solid var(--border); padding: 4px 14px 8px; }
+.ck-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.ck-list li { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+.ck-list li .grow { font-family: var(--font-mono); font-size: 12px; }
+.side-h { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.side-h .grow { font-weight: 600; }
+.cronk { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--muted); }
+.no-report { color: var(--warn); border-color: var(--warn); }
+.k-pr { color: var(--agent); }
+.sc-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.ask { border: 1px dashed var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+</style>
+
+<div class="proto-bar" role="navigation" aria-label="Prototype">
+  <strong>Cronk Phase 3 prototype</strong><span class="note">throwaway · fake data · direction from docs/ui.md</span>
+  <div class="proto-tabs" id="screens"></div>
+  <div class="seg" id="theme" aria-label="Theme"><button data-t="">System</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+</div>
+<div id="app"></div>
+<div id="modal"></div>
+<div class="switcher" role="group" aria-label="Variant">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="vlabel" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+// ---------------------------------------------------------------- helpers (as in #98)
+const av = (n, agent) => `<span class="av${agent ? " agent" : ""}">${n.split(/[\s-]/).map(s => s[0]).join("").slice(0, 2).toUpperCase()}</span>`;
+const user = n => `<span class="actor">${av(n)}${n}</span>`;
+const agent = (n, owner) => `<span class="actor agent-name">${av(n, true)}${n}</span>${owner ? `<span class="muted small">for ${owner}</span>` : ""}`;
+const sess = s => `<span class="session" title="Agent Session">${s}</span>`;
+const status = (cat, name) => `<span class="status ${cat}"><i></i><span>${name}</span></span>`;
+const prio = p => `<span class="prio ${p.toLowerCase()}">${p}</span>`;
+const kind = (cls, txt) => `<span class="kind ${cls}">${txt}</span>`;
+const lock = (extra) => `<span class="lock" title="Agents may read but not edit">🔒 <b>Protected</b>${extra ? ` · ${extra}` : ""}</span>`;
+const dst = s => `<span class="dst ${s}">${s}</span>`;
+
+function nav(active) {
+  const items = [
+    ["inbox", "Inbox", `<span class="count hot">7</span>`],
+    ["triage", "Triage", `<span class="count">4</span>`],
+    ["documents", "Documents", ""],
+    ["terms", "Terms", ""],
+    ["decisions", "Decisions", ""],
+    ["agents", "Agents", `<span class="count"><span class="live">2</span></span>`],
+  ];
+  return items.map(([k, n, c]) => `<a class="nav-item${active === k ? " active" : ""}">${n}${c}</a>`).join("");
+}
+function frame(active, inner) {
+  return `<div class="frame">
+    <aside class="sidebar" aria-label="Main">
+      <div class="ws"><span class="ws-mark">A</span>Acme</div>
+      <div class="search">Search <kbd>/</kbd></div>
+      <nav class="nav-group">${nav(active)}</nav>
+      <nav class="nav-group projects-group"><div class="nav-label">Projects</div>
+        <a class="nav-item${active === "projects" ? " active" : ""}"><span class="pkey">CRONK</span>Cronk</a>
+        <a class="nav-item"><span class="pkey">SITE</span>Website</a>
+        <a class="nav-item"><span class="pkey">OPS</span>Operations</a>
+      </nav>
+      <nav class="nav-group"><div class="nav-label">Workspace</div>
+        <a class="nav-item">Guidance</a><a class="nav-item">Users</a><a class="nav-item">Settings</a>
+      </nav>
+      <div class="me">${av("Ada Lovelace")}<span class="grow">Ada Lovelace</span><span class="muted small">Admin</span></div>
+    </aside>
+    <main class="main"><div class="main-inner">${inner}</div></main></div>`;
+}
+
+
+const host = h => `<span class="host" title="${h === "GH" ? "GitHub" : "GitLab"}">${h}</span>`;
+const health = (cls, txt) => `<span class="health ${cls}"><span>${txt}</span></span>`;
+const toggle = (on, txt, data) => `<button class="toggle" aria-pressed="${on}" ${data || ""}><i></i>${txt}</button>`;
+const prState = s => `<span class="prs ${s}">${{ draft: "Draft", open: "Open", merged: "Merged", closed: "Closed" }[s]}</span>`;
+const checks = (ok, bad, run) => `<span class="checks">${ok ? `<span class="ck-ok">✓ ${ok}</span>` : ""}${bad ? `<span class="ck-bad">✗ ${bad}</span>` : ""}${run ? `<span class="ck-run">● ${run}</span>` : ""}</span>`;
+const cronk = `<span class="cronk">Cronk</span>`;
+const copy = v => `<div class="copy"><span>${v}</span><button class="btn small secondary">Copy</button></div>`;
+
+// ---------------------------------------------------------------- fake data
+const REPOS = [
+  { h: "GH", name: "cronkcorp/cronk", also: "Also listed by SITE", hl: ["ok", "Last event 4 min ago"], token: "Fine-grained token · expires in 23 days", by: "Ada Lovelace", auto: true, prs: 3, del: "ok ok ok ok ok ok ok ok ok ok ok ok ok ok" },
+  { h: "GH", name: "cronkcorp/cronk-docs", also: "", hl: ["wait", "No events yet"], token: "Fine-grained token · no expiry", by: "Grace Hopper", auto: true, prs: 0, del: "n n n n n n n n n n n n n n" },
+  { h: "GL", name: "gitlab.acme.dev/ops/deploy", also: "", hl: ["bad", "Token refused 2 h ago"], token: "Project access token · expired 2 h ago", by: "Ada Lovelace", auto: false, prs: 1, del: "ok ok ok ok ok ok ok ok f f f f f f" },
+];
+const MAP = [
+  ["Ready for review (or opened, not a draft)", "Backlog, Unstarted or Started", "→ In Review"],
+  ["Checks fail, or changes requested", "In Review", "Send back by Cronk, with a Comment linking the checks or review"],
+  ["Merged by a User (linked Git host account)", "any open Status", "→ Completed · Verified when an Agent completed the work"],
+  ["Merged by anyone else", "any open Status", "→ Completed · Unverified"],
+  ["Merged while another linked PR is still open", "any", "nothing yet; waits for the last one"],
+];
+
+// ---------------------------------------------------------------- Repositories
+function settingsShell(body) {
+  const secs = ["Access", "Agent Access", "Autonomous Delegation", "Repositories", "Statuses", "Guidance"];
+  return `<div class="crumbs">Projects / CRONK Cronk</div>
+  <div class="page-head"><h1>Project settings</h1></div>
+  <div class="settings"><nav class="settings-nav" aria-label="Sections">${secs.map(s => `<a class="nav-item${s === "Repositories" ? " active" : ""}">${s}</a>`).join("")}</nav>
+  <div class="settings-body">${body}</div></div>`;
+}
+function reposA() {
+  const rows = REPOS.map(r => `<div class="rrow">
+      ${host(r.h)}<div class="t"><span class="repo">${r.name}</span><span class="muted small">${r.token}${r.also ? ` · ${r.also}` : ""}</span></div>
+      ${health(...r.hl)}
+      ${toggle(r.auto, "Move Tickets")}
+      <button class="btn small secondary">…</button></div>`).join("");
+  return settingsShell(`<section class="sec">
+    <div class="sec-head"><h2>Repositories</h2><button class="btn" data-modal="list">List a Repository</button></div>
+    <p class="muted small">Pull Requests in these Repositories link to a Ticket when their branch name or title holds its key (CRONK-12). With "Move Tickets" on, their events move those Tickets.</p>
+    <div class="panel">${rows}</div>
+    <div class="banner warn"><b>gitlab.acme.dev/ops/deploy</b> stopped working: its token was refused 2 h ago. <button class="btn small secondary">Replace token…</button></div>
+    <details class="panel panel-pad"><summary class="small" style="cursor:pointer">What Pull Request events do</summary>${mapTable()}</details>
+  </section>`);
+}
+function mapTable() {
+  return `<div class="tablewrap"><table class="map"><thead><tr><th>Pull Request event</th><th>Ticket in</th><th>Then</th></tr></thead><tbody>${MAP.map(r => `<tr><td>${r[0]}</td><td class="muted">${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody></table></div>
+  <p class="muted small" style="margin-top:8px">A delegated Ticket whose Agent holds a live Claim and hasn't written a Report doesn't move to In Review; Cronk asks the Agent for one.</p>`;
+}
+function listDialog() {
+  return `<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="ld-t" style="display:flex;flex-direction:column;gap:12px">
+    <h2 id="ld-t">List a Repository</h2>
+    <div class="col"><label class="label">Address</label><input class="input mono" value="https://github.com/cronkcorp/cronk"><span class="muted small">GitHub, or GitLab including your own (https://gitlab.acme.dev/group/project).</span></div>
+    <div class="banner info">cronkcorp/cronk is already listed by SITE. CRONK will share it, with its token and webhook.</div>
+    <div class="col"><label class="label">Token</label><input class="input mono" placeholder="github_pat_…"><span class="muted small">A fine-grained token that can read Pull Requests, checks and contents. Cronk encrypts it and never shows it again.</span></div>
+    <div class="col"><span class="label">Webhook: add this on GitHub (Settings → Webhooks), for Pull Request, check and review events</span>${copy("https://cronk.acme.dev/api/hooks/github")}${copy("whsec_3f9a…c21 (secret)")}</div>
+    ${toggle(true, "Move Tickets on Pull Request events")}
+    <div class="dialog-actions"><button class="btn secondary" data-modal="">Cancel</button><button class="btn">List Repository</button></div>
+  </div></div>`;
+}
+function reposB() {
+  const st = state.step || 1;
+  const steps = ["Repository and token", "Webhook", "What events do"].map((s, i) => `<button data-step="${i + 1}" aria-current="${st === i + 1}" class="${st > i + 1 ? "done" : ""}"><span class="n">${st > i + 1 ? "✓" : i + 1}</span>${s}</button>`).join("");
+  const body = st === 1 ? `<div class="col"><label class="label">Address</label><input class="input mono" value="https://github.com/cronkcorp/cronk-docs"></div>
+      <div class="col"><label class="label">Token</label><input class="input mono" value="github_pat_11A…"><span class="muted small">Needs: Pull requests (read), Checks (read), Contents (read).</span></div>
+      <div class="banner info">Checked: the token can read cronkcorp/cronk-docs, its Pull Requests and checks.</div>
+      <div><button class="btn" data-step="2">Next: Webhook</button></div>`
+    : st === 2 ? `<p>Add a webhook on GitHub, under <b>cronkcorp/cronk-docs → Settings → Webhooks</b>:</p>
+      <div class="col"><span class="label">Payload URL</span>${copy("https://cronk.acme.dev/api/hooks/github")}<span class="label">Secret</span>${copy("whsec_3f9a…c21")}<span class="label">Events</span><span class="small">Pull requests, Pull request reviews, Check runs</span></div>
+      <div class="panel panel-pad row">${health("wait", "Waiting for GitHub's ping…")}<span class="grow"></span><button class="proto-sim" data-step="3">Simulate the ping arriving</button></div>
+      <p class="muted small">Cronk must be reachable from GitHub. Behind a firewall, use a tunnel; Cronk doesn't poll.</p>`
+    : `<div class="panel panel-pad row">${health("ok", "Ping received 2 s ago")}</div>${mapTable()}
+      ${toggle(true, "Move Tickets on Pull Request events")}
+      <div class="row"><button class="btn">Finish</button><button class="btn ghost" data-step="2">Back</button></div>`;
+  return settingsShell(`<section class="sec"><div class="sec-head"><h2>List a Repository</h2><button class="btn ghost">Cancel</button></div>
+    <div class="steps">${steps}</div><div class="panel panel-pad col" style="gap:12px">${body}</div></section>`);
+}
+function reposC() {
+  const cards = REPOS.map(r => `<div class="panel rcard">
+    <div class="rh">${host(r.h)}<span class="repo grow">${r.name}</span>${health(...r.hl)}</div>
+    <div class="rb"><dl class="kv"><dt>Token</dt><dd>${r.token}</dd><dt>Listed by</dt><dd>${r.by}${r.also ? ` · ${r.also}` : ""}</dd><dt>Open PRs</dt><dd>${r.prs} linked to CRONK Tickets</dd>
+      <dt>Deliveries</dt><dd><span class="deliv">${r.del.split(" ").map(x => `<i class="${x === "ok" ? "" : x}"></i>`).join("")}</span><span class="muted small">last 14 days</span></dd></dl></div>
+    <div class="rf">${toggle(r.auto, "Move Tickets")}<span class="grow"></span><button class="btn small secondary">Replace token…</button><button class="btn small ghost">Remove</button></div></div>`).join("");
+  return settingsShell(`<section class="sec"><div class="sec-head"><h2>Repositories</h2><button class="btn" data-modal="list">List a Repository</button></div>
+    <div class="rcards">${cards}</div>
+    <div class="panel"><div class="side-h">What Pull Request events do in CRONK</div><div style="padding:4px 4px 12px">${mapTable()}</div></div></section>`);
+}
+
+// ---------------------------------------------------------------- Ticket with Pull Requests
+const SC = {
+  review: { name: "Ready for review", st: ["review", "In Review"], pr: ["open", 4, 0, 0, "Review requested"], ver: "" },
+  failed: { name: "Checks failed", st: ["started", "In Progress"], pr: ["open", 3, 1, 0, "Review requested"], ver: "" },
+  noreport: { name: "No Report yet", st: ["started", "In Progress"], pr: ["open", 0, 0, 4, "Ready for review"], ver: "" },
+  merged: { name: "Merged by a User", st: ["completed", "Done"], pr: ["merged", 4, 0, 0, "Merged by Ada"], ver: "Verified" },
+};
+const CHECKS = [["lint", "ok"], ["typecheck", "ok"], ["test (node 22)", "bad"], ["e2e", "ok"]];
+function sc() { return SC[state.sc || "review"]; }
+function scBar() {
+  return `<div class="sc-bar">Scenario: <div class="seg">${Object.entries(SC).map(([k, v]) => `<button data-sc="${k}" aria-pressed="${(state.sc || "review") === k}">${v.name}</button>`).join("")}</div></div>`;
+}
+function prMain() { const p = sc().pr; return { s: p[0], ok: p[1], bad: p[2], run: p[3], rv: p[4] }; }
+function checkList() {
+  const p = prMain();
+  return `<ul class="ck-list">${CHECKS.map(([n, s]) => { const st = p.run ? "run" : (s === "bad" && p.bad ? "bad" : "ok"); return `<li><span class="ck-${st}">${{ ok: "✓", bad: "✗", run: "●" }[st]}</span><span class="grow">${n}</span><span class="muted small">${{ ok: "passed", bad: "failed", run: "running" }[st]}</span></li>`; }).join("")}</ul>`;
+}
+function timeline(extra) {
+  const s = state.sc || "review";
+  const items = [
+    `<li><span class="gut">${av("claude-laptop", true)}</span><div class="act"><div class="act-head">${kind("k-plan", "Plan")}${agent("claude-laptop")}${sess("brisk-otter")}<span class="muted small">09:40</span></div><div class="act-body md"><p>Limit failed sign-ins per email in the API; open one PR for the code and one for the docs.</p></div></div></li>`,
+    extra.opened || "",
+    `<li class="sys"><span class="gut"></span>${cronk} linked <b>#215</b> Docs: sign-in limits, merged by ${"Ada Lovelace"} · 10:12</li>`,
+  ];
+  if (s !== "noreport") items.push(`<li><span class="gut">${av("claude-laptop", true)}</span><div class="act"><div class="act-head">${kind("k-report", "Report")}${agent("claude-laptop")}<span class="muted small">10:40</span></div><div class="report-card"><div class="rc-head"><b>Sign-in rate limit</b><span class="grow"></span><a>Open Report</a></div><div class="rc-body md"><p>5 failures per email per minute, sliding. PR #212 holds the code; #215 the docs.</p></div></div></div></li>`);
+  if (s === "review" || s === "failed" || s === "merged") items.push(`<li class="sys"><span class="gut"></span>${cronk} moved it from In Progress to In Review: <b>#212</b> is ready for review · 10:41</li>`);
+  if (s === "failed") items.push(`<li><span class="gut"><span class="av">C</span></span><div class="act"><div class="act-head">${kind("k-comment", "Sent back")}${cronk}<span class="muted small">10:52</span></div><div class="bubble md"><p><b>#212</b>'s checks failed: <a>test (node 22)</a>. Sent back to claude-laptop.</p></div></div></li>`,
+    `<li class="sys"><span class="gut"></span>${cronk} moved it from In Review to In Progress · 10:52</li>`);
+  if (s === "noreport") items.push(`<li><span class="gut"><span class="av">C</span></span><div class="act"><div class="act-head">${kind("k-question", "Waiting on a Report")}${cronk}<span class="muted small">10:41</span></div><div class="bubble md"><p><b>#212</b> is ready for review, but claude-laptop holds the Claim and hasn't written a Report. Cronk left it In Progress and asked claude-laptop to write one and move it.</p></div></div></li>`);
+  if (s === "merged") items.push(`<li class="sys"><span class="gut"></span>${user("Ada Lovelace")} merged <b>#212</b> on GitHub · ${cronk} moved it to Done, Verified by that merge · 11:30</li>`);
+  return `<ol class="tl">${items.join("")}</ol>`;
+}
+function sidePanel(prBlock) {
+  const s = sc();
+  return `<aside class="tk-side">
+    <div class="panel">
+      <div class="prop"><span class="label">Status</span>${status(s.st[0], s.st[1])}</div>
+      ${s.ver ? `<div class="prop"><span class="label">Verification</span><span class="chip" style="color:var(--ok);border-color:var(--ok)">Verified</span><span class="muted small">by Ada's merge</span></div>` : ""}
+      <div class="prop"><span class="label">Priority</span>${prio("High")}</div>
+      <div class="prop"><span class="label">Assignee</span>${user("Ada Lovelace")}</div>
+      <div class="prop"><span class="label">Delegate</span>${agent("claude-laptop")}</div>
+      <div class="prop"><span class="label">Autonomy</span><span>Stops at In Review</span></div>
+    </div>
+    ${(state.sc || "review") === "noreport" || (state.sc || "review") === "failed" ? `<div class="claim-card"><div class="row"><b style="color:var(--agent)">Claimed</b>${sess("brisk-otter")}</div><div class="meter"><i style="width:70%"></i></div><span class="muted small">heard 40 s ago</span></div>` : ""}
+    ${prBlock || ""}
+    <div class="panel panel-pad small col"><b>Relations</b><span><span class="key">CRONK-31</span> blocks this · Done</span></div>
+  </aside>`;
+}
+function ticketPage(main, side, extra) {
+  return `<div class="crumbs">Projects / CRONK Cronk / <span class="mono">CRONK-12</span></div>${scBar()}
+  <div class="tk-layout"><div class="tk-main">
+    <div class="row"><span class="key">CRONK-12</span></div><h1 style="font-size:24px">Rate-limit sign-in attempts</h1>
+    <div class="panel desc md"><p>Repeated failed sign-ins should slow down. Decide per email or per IP (see CRONK-D4).</p></div>
+    ${main || ""}
+    <h2>Timeline</h2>${timeline(extra || {})}
+  </div>${side}</div>`;
+}
+function prA() {
+  const p = prMain();
+  const block = `<div class="panel"><div class="side-h"><span class="grow">Pull Requests</span><button class="btn small ghost" title="Re-read them from GitHub">Refresh</button></div>
+    <div class="pr-row"><div class="row">${host("GH")}<b>#212</b><span class="grow">Rate-limit failed sign-ins</span></div><div class="row wrap">${prState(p.s)}${checks(p.ok, p.bad, p.run)}<span class="muted small">${p.rv}</span></div></div>
+    <div class="pr-row"><div class="row">${host("GH")}<b>#215</b><span class="grow">Docs: sign-in limits</span></div><div class="row wrap">${prState("merged")}${checks(2)}</div></div>
+    <div class="pr-row"><a class="small">Link a Pull Request…</a></div></div>`;
+  return ticketPage("", sidePanel(block), { opened: `<li class="sys"><span class="gut"></span>${agent("claude-laptop")} linked <b>#212</b> Rate-limit failed sign-ins (branch <code>cronk-12-sign-in-limit</code>) · 10:05</li>` });
+}
+function prB() {
+  const p = prMain();
+  const main = `<div class="row"><h2 class="grow">Pull Requests</h2><button class="btn small secondary">Refresh</button><button class="btn small ghost">Link…</button></div>
+    <div class="panel pr-card"><div class="ph">${host("GH")}<b>#212</b><span class="grow">Rate-limit failed sign-ins</span>${prState(p.s)}</div>
+      <div class="ph" style="padding-top:0"><span class="mono small muted">cronk-12-sign-in-limit → main</span><span class="muted small">· by claude-laptop · ${p.rv}</span></div>
+      <div class="pb">${checkList()}</div></div>
+    <div class="panel pr-card"><div class="ph">${host("GH")}<b>#215</b><span class="grow">Docs: sign-in limits</span>${prState("merged")}${checks(2)}</div></div>`;
+  return ticketPage(main, sidePanel(""), {});
+}
+function prC() {
+  const p = prMain();
+  const evt = `<li><span class="gut">${host("GH")}</span><div class="act"><div class="act-head">${kind("k-pr", "Pull Request")}<b>#212</b> Rate-limit failed sign-ins ${prState(p.s)}<span class="muted small">opened 10:05 by claude-laptop</span></div>
+    <div class="bubble"><div class="row wrap">${checks(p.ok, p.bad, p.run)}<span class="muted small">${p.rv}</span><span class="grow"></span><a class="small">Open on GitHub</a></div>${p.bad || p.run ? checkList() : ""}</div></div></li>`;
+  const chip = `<div class="panel panel-pad small row wrap"><b>Pull Requests</b><span class="grow"></span>${prState(p.s)} <b>#212</b> ${prState("merged")} <b>#215</b></div>`;
+  return ticketPage("", sidePanel(chip), { opened: evt });
+}
+
+// ---------------------------------------------------------------- screens
+const SCREENS = {
+  repos: { name: "Repositories", nav: "projects", variants: {
+    a: ["Settings section with rows", "A Repositories section in Project settings: one row per Repository with its host, health and a Move Tickets switch; List a Repository opens a dialog holding the address, token and webhook to copy. What events do is folded away.", reposA],
+    b: ["Guided setup", "Listing a Repository is a three-step page: address and token (checked as you go), the webhook to add with a live wait for the host's ping, then a table of what events will do. The list itself would be as in A.", reposB],
+    c: ["Health cards", "Each Repository is a card with its token's expiry, who listed it, open Pull Requests and 14 days of webhook deliveries, so a broken one is obvious. What events do is always shown underneath.", reposC],
+  }},
+  ticket: { name: "Ticket · Pull Requests", nav: "projects", variants: {
+    a: ["Side panel group", "Pull Requests are a side panel group like Relations: state, checks and review per PR, with Refresh. Cronk's moves are Change lines naming the PR; a Send back by Cronk is a SENT BACK Comment. Flip the scenarios above.", prA],
+    b: ["Card in the main column", "Pull Requests sit under the description as cards with branch, author and every check listed. The side panel stays as today.", prB],
+    c: ["In the timeline", "A Pull Request is a timeline entry (PULL REQUEST kind) that updates in place with its state and checks, expanding the checks when one fails or runs. The side panel only names them.", prC],
+  }},
+};
+
+// ---------------------------------------------------------------- shell
+const state = { screen: "repos", variant: "a" };
+function parseHash() {
+  const m = /^#([a-z]+)-([a-z])$/.exec(location.hash);
+  if (m && SCREENS[m[1]] && SCREENS[m[1]].variants[m[2]]) { state.screen = m[1]; state.variant = m[2]; }
+}
+function resetLocal() { Object.assign(state, { modal: "", step: 1 }); }
+function go(screen, variant) { location.hash = `${screen}-${variant}`; }
+function render() {
+  const s = SCREENS[state.screen];
+  const [vname, note, body] = s.variants[state.variant];
+  document.getElementById("screens").innerHTML = Object.entries(SCREENS).map(([k, x]) => `<button data-screen="${k}" aria-current="${k === state.screen}">${x.name}</button>`).join("");
+  const keys = Object.keys(s.variants);
+  document.getElementById("vlabel").textContent = `${s.name} ${state.variant.toUpperCase()} of ${keys.length}: ${vname}`;
+  document.getElementById("app").innerHTML = frame(s.nav, `<div class="variant-note"><strong>${s.name} ${state.variant.toUpperCase()}, ${vname}.</strong> ${note}</div>${body()}`);
+  document.getElementById("modal").innerHTML = state.modal === "list" ? listDialog() : "";
+}
+function cycle(d) {
+  const keys = Object.keys(SCREENS[state.screen].variants);
+  go(state.screen, keys[(keys.indexOf(state.variant) + d + keys.length) % keys.length]);
+}
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+  if (e.key === "Escape" && state.modal) { state.modal = ""; render(); }
+});
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-screen],[data-t],[data-modal],[data-step],[data-sc],.toggle");
+  if (!t) return;
+  const d = t.dataset;
+  if (t.classList.contains("toggle")) { t.setAttribute("aria-pressed", String(t.getAttribute("aria-pressed") !== "true")); return; }
+  if (d.screen) { resetLocal(); go(d.screen, "a"); return; }
+  if (d.t !== undefined) { if (d.t) document.documentElement.dataset.theme = d.t; else delete document.documentElement.dataset.theme; markTheme(); return; }
+  if (d.modal !== undefined) state.modal = d.modal;
+  if (d.step) state.step = Number(d.step);
+  if (d.sc) state.sc = d.sc;
+  render();
+});
+function markTheme() {
+  const cur = document.documentElement.dataset.theme || "";
+  document.querySelectorAll("#theme button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === cur)));
+}
+addEventListener("hashchange", () => { parseHash(); resetLocal(); render(); });
+parseHash(); resetLocal(); markTheme(); render();
+</script>
