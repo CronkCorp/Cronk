@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { ada, delegatedSetup, startCronk, startInstalledCronk, type Cronk, type HeldLock } from "./harness.js";
+import { ada, delegatedSetup, startCronk, startInstalledCronk, type Client, type Cronk, type HeldLock } from "./harness.js";
 
 /** The bound on closing these tests start Cronk with. */
 const CLOSE_WITHIN_MS = 500;
@@ -23,11 +23,20 @@ async function expectWithin(ms: number, work: Promise<unknown>): Promise<void> {
   }
 }
 
-/** Bytes an endless upload sends before it stalls: more than the connection's buffers hold, so once they are all taken the server is reading them. */
-const SENT_BEFORE_STALLING = 32 * 1024 * 1024;
+/** More bytes than a connection's buffers hold, so a transfer of them stalls on the end that stops reading them. */
+const MORE_THAN_BUFFERED = 32 * 1024 * 1024;
+
+/** Closes the application and starts it again, failing unless closing finishes within its bound and Cronk then answers over HTTP. */
+async function restartWithinBound(cronk: Cronk): Promise<void> {
+  await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+
+  const health = await cronk.client().send("/api/health");
+  const body = JSON.parse(Buffer.concat(await health.toArray()).toString());
+  expect({ status: health.statusCode, body }).toEqual({ status: 200, body: { status: "ok" } });
+}
 
 /**
- * An upload body that sends `SENT_BEFORE_STALLING` bytes and then never sends more nor ends, as a very slow client does;
+ * An upload body that sends `MORE_THAN_BUFFERED` bytes and then never sends more nor ends, as a very slow client does;
  * `stalled` resolves once all those bytes have been taken.
  */
 function endlessUpload(): { body: Readable; stalled: Promise<void> } {
@@ -37,7 +46,7 @@ function endlessUpload(): { body: Readable; stalled: Promise<void> } {
   const stalled = new Promise<void>((resolve) => (allRead = resolve));
   const body = new Readable({
     read() {
-      if (sent >= SENT_BEFORE_STALLING) return allRead();
+      if (sent >= MORE_THAN_BUFFERED) return allRead();
       sent += chunk.length;
       this.push(chunk);
     },
@@ -57,27 +66,15 @@ async function restartWhileWaiting<T>(cronk: Cronk, wait: () => Promise<T>): Pro
   waiting.catch(() => {});
   await held.waiters(1);
 
-  await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
-
-  const health = await cronk.client().send("/api/health");
-  const body = JSON.parse(Buffer.concat(await health.toArray()).toString());
-  expect({ status: health.statusCode, body }).toEqual({ status: 200, body: { status: "ok" } });
+  await restartWithinBound(cronk);
   return { waiting, held };
 }
 
-/** Bytes a stalled download's file holds: more than the connection's buffers hold, so the server is left with more to send. */
-const DOWNLOAD_SIZE = 32 * 1024 * 1024;
-
-/** Attaches `DOWNLOAD_SIZE` random bytes, which don't compress, to CRONK-1 over HTTP and answers the Attachment's id. */
-async function attachLargeFile(client: ReturnType<Cronk["client"]>): Promise<string> {
-  const res = await client.send("/api/tickets/CRONK-1/attachments?name=large.bin", {
-    method: "POST",
-    body: Readable.from([randomBytes(DOWNLOAD_SIZE)]),
-    headers: { "content-type": "application/octet-stream" },
-  });
-  const body = JSON.parse(Buffer.concat(await res.toArray()).toString());
-  expect(res.statusCode, JSON.stringify(body)).toBe(201);
-  return body.attachment.id;
+/** Attaches `MORE_THAN_BUFFERED` random bytes, which don't compress, to CRONK-1 and answers the Attachment's id. */
+async function attachLargeFile(client: Client): Promise<string> {
+  const res = await client.upload("/api/tickets/CRONK-1/attachments?name=large.bin", randomBytes(MORE_THAN_BUFFERED), "application/octet-stream");
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body.attachment.id;
 }
 
 /**
@@ -85,15 +82,13 @@ async function attachLargeFile(client: ReturnType<Cronk["client"]>): Promise<str
  * response is left unread, so the server still has bytes to send that its connection won't take. Fails unless closing
  * finishes within its bound and Cronk then answers over HTTP. Answers the response, still unread.
  */
-async function restartWhileDownloadStalls(cronk: Cronk, client: ReturnType<Cronk["client"]>, path: string): Promise<IncomingMessage> {
+async function restartWhileDownloadStalls(cronk: Cronk, client: Client, path: string): Promise<IncomingMessage> {
   const download = await client.send(path);
   expect(download.statusCode).toBe(200);
   // Its first bytes have arrived; nothing reads on, so the connection's buffers fill and the server stops sending.
   await new Promise((resolve) => download.once("readable", resolve));
 
-  await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
-
-  expect((await client.send("/api/health")).statusCode).toBe(200);
+  await restartWithinBound(cronk);
   return download;
 }
 
@@ -180,11 +175,10 @@ describe("stopping the application", () => {
     uploading.catch(() => {});
     await upload.stalled;
 
-    await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+    await restartWithinBound(cronk);
 
     // The client mid-upload sees its connection end without an answer, and nothing of the upload is kept.
     await expect(uploading).rejects.toThrow();
-    expect((await admin.send("/api/health")).statusCode).toBe(200);
     expect((await admin.get("/api/tickets/CRONK-1/attachments")).body.attachments).toEqual([]);
   });
 
@@ -205,6 +199,7 @@ describe("stopping the application", () => {
 
     const download = await restartWhileDownloadStalls(cronk, admin, "/api/export");
 
+    // The client reading on finds the connection ended before the whole archive arrived.
     await expect(download.toArray()).rejects.toThrow();
   });
 });
