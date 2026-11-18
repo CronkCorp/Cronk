@@ -174,8 +174,10 @@ export const isUserFinishChangeSql = (c: string) =>
 const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isUserFinishChangeSql("c")})`;
 
 /**
- * SQL condition: the history of the Ticket `t` records a User's delegating it, whatever its Delegate is now. Only a User
- * sets a Delegate, so any `delegate` Change is a User's.
+ * SQL condition: the history of the Ticket `t` records a `delegate` Change, whatever its Delegate is now. On a Discovered
+ * Ticket that is a User's delegating it: only a User delegates, and the other `delegate` Changes (an Agent's Sub-Ticket
+ * inheriting its parent's Delegate, a Delegate cleared on reassigning or removing its Agent) never begin a Delegation
+ * of a Discovered Ticket, so none is recorded on one never delegated.
  */
 const everDelegatedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND c.change = 'delegate')`;
 
