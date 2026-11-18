@@ -27,22 +27,24 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 
 - **Vocabulary.** The unit of work is a Ticket (not Issue, Task or Work item), partly to avoid clashing with GitHub and GitLab Issues.
 - **Structure.** The Workspace holds Projects plus knowledge spanning them (Documents, Terms, Decisions, Guidance) but never Tickets. Project knowledge layers over the Workspace's.
-- **Agent Sessions.** One MCP connection is one Agent Session; the MCP session id is the Agent Session's id. It ends when the client disconnects (an MCP DELETE) or stays silent longer than the Workspace's silence threshold (default 5 minutes, configurable per Workspace), after which the client must reconnect. Every call in a Session refreshes it; Activities and tool calls keep Claims alive. An open stream of the Session's waiting work (`GET /api/agent-sessions/current/events`) counts as not silent too: its heartbeat refreshes the Session, so an Agent waiting on a blocking question keeps its Session and Claims for as long as it stays connected. Over MCP, that stream is followed only while the client keeps open its own stream it hears notifications on, so a client that crashes without disconnecting still goes silent. The MCP server calls the HTTP API as the Agent, sending the `Cronk-Agent-Session` header so the API knows the Session; history records it. An Agent changes things only within an Agent Session: a write sent with a bare token is refused (403) with how to start one, while reads with a bare token work; a script starts a Session with `POST /api/agent-sessions` and ends it with `DELETE /api/agent-sessions/current`.
+- **Agent Sessions.** One MCP connection is one Agent Session; the MCP session id is the Agent Session's id. It ends when the client disconnects (an MCP DELETE) or stays silent longer than the Workspace's silence threshold (default 5 minutes, configurable per Workspace), after which the client must reconnect. Every call in a Session refreshes it; Activities and tool calls keep Claims alive. An open stream of the Session's waiting work (`GET /api/agent-sessions/current/events`) counts as not silent too: its heartbeat refreshes the Session, so an Agent waiting on a blocking question keeps its Session and Claims for as long as it stays connected. Over MCP, that stream is followed only while the client keeps open its own stream it hears notifications on, so a client that crashes without disconnecting still goes silent. The MCP server calls the HTTP API as the Agent, sending the `Cronk-Agent-Session` header so the API knows the Session; history records it. An Agent changes things only within an Agent Session, except uploading a Transcript, which a client hook does outside any: a write sent with a bare token is refused (403) with how to start one, while reads with a bare token work; a script starts a Session with `POST /api/agent-sessions` and ends it with `DELETE /api/agent-sessions/current`.
 - **Ticket keys.** `<PROJECT KEY>-<n>`, numbered in order per Project by the server.
-- **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise. Ticket fields are last-write-wins; only Documents take version-based edits (ADR 0009).
+- **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise. Ticket fields are last-write-wins; knowledge items (Documents, Terms, Decisions, Guidance) and Artifact publishes take version-based edits, deletes included (ADR 0009).
+- **Review actions.** Any User with Write may Accept, Reopen, Send back, Keep in Backlog or decide a Suggestion, not only the Assignee or reviewer; Workspace Guidance Suggestions need an Admin. An Unverified completion leaves Completed only by Reopen, and a Ticket In Review returns to work only by Send back (#476). A new Assignee who doesn't own the Delegate removes it, and a Delegate change ends the Claim but keeps an Autonomous Delegation setting a User made (#479).
+- **Deleting.** Artifacts and Decisions are never deleted. A Document with Documents under it can't be deleted. Only a Transcript's Owner may delete or redact it, not their Agents or Admins.
 - **Reports.** Required whenever an Agent hands work over: moving a Ticket to In Review, or completing it under Autonomous Delegation. Not required when an Agent just releases its Claim.
 - **Documents.** Human-curated Documents live in a page tree per Project and Workspace; Reports live with their Ticket; Terms and Decisions get their own views. Agents follow Guidance about where new Documents go.
-- **Comments.** Threaded, on Tickets and Documents, from any Actor, optionally anchored to a passage. Answers to Agent questions are Comment replies. Comments, @mentions and answers mark work as waiting for an Agent.
+- **Comments.** Threaded, on Tickets, Documents and Artifacts, from any Actor with Write where they are posted, optionally anchored to a passage of a Document. Answers to Agent questions are Comment replies. Comments, @mentions and answers mark work as waiting for an Agent.
 - **Inbox and Triage.** One Inbox per User for everything waiting on them, blocking questions first; Triage for waiting items without a clear User.
 - **Access.** Workspace roles Admin and Member; open or private Projects; Read or Write per Member. Admins have Write in every Project. A Member listed in a Project has the access listed; an unlisted Member has Write in an open Project and nothing in a private one, which answers as if it didn't exist. Only Admins change roles, invitations, visibility and listings. Protected means "Agents can't edit", not "only Admins can edit".
 - **Agents and tokens.** Any User registers and manages only their own Agents; Admins can see every Agent but not change others'. An Agent calls the API with a bearer token, full or read-only; only the token's hash is stored and its secret is shown once. Revoking a token or removing the Agent refuses it at once; deactivating an Owner ends their Agents' Agent Sessions (and so their Claims) and refuses the Agents until the Owner is reactivated, when their next Agent Sessions start afresh. Agents can't manage Agents, change Agent Access, or do anything only Admins can, even for an Admin Owner.
 - **Agent Access.** None, Read or Write, Write by default, per Project and for the Workspace (which covers what lies outside any Project, such as creating Projects or listing Users). A Project's is set by Users with Write in it; the Workspace's by Admins. An Agent's access is the lowest of its Owner's, the Agent Access and its token; a Project it has None in answers as if it didn't exist.
-- **Users.** Unique by email across the installation, which a second Workspace (ADR 0008) would have to revisit. There is no password change or reset yet.
+- **Users.** Unique by email across the installation, which a second Workspace (ADR 0008) would have to revisit. Sign-ins last 30 days. Changing one's own password ends one's other sign-ins; a reset link is refused for a User who is deactivated or hasn't joined.
 - **Invitations.** Until outside-app email arrives (Phase 3), inviting a User gives the Admin a one-time link, valid 7 days, to send themselves.
 - **Sign-in.** Email and password, with optional OIDC in Phase 3.
 - **Search.** Postgres full-text search plus context on claim. Semantic search is optional and off by default; Cronk must never require an extra AI service. Full-text search uses Postgres's `english` configuration; changing it means rebuilding the indexes.
 - **Notifications.** In-app live updates. Outside the app only from Phase 3, via webhooks or optional email, defaulting to urgent events only. No native apps for now.
-- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders. Export and import are Admin-only, except that anyone who can read a scope can download its Terms alone as `GLOSSARY.md` and its Decisions alone as `docs/adr/`. Import gives Agents and Agent Sessions new ids.
+- **Portability.** A documented HTTP API; full export as Markdown with frontmatter; import of that format and of plain Markdown folders. Export and import are Admin-only, except that anyone who can read a scope can download its Terms alone as `GLOSSARY.md` and its Decisions alone as `docs/adr/`. Import keeps Agent and Agent Session ids, giving a new one (and keeping the mapping) only when one is taken; an Agent matched by Owner and name takes the existing Agent's id. Transcripts travel only in a Workspace export, not a Project's.
 - **Deployment.** Docker Compose first; standalone servers and Proxmox later, so nothing may assume Docker (ADR 0006).
 
 ## Phase 1: Core loop
@@ -53,7 +55,7 @@ Workspace, Projects, Users (Admin, Member), open and private Projects, Agents wi
 
 ## Phase 2: Knowledge and review
 
-Spec: GitHub issue #149; its 31 tickets are sub-issues #150–#180 with native blocking dependencies, and the Reconcile fixes #138–#145 are sub-issues too. Screens: `docs/ui.md`.
+Built. Spec: GitHub issue #149; its 31 tickets are sub-issues #150–#180 with native blocking dependencies, and the Reconcile fixes #138–#145 are sub-issues too. Screens: `docs/ui.md`. The lists below record the design as decided; where the build settled a rule differently, the Reconcile for Phase 3 moved it into "Settled across all phases" or the glossary.
 
 Scope:
 
@@ -90,7 +92,7 @@ Decided so far (beyond the glossary and ADRs):
 
 Decided in the Phase 2 grilling:
 
-- **Suggestions** are full proposed content based on a specific Version (ADR 0014). An outdated one is merged on accept. "Accept" credits the Agent; "edit and accept" credits the User and links the Suggestion. Rejecting needs a Comment, which reaches the Agent as Waiting Work. A Suggestion on a Project item goes to the source Ticket's Assignee, else the Agent's Owner, else Triage; Suggestions on Workspace items always go to Triage.
+- **Suggestions** are full proposed content based on a specific Version (ADR 0014). An outdated one is merged on accept. "Accept" credits the Agent; "edit and accept" credits the User and links the Suggestion. Rejecting needs a reason, which reaches the Agent as Waiting Work. A Suggestion on a Project item goes to the source Ticket's Assignee, else the Agent's Owner, else Triage; Suggestions on Workspace items always go to Triage.
 - **Protected** is set and unset by any User with Write where the item lives, recorded in its history. Protecting a Document covers every Document under it, including ones added later; adding a Document under a protected branch, or moving one in or out, takes a User or a Suggestion.
 - **Terms** have a name, definition, words to avoid and an optional group. Links come from mentions: a Term's name, matched with its capitalisation, and Decision keys. A Project Term replaces a Workspace Term of the same name (ignoring case), and both views show the override. When an Agent saves text with an avoided word (outside code and quotes), the save succeeds and the result lists the words with the Term to use. The welcome lists Term names, with a tool to look one up.
 - **Decisions** have a number (per Project or Workspace), title, status (proposed, accepted, rejected, deprecated, superseded), a Markdown body prefilled with the ADR sections, and an optional group. They are referred to as `CRONK-D7`, or `D7` in the Workspace. Only Users change status; superseding is set from the new Decision and takes effect when it is accepted. Agents may create proposed Decisions, which go to the source Ticket's Assignee, else the Owner; Reports list them.
@@ -127,7 +129,30 @@ Decided so far (beyond the glossary and ADRs):
 - Outside-the-app notifications by default cover only blocking questions and Reopen requests; each User chooses which event kinds notify them, via User Webhooks (e.g. n8n, ntfy, Discord, Home Assistant) or optional SMTP email.
 - An Agent Webhook only signals that work is waiting; whatever runner the User has decides whether to start an Agent Session.
 
-Open questions to grill before writing the spec: GitHub and GitLab adapter shape and authentication (app vs. token); webhook payloads and retries; which events Users can subscribe to; whether CI-driven Status changes are on by default per Project.
+Decided in the Phase 3 reconcile (each a ticket that comes first, like Phase 2's #138–#145):
+
+- An Unverified completion leaves Completed only by Reopen, and a Ticket In Review returns to work only by Send back; a plain Status change is refused (#476).
+- Agents create and edit unprotected Terms over MCP, as over HTTP (#472).
+- A Protected Artifact takes no Suggestions; refusals give advice an Agent can follow (#477).
+- A Suggestion or proposed Decision whose reviewer can't act on it goes to Triage (#478).
+- A User's Autonomous Delegation setting stays when the Delegate changes (#479).
+- A block from a Discovered Ticket needs Write on the blocked Ticket (#480).
+- Fixes the reconcile found: stale API and MCP descriptions (#481), avoided words from every save (#482), live updates for protection (#483), Transcript redaction and deletion in the UI (#473), the Transcript size limit in settings (#474), and a complete Agent Record (#475).
+
+Open questions to grill before writing the spec:
+
+- GitHub and GitLab adapter shape and authentication (app vs. token); webhook payloads and retries; which events Users can subscribe to; whether CI-driven Status changes are on by default per Project.
+- Pull Request events and Review: a CI failure or requested changes moving a Ticket In Review back to Started is a Send back by no User (#476). What does it record, and what reaches the Delegate?
+- Removing leaked content: who may delete or redact a Transcript, or remove an Artifact, once its Owner is gone? Artifacts are never deleted and storage has no quota, so it only grows.
+- Questions: should an Agent's Question leave the Inbox when its Ticket is finished or its Claim ends, or get a dismiss?
+- Sub-Tickets and their parent: should unfinished Sub-Tickets stop the parent from moving to In Review or being completed?
+- Claims after access changes: should a Claim end when its Project is archived or the Agent's access drops to Read?
+- Context on claim: should it include the Terms and Decisions a Ticket names?
+- Decision statuses: may Users un-reject, and should re-accepting re-protect a Decision a User unprotected?
+- Reach of a Reopen: only dependents with a Delegate, in Projects where the User has Write, get a Comment. Is that intended?
+- Transcripts: should a Project export include them, and should their storage show beside Attachments'?
+- Search: should Artifacts, and earlier Transcript texts, be searchable?
+- Artifact frame addresses expire after 12 hours; is that right for long-open pages?
 
 ## Later, not scheduled
 

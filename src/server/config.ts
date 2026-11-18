@@ -28,7 +28,7 @@ export interface ServerConfig extends AppConfig {
  *   while unpacking a zip archive and into the file store, before it is refused.
  * - `ARTIFACTS_URL` (optional, recommended): the address of the hostname Artifacts are served from, such as
  *   `https://artifacts.cronk.example`, pointed at this same server; it needs `PUBLIC_URL` too. Without it, Artifacts are
- *   served from Cronk's own hostname in a stricter sandbox (ADR 0007).
+ *   served from Cronk's own hostname in the same sandbox, less safely (ADR 0007).
  * - `NODE_ENV`: unless `production`, the lock order is checked (`checkLockOrder` in `AppConfig`).
  */
 export function loadConfig(env: NodeJS.ProcessEnv, defaultWebRoot?: string): ServerConfig {

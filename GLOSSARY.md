@@ -25,7 +25,7 @@ Where a Ticket currently stands in its Project's workflow. Each Project defines 
 _Avoid_: State, column, stage
 
 **Status Category**:
-One of the fixed groups every Status belongs to, shared by all Projects: Backlog, Unstarted, Started, In Review, Completed, Canceled. Agents may move Tickets only into Unstarted, Started and In Review; Users decide the rest (ADR 0011).
+One of the fixed groups every Status belongs to, shared by all Projects: Backlog, Unstarted, Started, In Review, Completed, Canceled. Agents may move Tickets only into Unstarted, Started and In Review, or Completed under Autonomous Delegation; Users decide the rest (ADR 0011).
 _Avoid_: Status type, phase
 
 **Ready**:
@@ -33,7 +33,7 @@ Said of a Ticket an Agent can take up now: delegated to it, in a Backlog, Unstar
 _Avoid_: Available, open, unblocked (as the overall term)
 
 **Assignee**:
-The User accountable for a Ticket. Always a User, never an Agent.
+The User accountable for a Ticket. Always a User, never an Agent. A new Assignee who doesn't own the Ticket's Delegate removes it as Delegate.
 _Avoid_: Owner (reserved for Agents), responsible
 
 **Delegate**:
@@ -45,23 +45,23 @@ A User's handing of a Ticket to an Agent, which makes the Agent the Ticket's Del
 _Avoid_: Agent assignment, hand-off, dispatch
 
 **Autonomous Delegation**:
-A Delegation in which the Delegate may complete Tickets itself rather than stopping at In Review. Every completion it makes is Unverified until a User checks it. A User sets it on a Ticket, and the Ticket's Sub-Tickets inherit it.
+A Delegation in which the Delegate may complete Tickets itself rather than stopping at In Review. Every completion it makes is Unverified until a User checks it. A User sets it on a Ticket, and the Ticket's Sub-Tickets inherit that setting, as does a Ticket moved under a parent. A Ticket nobody set it on takes the Project's default when delegated, without passing it to its Sub-Tickets; a setting a User made stays when the Delegate changes.
 _Avoid_: Auto mode, unattended mode, YOLO mode
 
 **Report**:
-The Document of findings an Agent writes on a Ticket it worked on, with supporting evidence such as Artifacts and Attachments. Lives with its Ticket rather than in the Project's page tree. Required whenever an Agent hands work over, by moving a Ticket to In Review or completing it. Like any Document, only a User may delete one; an Agent may change one only while holding its Ticket's Claim.
+The Document of findings an Agent writes on a Ticket it worked on, with supporting evidence such as Artifacts and Attachments. Lives with its Ticket rather than in the Project's page tree. Required whenever an Agent hands work over, by moving a Ticket to In Review or completing it, and written during the Claim that hands it over: one from an earlier Claim doesn't count. Like any Document, only a User may delete one; an Agent may change one only while holding its Ticket's Claim.
 _Avoid_: Summary, write-up, result
 
 **Verification**:
-A User's after-the-fact judgement on a Ticket an Agent completed: Unverified until a User either Accepts it (Verified) or Reopens it back to the Delegate. Reopen applies only to an Unverified completion; work still In Review goes back by Send back instead.
+A User's after-the-fact judgement on a Ticket an Agent completed: Unverified until a User either Accepts it (Verified) or Reopens it back to the Delegate, with a Comment saying why. Reopen applies only to an Unverified completion, which leaves Completed only that way; work still In Review goes back by Send back instead. Reopening lists the Ticket's **dependents**, the Tickets it blocks that already continued, and the User keeps, pauses (ending its Claim) or reopens each. Any User with Write may Accept or Reopen, not only the Assignee.
 _Avoid_: Approval, sign-off, QA
 
 **Send back**:
-A User's return of a Ticket In Review to its Delegate and a Started Status, with a Comment saying what is left to do.
+A User's return of a Ticket In Review to its Delegate and a Started Status, with a Comment saying what is left to do. A Ticket In Review goes back to work only this way; any User with Write may do it.
 _Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
-A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. It waits in Backlog for a User to settle it, and may block other Tickets meanwhile. Keeping it in Backlog (Keep in Backlog) or moving it out of Backlog settles it. Delegating it, or finishing it by completing or cancelling it, settles it for good: even if undelegated or moved back to Backlog, it doesn't wait again.
+A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. Cronk assigns it to its source Ticket's Assignee, else the Agent's Owner, leaving it unassigned for Triage when that User can't see its Project. It waits in Backlog for a User to settle it, and may block Tickets the Agent can write in meanwhile. Keeping it in Backlog (Keep in Backlog) or moving it out of Backlog settles it. Delegating it, or finishing it by completing or cancelling it, settles it for good: even if undelegated or moved back to Backlog, it doesn't wait again.
 _Avoid_: Follow-up, spin-off, finding
 
 **Keep in Backlog**:
@@ -97,7 +97,7 @@ One recorded edit an Actor made to a Ticket, such as to its Status, Delegate or 
 _Avoid_: Event, history entry, field change
 
 **Comment**:
-A message any Actor posts on a Ticket, Document or Artifact, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. On an Artifact it records the Version being viewed. Conversation, as opposed to an Agent's own Activities.
+A message an Actor posts on a Ticket, Document or Artifact, possibly in reply to another Comment or an Activity, or anchored to a passage of a Document. Posting one takes Write there, so a Member with Read can't answer a Question. On an Artifact it records the Version being viewed. Conversation, as opposed to an Agent's own Activities.
 _Avoid_: Reply, note, message, discussion
 
 **Waiting Work**:
@@ -105,7 +105,7 @@ A Comment that concerns an Agent: it answers the Agent's Question, @mentions it,
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
-An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. An Agent changes a Ticket's fields, Status and Relations only from the Agent Session holding its Claim; Comments need none. It ends when the Ticket moves to In Review, Completed or Canceled or the Agent releases it, and lapses when its Agent Session ends.
+An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. An Agent changes a Ticket's fields, Status and Relations only from the Agent Session holding its Claim, except on its own Discovered Ticket that no User has settled for good, which it may edit and block from without one; Comments need none. It ends when the Ticket moves to In Review, Completed or Canceled, the Agent releases it, a User changes the Ticket's Delegate, or a Reopen pauses it, and lapses when its Agent Session ends.
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:
@@ -113,7 +113,7 @@ A User's personal list of everything waiting on them: Tickets In Review, Unverif
 _Avoid_: Review queue, notifications, to-do
 
 **Triage**:
-The shared list of waiting items that have no clear User to go to, such as a delegated Ticket whose Assignee is deactivated or can no longer see its Project. Each User sees the items they could act on.
+The shared list of waiting items that have no clear User to go to: an **Unattended** Ticket (delegated, In Review or an Unverified completion) whose Assignee is deactivated or can no longer see its Project, or a Discovered Ticket, Suggestion or proposed Decision whose User can't act on it. Each User sees the items they could act on.
 _Avoid_: Unassigned queue, backlog
 
 ### Code
@@ -129,7 +129,7 @@ _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's
 ### Knowledge
 
 **Document**:
-A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown. Only a User may delete one, since a delete removes it and its Versions for good; an Agent never may, even with Write.
+A piece of written knowledge belonging to a Project or the Workspace, kept as Markdown. Only a User may delete one, since a delete removes it and its Versions for good; an Agent never may, even with Write. A Document with Documents under it can't be deleted until they are moved or deleted.
 _Avoid_: Page, doc, wiki page, note
 
 **Page tree**:
@@ -149,20 +149,28 @@ One saved state of a Document, Decision, Term, Artifact or Guidance, recording w
 _Avoid_: Revision, snapshot, history entry
 
 **Artifact**:
-A live, viewable thing built by an Actor, such as an HTML prototype, served in isolation at a stable address. Belongs to a Project or the Workspace, records the Ticket or Agent Session it came from, and can be embedded in many places.
+A live, viewable thing built by an Actor, such as an HTML prototype, served in isolation at a stable address. Belongs to a Project or the Workspace, records the Ticket or Agent Session it came from (a source Ticket in its own Project), and can be embedded in many places. Never deleted. Its page may load only from the Workspace's **allow-list** of origins, plus any **extra origins** a publish declares, with reasons, for that Version alone.
 _Avoid_: Prototype (as the general term), app, preview, page
 
+**Embed**:
+An Artifact's address alone on its own line of a Document, Report or Comment, which shows the Artifact in place: the Version it names, else the latest.
+_Avoid_: Inline, iframe, preview
+
 **Attachment**:
-A plain file, such as an image, video, PDF or log, attached to a Document, Report, Ticket or Comment. It belongs to that item and is readable by whoever can read it; on a Document it belongs to the Document rather than a Version, so every Version can show it.
+A plain file, such as an image, video, PDF or log, attached to a Document, Report, Ticket or Comment (an Artifact has Attachments only in its Comments). It belongs to that item and is readable by whoever can read it; on a Document it belongs to the Document rather than a Version, so every Version can show it.
 _Avoid_: Upload, asset, media, file (as the term)
 
 **Term**:
-A glossary entry naming one concept: its canonical name, definition and the words to avoid for it. Belongs to the Workspace or a Project; within a Project, a Project Term replaces any Workspace Term of the same name. Every change saves a Version; only a User may delete one, since a delete removes its Versions for good.
+A glossary entry naming one concept: its canonical name, definition and the words to avoid for it. Belongs to the Workspace or a Project; within a Project, a Project Term replaces any Workspace Term of the same name. An optional **group** sorts Terms in their view, as it does Decisions. Every change saves a Version; only a User may delete one, since a delete removes its Versions for good.
 _Avoid_: Glossary entry, definition, word
 
 **Decision**:
-A recorded choice with its reasoning and a lifecycle status (proposed, accepted, rejected, deprecated, superseded), which may supersede earlier Decisions. Only Users change its status, and rejecting one takes a reason; accepting a Decision that supersedes another marks the other superseded. An Agent may propose one and refine it while it is proposed; a User then reviews it: the Assignee of the Ticket the Agent held the Claim on (its **source Ticket**), or else the Agent's Owner.
+A recorded choice with its reasoning and a lifecycle status (proposed, accepted, rejected, deprecated, superseded), which may supersede earlier Decisions. Only Users change its status, and rejecting one takes a reason; accepting a Decision that supersedes another marks the other superseded. An Agent may propose one, and refine any Decision while it is proposed; a User then reviews it: its source Ticket's Assignee, or else the Agent's Owner, or Triage when that User can't act on it. Decisions are never deleted.
 _Avoid_: ADR (in the product), RFC, ruling
+
+**Source Ticket**:
+The Ticket an Agent's work came from: the one it held the Claim on when it filed a Discovered Ticket, proposed a Decision or made a Suggestion, or the one an Artifact's publish names. Its Assignee is the first User a Discovered Ticket, proposed Decision or Suggestion goes to.
+_Avoid_: Origin Ticket, parent (reserved for Sub-Tickets)
 
 ### Actors
 
@@ -191,7 +199,7 @@ A non-human account that acts in Cronk on behalf of exactly one User. A User may
 _Avoid_: Bot, AI user, integration
 
 **Agent Session**:
-One continuous connection of an Agent, from connect until it disconnects or stays silent longer than the silence threshold, or its token, Agent or Owner is revoked, removed or deactivated. Every call in it, and the heartbeat of its open stream of Waiting Work, keeps it going; once ended it never resumes. An Agent changes things only within an Agent Session. Many Agent Sessions of the same Agent may run at once.
+One continuous connection of an Agent, from connect until it disconnects or stays silent longer than the silence threshold, or its token, Agent or Owner is revoked, removed or deactivated. Every call in it, and the heartbeat of its open stream of Waiting Work, keeps it going; once ended it never resumes. An Agent changes things only within an Agent Session, except uploading a Transcript, which its client does outside any. Many Agent Sessions of the same Agent may run at once.
 _Avoid_: Run, instance, conversation
 
 **Agent Record**:
@@ -199,7 +207,7 @@ Everything an Agent did across the Workspace, newest first: the Changes it made,
 _Avoid_: Work (reserved for Waiting Work), history, activity log, feed
 
 **Transcript**:
-The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did.
+The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did. Cronk **scrubs** known secret patterns on upload, as a best effort; only its Owner may delete it or **redact** a passage by hand, which later uploads keep redacted.
 _Avoid_: Chat log, conversation, chat history, session log
 
 **Silence threshold**:
@@ -233,9 +241,9 @@ The secret an Agent calls the API with, full or read-only, shown once when issue
 _Avoid_: API key, password, credential (as the term)
 
 **Protected**:
-Said of a Document, Term, Decision or Artifact that Agents may read but never edit, regardless of Agent Access. Protecting a Document also protects every Document under it in the page tree, including ones added later.
+Said of a Document, Term, Decision or Artifact that Agents may read but never edit, regardless of Agent Access. Protecting a Document also protects every Document under it in the page tree, including ones added later. An Agent changes a Protected Document, Term or Decision by Suggestion; a Protected Artifact takes none, so the Agent asks a User in a Comment.
 _Avoid_: Locked, read-only, human-only
 
 **Suggestion**:
-A new Version of a Protected item that an Agent proposes, starting from a specific Version and giving its reasoning. It takes effect only when a User accepts it, becoming the item's next Version. An Agent also suggests a new Document under a protected branch this way, from nothing; accepting it creates the Document there. A Suggestion carries content, never a place, so it can't move a Document: an Agent refused a move asks a User to make it in a Comment.
+A new Version of an item an Agent may not change itself (a Protected Document, Term or Decision, Guidance, or a Decision no longer proposed) that an Agent proposes, starting from a specific Version and giving its reasoning; making one takes Write. It takes effect only when a User with Write accepts it, becoming the item's next Version. One whose item has moved on since is **outdated**, and is merged on accept, crediting the accepting User. An Agent also suggests a new Document under a protected branch this way, from nothing; accepting it creates the Document there. A Suggestion carries content, never a place, so it can't move a Document: an Agent refused a move asks a User to make it in a Comment.
 _Avoid_: Proposal, change request, draft
