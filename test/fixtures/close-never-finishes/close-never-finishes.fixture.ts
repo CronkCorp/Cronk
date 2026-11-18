@@ -5,6 +5,8 @@ import { delegatedSetup, type Client, type Cronk } from "../../harness.js";
 
 /** The bound on closing these tests start Cronk with. */
 const CLOSE_WITHIN_MS = 500;
+/** How long a restart may take, as `test/startup.test.ts` bounds it: the bound on closing, and slack past it. */
+const RESTART_WITHIN_MS = CLOSE_WITHIN_MS + 2_000;
 
 /** More bytes than a connection's buffers hold, so a download of them stalls on a client that stops reading. */
 const MORE_THAN_BUFFERED = 32 * 1024 * 1024;
@@ -34,10 +36,10 @@ it("fails on a restart whose close never finishes", async () => {
   await stallClosing(cronk, admin);
 
   let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), 2_500)));
+  const late = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), RESTART_WITHIN_MS)));
   const restarted = await Promise.race([cronk.restart().then(() => "done"), late]);
   clearTimeout(timer);
-  expect(restarted, "did not finish within 2500 ms").toBe("done");
+  expect(restarted, "Restarting did not finish within its bound").toBe("done");
 });
 
 it("fails on a close that never finishes once it passes", async () => {

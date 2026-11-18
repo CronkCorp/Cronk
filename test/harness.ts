@@ -621,13 +621,17 @@ export async function startCronk(
   // A close that never finishes, as when closing regresses, would otherwise hold teardown for the whole hook timeout and fail
   // the test a second time with a timeout beside its own error. So teardown waits only as long as closing may take, then drops
   // the database (ending the connections still open to it) and the files all the same.
-  const closeWithinMs = (opts.closeWithinMs ?? DEFAULT_CLOSE_WITHIN_MS) + CUT_OFF_MS + ANSWER_CUT_OFF_WITHIN_MS + CLOSE_SLACK_MS;
+  const teardownWaitsMs = (opts.closeWithinMs ?? DEFAULT_CLOSE_WITHIN_MS) + CUT_OFF_MS + ANSWER_CUT_OFF_WITHIN_MS + CLOSE_SLACK_MS;
   onTestFinished(async ({ task }) => {
-    const closed = await settlesWithin(closeWithinMs, cronk.app.close());
-    await withClient(adminUrl, (admin) => admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`));
-    await rm(filesDir, { recursive: true, force: true });
+    let closed: boolean;
+    try {
+      closed = await settlesWithin(teardownWaitsMs, cronk.app.close());
+    } finally {
+      await withClient(adminUrl, (admin) => admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`));
+      await rm(filesDir, { recursive: true, force: true });
+    }
     // A test that failed already has its own error, which a close left unfinished most likely follows from.
-    if (!closed && task.result?.state !== "fail") throw new Error(`Closing the application did not finish within ${closeWithinMs} ms`);
+    if (!closed && task.result?.state !== "fail") throw new Error(`Closing the application did not finish within ${teardownWaitsMs} ms`);
   });
   return cronk;
 }

@@ -45,7 +45,7 @@ describe("a test whose close never finishes", () => {
 
     expect(ms).toBeLessThan(RUN_WITHIN_MS);
     expect(output).toContain("1 failed");
-    expect(output).toContain("did not finish within 2500 ms");
+    expect(output).toContain("Restarting did not finish within its bound");
     // Its only error is its own: one failure reported, and teardown adds none of its own.
     expect(output).toContain("Failed Tests 1");
     expect(output).not.toContain("Hook timed out");
@@ -67,7 +67,7 @@ describe("a test whose close never finishes", () => {
 });
 
 describe("a test whose close finishes", () => {
-  it("leaves neither its database nor its files behind", async () => {
+  it("leaves neither its database nor its files behind", { timeout: RUN_WITHIN_MS + 10_000 }, async () => {
     const { output } = await runFixture("passes, closing as it should");
 
     expect(output).toContain("1 passed");
