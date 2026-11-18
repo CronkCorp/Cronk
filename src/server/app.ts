@@ -78,7 +78,7 @@ export interface AppConfig {
 export async function buildApp(opts: {
   config: AppConfig;
   clock: Clock;
-  /** Whether and where to log, as Fastify takes it: off unless given. Tests log errors only, to show them where a test fails. */
+  /** Whether and where to log, as Fastify takes it; off unless given. */
   logger?: FastifyServerOptions["logger"];
   live?: LiveUpdates;
   /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
