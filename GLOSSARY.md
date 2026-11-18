@@ -37,7 +37,7 @@ The User accountable for a Ticket. Always a User, never an Agent.
 _Avoid_: Owner (reserved for Agents), responsible
 
 **Delegate**:
-The Agent a Ticket's Assignee has handed the work to. Must be one of the Assignee's own Agents, so a delegated Ticket always has an Assignee: delegating a Ticket without one assigns the delegating User. Removing the Agent clears it as Delegate of every Ticket, as a change by whoever removed it.
+The Agent a Ticket is delegated to, to do the work on its Assignee's behalf. Any User with Write may delegate a Ticket, not only its Assignee. Must be one of the Assignee's own Agents, so a delegated Ticket always has an Assignee: delegating a Ticket without one assigns the delegating User. Removing the Agent clears it as Delegate of every Ticket, as a change by whoever removed it.
 _Avoid_: Agent assignee, worker
 
 **Delegation**:
