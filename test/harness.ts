@@ -8,7 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 import tar from "tar-stream";
-import { inject, onTestFinished } from "vitest";
+import { inject, onTestFailed, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/server/app.js";
 import type { Clock } from "../src/server/clock.js";
@@ -435,8 +435,10 @@ export async function startCronk(
   const clock = new FakeClock();
   let live!: HoldableLiveUpdates;
   let lookForLapses!: () => Promise<void>;
+  const logged = errorsLogged();
   const start = () =>
     buildApp({
+      logger: { level: "error", stream: logged.stream },
       config: { databaseUrl, cookieSecure: false, publicUrl: opts.publicUrl, storage, importMaxBytes: opts.importMaxBytes, artifactsUrl: `http://${ARTIFACT_HOST}`, checkLockOrder: true },
       clock,
       live: (live = new HoldableLiveUpdates()),
@@ -604,6 +606,21 @@ export async function startCronk(
     await rm(filesDir, { recursive: true, force: true });
   });
   return cronk;
+}
+
+/**
+ * Collects what the server logs at error level, such as the error behind an answer of 500, and prints it if the test fails,
+ * so a failure reads with its cause. A test that passes prints none of it: the faults tests stage on purpose fail requests.
+ */
+function errorsLogged(): { stream: { write(line: string): void } } {
+  const entries: { msg?: string; err?: { stack?: string } }[] = [];
+  onTestFailed(() => {
+    if (entries.length === 0) return;
+    // A stack starts with its error's message, often the entry's own; a message of its own (what failed, say) comes first.
+    const shown = entries.map(({ msg = "", err }) => (err?.stack?.includes(msg) ? err.stack : [msg, err?.stack].filter(Boolean).join("\n")));
+    console.error(`The server logged ${entries.length === 1 ? "an error" : `${entries.length} errors`} in this test:\n\n${shown.join("\n\n")}`);
+  });
+  return { stream: { write: (line) => entries.push(JSON.parse(line)) } };
 }
 
 /** The disposable S3-compatible server (MinIO) of this run, or null when none could be started. */

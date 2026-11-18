@@ -1,4 +1,4 @@
-import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyServerOptions } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import swagger from "@fastify/swagger";
@@ -78,7 +78,8 @@ export interface AppConfig {
 export async function buildApp(opts: {
   config: AppConfig;
   clock: Clock;
-  logger?: boolean;
+  /** Whether and where to log, as Fastify takes it: off unless given. Tests log errors only, to show them where a test fails. */
+  logger?: FastifyServerOptions["logger"];
   live?: LiveUpdates;
   /** How often to look for Claims that lapsed, to tell their watchers; every 5 seconds by default. */
   lapseCheckMs?: number;
