@@ -65,7 +65,7 @@ import {
   type AgentRef,
 } from "./tickets.js";
 import { findAgent } from "../identity/agents.js";
-import { clearClaim, isOwnDiscoveryAwaitingDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
+import { clearClaim, isOwnDiscoveryAwaitingDelegation, mayAwaitOwnDelegation, requireAgentMayChange, requireClaimHolder } from "../coordination/claims.js";
 import { hasReportFromClaim } from "../knowledge/reports.js";
 import { discoverySourceClaimOf } from "../coordination/sources.js";
 import { shownRelations, ticketDetail, ticketDetailSchema, ticketFor, visibleChanges } from "./ticket-reads.js";
@@ -1118,6 +1118,12 @@ async function relationEnds(
   if (userAdding) await ticketFor(tx, actor, otherKey, "write");
   // Before an Agent's Ticket is locked, as the block's row then waits on both Tickets (see lockBlocking).
   const locking = isBlocking(kind) && !opts.removing;
+  // An Agent's blocking Relation that can never be a block from its own Discovered Ticket awaiting delegation needs Write on the
+  // other Ticket whatever the lock finds, so it is refused before waiting for the lock, ahead of a 409 for a missing Claim.
+  // Checked again under the lock below, as access may change while waiting.
+  if (locking && actor.kind === "agent" && (kind !== "blocks" || !(await mayAwaitOwnDelegation(tx, actor, unlocked)))) {
+    await ticketFor(tx, actor, otherKey, "write");
+  }
   if (locking) await lockBlocking(tx, actingUser(actor).workspaceId, opts);
   // Read again once the lock is held, as the Ticket may have changed while waiting for it.
   // An Agent's Claim is checked against the locked row, so it can't end before the change commits.

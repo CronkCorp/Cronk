@@ -116,7 +116,63 @@ describe("Blocks from a Discovered Ticket", () => {
     expect([(await filing).status, (await blocking).status]).toEqual([201, 201]);
     expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blockedBy.map((t: any) => t.key).sort()).toEqual(["CRONK-3", "CRONK-4"]);
   });
+
+  it("are refused if a User delegates the Discovered Ticket while the block waits for another block being added", async () => {
+    const { admin, claude, blockWhileWaiting } = await readOnlyBlockSetup();
+
+    const { block, waiting } = await blockWhileWaiting(async () => {
+      expect((await admin.patch("/api/tickets/CRONK-4", { delegateId: claude.agentId })).status).toBe(200);
+    });
+
+    expect(block.status).toBe(409);
+    expect(waiting.status).toBe(201);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toEqual([]);
+  });
+
+  it("are added if a User moves the finished Discovered Ticket back to Backlog while the block waits for another block being added", async () => {
+    const { admin, blockWhileWaiting } = await readOnlyBlockSetup();
+    await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "canceled") });
+
+    const { block, waiting } = await blockWhileWaiting(async () => {
+      expect((await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "backlog") })).status).toBe(200);
+    });
+
+    expect(block.status).toBe(201);
+    expect(waiting.status).toBe(201);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+  });
 });
+
+/**
+ * The Agent's Discovered Ticket CRONK-4, and OPS-1 in a Project the Agent can only read. `blockWhileWaiting` has the Agent
+ * block OPS-1 from CRONK-4 while a User's block of CRONK-3 holds the Workspace's blocking lock, runs `meanwhile` once the
+ * Agent's block waits too, then lets both through and answers both.
+ */
+async function readOnlyBlockSetup() {
+  const setup = await delegatedSetup(3);
+  const { cronk, admin, session } = setup;
+  await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+  await admin.post("/api/projects/OPS/tickets", { title: "Deploy" });
+  await admin.patch("/api/projects/OPS", { agentAccess: "read" });
+  const agent = await session();
+  await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+  const blockWhileWaiting = async (meanwhile: () => Promise<void>) => {
+    const held = await cronk.holdRow("tickets", (await admin.get("/api/tickets/CRONK-3")).body.ticket.id);
+    const waiting = admin.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-3" });
+    await held.waiters(1);
+    const block = agent.post("/api/tickets/CRONK-4/relations", { kind: "blocks", ticketKey: "OPS-1", reason });
+    await held.waiters(2);
+    await meanwhile();
+    await held.release();
+    return { block: await block, waiting: await waiting };
+  };
+  return { ...setup, blockWhileWaiting };
+}
+
+/** The id of the CRONK Status in `category`. */
+async function statusIn(admin: { get: (path: string) => Promise<{ body: any }> }, category: string): Promise<string> {
+  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
+}
 
 describe("Blocks added at once by holders of the Tickets' Claims", () => {
   it("queue rather than deadlock when two Agents block each other's Ticket: one is added, the other would close a cycle", async () => {

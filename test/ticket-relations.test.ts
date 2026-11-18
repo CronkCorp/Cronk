@@ -198,4 +198,25 @@ describe("Ticket relations", () => {
     await held.release();
     expect((await waiting).status).toBe(201);
   });
+
+  it("refuse an Agent's block naming a Ticket it can only read without waiting for another block being added, with or without its Claim", async () => {
+    const { cronk, admin, session } = await delegatedSetup(4);
+    await projectWithTickets(admin, "OPS", 1);
+    await admin.patch("/api/projects/OPS", { agentAccess: "read" });
+    const agent = await session();
+    await agent.post("/api/tickets/CRONK-1/claim");
+
+    const held = await cronk.holdRow("tickets", (await admin.get("/api/tickets/CRONK-4")).body.ticket.id);
+    const waiting = admin.post("/api/tickets/CRONK-3/relations", { kind: "blocks", ticketKey: "CRONK-4" });
+    await held.waiters(1);
+
+    for (const kind of ["blocks", "blocked_by"]) {
+      expect((await agent.post("/api/tickets/CRONK-1/relations", { kind, ticketKey: "OPS-1" })).status, kind).toBe(403);
+      // Without its Claim too: the other Ticket's 403 comes before the Claim's 409, as the Claim is checked under the lock.
+      expect((await agent.post("/api/tickets/CRONK-2/relations", { kind, ticketKey: "OPS-1" })).status, kind).toBe(403);
+    }
+    await held.release();
+    expect((await waiting).status).toBe(201);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations).toMatchObject({ blocks: [], blockedBy: [] });
+  });
 });
