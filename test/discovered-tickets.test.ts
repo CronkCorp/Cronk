@@ -317,12 +317,13 @@ describe("Discovered Tickets in the Inbox", () => {
     const refused = await admin.post("/api/tickets/CRONK-2/keep");
     expect(refused.status).toBe(409);
     expect(refused.body.error).toContain("isn't a Discovered Ticket waiting");
+    expect((await admin.post("/api/tickets/CRONK-3/keep")).status).toBe(409);
     expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.discovered).toMatchObject({ kept: false, everFinished: true });
     expect((await admin.get("/api/tickets/CRONK-5")).body.ticket.discovered).toMatchObject({ kept: false, everFinished: false });
     expect((await admin.post("/api/tickets/CRONK-5/keep")).status).toBe(200);
   });
 
-  it("are told apart from finished ones in a fixed number of history queries, each looked up by index, however many there are", async () => {
+  it("are told apart from finished ones in a fixed number of queries, their history looked up by index, however many there are", async () => {
     // The server's own looks for lapsed Claims read the history too, so they are left out.
     const { cronk, admin, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000 });
     const agent = await session();
@@ -338,6 +339,8 @@ describe("Discovered Tickets in the Inbox", () => {
     const historyQueries = async () => {
       const counts: number[] = [];
       for (const path of listings) counts.push(await cronk.queriesOn("ticket_changes", () => admin.get(path)));
+      // Each item's Reports too, which Ticket items carry.
+      for (const path of listings.slice(0, 2)) counts.push(await cronk.queriesOn("documents", () => admin.get(path)));
       return counts;
     };
     for (const options of [{}, { unassigned: true }, { finished: true, unassigned: true }]) await discover(options);

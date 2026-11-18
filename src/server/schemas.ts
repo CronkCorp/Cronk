@@ -475,7 +475,7 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
           kept: { type: "boolean", description: "Whether a User chose Keep in Backlog for it, which takes it out of the Inbox." },
           everFinished: {
             type: "boolean",
-            description: "Whether a User ever moved it to a finished Status. That settles it for good: moved back to Backlog, it doesn't wait in the Inbox again.",
+            description: "Whether its history records a move to a finished Status. That settles it for good: moved back to Backlog, it doesn't wait in the Inbox again.",
           },
         }),
       ),

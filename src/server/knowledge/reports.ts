@@ -127,11 +127,13 @@ export async function findReport(db: Queryable, id: string): Promise<Report | un
 
 /** A Ticket's Reports, oldest first. */
 export async function listTicketReports(db: Queryable, ticketId: string): Promise<Report[]> {
-  const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticketId]);
-  return toReports(db, rows);
+  return (await listReportsOfTickets(db, [ticketId])).get(ticketId)!;
 }
 
-/** The Reports of each of the Tickets `ticketIds`, by Ticket id, oldest first; in a fixed number of queries however many there are. */
+/**
+ * The Reports of each of the Tickets `ticketIds`, oldest first, by Ticket id: every one given has an entry, empty for none.
+ * Takes a fixed number of queries however many there are.
+ */
 export async function listReportsOfTickets(db: Queryable, ticketIds: string[]): Promise<Map<string, Report[]>> {
   const byTicket = new Map<string, Report[]>(ticketIds.map((id) => [id, []]));
   if (ticketIds.length === 0) return byTicket;
