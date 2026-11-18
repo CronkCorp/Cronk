@@ -15,7 +15,7 @@ Phase 1 was built without step 3; #98 reviewed its UI afterwards and wrote the f
 A session starting a later phase should read, in order:
 
 1. `GLOSSARY.md`: the vocabulary. Use these terms and avoid the listed synonyms.
-2. `docs/adr/`: decisions that are hard to reverse (0001–0014).
+2. `docs/adr/`: decisions that are hard to reverse (0001–0015).
 3. This roadmap: scope per phase, the cross-phase choices below, and each phase's decided and open lists.
 4. The Phase 1 spec, GitHub issue #1 (`gh issue view 1`): the format and level of detail a phase spec should have, and the Phase 1 model later phases build on.
 5. `docs/testing.md`: the test seams every phase uses.
@@ -31,7 +31,7 @@ Choices made in the initial design that are not ADRs (easy to reverse or unsurpr
 - **Ticket keys.** `<PROJECT KEY>-<n>`, numbered in order per Project by the server.
 - **Ticket model.** Priority, Labels, parent, blocks / relates-to relations. No cycles, sprints, estimates, due dates or custom fields unless a later phase decides otherwise. Ticket fields are last-write-wins; knowledge items (Documents, Terms, Decisions, Guidance) and Artifact publishes take version-based edits, deletes included (ADR 0009).
 - **Review actions.** Any User with Write may Accept, Reopen, Send back, Keep in Backlog or decide a Suggestion, not only the Assignee or reviewer; Workspace Guidance Suggestions need an Admin. An Unverified completion leaves Completed only by Reopen, and a Ticket In Review returns to work only by Send back (#476). A new Assignee who doesn't own the Delegate removes it, and a Delegate change ends the Claim but keeps an Autonomous Delegation setting a User made (#479).
-- **Deleting.** Artifacts and Decisions are never deleted. A Document with Documents under it can't be deleted. Only a Transcript's Owner may delete or redact it, not their Agents or Admins.
+- **Deleting.** Decisions are never deleted; Artifacts only by an Admin (from Phase 3). A Document with Documents under it can't be deleted. Only a Transcript's Owner may delete or redact it, not their Agents, and from Phase 3 an Admin too.
 - **Reports.** Required whenever an Agent hands work over: moving a Ticket to In Review, or completing it under Autonomous Delegation. Not required when an Agent just releases its Claim.
 - **Documents.** Human-curated Documents live in a page tree per Project and Workspace; Reports live with their Ticket; Terms and Decisions get their own views. Agents follow Guidance about where new Documents go.
 - **Comments.** Threaded, on Tickets, Documents and Artifacts, from any Actor with Write where they are posted, optionally anchored to a passage of a Document. Answers to Agent questions are Comment replies. Comments, @mentions and answers mark work as waiting for an Agent.
@@ -126,8 +126,44 @@ Decided so far (beyond the glossary and ADRs):
 - A Pull Request links to a Ticket when its branch name or title contains the Ticket key, or when an Agent links it explicitly; a Ticket may have many Pull Requests and vice versa.
 - A Project can turn automatic Status changes from Pull Request events off.
 - GitHub and GitLab each get an adapter behind webhooks; nothing specific to either enters the core model.
-- Outside-the-app notifications by default cover only blocking questions and Reopen requests; each User chooses which event kinds notify them, via User Webhooks (e.g. n8n, ntfy, Discord, Home Assistant) or optional SMTP email.
+- Outside-the-app notifications by default cover only blocking Questions and Unverified completions; each User chooses which event kinds notify them, via User Webhooks (e.g. n8n, ntfy, Discord, Home Assistant) or optional SMTP email.
 - An Agent Webhook only signals that work is waiting; whatever runner the User has decides whether to start an Agent Session.
+
+Decided in the Phase 3 grilling:
+
+- **Git host access.** Each Repository holds a token (a GitHub fine-grained token, or a GitLab project or group access token) and a webhook secret. A GitHub App can come later behind the same adapter.
+- **Webhooks only.** Cronk doesn't poll Git hosts; its server must be reachable from them, directly or through a tunnel. A Ticket's Pull Requests have a Refresh action that re-reads them on demand.
+- **Shared Repositories.** Several Projects may list one Repository; Ticket keys are unique across the Workspace, so a Pull Request still links to the right Ticket.
+- **Git host accounts.** Users link theirs in their profile, and each Agent records its own. A merge by an account linked to a User is a User's; any other merge is automated, so the completion is Unverified. No matching by email.
+- **CI failure and requested changes** on a Ticket In Review are a Send back by Cronk: a system Change, with a Comment from Cronk linking the failing checks or the review, reaching the Delegate as Waiting Work (#476 keeps Send back the only way back).
+- **Which Tickets move.** The automation follows the Pull Request whoever works the Ticket, delegated or not, and a PR ready for review moves a Backlog or Unstarted Ticket to In Review too. It never moves a Completed, Canceled or Unverified Ticket. A User's merge on an undelegated Ticket simply completes it.
+- **On by default.** Status changes from Pull Request events are on once a Project lists a Repository; the Project can turn them off.
+- **Several Pull Requests.** A merge completes the Ticket only when no other linked Pull Request is still open; ones closed without merging don't count.
+- **Reports still come from the Agent.** A Pull Request ready for review doesn't move a Ticket whose Claim is live and has no Report from it: the Ticket stays Started with an Activity telling the Agent to write one and move it itself. Without a live Claim the move goes ahead, and the Ticket shows that it has no Report.
+- **A User's merge is the review.** It completes a delegated Ticket as Verified, with a Change recording which User's merge on the Git host verified it.
+- **Webhook delivery**, for User and Agent Webhooks alike: one JSON body format naming the event kind, signed with an HMAC of the webhook's own secret; retries with exponential backoff for about 24 hours, then the webhook is marked failing and its User sees it; 7 days of delivery history shown to its User. Retries are kept in Postgres, with no new service (ADR 0006); delivery order isn't guaranteed.
+- **Agent Webhooks** carry the Agent's id, the kinds and counts of its Waiting Work and the Ticket keys, never text, so content stays behind Agent Access. They fire only while the Agent has no live Agent Session, at most once a minute per Agent.
+- **Agent Webhooks are the Owner's.** Only the Owner sets one, on the Agent's page like its tokens; Agents can't.
+- **Event kinds** a User may choose, per User Webhook and for email: blocking Question, any Question, a Ticket In Review assigned to them, an Unverified completion, a Suggestion or proposed Decision to review, a Discovered Ticket, an @mention of them, a reply to their Comment, failed Pull Request checks on their Ticket, and an Agent Session that ended with a Claim lapsing.
+- **Workspace Webhooks.** Admins may register webhooks for Triage events only; every other event goes to Users' own.
+- **Default events** are blocking Questions and Unverified completions, the two where an Agent's work stalls or goes unchecked.
+- **OIDC.** One provider, set in the server environment. A sign-in matches an existing User by verified email; anyone else is refused unless they hold an Invitation or their email's domain is one an Admin lets join on its own. Several providers can come later.
+- **Password sign-in can be turned off** by an Admin once OIDC works. The server command that issues a reset link for a lost last Admin then also lets that Admin sign in with a password again, as the way back in when the provider is down.
+- **GitHub Issues importer.** One Repository's issues into one Project, run by an Admin, once: running it again skips issues already imported, and nothing syncs. It brings open and closed issues with their Comments and Labels, sub-issues as Sub-Tickets and dependencies as blocks; open goes to Backlog, closed as completed to Completed (not Unverified, as no Agent completed it), closed as not planned to Canceled. Milestones, reactions and projects are dropped. Logins match Users by linked Git host account; an unmatched author is kept as text ("@octocat on GitHub") and an unmatched assignee dropped, so no unjoined Users appear. Each Ticket keeps a link to its issue.
+- **Removing leaked content.** Admins may delete or redact any Transcript, and delete an Artifact or one of its Versions, recorded in history. For everyone else Artifacts stay undeletable.
+- **Questions leave the Inbox** when their Ticket is Completed or Canceled, and a User may dismiss one; a dismissed blocking Question reaches the Agent as Waiting Work, so it stops waiting.
+- **Sub-Tickets gate their parent for Agents.** An Agent can't move a parent to In Review or complete it while a Sub-Ticket is unfinished; a User still can.
+- **Claims end with access.** Archiving a Project, or the Agent losing Write in it, ends its Claims there at once; the Agent hears it as a lapsed Claim.
+- **Context on claim** also lists the Terms and Decisions the Ticket's text names: each Term's definition, each Decision's title and status, never full bodies.
+- **Decision statuses** stay open to Users in every direction, un-rejecting included. Re-accepting a Decision protects it again, even if a User had unprotected it.
+- **Reopen's reach** stays as built: only dependents with a Delegate, in Projects where the reopening User has Write, get a Comment.
+- **Transcripts** stay out of Project exports, as who may read one depends on places outside the Project; Admins see their storage beside Attachments'.
+- **Search** finds Artifacts by title and description, not file contents. Earlier Transcript texts stay unsearchable.
+- **Artifact frame addresses** keep their 12 hours; the app fetches a fresh one whenever a frame is shown or reloaded, and a frame offers Reload when a file fails after expiry.
+- **SMTP** is set in the server environment. Once set, Invitations and password reset links are emailed as well as shown to the Admin, and sign-in offers "Forgot password".
+- **Listing a Repository** is for any User with Write in the Project, never Agents. Its token, once saved, is never shown again.
+- **Git host tokens and webhook secrets** are encrypted at rest with a key from the server environment (ADR 0015).
+- **An Agent links a Pull Request** only while holding the Ticket's Claim, like any field, and only from a Repository the Ticket's Project lists.
 
 Decided in the Phase 3 reconcile (each a ticket that comes first, like Phase 2's #138–#145):
 
@@ -139,20 +175,7 @@ Decided in the Phase 3 reconcile (each a ticket that comes first, like Phase 2's
 - A block from a Discovered Ticket needs Write on the blocked Ticket (#480).
 - Fixes the reconcile found: stale API and MCP descriptions (#481), avoided words from every save (#482), live updates for protection (#483), Transcript redaction and deletion in the UI (#473), the Transcript size limit in settings (#474), and a complete Agent Record (#475).
 
-Open questions to grill before writing the spec:
-
-- GitHub and GitLab adapter shape and authentication (app vs. token); webhook payloads and retries; which events Users can subscribe to; whether CI-driven Status changes are on by default per Project.
-- Pull Request events and Review: a CI failure or requested changes moving a Ticket In Review back to Started is a Send back by no User (#476). What does it record, and what reaches the Delegate?
-- Removing leaked content: who may delete or redact a Transcript, or remove an Artifact, once its Owner is gone? Artifacts are never deleted and storage has no quota, so it only grows.
-- Questions: should an Agent's Question leave the Inbox when its Ticket is finished or its Claim ends, or get a dismiss?
-- Sub-Tickets and their parent: should unfinished Sub-Tickets stop the parent from moving to In Review or being completed?
-- Claims after access changes: should a Claim end when its Project is archived or the Agent's access drops to Read?
-- Context on claim: should it include the Terms and Decisions a Ticket names?
-- Decision statuses: may Users un-reject, and should re-accepting re-protect a Decision a User unprotected?
-- Reach of a Reopen: only dependents with a Delegate, in Projects where the User has Write, get a Comment. Is that intended?
-- Transcripts: should a Project export include them, and should their storage show beside Attachments'?
-- Search: should Artifacts, and earlier Transcript texts, be searchable?
-- Artifact frame addresses expire after 12 hours; is that right for long-open pages?
+Open questions: none. The Phase 3 grilling settled every one listed after the reconcile; the next steps are prototyping the new screens and the spec.
 
 ## Later, not scheduled
 

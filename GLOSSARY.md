@@ -57,7 +57,7 @@ A User's after-the-fact judgement on a Ticket an Agent completed: Unverified unt
 _Avoid_: Approval, sign-off, QA
 
 **Send back**:
-A User's return of a Ticket In Review to its Delegate and a Started Status, with a Comment saying what is left to do. A Ticket In Review goes back to work only this way; any User with Write may do it.
+A User's return of a Ticket In Review to its Delegate and a Started Status, with a Comment saying what is left to do. A Ticket In Review goes back to work only this way; any User with Write may do it, and Cronk does it itself when a linked Pull Request's checks fail or a reviewer requests changes.
 _Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
@@ -89,7 +89,7 @@ One timestamped entry an Agent Session writes on a Ticket while working: a plan,
 _Avoid_: Log line, event, comment, thought
 
 **Question**:
-An Activity in which an Agent asks something of a User, marked **blocking** when the Agent waits for the answer. The first User's Comment reply **answers** it; blocking Questions come first in the Inbox.
+An Activity in which an Agent asks something of a User, marked **blocking** when the Agent waits for the answer. The first User's Comment reply **answers** it; blocking Questions come first in the Inbox. A User may instead **dismiss** it, and it leaves the Inbox by itself once its Ticket is Completed or Canceled.
 _Avoid_: Prompt, request, clarification
 
 **Change**:
@@ -105,7 +105,7 @@ A Comment that concerns an Agent: it answers the Agent's Question, @mentions it,
 _Avoid_: Notification, wake-up, Inbox (reserved for Users)
 
 **Claim**:
-An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. An Agent changes a Ticket's fields, Status and Relations only from the Agent Session holding its Claim, except on its own Discovered Ticket that no User has settled for good, which it may edit and block from without one; Comments need none. It ends when the Ticket moves to In Review, Completed or Canceled, the Agent releases it, a User changes the Ticket's Delegate, or a Reopen pauses it, and lapses when its Agent Session ends.
+An Agent Session's exclusive, temporary hold on a Ready Ticket while it works on it. A Ticket has at most one live Claim. An Agent changes a Ticket's fields, Status and Relations only from the Agent Session holding its Claim, except on its own Discovered Ticket that no User has settled for good, which it may edit and block from without one; Comments need none. It ends when the Ticket moves to In Review, Completed or Canceled, the Agent releases it, a User changes the Ticket's Delegate, or a Reopen pauses it, and lapses when its Agent Session ends or the Agent can no longer write there (its Project archived, or its access lowered).
 _Avoid_: Lock, checkout, lease
 
 **Inbox**:
@@ -119,12 +119,16 @@ _Avoid_: Unassigned queue, backlog
 ### Code
 
 **Repository**:
-A code repository on an external Git host that a Project lists as holding its code.
+A code repository on an external Git host (GitHub, or GitLab including a self-hosted one) that one or more Projects list as holding their code. It holds the credentials Cronk uses with that host.
 _Avoid_: Repo (in the product), codebase, source
 
 **Pull Request**:
 A proposed edit to code on a Git host, linked to one or more Tickets. Covers GitLab's merge requests too.
 _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's Changes)
+
+**Git host account**:
+A User's or Agent's account on a Git host, which they link in Cronk so it can tell who acted on a Pull Request. A merge by an account no User has linked counts as automated.
+_Avoid_: Git identity, GitHub user, handle
 
 ### Knowledge
 
@@ -149,7 +153,7 @@ One saved state of a Document, Decision, Term, Artifact or Guidance, recording w
 _Avoid_: Revision, snapshot, history entry
 
 **Artifact**:
-A live, viewable thing built by an Actor, such as an HTML prototype, served in isolation at a stable address. Belongs to a Project or the Workspace, records the Ticket or Agent Session it came from (a source Ticket in its own Project), and can be embedded in many places. Never deleted. Its page may load only from the Workspace's **allow-list** of origins, plus any **extra origins** a publish declares, with reasons, for that Version alone.
+A live, viewable thing built by an Actor, such as an HTML prototype, served in isolation at a stable address. Belongs to a Project or the Workspace, records the Ticket or Agent Session it came from (a source Ticket in its own Project), and can be embedded in many places. Only an Admin may delete one, or one of its Versions. Its page may load only from the Workspace's **allow-list** of origins, plus any **extra origins** a publish declares, with reasons, for that Version alone.
 _Avoid_: Prototype (as the general term), app, preview, page
 
 **Embed**:
@@ -207,7 +211,7 @@ Everything an Agent did across the Workspace, newest first: the Changes it made,
 _Avoid_: Work (reserved for Waiting Work), history, activity log, feed
 
 **Transcript**:
-The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did. Cronk **scrubs** known secret patterns on upload, as a best effort; only its Owner may delete it or **redact** a passage by hand, which later uploads keep redacted.
+The verbatim record of a chat between a User and their Agent, uploaded from the Agent's side, that led the Agent to change things in Cronk. Linked to the Agent Sessions it covered and so to everything they did. Cronk **scrubs** known secret patterns on upload, as a best effort; only its Owner or an Admin may delete it or **redact** a passage by hand, which later uploads keep redacted.
 _Avoid_: Chat log, conversation, chat history, session log
 
 **Silence threshold**:
@@ -227,8 +231,16 @@ Standing instructions Users write for Agents (Admins, for the Workspace's), laye
 _Avoid_: System prompt, rules, AGENTS.md (in the product)
 
 **Agent Webhook**:
-An address an Agent may register so Cronk can tell the Agent's own runner that work is waiting for it.
+An address a User registers for one of their Agents so Cronk can tell the Agent's own runner that work is waiting for it. Agents can't set it themselves. Cronk calls it only while the Agent has no live Agent Session, saying what kinds of Waiting Work wait and on which Tickets, never their text.
 _Avoid_: Trigger, callback, wake-up hook
+
+**User Webhook**:
+An address a User registers so Cronk tells them, outside the app, of the events they chose, such as blocking Questions.
+_Avoid_: Notification channel, integration, hook
+
+**Workspace Webhook**:
+An address an Admin registers so Cronk sends Triage events, such as a new item waiting there, to a shared place like a team channel.
+_Avoid_: Team webhook, global hook
 
 ### Access
 
