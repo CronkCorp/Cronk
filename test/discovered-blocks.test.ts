@@ -203,18 +203,19 @@ describe("Blocks an Agent added from its Discovered Ticket before a User finishe
     expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
   });
 
-  it("leave the Inbox and Triage block lists, and both Tickets' history records them ended by the User", async () => {
+  it("leave the Inbox and Triage, and both Tickets' history records them ended by the User", async () => {
     const { admin, session } = await delegatedSetup(2);
     const agent = await session();
     await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }, { ticketKey: "CRONK-2", reason }] });
+    expect((await admin.get("/api/inbox?kind=discovered")).body.items).toMatchObject([{ ticket: { key: "CRONK-3" }, blocks: [{ key: "CRONK-1" }, { key: "CRONK-2" }] }]);
 
     await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "canceled") });
     await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "backlog") });
 
-    const [item] = (await admin.get("/api/inbox?kind=discovered")).body.items;
-    expect(item).toMatchObject({ ticket: { key: "CRONK-3" }, blocks: [], hiddenBlocks: 0 });
+    // Finished once, it is settled and waits for no one again, so neither lists it or what it blocked.
+    expect((await admin.get("/api/inbox?kind=discovered")).body.items).toEqual([]);
     await admin.patch("/api/tickets/CRONK-3", { assigneeId: null });
-    expect((await admin.get("/api/triage?kind=discovered")).body.items).toMatchObject([{ ticket: { key: "CRONK-3" }, blocks: [], hiddenBlocks: 0 }]);
+    expect((await admin.get("/api/triage?kind=discovered")).body.items).toEqual([]);
     const changes = async (key: string) => (await admin.get(`/api/tickets/${key}/changes`)).body.changes.filter((c: any) => c.change === "relation removed");
     expect(await changes("CRONK-3")).toMatchObject([
       { kind: "blocks", ticket: { key: "CRONK-1" }, actor: { kind: "user" } },
