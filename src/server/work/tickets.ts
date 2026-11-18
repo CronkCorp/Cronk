@@ -3,6 +3,7 @@ import { lockUntilCommit, queryParams, type Queryable } from "../db/database.js"
 import { FINISHED_CATEGORIES, type Priority, type RelationKind, type StatusCategory, type Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
+import { endVettedDiscoveredBlocks } from "./relations.js";
 import { readableOnlyIn } from "../identity/readable-only-in.js";
 
 /** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
@@ -158,10 +159,12 @@ const toTicket = (row: TicketRow): Ticket => ({
   updatedAt: row.updated_at,
 });
 
+/** SQL condition: the Ticket change `c` moved its Ticket to a finished Status. */
+export const isFinishChangeSql = (c: string) =>
+  `(${c}.change = 'status' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
+
 /** SQL condition: the history of the Ticket `t` records a move to a finished Status, whatever Status it is in now. */
-const everFinishedSql = (t: string) =>
-  `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND c.change = 'status'
-     AND c.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
+const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isFinishChangeSql("c")})`;
 
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
@@ -406,6 +409,9 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     ...columns.map(([, value]) => value),
   ]);
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
+  if (ticket.discovered && changes.status && FINISHED_CATEGORIES.includes(changes.status.category) && changes.status.id !== ticket.status.id) {
+    await endVettedDiscoveredBlocks(db, [ticket.id], actor, now);
+  }
   if (columns.some(([column]) => column === "title" || column === "description")) await recordMentions(db, { kind: "ticket", id: ticket.id });
   return (await findTicketById(db, ticket.id))!;
 }

@@ -209,7 +209,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       file: {
         description:
           "file a Discovered Ticket in a Project, needing no Claim: it goes to Backlog, undelegated, for the Assignee of the Ticket you hold the Claim on, " +
-          "or else your Owner, and that Ticket's Reports from this Claim list it; with `blocks` and a `reason`, it blocks those Tickets until finished or a User removes the block",
+          "or else your Owner, and that Ticket's Reports from this Claim list it; with `blocks` and a `reason`, it blocks those Tickets until a User removes the block or finishes it, which ends its blocks for good unless a User delegated it first",
         writes: true,
         run: (api, a) => {
           const project = required(a.project, "a project", "file");

@@ -71,7 +71,7 @@ Decided so far (beyond the glossary and ADRs):
 - Reopening a Ticket requires a Comment saying why; it goes back to the same Delegate.
 - An Unverified completion counts as finished for blocking; Reopening makes it block its dependents again.
 - An Agent may split its own delegated Ticket into Sub-Tickets but may not work on Discovered Tickets until a User delegates them; the Report lists every Discovered Ticket from the work.
-- A Discovered Ticket may block queued Tickets and so pause that part of an autonomous run; this is intended.
+- A Discovered Ticket may block queued Tickets and so pause that part of an autonomous run; this is intended. A User finishing it undelegated ends those blocks for good (#443).
 - Suggestions land in the same Inbox as Unverified completions; Suggestions on Workspace-level items with no clear owner go to Triage, as do unassigned Discovered Tickets.
 - Terms and Decisions are stored as Markdown with frontmatter (ADR 0003); in the product they are called Decisions, "ADR" is only the export format.
 - Artifacts belong to a Project or the Workspace, never to a Ticket or chat; they record the Ticket or Agent Session they came from and can be embedded in many places.

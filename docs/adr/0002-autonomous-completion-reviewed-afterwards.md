@@ -4,4 +4,4 @@ By default Agents can move a Ticket no further than In Review. Under an Autonomo
 
 ## Consequences
 
-- A Discovered Ticket that an Agent marks as blocking a queued Ticket halts that part of the autonomous run until a User vets it. This is intended.
+- A Discovered Ticket that an Agent marks as blocking a queued Ticket halts that part of the autonomous run until a User vets it. This is intended. A User finishing it, before any User delegated it, vets it for good: the blocks its Agent added from it end then, and stay ended if it is moved back out of its finished Status.

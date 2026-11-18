@@ -2,7 +2,7 @@ import { insertActivity, markAnswered, type Activity } from "../coordination/act
 import { ACTIVITY_KINDS, PRIORITIES, VERIFICATIONS } from "../../shared/values.js";
 import { recordChange, ticketKeySql } from "../work/tickets.js";
 import { findUserById } from "../identity/users.js";
-import { storeRelation, type NewDiscoveredBlock } from "../work/relations.js";
+import { endVettedDiscoveredBlocks, storeRelation, type NewDiscoveredBlock } from "../work/relations.js";
 import { storeDocumentLink } from "../work/document-links.js";
 import { exportAttachments, importAttachments } from "./attachments.js";
 import { exportComments, importComments } from "./comments.js";
@@ -257,6 +257,8 @@ export class ImportedTickets {
   /**
    * Imports the Tickets' history, once every Ticket is in so changes can name them, then records each assignment to a
    * Delegate's Owner this import made, as a Change by Cronk itself, as the upgrade that assigned them here would have.
+   * Last, as the upgrade that ended them here would have, it ends the blocks of an export from before finishing ended
+   * them, from Discovered Tickets its history says a User finished undelegated.
    */
   async importHistories(ctx: ImportContext): Promise<void> {
     for (const { ticketId, statusIds, file } of this.histories) await importHistory(ctx, file, ticketId, statusIds);
@@ -264,6 +266,7 @@ export class ImportedTickets {
       const owner = (await findUserById(ctx.db, ownerId))!;
       await recordChange(ctx.db, ticketId, { kind: "system" }, ctx.now, { change: "assignee", from: null, to: { id: owner.id, name: owner.name } });
     }
+    await endVettedDiscoveredBlocks(ctx.db, [...this.ids.values()], { kind: "system" }, ctx.now);
   }
 }
 

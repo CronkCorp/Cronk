@@ -1389,3 +1389,26 @@ describe("the Workspace's settings in an export", () => {
     expect(workspace).toMatchObject({ name: "Acme", silenceThresholdSeconds: 120, artifactMaxFiles: 50, attachmentMaxBytes: 2 * 1024 * 1024 });
   });
 });
+
+describe("a block from a Discovered Ticket a User finished undelegated, in an export from before finishing ended it", () => {
+  it("is imported ended, recorded as a Change by Cronk itself, so the Ticket it blocked stays Ready once the Discovered Ticket is moved back", async () => {
+    const { admin, session } = await delegatedSetup(1);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason: "Builds on it." }] });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "completed") });
+    const files = await untarGz((await admin.download("/api/projects/CRONK/export")).body);
+    // As exported before finishing ended it: the finished CRONK-2 still blocks CRONK-1.
+    const exported = editedExport(files, "projects/CRONK/tickets/CRONK-2.md", (data) => {
+      data.discovered.blockReasons = { "CRONK-1": "Builds on it." };
+      data.blocks = ["CRONK-1"];
+    });
+
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", await exported)).status).toBe(201);
+    await elsewhere.admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(elsewhere.admin, "backlog") });
+
+    expect((await elsewhere.admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
+    const { changes } = (await elsewhere.admin.get("/api/tickets/CRONK-1/changes")).body;
+    expect(changes.at(-1)).toMatchObject({ actor: { kind: "system" }, change: "relation removed", kind: "blocked_by", ticket: { key: "CRONK-2" } });
+  });
+});

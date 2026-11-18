@@ -2,6 +2,7 @@ import type { Queryable } from "./database.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 import { recordAllEmbeds } from "../files/artifact-embeds.js";
 import { scrubAllStored, storeAllTurns } from "../transcripts/transcripts.js";
+import { endVettedDiscoveredBlocks } from "../work/relations.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a
@@ -1061,5 +1062,15 @@ export const migrations: Migration[] = [
       CREATE INDEX decision_versions_actor_session ON decision_versions (actor_session_id) WHERE actor_session_id IS NOT NULL;
       CREATE INDEX artifact_versions_actor_session ON artifact_versions (actor_session_id) WHERE actor_session_id IS NOT NULL;
     `,
+  },
+  {
+    id: "0047_end_vetted_discovered_blocks",
+    sql: `
+      -- No schema change: the backfill ends the blocks Agents added from their Discovered Tickets that a User finished,
+      -- undelegated, before finishing ended them (work/tickets.ts), so moving such a Ticket back out of its finished
+      -- Status no longer pauses the Tickets it blocked. Cronk records each in both Tickets' history.
+      SELECT 1;
+    `,
+    backfill: (db) => endVettedDiscoveredBlocks(db, null, { kind: "system" }, new Date()),
   },
 ];
