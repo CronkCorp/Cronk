@@ -189,6 +189,21 @@ async function readOnlyBlockSetup() {
   return { ...setup, blockWhileWaiting };
 }
 
+describe("Blocks an Agent added from its Discovered Ticket before a User finished it", () => {
+  it("end with the finish, so the Ticket they blocked stays Ready once the Discovered Ticket is moved back to Backlog", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "completed") });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "backlog") });
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blocks).toEqual([]);
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  });
+});
+
 describe("Blocks added at once by holders of the Tickets' Claims", () => {
   it("queue rather than deadlock when two Agents block each other's Ticket: one is added, the other would close a cycle", async () => {
     const { cronk, admin, adaId, session } = await delegatedSetup(4);

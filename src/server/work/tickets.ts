@@ -185,6 +185,26 @@ export async function wasEverDelegatedOrFinished(db: Queryable, ticketId: string
   return rowCount !== 0;
 }
 
+/**
+ * Ends the blocks the filing Agent added from `ticket`, its Discovered Ticket, as a User finishes it while no User ever
+ * delegated it: finishing vets it (ADR 0002), so they no longer block, even once it is moved back out of its finished
+ * Status. Each is removed, and recorded in both Tickets' history as `actor`'s. Blocks a User added stay, as do those
+ * from a Ticket that was delegated, which is work like any other. Call once the move is recorded.
+ */
+async function endDiscoveredBlocksOnFinish(db: Queryable, ticket: Ticket, actor: Actor | SystemActor, now: Date): Promise<void> {
+  if (!ticket.discovered) return;
+  const { rowCount: delegated } = await db.query("SELECT 1 FROM ticket_changes WHERE ticket_id = $1 AND change = 'delegate' LIMIT 1", [ticket.id]);
+  if (delegated !== 0) return;
+  const { rows } = await db.query<{ id: string }>(
+    "DELETE FROM ticket_relations WHERE kind = 'blocks' AND from_ticket_id = $1 AND added_by_agent_id IS NOT NULL RETURNING to_ticket_id AS id",
+    [ticket.id],
+  );
+  for (const blocked of await findTicketsByIds(db, rows.map((r) => r.id))) {
+    await recordChange(db, ticket.id, actor, now, { change: "relation removed", kind: "blocks", ticket: { key: blocked.key, title: blocked.title } });
+    await recordChange(db, blocked.id, actor, now, { change: "relation removed", kind: "blocked_by", ticket: { key: ticket.key, title: ticket.title } });
+  }
+}
+
 /** Records a User's Keep in Backlog of a Discovered Ticket, which settles it, in its history too; returns the Ticket as kept. */
 export async function keepDiscovery(db: Queryable, ticket: Ticket, actor: Actor, now: Date): Promise<Ticket> {
   await db.query("UPDATE tickets SET discovery_kept = true, updated_at = $2 WHERE id = $1", [ticket.id, now]);
@@ -391,6 +411,9 @@ export async function updateTicket(db: Queryable, ticket: Ticket, changes: Ticke
     ...columns.map(([, value]) => value),
   ]);
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
+  if (changes.status && FINISHED_CATEGORIES.includes(changes.status.category) && changes.status.id !== ticket.status.id) {
+    await endDiscoveredBlocksOnFinish(db, ticket, actor, now);
+  }
   if (columns.some(([column]) => column === "title" || column === "description")) await recordMentions(db, { kind: "ticket", id: ticket.id });
   return (await findTicketById(db, ticket.id))!;
 }
