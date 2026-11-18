@@ -10,7 +10,8 @@ import pg from "pg";
 import tar from "tar-stream";
 import { inject, onTestFailed, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../src/server/app.js";
+import { ANSWER_CUT_OFF_WITHIN_MS, buildApp, DEFAULT_CLOSE_WITHIN_MS } from "../src/server/app.js";
+import { CUT_OFF_MS } from "../src/server/db/database.js";
 import type { Clock } from "../src/server/clock.js";
 import type { StatusCategory } from "../src/shared/values.js";
 import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js";
@@ -349,6 +350,8 @@ export interface Cronk {
   url(): Promise<string>;
   /** The connection string of this test's database, for running server commands against it as an operator would. */
   databaseUrl: string;
+  /** The directory of this test's own that teardown removes, where Cronk keeps files unless started with other storage. */
+  filesDir: string;
 }
 
 /** Live updates held by `Cronk.holdPushes`, until released. */
@@ -387,6 +390,20 @@ const LOCK_WAITERS_FROM = "FROM pg_stat_activity WHERE datname = $1 AND wait_eve
 async function lockWaiters(client: pg.Client, dbName: string): Promise<number> {
   const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int AS n ${LOCK_WAITERS_FROM}`, [dbName]);
   return rows[0]!.n;
+}
+
+/** The time past the server's own bound on closing that teardown waits for a close to finish, for a loaded machine. */
+const CLOSE_SLACK_MS = 2_000;
+
+/** Whether `work` settles within `ms`; should it fail in time, its error is thrown. */
+async function settlesWithin(ms: number, work: Promise<unknown>): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
+  try {
+    return await Promise.race([work.then(() => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -568,6 +585,7 @@ export async function startCronk(
     },
     url: () => (listening ??= cronk.app.listen({ host: "127.0.0.1", port: 0 })),
     databaseUrl,
+    filesDir,
   };
   /** Takes a lock with `sql` in a transaction it keeps open until released. */
   async function hold(sql: string, params: unknown[]): Promise<HeldLock> {
@@ -601,10 +619,20 @@ export async function startCronk(
   }
   let listening: Promise<string> | undefined;
 
-  onTestFinished(async () => {
-    await cronk.app.close();
-    await withClient(adminUrl, (admin) => admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`));
-    await rm(filesDir, { recursive: true, force: true });
+  // A close that never finishes, as when closing regresses, would otherwise hold teardown for the whole hook timeout and fail
+  // the test a second time with a timeout beside its own error. So teardown waits only as long as closing may take, then drops
+  // the database (ending the connections still open to it) and the files all the same.
+  const teardownWaitsMs = (opts.closeWithinMs ?? DEFAULT_CLOSE_WITHIN_MS) + CUT_OFF_MS + ANSWER_CUT_OFF_WITHIN_MS + CLOSE_SLACK_MS;
+  onTestFinished(async ({ task }) => {
+    let closed: boolean;
+    try {
+      closed = await settlesWithin(teardownWaitsMs, cronk.app.close());
+    } finally {
+      await withClient(adminUrl, (admin) => admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`));
+      await rm(filesDir, { recursive: true, force: true });
+    }
+    // A test that failed already has its own error, which a close left unfinished most likely follows from.
+    if (!closed && task.result?.state !== "fail") throw new Error(`Closing the application did not finish within ${teardownWaitsMs} ms`);
   });
   return cronk;
 }
