@@ -15,8 +15,8 @@ interface WorkspaceSetting {
   name: string;
   /** Its column in `workspaces`, where its default and `CHECK` live. */
   column: string;
-  /** Whether the column is a `bigint`, which comes back from the database as a string. */
-  bigint: boolean;
+  /** The column's Postgres type. A `bigint` comes back from the database as a string, which reading turns into a number. */
+  type: "integer" | "bigint";
   /** What the API accepts, which an import checks too. */
   schema: { type: "integer"; minimum: number; maximum: number; description: string };
   /** What the setting is, as the `Workspace` schema of API responses describes it, without the bounds. */
@@ -31,7 +31,7 @@ export const WORKSPACE_SETTINGS = [
   {
     name: "silenceThresholdSeconds",
     column: "silence_threshold_seconds",
-    bigint: false,
+    type: "integer",
     schema: {
       type: "integer",
       minimum: 60,
@@ -43,14 +43,14 @@ export const WORKSPACE_SETTINGS = [
   {
     name: "attachmentMaxBytes",
     column: "attachment_max_bytes",
-    bigint: true,
+    type: "bigint",
     schema: { type: "integer", minimum: MB, maximum: 10 * 1024 * MB, description: "The largest file an Attachment may be, in bytes: 1 MB to 10 GB." },
     responseDescription: "The largest file an Attachment may be, in bytes.",
   },
   {
     name: "transcriptMaxBytes",
     column: "transcript_max_bytes",
-    bigint: false,
+    type: "integer",
     schema: {
       type: "integer",
       minimum: MIN_TRANSCRIPT_BYTES,
@@ -62,7 +62,7 @@ export const WORKSPACE_SETTINGS = [
   {
     name: "artifactMaxBytes",
     column: "artifact_max_bytes",
-    bigint: true,
+    type: "bigint",
     schema: {
       type: "integer",
       minimum: MB,
@@ -74,7 +74,7 @@ export const WORKSPACE_SETTINGS = [
   {
     name: "artifactMaxFiles",
     column: "artifact_max_files",
-    bigint: false,
+    type: "integer",
     schema: { type: "integer", minimum: 1, maximum: 10_000, description: "The most files one Version of an Artifact may hold: 1 to 10,000; 500 unless changed." },
     responseDescription: "The most files one Version of an Artifact may hold.",
   },
@@ -123,7 +123,7 @@ const toWorkspace = (row: WorkspaceRow): Workspace => ({
   id: row.id,
   name: row.name,
   agentAccess: row.agent_access,
-  ...(Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, s.bigint ? Number(row[s.column]) : row[s.column]])) as WorkspaceSettings),
+  ...(Object.fromEntries(WORKSPACE_SETTINGS.map((s) => [s.name, Number(row[s.column])])) as WorkspaceSettings),
   artifactAllowedOrigins: row.artifact_allowed_origins,
   artifactExtraOriginsAllowed: row.artifact_extra_origins_allowed,
 });
@@ -161,7 +161,7 @@ export async function updateWorkspace(
   const columns: [column: string, value: unknown, type: string][] = [
     ["name", changes.name, "text"],
     ["agent_access", changes.agentAccess, "text"],
-    ...WORKSPACE_SETTINGS.map((s): [column: string, value: unknown, type: string] => [s.column, changes[s.name], s.bigint ? "bigint" : "integer"]),
+    ...WORKSPACE_SETTINGS.map((s): [column: string, value: unknown, type: string] => [s.column, changes[s.name], s.type]),
     ["artifact_allowed_origins", changes.artifactAllowedOrigins, "text[]"],
     ["artifact_extra_origins_allowed", changes.artifactExtraOriginsAllowed, "boolean"],
   ];
