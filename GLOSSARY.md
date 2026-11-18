@@ -40,6 +40,10 @@ _Avoid_: Owner (reserved for Agents), responsible
 The Agent a Ticket's Assignee has handed the work to. Must be one of the Assignee's own Agents, so a delegated Ticket always has an Assignee: delegating a Ticket without one assigns the delegating User. Removing the Agent clears it as Delegate of every Ticket, as a change by whoever removed it.
 _Avoid_: Agent assignee, worker
 
+**Delegation**:
+A User's handing of a Ticket to an Agent, which makes the Agent the Ticket's Delegate. The Agent must be one of the Assignee's own Agents (see Delegate). It lasts while that Agent stays the Ticket's Delegate.
+_Avoid_: Agent assignment, hand-off, dispatch
+
 **Autonomous Delegation**:
 A Delegation in which the Delegate may complete Tickets itself rather than stopping at In Review. Every completion it makes is Unverified until a User checks it. A User sets it on a Ticket, and the Ticket's Sub-Tickets inherit it.
 _Avoid_: Auto mode, unattended mode, YOLO mode
