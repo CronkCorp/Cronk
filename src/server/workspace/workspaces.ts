@@ -15,7 +15,7 @@ interface WorkspaceSetting {
   name: string;
   /** Its column in `workspaces`, where its default and `CHECK` live. */
   column: string;
-  /** The column's Postgres type. A `bigint` comes back from the database as a string, which reading turns into a number. */
+  /** The column's Postgres type, which an update binds its value as. A `bigint` comes back from the database as a string. */
   type: "integer" | "bigint";
   /** What the API accepts, which an import checks too. */
   schema: { type: "integer"; minimum: number; maximum: number; description: string };
