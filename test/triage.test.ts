@@ -91,7 +91,6 @@ describe("Triage on Project items", () => {
   });
 });
 
-/** The id of the CRONK Status in `category`. */
 describe("Triage's Unverified completions", () => {
   it("lists an Unverified completion whose Ticket has no Assignee to the Users with Write in its Project, until one Accepts it", async () => {
     const { cronk, admin, session } = await delegatedSetup();

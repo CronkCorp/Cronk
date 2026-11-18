@@ -698,14 +698,14 @@ export async function joinAs(
   return client;
 }
 
+/** The password `joinAs` gives every User it creates. */
+export const memberPassword = "member password";
+
 /** The id of the first Status in `category` of Project `project` (CRONK unless named), as `client` sees it. */
 export async function statusIn(client: Client, category: string, project = "CRONK"): Promise<string> {
   const statuses = (await client.get(`/api/projects/${project}`)).body.statuses as { id: string; category: string }[];
   return statuses.find((s) => s.category === category)!.id;
 }
-
-/** The password `joinAs` gives every User it creates. */
-export const memberPassword = "member password";
 
 /**
  * Has `owner` register an Agent called `name` and issue it a token, and returns a
