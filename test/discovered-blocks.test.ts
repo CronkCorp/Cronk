@@ -243,6 +243,29 @@ describe("Blocks an Agent added from its Discovered Ticket before a User finishe
     expect(claim.status).toBe(409);
     expect(claim.body.error).toContain("CRONK-2 is blocked by CRONK-3");
   });
+
+  it("end on upgrading, for a Discovered Ticket a User finished before the upgrade, but not one delegated before it was finished", async () => {
+    const { cronk, admin, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+    await agent.post("/api/projects/CRONK/tickets", { title: "Docs are stale", blocks: [{ ticketKey: "CRONK-2", reason }] });
+    await admin.patch("/api/tickets/CRONK-4", { delegateId: claude.agentId });
+    await admin.patch("/api/tickets/CRONK-4", { delegateId: null });
+    for (const key of ["CRONK-3", "CRONK-4"]) await admin.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "completed") });
+    // As before blocks ended with the finish: CRONK-3 still blocks CRONK-1.
+    await cronk.undoMigration(
+      "0047_end_vetted_discovered_blocks",
+      `INSERT INTO ticket_relations (kind, from_ticket_id, to_ticket_id, added_by_agent_id, reason)
+       SELECT 'blocks', d.id, b.id, d.discovered_by_agent_id, 'Builds on it.' FROM tickets d, tickets b WHERE d.number = 3 AND b.number = 1`,
+    );
+    await cronk.restart();
+
+    for (const key of ["CRONK-3", "CRONK-4"]) await admin.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "backlog") });
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+    expect((await agent.post("/api/tickets/CRONK-1/claim")).status).toBe(200);
+  });
 });
 
 describe("Blocks added at once by holders of the Tickets' Claims", () => {
