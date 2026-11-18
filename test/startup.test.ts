@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { ada, delegatedSetup, startCronk, startInstalledCronk, type Client, type Cronk, type HeldLock } from "./harness.js";
+import { ada, DATABASE_CUT_OFF, delegatedSetup, startCronk, startInstalledCronk, type Client, type Cronk, type HeldLock } from "./harness.js";
 
 /** The bound on closing these tests start Cronk with. */
 const CLOSE_WITHIN_MS = 500;
@@ -25,15 +25,6 @@ async function expectWithin(ms: number, work: Promise<unknown>): Promise<void> {
 
 /** More bytes than a connection's buffers hold, so a transfer of them stalls on the end that stops reading them. */
 const MORE_THAN_BUFFERED = 32 * 1024 * 1024;
-
-/**
- * What work waiting on the database fails with once closing cuts it off: Postgres ending the session on the server's
- * behalf (`57P01`, admin_shutdown), or the connection dropped under it should that word not arrive before the socket goes.
- */
-const DATABASE_CUT_OFF = expect.toSatisfy(
-  (err: unknown) => err instanceof Error && ((err as { code?: string }).code === "57P01" || err.message === "Connection terminated unexpectedly"),
-  "a database connection cut off",
-);
 
 /**
  * What a client over HTTP sees once closing ends its connection before the request or answer is complete: the connection
