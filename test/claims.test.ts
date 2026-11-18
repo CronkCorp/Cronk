@@ -45,7 +45,7 @@ describe("Claiming a Ticket", () => {
     expect(undelegated.status).toBe(409);
     expect(undelegated.body.error).toBe("CRONK-2 isn't delegated to claude-laptop");
 
-    for (const category of ["completed", "canceled"]) {
+    for (const category of ["completed", "canceled"] as const) {
       await admin.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, category) });
       const finished = await inSession.post("/api/tickets/CRONK-1/claim");
       expect(finished.status).toBe(409);
@@ -265,12 +265,12 @@ describe("The Claim holder", () => {
     await agent.post("/api/tickets/CRONK-1/claim");
     await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "Done." });
 
-    for (const category of ["started", "unstarted", "in_review"]) {
+    for (const category of ["started", "unstarted", "in_review"] as const) {
       const moved = await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, category) });
       expect(moved.status).toBe(200);
       expect(moved.body.ticket.status.category).toBe(category);
     }
-    for (const category of ["completed", "canceled", "backlog"]) {
+    for (const category of ["completed", "canceled", "backlog"] as const) {
       const refused = await agent.patch("/api/tickets/CRONK-1", { statusId: await statusIn(admin, category) });
       expect(refused.status).toBe(403);
     }
