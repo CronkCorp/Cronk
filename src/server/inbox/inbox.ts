@@ -4,7 +4,7 @@ import { inboxTopic, TRIAGE_TOPIC } from "../live/topics.js";
 import { visibleProjects } from "../identity/access.js";
 import type { User } from "../identity/users.js";
 import { userActor } from "../actor.js";
-import { listTicketReports, type Report } from "../knowledge/reports.js";
+import { listReportsOfTickets, type Report } from "../knowledge/reports.js";
 import { listAllProjects } from "../work/projects.js";
 import { findTicketsByIds, isWaitingDiscoverySql, type Ticket, type TicketRef } from "../work/tickets.js";
 import { blockingRefsOf, type BlockingRef } from "../work/relations.js";
@@ -267,13 +267,13 @@ export async function asTicketItems<K extends string, R extends { id: string; at
   kind: K,
   rows: R[],
 ): Promise<(TicketItem<K> & Omit<R, "id" | "at">)[]> {
-  const tickets = new Map((await findTicketsByIds(db, rows.map((r) => r.id))).map((t) => [t.id, t]));
-  return Promise.all(
-    rows.flatMap(({ id, at, ...rest }) => {
-      const ticket = tickets.get(id);
-      return ticket ? [listTicketReports(db, id).then((reports) => ({ ...rest, kind, at, ticket, reports }))] : [];
-    }),
-  );
+  const ids = rows.map((r) => r.id);
+  const tickets = new Map((await findTicketsByIds(db, ids)).map((t) => [t.id, t]));
+  const reports = await listReportsOfTickets(db, ids);
+  return rows.flatMap(({ id, at, ...rest }) => {
+    const ticket = tickets.get(id);
+    return ticket ? [{ ...rest, kind, at, ticket, reports: reports.get(id)! }] : [];
+  });
 }
 
 /**

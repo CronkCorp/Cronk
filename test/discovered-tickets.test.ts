@@ -298,6 +298,61 @@ describe("Discovered Tickets in the Inbox", () => {
     expect((await admin.post("/api/tickets/CRONK-2/keep")).status).toBe(200);
     expect((await admin.post("/api/tickets/CRONK-2/keep")).status).toBe(409);
   });
+
+  it("stay settled once a User finishes them, even moved back to Backlog undelegated: out of the Inbox and Triage, with nothing to keep", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    for (const title of ["Done", "Dropped", "Unassigned", "Fresh"]) await agent.post("/api/projects/CRONK/tickets", { title });
+    await admin.patch("/api/tickets/CRONK-4", { assigneeId: null });
+    const backlog = await statusIn(admin, "backlog");
+
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "completed") });
+    await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "canceled") });
+    await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "completed") });
+    for (const key of ["CRONK-2", "CRONK-3", "CRONK-4"]) expect((await admin.patch(`/api/tickets/${key}`, { statusId: backlog })).status).toBe(200);
+
+    // The one never finished still waits, in its Assignee's Inbox.
+    expect(await waiting(admin)).toEqual(["discovered CRONK-5"]);
+    expect(await waiting(admin, "/api/triage")).toEqual([]);
+    const refused = await admin.post("/api/tickets/CRONK-2/keep");
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toContain("isn't a Discovered Ticket waiting");
+    expect((await admin.post("/api/tickets/CRONK-3/keep")).status).toBe(409);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.discovered).toMatchObject({ kept: false, everFinished: true });
+    expect((await admin.get("/api/tickets/CRONK-5")).body.ticket.discovered).toMatchObject({ kept: false, everFinished: false });
+    expect((await admin.post("/api/tickets/CRONK-5/keep")).status).toBe(200);
+  });
+
+  it("are told apart from finished ones in a fixed number of queries, their history looked up by index, however many there are", async () => {
+    // The server's own looks for lapsed Claims read the history too, so they are left out.
+    const { cronk, admin, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000 });
+    const agent = await session();
+    const backlog = await statusIn(admin, "backlog");
+    const completed = await statusIn(admin, "completed");
+    /** Files a Discovered Ticket, finished and moved back to Backlog when `finished`, unassigned when `unassigned`. */
+    const discover = async ({ finished = false, unassigned = false } = {}) => {
+      const { key } = (await agent.post("/api/projects/CRONK/tickets", { title: "Found" })).body.ticket;
+      if (unassigned) await admin.patch(`/api/tickets/${key}`, { assigneeId: null });
+      if (finished) for (const statusId of [completed, backlog]) await admin.patch(`/api/tickets/${key}`, { statusId });
+    };
+    const listings = ["/api/inbox?kind=discovered", "/api/triage?kind=discovered", "/api/projects/CRONK/tickets"];
+    const historyQueries = async () => {
+      const counts: number[] = [];
+      for (const path of listings) counts.push(await cronk.queriesOn("ticket_changes", () => admin.get(path)));
+      // Each item's Reports too, which Ticket items carry.
+      for (const path of listings.slice(0, 2)) counts.push(await cronk.queriesOn("documents", () => admin.get(path)));
+      return counts;
+    };
+    for (const options of [{}, { unassigned: true }, { finished: true, unassigned: true }]) await discover(options);
+    const withFew = await historyQueries();
+
+    for (const options of [{}, { unassigned: true }, { finished: true }, { finished: true, unassigned: true }]) await discover(options);
+
+    expect(await historyQueries()).toEqual(withFew);
+    for (const path of listings) expect(await cronk.tablesReadWhole(() => admin.get(path))).not.toContain("ticket_changes");
+    expect(await waiting(admin)).toEqual(["discovered CRONK-2", "discovered CRONK-5"]);
+    expect(await waiting(admin, "/api/triage")).toEqual(["discovered CRONK-3", "discovered CRONK-6"]);
+  });
 });
 
 describe("Discovered Tickets in Triage", () => {
