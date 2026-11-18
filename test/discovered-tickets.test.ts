@@ -222,7 +222,7 @@ describe("An Agent's own Discovered Ticket", () => {
     const { admin, claude, session } = await delegatedSetup();
     const agent = await session();
     await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
-    const started = ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === "started")!.id;
+    const started = await statusIn(admin, "started");
 
     const claim = await agent.post("/api/tickets/CRONK-2/claim");
     expect(claim.status).toBe(409);
