@@ -547,7 +547,7 @@ export function workRoutes(ctx: AppContext) {
                 maxItems: 50,
                 description:
                   "For an Agent: Tickets of any Project it can read that its Discovered Ticket blocks from the start, each with why, which the blocked Ticket shows. " +
-                  "Nothing is filed if any can't be blocked.",
+                  "Nothing is filed if any can't be blocked. A User finishing the Discovered Ticket before delegating it ends these blocks for good.",
                 items: {
                   type: "object",
                   required: ["ticketKey", "reason"],
