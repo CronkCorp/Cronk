@@ -323,15 +323,48 @@ describe("Discovered Tickets in the Inbox", () => {
     expect((await admin.post("/api/tickets/CRONK-5/keep")).status).toBe(200);
   });
 
-  it("are told apart from finished ones in a fixed number of queries, their history looked up by index, however many there are", async () => {
+  it("stay settled once a User delegates them, even undelegated in Backlog: out of the Inbox and Triage, with nothing to keep", async () => {
+    const { admin, claude, session } = await delegatedSetup();
+    const agent = await session();
+    for (const title of ["Assigned", "Unassigned", "Fresh"]) await agent.post("/api/projects/CRONK/tickets", { title });
+    await admin.patch("/api/tickets/CRONK-3", { assigneeId: null });
+
+    // Before a User delegates them, both wait: one in its Assignee's Inbox, one in Triage.
+    expect(await waiting(admin)).toEqual(["discovered CRONK-2", "discovered CRONK-4"]);
+    expect(await waiting(admin, "/api/triage")).toEqual(["discovered CRONK-3"]);
+
+    for (const key of ["CRONK-2", "CRONK-3"]) {
+      expect((await admin.patch(`/api/tickets/${key}`, { delegateId: claude.agentId })).status).toBe(200);
+      const undelegated = await admin.patch(`/api/tickets/${key}`, { delegateId: null });
+      expect(undelegated.status).toBe(200);
+      expect(undelegated.body.ticket).toMatchObject({ status: { category: "backlog" }, delegate: null });
+    }
+
+    // The one never delegated still waits, in its Assignee's Inbox.
+    expect(await waiting(admin)).toEqual(["discovered CRONK-4"]);
+    expect(await waiting(admin, "/api/triage")).toEqual([]);
+    const refused = await admin.post("/api/tickets/CRONK-2/keep");
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toContain("isn't a Discovered Ticket waiting");
+    expect((await admin.post("/api/tickets/CRONK-3/keep")).status).toBe(409);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.discovered).toMatchObject({ kept: false, everDelegated: true, everFinished: false });
+    expect((await admin.get("/api/tickets/CRONK-4")).body.ticket.discovered).toMatchObject({ kept: false, everDelegated: false });
+    expect((await admin.post("/api/tickets/CRONK-4/keep")).status).toBe(200);
+  });
+
+  it("are told apart from delegated and finished ones in a fixed number of queries, their history looked up by index, however many there are", async () => {
     // The server's own looks for lapsed Claims read the history too, so they are left out.
-    const { cronk, admin, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000 });
+    const { cronk, admin, claude, session } = await delegatedSetup(1, { lapseCheckMs: 3_600_000 });
     const agent = await session();
     const backlog = await statusIn(admin, "backlog");
     const completed = await statusIn(admin, "completed");
-    /** Files a Discovered Ticket, finished and moved back to Backlog when `finished`, unassigned when `unassigned`. */
-    const discover = async ({ finished = false, unassigned = false } = {}) => {
+    /**
+     * Files a Discovered Ticket, delegated and undelegated when `delegated`, finished and moved back to Backlog when
+     * `finished`, unassigned when `unassigned`.
+     */
+    const discover = async ({ delegated = false, finished = false, unassigned = false } = {}) => {
       const { key } = (await agent.post("/api/projects/CRONK/tickets", { title: "Found" })).body.ticket;
+      if (delegated) for (const delegateId of [claude.agentId, null]) await admin.patch(`/api/tickets/${key}`, { delegateId });
       if (unassigned) await admin.patch(`/api/tickets/${key}`, { assigneeId: null });
       if (finished) for (const statusId of [completed, backlog]) await admin.patch(`/api/tickets/${key}`, { statusId });
     };
@@ -346,7 +379,8 @@ describe("Discovered Tickets in the Inbox", () => {
     for (const options of [{}, { unassigned: true }, { finished: true, unassigned: true }]) await discover(options);
     const withFew = await historyQueries();
 
-    for (const options of [{}, { unassigned: true }, { finished: true }, { finished: true, unassigned: true }]) await discover(options);
+    const more = [{}, { unassigned: true }, { finished: true }, { finished: true, unassigned: true }, { delegated: true }, { delegated: true, unassigned: true }];
+    for (const options of more) await discover(options);
 
     expect(await historyQueries()).toEqual(withFew);
     for (const path of listings) expect(await cronk.tablesReadWhole(() => admin.get(path))).not.toContain("ticket_changes");

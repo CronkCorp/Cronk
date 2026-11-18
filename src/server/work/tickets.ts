@@ -78,14 +78,16 @@ export interface Ticket {
 /**
  * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket, of
  * any Project, it was working on then, holding its Claim, if any; one of another Project is tagged `readableOnlyIn` it,
- * so only readers of that Project see it. `kept` records a User's Keep in Backlog; `everFinished` whether its history
- * records a User's move to a finished Status (see `everFinishedSql`).
+ * so only readers of that Project see it. `kept` records a User's Keep in Backlog; `everDelegated` whether its
+ * history records a User's delegating it (see `everDelegatedSql`); `everFinished` whether it records a User's move to a
+ * finished Status (see `everFinishedSql`).
  */
 export interface Discovery {
   agent: AgentRef;
   session: { id: string } | null;
   sourceTicket: TicketName | null;
   kept: boolean;
+  everDelegated: boolean;
   everFinished: boolean;
 }
 
@@ -117,6 +119,7 @@ interface TicketRow {
   source_number: number | null;
   source_title: string | null;
   discovery_kept: boolean;
+  discovery_ever_delegated: boolean;
   discovery_ever_finished: boolean;
   created_at: Date;
   updated_at: Date;
@@ -153,6 +156,7 @@ const toTicket = (row: TicketRow): Ticket => ({
           session: row.discovered_session_id === null ? null : { id: row.discovered_session_id },
           sourceTicket: sourceTicketOf(row),
           kept: row.discovery_kept,
+          everDelegated: row.discovery_ever_delegated,
           everFinished: row.discovery_ever_finished,
         },
   createdAt: row.created_at,
@@ -169,24 +173,35 @@ export const isUserFinishChangeSql = (c: string) =>
 /** SQL condition: the history of the Ticket `t` records a User's move to a finished Status, whatever Status it is in now. */
 const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isUserFinishChangeSql("c")})`;
 
+/**
+ * SQL condition: the history of the Ticket `t` records a `delegate` Change, whatever its Delegate is now. On a Discovered
+ * Ticket that is a User's delegating it: only a User delegates, and the other `delegate` Changes (an Agent's Sub-Ticket
+ * inheriting its parent's Delegate, a Delegate cleared on reassigning or removing its Agent) never begin a Delegation
+ * of a Discovered Ticket, so none is recorded on one never delegated.
+ */
+const everDelegatedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND c.change = 'delegate')`;
+
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
          s.id AS status_id, s.name AS status_name, s.category AS status_category,
          a.id AS assignee_id, a.name AS assignee_name, d.id AS delegate_id, d.name AS delegate_name, pt.number AS parent_number, pt.title AS parent_title,
          t.discovered_by_agent_id, da.name AS discovered_by_agent_name, t.discovered_session_id, st.project_id AS source_project_id, sp.key AS source_project_key, st.number AS source_number, st.title AS source_title, t.discovery_kept,
+         t.discovered_by_agent_id IS NOT NULL AND ${everDelegatedSql("t")} AS discovery_ever_delegated,
          t.discovered_by_agent_id IS NOT NULL AND ${everFinishedSql("t")} AS discovery_ever_finished
   FROM tickets t JOIN projects p ON p.id = t.project_id JOIN statuses s ON s.id = t.status_id
   LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN agents d ON d.id = t.delegate_id LEFT JOIN tickets pt ON pt.id = t.parent_id
   LEFT JOIN agents da ON da.id = t.discovered_by_agent_id LEFT JOIN tickets st ON st.id = t.discovered_source_ticket_id LEFT JOIN projects sp ON sp.id = st.project_id`;
 
 /**
- * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated, not kept there and never
- * finished by a User. Delegating, keeping or moving it out of Backlog settles it; a User's finish (completing or cancelling)
- * settles it for good, so moved back to Backlog it doesn't wait again, as its history records. `isWaitingDiscoverySql` says the same in SQL.
+ * Whether a Discovered Ticket still waits for a User to decide on it: in Backlog, undelegated, not kept there, and never
+ * delegated or finished by a User. Delegating, keeping or moving it out of Backlog settles it; delegating it or a User's
+ * finish (completing or cancelling) settles it for good, so undelegated or moved back to Backlog it doesn't wait again,
+ * as its history records. `isWaitingDiscoverySql` says the same in SQL.
  */
 export const isWaitingDiscovery = (ticket: Ticket): boolean =>
   ticket.discovered !== null &&
   !ticket.discovered.kept &&
+  !ticket.discovered.everDelegated &&
   !ticket.discovered.everFinished &&
   ticket.delegate === null &&
   ticket.status.category === "backlog";
@@ -194,13 +209,13 @@ export const isWaitingDiscovery = (ticket: Ticket): boolean =>
 /** SQL condition: the Ticket `t`, in the Status `s`, is a Discovered Ticket waiting for a User (see `isWaitingDiscovery`). */
 export const isWaitingDiscoverySql = (t: string, s: string) =>
   `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog'
-    AND NOT ${everFinishedSql(t)})`;
+    AND NOT ${everDelegatedSql(t)} AND NOT ${everFinishedSql(t)})`;
 
 /** Whether a User ever delegated the Ticket, or moved it to a finished Status, as its history records. */
 export async function wasEverDelegatedOrFinished(db: Queryable, ticketId: string): Promise<boolean> {
   const { rowCount } = await db.query(
     `SELECT 1 FROM tickets t WHERE t.id = $1
-       AND (EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = t.id AND c.change = 'delegate') OR ${everFinishedSql("t")})`,
+       AND (${everDelegatedSql("t")} OR ${everFinishedSql("t")})`,
     [ticketId],
   );
   return rowCount !== 0;

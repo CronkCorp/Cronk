@@ -473,6 +473,10 @@ const sharedSchemas: Record<SharedSchemaName, object> = {
             description: "The Ticket, of any Project, the Agent was working on, holding its Claim; null for none, or when the caller can't read that Ticket's Project.",
           },
           kept: { type: "boolean", description: "Whether a User chose Keep in Backlog for it, which takes it out of the Inbox." },
+          everDelegated: {
+            type: "boolean",
+            description: "Whether its history records a User's delegating it. That settles it for good: undelegated in Backlog, it doesn't wait in the Inbox again.",
+          },
           everFinished: {
             type: "boolean",
             description: "Whether its history records a User's move to a finished Status. That settles it for good: moved back to Backlog, it doesn't wait in the Inbox again.",

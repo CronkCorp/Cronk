@@ -61,7 +61,7 @@ A User's return of a Ticket In Review to its Delegate and a Started Status, with
 _Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
-A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. It waits in Backlog for a User to settle it, and may block other Tickets meanwhile. Delegating it, keeping it in Backlog (Keep in Backlog), cancelling it or moving it out of Backlog settles it. Finishing it, by completing or cancelling it, settles it for good: even if moved back to Backlog, it doesn't wait again.
+A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. It waits in Backlog for a User to settle it, and may block other Tickets meanwhile. Keeping it in Backlog (Keep in Backlog) or moving it out of Backlog settles it. Delegating it, or finishing it by completing or cancelling it, settles it for good: even if undelegated or moved back to Backlog, it doesn't wait again.
 _Avoid_: Follow-up, spin-off, finding
 
 **Keep in Backlog**:
