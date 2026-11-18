@@ -161,7 +161,7 @@ export async function updateWorkspace(
   const columns: [column: string, value: unknown, type: string][] = [
     ["name", changes.name, "text"],
     ["agent_access", changes.agentAccess, "text"],
-    ...WORKSPACE_SETTINGS.map((s): [string, unknown, string] => [s.column, changes[s.name], s.bigint ? "bigint" : "integer"]),
+    ...WORKSPACE_SETTINGS.map((s): [column: string, value: unknown, type: string] => [s.column, changes[s.name], s.bigint ? "bigint" : "integer"]),
     ["artifact_allowed_origins", changes.artifactAllowedOrigins, "text[]"],
     ["artifact_extra_origins_allowed", changes.artifactExtraOriginsAllowed, "boolean"],
   ];
