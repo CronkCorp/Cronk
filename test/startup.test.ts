@@ -197,6 +197,16 @@ describe("stopping the application", () => {
     // The client reading on finds the connection ended before the whole file arrived.
     await expect(download.toArray()).rejects.toThrow();
   });
+
+  it("finishes within its bound while an export's client stops reading, and answers after it starts again", async () => {
+    const { cronk, admin } = await delegatedSetup(1, { closeWithinMs: CLOSE_WITHIN_MS });
+    // The export carries the Attachment's file, so it is too large for the connection's buffers to take whole.
+    await attachLargeFile(admin);
+
+    const download = await restartWhileDownloadStalls(cronk, admin, "/api/export");
+
+    await expect(download.toArray()).rejects.toThrow();
+  });
 });
 
 describe("losing database connections", () => {
