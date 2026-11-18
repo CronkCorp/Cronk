@@ -198,10 +198,10 @@ const RECORDS = RECORDS_BRANCHES.map(
 ).join("\n  UNION ALL ");
 
 /**
- * Where an item of a LinkedKind lies, for transcriptPlacesSql: the `table` its items are in, joined aliased `alias` on the record's
- * `{kind}_id` column, any further `joins` that need, and SQL for the item's `projectId`, NULL for the Workspace outside any Project.
- * Every alias, those in `joins` too, is named once in transcriptPlacesSql's query, so each must differ from every other kind's and
- * from `ts`, `r`, `rt` and `place`.
+ * Where an item of a LinkedKind lies, for transcriptPlacesSql and the CHANGED queries: the `table` its items are in, aliased `alias`
+ * (joined on the record's `{kind}_id` column in transcriptPlacesSql), any further `joins` that need, and SQL for the item's
+ * `projectId`, NULL for the Workspace outside any Project. Every alias, those in `joins` too, is named once in transcriptPlacesSql's
+ * query, so each must differ from every other kind's and from `ts`, `r`, `place`, and from `c`, `g` and `p` of the CHANGED queries.
  */
 interface ItemPlace {
   table: string;
@@ -211,8 +211,9 @@ interface ItemPlace {
 }
 
 /**
- * Where an item of each LinkedKind lies, the SQL twin of the `project_id` CHANGED gives each item. Typed over the LinkedKinds, so a
- * kind added to LINKED_KINDS without its place here is a type error. A Report lies in its Ticket's Project.
+ * Where an item of each LinkedKind lies, for both the many-at-once check (transcriptPlacesSql) and the `project_id` CHANGED gives
+ * each item, so the two can't drift apart. Typed over the LinkedKinds, so a kind added to LINKED_KINDS without its place here is a
+ * type error. A Report lies in its Ticket's Project.
  */
 const ITEM_PLACES: Record<LinkedKind, ItemPlace> = {
   ticket: { table: "tickets", alias: "t", projectId: "t.project_id" },
@@ -460,35 +461,58 @@ const TRANSCRIPT_GROUPS: Grouping = `
   SELECT ts.transcript_id AS grp, r.* FROM transcript_sessions ts JOIN (${RECORDS}) r ON r.actor_session_id = ts.session_id
   WHERE ts.transcript_id = ANY($1::uuid[])`;
 
-/** Each group's changed items of `kind`: one row per group and item, joined to the item aliased `alias`. */
-const changedIn = (grouping: Grouping, kind: LinkedKind, alias: string) => {
+/**
+ * Each group's changed items of `kind`, placed as ITEM_PLACES says: `from`, SQL to put after SELECT's columns, reads the item's table
+ * under its alias in ITEM_PLACES with that place's joins, then `joins`, then one row per group and item; `projectId` is SQL for the
+ * Project the item lies in, as transcriptPlacesSql finds it. The queries name each item by its alias in ITEM_PLACES.
+ */
+const changedIn = (grouping: Grouping, kind: LinkedKind, joins?: string) => {
+  const { table, alias, joins: placeJoins, projectId } = ITEM_PLACES[kind];
   const column = recordColumn(kind);
-  return `JOIN (SELECT DISTINCT grp, ${column} FROM (${grouping}) g WHERE ${column} IS NOT NULL) c ON c.${column} = ${alias}.id`;
+  const from = [`FROM ${table} ${alias}`, placeJoins, joins].filter(Boolean).join(" ");
+  return {
+    projectId,
+    from: `${from}
+  JOIN (SELECT DISTINCT grp, ${column} FROM (${grouping}) g WHERE ${column} IS NOT NULL) c ON c.${column} = ${alias}.id`,
+  };
 };
 
 /** The Tickets each group changed, with the Project each lies in, by Project key and number. */
-const changedTickets = (g: Grouping) => `
-  SELECT c.grp, t.id, ${ticketKeySql("p", "t")} AS key, t.title, t.project_id FROM tickets t JOIN projects p ON p.id = t.project_id
-  ${changedIn(g, "ticket", "t")} ORDER BY p.key, t.number`;
+const changedTickets = (g: Grouping) => {
+  const { projectId, from } = changedIn(g, "ticket", "JOIN projects p ON p.id = t.project_id");
+  return `
+  SELECT c.grp, t.id, ${ticketKeySql("p", "t")} AS key, t.title, ${projectId} AS project_id ${from} ORDER BY p.key, t.number`;
+};
 
 /** The Documents and Reports each group changed, with the Project each lies in: a Report's Ticket's; null for the Workspace. */
-const changedDocuments = (g: Grouping) => `
-  SELECT c.grp, d.id, d.title, coalesce(rt.project_id, d.project_id) AS project_id FROM documents d LEFT JOIN tickets rt ON rt.id = d.ticket_id
-  ${changedIn(g, "document", "d")} ORDER BY d.created_at, d.id`;
+const changedDocuments = (g: Grouping) => {
+  const { projectId, from } = changedIn(g, "document");
+  return `
+  SELECT c.grp, d.id, d.title, ${projectId} AS project_id ${from} ORDER BY d.created_at, d.id`;
+};
 
 /** The Terms each group changed, with the Project each lies in; null for the Workspace. The Workspace's first. */
-const changedTerms = (g: Grouping) => `
-  SELECT c.grp, tm.id, tm.name, tm.project_id, p.key AS project_key FROM terms tm LEFT JOIN projects p ON p.id = tm.project_id
-  ${changedIn(g, "term", "tm")} ORDER BY p.key NULLS FIRST, lower(tm.name), tm.id`;
+const changedTerms = (g: Grouping) => {
+  const { projectId, from } = changedIn(g, "term", "LEFT JOIN projects p ON p.id = tm.project_id");
+  return `
+  SELECT c.grp, tm.id, tm.name, ${projectId} AS project_id, p.key AS project_key ${from}
+  ORDER BY p.key NULLS FIRST, lower(tm.name), tm.id`;
+};
 
 /** The Decisions each group changed, with the Project each lies in; null for the Workspace. The Workspace's first. */
-const changedDecisions = (g: Grouping) => `
-  SELECT c.grp, dc.id, ${decisionKeySql("p", "dc")} AS key, dc.title, dc.project_id FROM decisions dc LEFT JOIN projects p ON p.id = dc.project_id
-  ${changedIn(g, "decision", "dc")} ORDER BY p.key NULLS FIRST, dc.number`;
+const changedDecisions = (g: Grouping) => {
+  const { projectId, from } = changedIn(g, "decision", "LEFT JOIN projects p ON p.id = dc.project_id");
+  return `
+  SELECT c.grp, dc.id, ${decisionKeySql("p", "dc")} AS key, dc.title, ${projectId} AS project_id ${from}
+  ORDER BY p.key NULLS FIRST, dc.number`;
+};
 
 /** The Artifacts each group changed, with the Project each lies in; null for the Workspace. */
-const changedArtifacts = (g: Grouping) => `
-  SELECT c.grp, a.id, a.title, a.project_id FROM artifacts a ${changedIn(g, "artifact", "a")} ORDER BY a.created_at, a.id`;
+const changedArtifacts = (g: Grouping) => {
+  const { projectId, from } = changedIn(g, "artifact");
+  return `
+  SELECT c.grp, a.id, a.title, ${projectId} AS project_id ${from} ORDER BY a.created_at, a.id`;
+};
 
 /** What some Sessions changed, each with the Project it lies in (see changedItems). */
 export interface ChangedItems {
