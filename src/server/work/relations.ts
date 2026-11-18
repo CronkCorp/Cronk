@@ -1,7 +1,7 @@
 import type { Actor, SystemActor } from "../actor.js";
 import { holdsLockUntilCommit, lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "../../shared/values.js";
-import { findTicketById, findTicketsByIds, isFinishChangeSql, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
+import { findTicketById, findTicketsByIds, isUserFinishChangeSql, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
 
 /** Whether `lockBlocking` checks the lock order (see `AppConfig`); `AppContext` has it. */
 export interface LockOrderCheck {
@@ -208,7 +208,7 @@ export async function endVettedDiscoveredBlocks(db: Queryable, ticketIds: string
        AND ($1::uuid[] IS NULL OR d.id = ANY($1::uuid[]))
        AND EXISTS (
          SELECT 1 FROM ticket_changes f
-         WHERE f.ticket_id = d.id AND ${isFinishChangeSql("f")}
+         WHERE f.ticket_id = d.id AND ${isUserFinishChangeSql("f")}
            -- A change delegating it records after the finish it came with, at the same time.
            AND NOT EXISTS (SELECT 1 FROM ticket_changes g WHERE g.ticket_id = d.id AND g.change = 'delegate' AND (g.id < f.id OR g.at = f.at)))
      RETURNING r.from_ticket_id AS from_id, r.to_ticket_id AS to_id`,
