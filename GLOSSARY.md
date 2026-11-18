@@ -127,7 +127,7 @@ A proposed edit to code on a Git host, linked to one or more Tickets. Covers Git
 _Avoid_: Merge request, MR, PR (in the product), change (reserved for a Ticket's Changes)
 
 **Git host account**:
-A User's or Agent's account on a Git host, which they link in Cronk so it can tell who acted on a Pull Request. A merge by an account no User has linked counts as automated.
+A User's or Agent's account on a Git host, which they link in Cronk so it can tell who acted on a Pull Request. A merge by an account no User has linked counts as automated. Linking one is trusted, not checked with the host, and recorded in history.
 _Avoid_: Git identity, GitHub user, handle
 
 ### Knowledge

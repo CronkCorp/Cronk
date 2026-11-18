@@ -2,7 +2,7 @@
 
 How Cronk's web UI looks and behaves. Read this before changing anything under `src/web/`. Vocabulary follows `GLOSSARY.md`; the UI holds no rules (ADR 0010, `docs/testing.md`), so everything here is about presentation.
 
-The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 brought the tokens, fonts and components, and #105 to #110 rework the screens. Until those land, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main. Phase 2's screens were chosen the same way; their prototype is on `prototype/phase-2-ui`, and their screenshots are `docs/ui/phase-2-*.png`.
+The direction was chosen in #98, from prototypes of each screen. This file describes the target: the screenshots in `docs/ui/` are those prototypes, not the shipped app. The follow-up issues filed from #98 bring the code in line: #104 brought the tokens, fonts and components, and #105 to #110 rework the screens. Until those land, follow this file for new UI work and leave the old screens to their own tickets. The prototypes themselves are on the `prototype/gh-98-ui-directions` branch, outside main. Phase 2's screens were chosen the same way; their prototype is on `prototype/phase-2-ui`, and their screenshots are `docs/ui/phase-2-*.png`. Phase 3's are on `prototype/phase-3-ui`, with screenshots `docs/ui/phase-3-*.png`.
 
 ## Principles
 
@@ -24,7 +24,7 @@ The direction was chosen in #98, from prototypes of each screen. This file descr
   - Inbox, Triage, Documents, Terms, Decisions and Agents. Triage shows the number of items the User could act on, in `--muted`. Inbox shows the number of waiting items as a red count. Agents shows the number of live Agent Sessions with a green dot.
   - **Projects**, each listed by key and name. Archived Projects are left out.
   - **Workspace**: Guidance and Artifacts, plus Users and Settings for Admins.
-  - The signed-in User and their role, which opens a menu: Change password (the `/password` page) and Sign out.
+  - The signed-in User and their role, which opens a menu: Your account (the `/account` page: Password, Git host accounts and Notifications; the old `/password` opens its Password section) and Sign out.
 - **Active item:** `--accent-soft` background with `--accent` text. There is exactly one active item, and a Ticket or Document marks its Project or Documents.
 - **Below 760px** the sidebar becomes a wrapping strip with the main links. Projects, Workspace and the User move into a menu. Two-pane screens stack.
 - **Page head:** breadcrumbs (13px, muted), then a row holding the `h1`, the view switcher and the actions. The primary action comes last. Destructive actions such as Archive and Delete go in a "…" menu, never next to the primary action.
@@ -266,6 +266,70 @@ The Project page is shown in `docs/ui/frame.png`.
 - **Turns** follow in order, each under a kind label (`USER` or `ASSISTANT`) and its number, which links to `#turn-n`. Chips for the items that first appear in a turn sit next to its label. A coloured 3px left border marks the turn the address points at. Texts of earlier uploads that a later one didn't continue fold away under "Earlier texts" at the end.
 - **From Transcript** is a side group on a Ticket's and a Decision's page, and sits under a Term's definition, a Document's head and an Artifact's serving note: each Transcript the item came from, opening at the turn where the item first appears (or the top), with its Agent.
 - **Search** lists Transcripts after every other kind, with a `Transcript` chip and the turn that matched, opening at that turn.
+
+### Repositories (Phase 3)
+
+| Repositories | Listing one |
+|---|---|
+| ![Repositories](ui/phase-3-repositories.png) | ![List a Repository](ui/phase-3-list-repository.png) |
+
+- **Project settings** gain a **Repositories** section, between Autonomous Delegation and Statuses, read-only without Write.
+- **A card per Repository**, in a grid: the host mark (`GH`, `GL`) and owner/name in mono, its health (a dot and a line: "Last event 4 min ago" in `--ok`, "No events yet" in `--warn`, "Token refused 2 h ago" in `--danger`), then the token's kind and expiry, who listed it and the other Projects listing it, its open Pull Requests linked to this Project's Tickets, and a strip of the last 14 days of webhook deliveries (one bar a day, `--danger` for a day with failures). The footer holds the **Move Tickets** switch, Replace token… and Remove.
+- **What Pull Request events do** sits under the cards as a table: each event, the Status Categories it applies in, and what happens, so the automation is never a surprise.
+- **List a Repository** (primary, in the section head) opens a page of three steps, shown as a stepper: **Repository and token** (the address, then the token, checked as typed, naming the permissions it lacks; a Repository another Project lists already says so and shares its token and webhook), **Webhook** (the payload address and secret to copy, the events to tick on the host, and a live wait for the host's ping, with the note that Cronk must be reachable and doesn't poll), and **What events do** (the table, and the Move Tickets switch, on). Finish lists it.
+
+### Pull Requests on a Ticket (Phase 3)
+
+| Side panel (default) | Main column |
+|---|---|
+| ![Pull Requests in the side panel](ui/phase-3-ticket-pull-requests-side.png) | ![Pull Requests in the main column](ui/phase-3-ticket-pull-requests-main.png) |
+
+- **Two layouts, the User's choice**, kept on the User (`pullRequestView`) like the diff view, and switched from the group's head. Below 900px both stack like the side panel.
+  - **Side panel** (default): a **Pull Requests** group after the Claim card, one row per Pull Request: host mark, number, title, then its state pill, check counts and review state ("Review requested", "Changes requested", "Merged by Ada"). **Refresh** in the group head re-reads them from the host; **Link a Pull Request…** at the end, for those with Write.
+  - **Main column**: a **Pull Requests** heading under the description with Refresh and Link…, then a card per Pull Request: host mark, number, title, state pill, the branch (`cronk-12-sign-in-limit → main`), its author and review state, and every check with ✓, ✗ or ● and passed, failed or running.
+- **State pill** (`<PullRequestState>`): 11px uppercase. Draft dashed `--muted`, Open outlined `--ok`, Merged filled `--agent-soft` with `--agent` text, Closed outlined `--danger`. **Checks** show as counts: ✓ in `--ok`, ✗ in `--danger`, ● running in `--warn`.
+- **In the timeline**, Cronk's moves are Change lines naming the Pull Request: "Cronk moved it from In Progress to In Review: #212 is ready for review", "Ada merged #212 on GitHub · Cronk moved it to Done, Verified by that merge". Linking one is a Change line too.
+- **A Send back by Cronk** is a Comment from Cronk labelled `SENT BACK`, naming the failing checks (each linking to the host) or the review, followed by its Change line.
+- **No Report yet**: when a Pull Request is ready for review but the Agent holding the Claim hasn't written a Report, a Comment from Cronk says so and that the Ticket stayed where it was. A Ticket that went In Review without a Claim and has no Report shows a `--warn` **No Report** chip by its Status.
+- **Cronk as an Actor** is plain muted text with a neutral round "C" avatar for its Comments, as for its Changes.
+
+### Your account and notifications (Phase 3)
+
+![Notifications](ui/phase-3-notifications.png)
+
+- **Your account** (`/account`) uses the settings layout: a section list on the left (Password, Git host accounts, Notifications) and the section on the right.
+- **Git host accounts**: one row per linked account (host mark, `@login`, host) with Unlink, and **Link an account…**, which asks for the host and login. A line says Cronk counts merges by these accounts as the User's.
+- **Notifications**: the User's webhooks first, one row each with name, address in mono, health ("Delivered 3 min ago", or "Failing since 08:14 · retrying" in `--danger`), **Deliveries** and a "…" menu (Rename, Show secret, Send a test, Remove); **Add a User Webhook…** in the head. Below, a **matrix**: one row per event kind, with a one-line explanation, and a checkbox column per place, Email first (only once SMTP is set) and then each webhook. New Users start with Blocking Question and Unverified completion ticked for email.
+- **Deliveries** opens a dialog of the last 7 days: when, event and result (status or error, and the next retry), with a `--warn` banner while the webhook is failing, and Send a test.
+- **Workspace settings** gain **Workspace Webhooks** (Admins): rows like a User's webhooks, each with pills for its Triage events (New in Triage, Left Triage). They also say whether SMTP is set, and where, since it lives in the server environment.
+
+### Agent connections (Phase 3)
+
+![Connect an Agent](ui/phase-3-agent-connect.png)
+
+- **Connect…** replaces "Manage tokens" on an Agent's card. It opens one dialog with tabs:
+  - **Tokens**: as the token dialog before.
+  - **Agent Webhook**: what Cronk calls and when (only while the Agent has no live Agent Session, at most once a minute, naming kinds of Waiting Work and Ticket keys, never text), the address, the secret with Copy, an example body in mono, the last call's health, **Send a test** and Save.
+  - **Git host accounts**: the Agent's own, with Unlink and Link an account…, and a line saying its merges stay Unverified.
+- The card's footer summarises them in one line ("2 tokens · webhook · @ada-claude-bot").
+
+### Sign-in (Phase 3)
+
+![Sign-in](ui/phase-3-sign-in.png)
+
+- **With OIDC set**, the sign-in card shows **Sign in with <provider>** as its primary button, then "or with a password" and the email and password form, its Sign in button secondary. **Forgot password?** sits beside the password label once SMTP is set.
+- **Password sign-in off**: the form is gone, with a muted line saying the Admin turned it off.
+- **Workspace settings** gain a **Sign-in** section: the provider and its address (set in the server environment), the email domains that may join on their own, one per line, and the **Allow password sign-in** switch, with a note on the server command as the way back in.
+
+### Importing GitHub Issues (Phase 3)
+
+![Import GitHub Issues](ui/phase-3-importer.png)
+
+- **Admins** start it from a Project's "…" menu, picking one of the Repositories the Project lists. It opens a page (`/projects/:key/import`) previewing the import before anything happens.
+- **The head** names the Repository, how many issues it has and how many were imported before and will be skipped, with **Import n issues** as the primary action.
+- **Filter chips**: All, Needs a look (issues with people who don't match), Skipped.
+- **The table**: issue number, title, its state on GitHub, the Status it becomes (with its dot), and its people, matched (`@grace → Grace Hopper`) or not, in `--warn` with what happens ("kept as text", "dropped").
+- **People not matched** is a panel under the table listing their logins, saying they could link a Git host account first.
 
 ## Live updates
 
