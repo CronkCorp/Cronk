@@ -57,8 +57,12 @@ A User's return of a Ticket In Review to its Delegate and a Started Status, with
 _Avoid_: Reject, bounce, Reopen (reserved for Verification)
 
 **Discovered Ticket**:
-A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. It waits in Backlog until a User delegates it, and may block other Tickets meanwhile.
+A Ticket an Agent files for work it noticed outside the scope of the Ticket it was working on, or while working on none. Every Ticket an Agent creates, other than a Sub-Ticket of its own Claimed Ticket, is one. It waits in Backlog for a User to decide on it, and may block other Tickets meanwhile. Delegating it, Keep in Backlog or moving it out of Backlog settles it. Finishing it, by moving it to a Completed or Canceled Status, settles it for good: moved back to Backlog, it doesn't wait again.
 _Avoid_: Follow-up, spin-off, finding
+
+**Keep in Backlog**:
+A User's decision to leave a waiting Discovered Ticket in Backlog without a Delegation, which settles it and takes it out of the Inbox and Triage. Only a User with Write may make it, and only while the Ticket waits.
+_Avoid_: Defer, snooze, park, dismiss
 
 **Sub-Ticket**:
 A Ticket that splits up part of a parent Ticket's work and stays within the parent's Delegation. Its parent is in the same Project.
