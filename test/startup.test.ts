@@ -37,7 +37,8 @@ const DATABASE_CUT_OFF = expect.toSatisfy(
 
 /**
  * What a client over HTTP sees once closing ends its connection before the request or answer is complete: the connection
- * reset under it, whether it was still sending (`socket hang up`) or reading (`aborted`).
+ * reset under it. Node words it `socket hang up` to a client still sending and `aborted` to one reading, so only the code
+ * is matched.
  */
 const CONNECTION_CUT_OFF = expect.objectContaining({ code: "ECONNRESET" });
 
