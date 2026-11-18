@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startSession, type Client } from "./harness.js";
-
-/** The id of the first Status of `category` in Project `key`. */
-const statusIn = async (client: Client, category: string, key = "CRONK") =>
-  ((await client.get(`/api/projects/${key}`)).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
+import { delegatedSetup, joinAs, registerAgent, startSession, statusIn, type Client } from "./harness.js";
 
 /** The Inbox of `client`, as `kind key` lines, in order. */
 const inboxLines = async (client: Client, query = "") =>

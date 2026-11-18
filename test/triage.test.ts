@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, statusIn, type Client } from "./harness.js";
 
 /** What `client`'s Triage holds, one line per item: its kind and what it is on. */
 async function triageLines(client: Client, query = ""): Promise<string[]> {
@@ -92,10 +92,6 @@ describe("Triage on Project items", () => {
 });
 
 /** The id of the CRONK Status in `category`. */
-async function statusIn(admin: Client, category: string): Promise<string> {
-  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
-}
-
 describe("Triage's Unverified completions", () => {
   it("lists an Unverified completion whose Ticket has no Assignee to the Users with Write in its Project, until one Accepts it", async () => {
     const { cronk, admin, session } = await delegatedSetup();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, tarGz } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, statusIn, tarGz } from "./harness.js";
 
 describe("Discovered Tickets", () => {
   it("files a Ticket an Agent creates while working on another as a Discovered Ticket: in Backlog, undelegated, with its source", async () => {
@@ -240,11 +240,6 @@ async function waiting(client: { get: (path: string) => Promise<{ status: number
   const res = await client.get(path);
   if (res.status !== 200) throw new Error(`Listing ${path} failed: ${JSON.stringify(res.body)}`);
   return res.body.items.map((item: any) => `${item.kind} ${item.ticket?.key ?? ""}`.trim());
-}
-
-/** The id of the CRONK Status in `category`. */
-async function statusIn(admin: { get: (path: string) => Promise<{ body: any }> }, category: string): Promise<string> {
-  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
 }
 
 describe("Discovered Tickets in the Inbox", () => {

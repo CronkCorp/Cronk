@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startSession, statusIn } from "./harness.js";
 
 const reason = "It builds on the migration that leaves orphans.";
 
@@ -167,11 +167,6 @@ async function readOnlyBlockSetup() {
     return { block: await block, waiting: await waiting };
   };
   return { ...setup, blockWhileWaiting };
-}
-
-/** The id of the CRONK Status in `category`. */
-async function statusIn(admin: { get: (path: string) => Promise<{ body: any }> }, category: string): Promise<string> {
-  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
 }
 
 describe("Blocks added at once by holders of the Tickets' Claims", () => {
