@@ -218,6 +218,23 @@ describe("An Agent's own Discovered Ticket", () => {
     expect((await agent.patch("/api/tickets/CRONK-2", { title: "Still found" })).status).toBe(409);
   });
 
+  it("stays out of the Agent's hands once a User finishes it, even if a User moves it back to Backlog undelegated", async () => {
+    const { admin, session } = await delegatedSetup();
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+    const plan = (await admin.post("/api/projects/CRONK/documents", { title: "Plan" })).body.document.id;
+
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "completed") });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "backlog") });
+
+    const refused = await agent.patch("/api/tickets/CRONK-2", { title: "Still found" });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe("Claim CRONK-2 in your Agent Session before editing it: it isn't Claimed");
+    expect((await agent.upload("/api/tickets/CRONK-2/attachments?name=log.txt", Buffer.from("trace"), "text/plain")).status).toBe(409);
+    expect((await agent.post(`/api/tickets/CRONK-2/documents/${plan}`)).status).toBe(409);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.ticket.title).toBe("Found");
+  });
+
   it("can't be worked on until a User delegates it: Claiming and moving it are refused, saying why", async () => {
     const { admin, claude, session } = await delegatedSetup();
     const agent = await session();

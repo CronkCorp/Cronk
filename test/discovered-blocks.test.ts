@@ -129,17 +129,37 @@ describe("Blocks from a Discovered Ticket", () => {
     expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toEqual([]);
   });
 
-  it("are added if a User moves the finished Discovered Ticket back to Backlog while the block waits for another block being added", async () => {
+  it("are refused if a User finishes the Discovered Ticket while the block waits, even moving it back to Backlog before it goes through", async () => {
     const { admin, blockWhileWaiting } = await readOnlyBlockSetup();
-    await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "canceled") });
 
     const { block, waiting } = await blockWhileWaiting(async () => {
+      expect((await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "canceled") })).status).toBe(200);
       expect((await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "backlog") })).status).toBe(200);
     });
 
-    expect(block.status).toBe(201);
+    expect(block.status).toBe(409);
+    expect(block.body.error).toBe("Claim CRONK-4 in your Agent Session before changing its Relations: it isn't Claimed");
     expect(waiting.status).toBe(201);
-    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toEqual([]);
+  });
+
+  it("are refused once a User has finished the Discovered Ticket, even after moving it back to Backlog undelegated", async () => {
+    const { admin, session } = await delegatedSetup();
+    await admin.post("/api/projects", { name: "Ops", key: "OPS" });
+    await admin.post("/api/projects/OPS/tickets", { title: "Deploy" });
+    await admin.patch("/api/projects/OPS", { agentAccess: "read" });
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Found" });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "completed") });
+    await admin.patch("/api/tickets/CRONK-2", { statusId: await statusIn(admin, "backlog") });
+
+    const refused = await agent.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "CRONK-1", reason });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe("Claim CRONK-2 in your Agent Session before changing its Relations: it isn't Claimed");
+    // Blocking a Ticket of a Project the Agent can only read is refused for lack of Write, as from any other Ticket.
+    expect((await agent.post("/api/tickets/CRONK-2/relations", { kind: "blocks", ticketKey: "OPS-1", reason })).status).toBe(403);
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toEqual([]);
+    expect((await admin.get("/api/tickets/OPS-1")).body.relations.blockedBy).toEqual([]);
   });
 });
 
