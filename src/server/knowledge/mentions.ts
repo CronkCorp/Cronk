@@ -1,5 +1,5 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
-import type { Queryable } from "../db/database.js";
+import { queryParams, type QueryParams, type Queryable } from "../db/database.js";
 import { readableClause, type Readable } from "../identity/access.js";
 import { replaceReferenceText, TICKET_REFERENCE } from "../../shared/ticket-references.js";
 import { DECISION_REFERENCE, normalName, termPattern } from "../../shared/knowledge-references.js";
@@ -211,20 +211,18 @@ const MENTIONS_LIMIT = 50;
 export type MentionTarget = { decisionKey: string } | { termId: string } | { ticketKey: string; ticketId: string };
 
 /**
- * The condition picking `target`'s rows of `mentions m`, with the query parameters it numbers from $1. A Ticket's
+ * The condition picking `target`'s rows of `mentions m`, its values bound to `params`. A Ticket's
  * own Comments, Activities and Reports and the Documents linked to it are left out, as the Ticket shows them already.
  */
-function mentionsOf(target: MentionTarget): { condition: string; params: string[] } {
-  if ("decisionKey" in target) return { condition: "m.decision_key = $1", params: [target.decisionKey] };
-  if ("termId" in target) return { condition: "m.mentioned_term_id = $1", params: [target.termId] };
-  return {
-    condition: `m.ticket_key = $1
-     AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id = m.comment_id AND c.ticket_id = $2)
-     AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = m.activity_id AND a.ticket_id = $2)
-     AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = m.document_id AND d.ticket_id = $2)
-     AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.document_id = m.document_id AND l.ticket_id = $2)`,
-    params: [target.ticketKey, target.ticketId],
-  };
+function mentionsOf(target: MentionTarget, params: QueryParams): string {
+  if ("decisionKey" in target) return `m.decision_key = ${params.bind(target.decisionKey, "text")}`;
+  if ("termId" in target) return `m.mentioned_term_id = ${params.bind(target.termId, "uuid")}`;
+  const ticketId = params.bind(target.ticketId, "uuid");
+  return `m.ticket_key = ${params.bind(target.ticketKey, "text")}
+     AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id = m.comment_id AND c.ticket_id = ${ticketId})
+     AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = m.activity_id AND a.ticket_id = ${ticketId})
+     AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = m.document_id AND d.ticket_id = ${ticketId})
+     AND NOT EXISTS (SELECT 1 FROM ticket_document_links l WHERE l.document_id = m.document_id AND l.ticket_id = ${ticketId})`;
 }
 
 /**
@@ -261,17 +259,16 @@ const FOUND_SQL = `
  * lies where `readable` doesn't let its reader read.
  */
 export async function listMentions(db: Queryable, target: MentionTarget, readable: Readable): Promise<Mention[]> {
-  const { condition, params } = mentionsOf(target);
-  const readableWhere = readableClause("f", readable, params.length + 1);
+  const params = queryParams();
   const { rows } = await db.query<Mention>(
-    `WITH m AS (SELECT * FROM mentions m WHERE ${condition}),
+    `WITH m AS (SELECT * FROM mentions m WHERE ${mentionsOf(target, params)}),
      found AS (
 ${FOUND_SQL}
      )
      SELECT kind, id, key, title, project_key AS "projectKey", ticket_key AS "ticketKey", document_id AS "documentId", artifact_id AS "artifactId", at, protected
-     FROM found f WHERE ${readableWhere.sql}
+     FROM found f WHERE ${readableClause("f", readable, params)}
      ORDER BY at DESC, id LIMIT ${MENTIONS_LIMIT}`,
-    [...params, ...readableWhere.params],
+    params.values,
   );
   return rows;
 }
@@ -281,14 +278,14 @@ ${FOUND_SQL}
  * unlike `listMentions`, every one is counted. Terms nothing readable mentions are left out.
  */
 export async function countTermMentions(db: Queryable, termIds: string[], readable: Readable): Promise<Map<string, number>> {
-  const readableWhere = readableClause("f", readable, 2);
+  const params = queryParams();
   const { rows } = await db.query<{ term_id: string; n: number }>(
-    `WITH m AS (SELECT * FROM mentions m WHERE m.mentioned_term_id = ANY($1::uuid[])),
+    `WITH m AS (SELECT * FROM mentions m WHERE m.mentioned_term_id = ANY(${params.bind(termIds, "uuid[]")})),
      found AS (${FOUND_SQL})
      SELECT mentioned_term_id AS term_id, count(*)::int AS n
-     FROM found f WHERE ${readableWhere.sql}
+     FROM found f WHERE ${readableClause("f", readable, params)}
      GROUP BY mentioned_term_id`,
-    [termIds, ...readableWhere.params],
+    params.values,
   );
   return new Map(rows.map((r) => [r.term_id, r.n]));
 }

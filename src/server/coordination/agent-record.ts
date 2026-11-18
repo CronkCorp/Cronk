@@ -1,5 +1,5 @@
 import type { Actor, RecordedActor } from "../actor.js";
-import type { Queryable } from "../db/database.js";
+import { queryParams, type Queryable } from "../db/database.js";
 import { placeReadableSql, readablePlaces } from "../identity/access.js";
 import { statusFlags, ticketKeySql, type RecordedChange } from "../work/tickets.js";
 import type { ActivityKind } from "../../shared/values.js";
@@ -118,21 +118,19 @@ export async function listAgentRecord(
   input: { since?: Date | undefined; limit: number },
 ): Promise<AgentRecordEntry[]> {
   const readable = await readablePlaces(db, actor);
-  const params: unknown[] = [];
-  /** Binds `value` as the next parameter, returning SQL that reads it. */
-  const param = (value: unknown, type: string) => `$${params.push(value)}::${type}`;
+  const { values, bind } = queryParams();
   const recordSelects = selects({
-    agent: param(agent.id, "uuid"),
-    projectIds: param(readable.projectIds, "uuid[]"),
-    workspaceId: param(readable.workspaceId, "uuid"),
+    agent: bind(agent.id, "uuid"),
+    projectIds: bind(readable.projectIds, "uuid[]"),
+    workspaceId: bind(readable.workspaceId, "uuid"),
   });
-  const since = param(input.since ?? null, "timestamptz");
+  const since = bind(input.since ?? null, "timestamptz");
   const { rows } = await db.query<RecordRow>(
     `SELECT * FROM (${recordSelects.join("\n UNION ALL ")}) entries
      WHERE ${since} IS NULL OR entries.at >= ${since}
      ORDER BY entries.at DESC, entries.kind, entries.seq DESC
-     LIMIT ${param(input.limit, "int")}`,
-    params,
+     LIMIT ${bind(input.limit, "int")}`,
+    values,
   );
   return rows.map((row) => {
     const session = row.session_id === null ? null : { id: row.session_id };

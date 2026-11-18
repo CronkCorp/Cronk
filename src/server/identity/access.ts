@@ -1,6 +1,6 @@
 import { actingUser, type Actor, type AgentActor } from "../actor.js";
 import { HttpError } from "../context.js";
-import type { Queryable } from "../db/database.js";
+import type { QueryParams, Queryable } from "../db/database.js";
 import { findProjectById, findProjectByKey, listProjects, type Project, type Visibility } from "../work/projects.js";
 import type { Agent } from "./agents.js";
 import { getWorkspace } from "../workspace/workspaces.js";
@@ -164,15 +164,9 @@ export interface Readable {
 export const placeReadableSql = (alias: string, projectIds: string, workspaceId: string) =>
   `(${alias}.project_id = ANY(${projectIds}) OR (${alias}.project_id IS NULL AND ${alias}.workspace_id = ${workspaceId}))`;
 
-/**
- * `placeReadableSql` for `readable` bound as query parameters: `sql` reads its Project ids as
- * `$firstParam` and its Workspace's id as the parameter after, and `params` holds those two values,
- * to bind at those positions. Keeps the positions and the values from falling out of step.
- */
-export const readableClause = (alias: string, readable: Readable, firstParam: number) => ({
-  sql: placeReadableSql(alias, `$${firstParam}::uuid[]`, `$${firstParam + 1}::uuid`),
-  params: [readable.projectIds, readable.workspaceId] as const,
-});
+/** `placeReadableSql` for `readable`, its Project ids and Workspace's id bound to `params`. */
+export const readableClause = (alias: string, readable: Readable, params: QueryParams) =>
+  placeReadableSql(alias, params.bind(readable.projectIds, "uuid[]"), params.bind(readable.workspaceId, "uuid"));
 
 /** Where `actor` may read, for finding things across the Workspace (see `Readable`). */
 export async function readablePlaces(db: Queryable, actor: Actor): Promise<Readable> {
