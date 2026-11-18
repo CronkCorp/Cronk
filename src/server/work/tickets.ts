@@ -3,6 +3,7 @@ import { lockUntilCommit, type Queryable } from "../db/database.js";
 import { FINISHED_CATEGORIES, type Priority, type RelationKind, type StatusCategory, type Verification } from "../../shared/values.js";
 import { PROJECT_KEY_PATTERN, type Project, type Status } from "./projects.js";
 import { recordMentions } from "../knowledge/mentions.js";
+import { endVettedDiscoveredBlocks } from "./relations.js";
 import { readableOnlyIn } from "../identity/readable-only-in.js";
 
 /** SQL for the key, such as CRONK-12, of the Ticket aliased `ticket` in the Project aliased `project`. */
@@ -174,44 +175,14 @@ export const isWaitingDiscovery = (ticket: Ticket): boolean =>
 export const isWaitingDiscoverySql = (t: string, s: string) =>
   `(${t}.discovered_by_agent_id IS NOT NULL AND NOT ${t}.discovery_kept AND ${t}.delegate_id IS NULL AND ${s}.category = 'backlog')`;
 
+/** SQL condition: the Ticket change `c` moved its Ticket to a finished Status. */
+export const isFinishChangeSql = (c: string) =>
+  `(${c}.change = 'status' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
+
 /** Whether a User ever delegated the Ticket, or moved it to a finished Status, as its history records. */
 export async function wasEverDelegatedOrFinished(db: Queryable, ticketId: string): Promise<boolean> {
-  const { rowCount } = await db.query(
-    `SELECT 1 FROM ticket_changes
-     WHERE ticket_id = $1 AND (change = 'delegate' OR (change = 'status' AND data->'to'->>'category' = ANY($2)))
-     LIMIT 1`,
-    [ticketId, FINISHED_CATEGORIES],
-  );
+  const { rowCount } = await db.query(`SELECT 1 FROM ticket_changes c WHERE c.ticket_id = $1 AND (c.change = 'delegate' OR ${isFinishChangeSql("c")}) LIMIT 1`, [ticketId]);
   return rowCount !== 0;
-}
-
-/**
- * Ends the blocks the filing Agent added from each of these Discovered Tickets (from every one, when `ticketIds` is null)
- * that a User finished before any User delegated it, as its history records: finishing vets it (ADR 0002), so they no
- * longer block, even once it is moved back out of its finished Status. Each is removed, and recorded in both Tickets'
- * history as `actor`'s. Blocks a User added stay, as do those from a Ticket delegated before it was finished, which is
- * work like any other. Call once a finish is recorded.
- */
-export async function endVettedDiscoveredBlocks(db: Queryable, ticketIds: string[] | null, actor: Actor | SystemActor, now: Date): Promise<void> {
-  const { rows } = await db.query<{ from_id: string; to_id: string }>(
-    `DELETE FROM ticket_relations r USING tickets d
-     WHERE r.kind = 'blocks' AND r.added_by_agent_id IS NOT NULL AND d.id = r.from_ticket_id AND d.discovered_by_agent_id IS NOT NULL
-       AND ($1::uuid[] IS NULL OR d.id = ANY($1::uuid[]))
-       AND EXISTS (
-         SELECT 1 FROM ticket_changes f
-         WHERE f.ticket_id = d.id AND f.change = 'status' AND f.data->'to'->>'category' = ANY($2)
-           AND NOT EXISTS (SELECT 1 FROM ticket_changes g WHERE g.ticket_id = d.id AND g.change = 'delegate' AND g.id < f.id))
-     RETURNING r.from_ticket_id AS from_id, r.to_ticket_id AS to_id`,
-    [ticketIds, FINISHED_CATEGORIES],
-  );
-  if (rows.length === 0) return;
-  const tickets = new Map((await findTicketsByIds(db, [...new Set(rows.flatMap((r) => [r.from_id, r.to_id]))])).map((t) => [t.id, t]));
-  const ended = rows.map((r) => [tickets.get(r.from_id)!, tickets.get(r.to_id)!] as const);
-  ended.sort(([, a], [, b]) => a.key.localeCompare(b.key, "en", { numeric: true }));
-  for (const [blocker, blocked] of ended) {
-    await recordChange(db, blocker.id, actor, now, { change: "relation removed", kind: "blocks", ticket: { key: blocked.key, title: blocked.title } });
-    await recordChange(db, blocked.id, actor, now, { change: "relation removed", kind: "blocked_by", ticket: { key: blocker.key, title: blocker.title } });
-  }
 }
 
 /** Records a User's Keep in Backlog of a Discovered Ticket, which settles it, in its history too; returns the Ticket as kept. */

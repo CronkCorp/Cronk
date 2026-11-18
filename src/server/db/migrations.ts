@@ -2,7 +2,7 @@ import type { Queryable } from "./database.js";
 import { recordAllMentions } from "../knowledge/mentions.js";
 import { recordAllEmbeds } from "../files/artifact-embeds.js";
 import { scrubAllStored, storeAllTurns } from "../transcripts/transcripts.js";
-import { endVettedDiscoveredBlocks } from "../work/tickets.js";
+import { endVettedDiscoveredBlocks } from "../work/relations.js";
 
 /**
  * Schema migrations, applied in order on startup. Never edit or reorder a

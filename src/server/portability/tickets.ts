@@ -1,8 +1,8 @@
 import { insertActivity, markAnswered, type Activity } from "../coordination/activities.js";
 import { ACTIVITY_KINDS, PRIORITIES, VERIFICATIONS } from "../../shared/values.js";
-import { endVettedDiscoveredBlocks, recordChange, ticketKeySql } from "../work/tickets.js";
+import { recordChange, ticketKeySql } from "../work/tickets.js";
 import { findUserById } from "../identity/users.js";
-import { storeRelation, type NewDiscoveredBlock } from "../work/relations.js";
+import { endVettedDiscoveredBlocks, storeRelation, type NewDiscoveredBlock } from "../work/relations.js";
 import { storeDocumentLink } from "../work/document-links.js";
 import { exportAttachments, importAttachments } from "./attachments.js";
 import { exportComments, importComments } from "./comments.js";

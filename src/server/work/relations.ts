@@ -1,7 +1,7 @@
-import type { Actor } from "../actor.js";
+import type { Actor, SystemActor } from "../actor.js";
 import { holdsLockUntilCommit, lockUntilCommit, type Queryable } from "../db/database.js";
 import type { RelationKind } from "../../shared/values.js";
-import { findTicketById, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
+import { findTicketById, findTicketsByIds, isFinishChangeSql, listIdentifiedTicketRefs, listTicketRefs, recordChange, type AgentRef, type Ticket, type TicketRef } from "./tickets.js";
 
 /** Whether `lockBlocking` checks the lock order (see `AppConfig`); `AppContext` has it. */
 export interface LockOrderCheck {
@@ -194,7 +194,38 @@ export async function removeRelation(db: Queryable, input: RelationChange): Prom
   return true;
 }
 
-async function recordBothSides(db: Queryable, change: "relation added" | "relation removed", input: RelationChange): Promise<void> {
+/**
+ * Ends the blocks the filing Agent added from each of these Discovered Tickets (from every one, when `ticketIds` is null)
+ * that a User finished before any User delegated it, as its history records: finishing vets it (ADR 0002), so they no
+ * longer block, even once it is moved back out of its finished Status. Each is removed, and recorded in both Tickets'
+ * history as `actor`'s. Blocks a User added stay, as do those from a Ticket delegated before it was finished, or by the
+ * change that finished it, which is work like any other. Call once a finish is recorded.
+ */
+export async function endVettedDiscoveredBlocks(db: Queryable, ticketIds: string[] | null, actor: Actor | SystemActor, now: Date): Promise<void> {
+  const { rows } = await db.query<{ from_id: string; to_id: string }>(
+    `DELETE FROM ticket_relations r USING tickets d
+     WHERE r.kind = 'blocks' AND r.added_by_agent_id IS NOT NULL AND d.id = r.from_ticket_id AND d.discovered_by_agent_id IS NOT NULL
+       AND ($1::uuid[] IS NULL OR d.id = ANY($1::uuid[]))
+       AND EXISTS (
+         SELECT 1 FROM ticket_changes f
+         WHERE f.ticket_id = d.id AND ${isFinishChangeSql("f")}
+           -- A change delegating it records after the finish it came with, at the same time.
+           AND NOT EXISTS (SELECT 1 FROM ticket_changes g WHERE g.ticket_id = d.id AND g.change = 'delegate' AND (g.id < f.id OR g.at = f.at)))
+     RETURNING r.from_ticket_id AS from_id, r.to_ticket_id AS to_id`,
+    [ticketIds],
+  );
+  if (rows.length === 0) return;
+  const tickets = new Map((await findTicketsByIds(db, [...new Set(rows.flatMap((r) => [r.from_id, r.to_id]))])).map((t) => [t.id, t]));
+  const ended = rows.map((r) => ({ ticket: tickets.get(r.from_id)!, other: tickets.get(r.to_id)! }));
+  ended.sort((a, b) => a.other.key.localeCompare(b.other.key, "en", { numeric: true }));
+  for (const { ticket, other } of ended) await recordBothSides(db, "relation removed", { ticket, kind: "blocks", other, actor, now });
+}
+
+async function recordBothSides(
+  db: Queryable,
+  change: "relation added" | "relation removed",
+  input: Omit<RelationChange, "actor"> & { actor: Actor | SystemActor },
+): Promise<void> {
   const { ticket, kind, other, actor, now } = input;
   await recordChange(db, ticket.id, actor, now, { change, kind, ticket: { key: other.key, title: other.title } });
   await recordChange(db, other.id, actor, now, { change, kind: inverse[kind], ticket: { key: ticket.key, title: ticket.title } });

@@ -244,6 +244,20 @@ describe("Blocks an Agent added from its Discovered Ticket before a User finishe
     expect(claim.body.error).toContain("CRONK-2 is blocked by CRONK-3");
   });
 
+  it("leave blocks from a Discovered Ticket a User delegates and finishes at once, or never finishes", async () => {
+    const { admin, claude, session } = await delegatedSetup(2);
+    const agent = await session();
+    await agent.post("/api/projects/CRONK/tickets", { title: "Migration leaves orphans", blocks: [{ ticketKey: "CRONK-1", reason }] });
+    await agent.post("/api/projects/CRONK/tickets", { title: "Docs are stale", blocks: [{ ticketKey: "CRONK-2", reason }] });
+
+    await admin.patch("/api/tickets/CRONK-3", { delegateId: claude.agentId, statusId: await statusIn(admin, "completed") });
+    await admin.patch("/api/tickets/CRONK-3", { statusId: await statusIn(admin, "backlog") });
+    await admin.patch("/api/tickets/CRONK-4", { statusId: await statusIn(admin, "unstarted") });
+
+    expect((await admin.get("/api/tickets/CRONK-1")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-3", block: { reason } }]);
+    expect((await admin.get("/api/tickets/CRONK-2")).body.relations.blockedBy).toMatchObject([{ key: "CRONK-4", block: { reason } }]);
+  });
+
   it("end on upgrading, for a Discovered Ticket a User finished before the upgrade, but not one delegated before it was finished", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup(2);
     const agent = await session();
