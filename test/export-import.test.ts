@@ -1453,4 +1453,13 @@ describe("a Discovered Ticket its Agent finished undelegated, in an export", () 
     expect(changed.status).toBe(200);
     expect(changed.body.ticket.title).toBe("Migration leaves orphaned rows");
   });
+
+  it("is imported still waiting for a User in the Inbox: only a User's finish settles it", async () => {
+    const elsewhere = await startInstalledCronk("Elsewhere");
+    expect((await elsewhere.admin.upload("/api/import", await exportFinishedByItsAgent())).status).toBe(201);
+
+    const ticket = (await elsewhere.admin.get("/api/tickets/CRONK-2")).body.ticket;
+    expect(ticket.discovered.everFinished).toBe(false);
+    expect((await elsewhere.admin.get("/api/inbox?kind=discovered")).body.items).toMatchObject([{ ticket: { key: "CRONK-2" }, blocks: [{ key: "CRONK-1" }] }]);
+  });
 });

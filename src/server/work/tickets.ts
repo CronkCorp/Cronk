@@ -79,7 +79,7 @@ export interface Ticket {
  * Where a Discovered Ticket came from: the Agent that filed it, the Agent Session it filed it in, and the Ticket, of
  * any Project, it was working on then, holding its Claim, if any; one of another Project is tagged `readableOnlyIn` it,
  * so only readers of that Project see it. `kept` records a User's Keep in Backlog; `everFinished` whether its history
- * records a move to a finished Status (see `everFinishedSql`).
+ * records a User's move to a finished Status (see `everFinishedSql`).
  */
 export interface Discovery {
   agent: AgentRef;
@@ -163,11 +163,11 @@ const toTicket = (row: TicketRow): Ticket => ({
  * SQL condition: the Ticket change `c` is a User's move of its Ticket to a finished Status. Only a User's finish vets a
  * Discovered Ticket (ADR 0002), so a finish an Agent made settles nothing.
  */
-export const isFinishChangeSql = (c: string) =>
+export const isUserFinishChangeSql = (c: string) =>
   `(${c}.change = 'status' AND ${c}.actor_kind = 'user' AND ${c}.data->'to'->>'category' IN (${FINISHED_CATEGORIES.map((category) => `'${category}'`).join(", ")}))`;
 
-/** SQL condition: the history of the Ticket `t` records a move to a finished Status, whatever Status it is in now. */
-const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isFinishChangeSql("c")})`;
+/** SQL condition: the history of the Ticket `t` records a User's move to a finished Status, whatever Status it is in now. */
+const everFinishedSql = (t: string) => `EXISTS (SELECT 1 FROM ticket_changes c WHERE c.ticket_id = ${t}.id AND ${isUserFinishChangeSql("c")})`;
 
 const SELECT_TICKETS = `
   SELECT t.id, t.project_id, p.key AS project_key, t.number, t.title, t.description, t.priority, t.labels, t.autonomous, t.verification, t.created_at, t.updated_at,
