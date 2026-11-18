@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, tarGz, untarGz, type EventStream } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, statusIn, tarGz, untarGz, type EventStream } from "./harness.js";
 
 describe("A Project's live updates", () => {
   it("tell its watchers which Ticket changed when one is edited", async () => {
@@ -212,7 +212,7 @@ describe("A Project's live updates", () => {
 
   it("tell which Ticket changed when it is sent back from review", async () => {
     const { admin } = await delegatedSetup(1);
-    const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
+    const inReview = await statusIn(admin, "in_review");
     await admin.patch("/api/tickets/CRONK-1", { statusId: inReview });
     const stream = await admin.events("/api/projects/CRONK/events");
     expect((await stream.next())?.event).toBe("ready");
@@ -224,7 +224,7 @@ describe("A Project's live updates", () => {
   it("tell which Tickets changed when finishing a Ticket unblocks them", async () => {
     const { admin } = await delegatedSetup(2);
     await admin.post("/api/tickets/CRONK-1/relations", { kind: "blocks", ticketKey: "CRONK-2" });
-    const completed = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "completed").id;
+    const completed = await statusIn(admin, "completed");
     const stream = await admin.events("/api/projects/CRONK/events");
     expect((await stream.next())?.event).toBe("ready");
 
@@ -253,7 +253,7 @@ describe("A Ticket's live updates", () => {
 
   it("push a Send back's Comment marked as one", async () => {
     const { admin } = await delegatedSetup(1);
-    const inReview = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: any) => s.category === "in_review").id;
+    const inReview = await statusIn(admin, "in_review");
     await admin.patch("/api/tickets/CRONK-1", { statusId: inReview });
     const stream = await admin.events("/api/tickets/CRONK-1/events");
     expect((await stream.next())?.event).toBe("ready");

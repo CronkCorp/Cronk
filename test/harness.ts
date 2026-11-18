@@ -12,6 +12,7 @@ import { inject, onTestFailed, onTestFinished } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/server/app.js";
 import type { Clock } from "../src/server/clock.js";
+import type { StatusCategory } from "../src/shared/values.js";
 import { LiveUpdates, type LiveEvent } from "../src/server/live/live-updates.js";
 import { CreateBucketCommand, DeleteBucketCommand, DeleteObjectsCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import type { S3StorageConfig } from "../src/server/files/s3-store.js";
@@ -719,7 +720,7 @@ export async function joinAs(
 export const memberPassword = "member password";
 
 /** The id of the first Status in `category` of Project `project` (CRONK unless named), as `client` sees it. */
-export async function statusIn(client: Client, category: string, project = "CRONK"): Promise<string> {
+export async function statusIn(client: Client, category: StatusCategory, project = "CRONK"): Promise<string> {
   const statuses = (await client.get(`/api/projects/${project}`)).body.statuses as { id: string; category: string }[];
   return statuses.find((s) => s.category === category)!.id;
 }

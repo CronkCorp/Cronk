@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, tarGz, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, startInstalledCronk, startSession, statusIn, tarGz, type Client } from "./harness.js";
 
 /** A small site to publish as an Artifact. */
 const site = (take: number) => tarGz({ "index.html": `<h1>Sign-in limits, take ${take}</h1>` });
@@ -7,7 +7,7 @@ const site = (take: number) => tarGz({ "index.html": `<h1>Sign-in limits, take $
 describe("What an Agent did", () => {
   it("lists its changes, Activities, Comments and saved Versions across Tickets and Documents, newest first", async () => {
     const { cronk, admin, claude, session } = await delegatedSetup();
-    const started = ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === "started")!;
+    const started = await statusIn(admin, "started");
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
     cronk.clock.advance(1000);
@@ -15,7 +15,7 @@ describe("What an Agent did", () => {
     cronk.clock.advance(1000);
     await agent.post("/api/tickets/CRONK-1/comments", { body: "Picking this up" });
     cronk.clock.advance(1000);
-    await agent.patch("/api/tickets/CRONK-1", { statusId: started.id });
+    await agent.patch("/api/tickets/CRONK-1", { statusId: started });
     cronk.clock.advance(1000);
     const report = (await agent.post("/api/tickets/CRONK-1/reports", { title: "Findings", body: "It was the cache." })).body.report;
     cronk.clock.advance(1000);
@@ -28,7 +28,7 @@ describe("What an Agent did", () => {
     const inSession = { id: agent.sessionId };
     expect(res.body.record).toMatchObject([
       { kind: "version", at: "2026-01-01T09:00:04.000Z", session: inSession, projectKey: "CRONK", ticket, document: { id: report.id, title: "Findings" }, version: { number: 1 } },
-      { kind: "change", at: "2026-01-01T09:00:03.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, change: { change: "status", to: { id: started.id } } },
+      { kind: "change", at: "2026-01-01T09:00:03.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, change: { change: "status", to: { id: started } } },
       { kind: "comment", at: "2026-01-01T09:00:02.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, comment: { body: "Picking this up" } },
       { kind: "activity", at: "2026-01-01T09:00:01.000Z", session: inSession, projectKey: "CRONK", ticket, document: null, activity: { kind: "plan", body: "Read the code", blocking: false } },
     ]);
