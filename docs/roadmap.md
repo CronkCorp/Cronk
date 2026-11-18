@@ -112,6 +112,8 @@ Decided in the Phase 2 grilling:
 
 ## Phase 3: Code and reach
 
+Spec: GitHub issue #487; the Reconcile fixes #472–#483 are its first sub-issues, and its tickets follow as sub-issues with native blocking dependencies. Screens: `docs/ui.md`.
+
 Scope:
 
 - **Repositories** listed per Project.
