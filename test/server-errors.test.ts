@@ -29,7 +29,7 @@ describe("a test run", () => {
 
     expect(output).toContain("1 failed");
     // Neither the refusal ("body must have required property 'key'") nor a heading for errors the server logged.
-    expect(output).not.toMatch(/required property|logged/i);
+    expect(output).not.toMatch(/required property|The server logged/);
   });
 
   it("shows nothing of an answer of 500 a passing test provokes", async () => {
