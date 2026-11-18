@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, registerAgent, startInstalledCronk, startSession, statusIn, type Client } from "./harness.js";
 
 interface Status {
   id: string;
@@ -271,7 +271,7 @@ describe("Statuses, managed by an Agent", () => {
     const claude = await session();
     await admin.post("/api/projects/CRONK/statuses", { name: "In QA", category: "started" });
     const qa = await statusNamed(admin, "In QA");
-    const done = (await statuses(admin)).find((s) => s.category === "completed")!;
+    const done = await statusIn(admin, "completed");
     await admin.patch("/api/tickets/CRONK-1", { statusId: qa.id });
     await claude.post("/api/tickets/CRONK-1/claim");
     const ticketBefore = (await admin.get("/api/tickets/CRONK-1")).body;
@@ -282,7 +282,7 @@ describe("Statuses, managed by an Agent", () => {
 
     for (const res of [
       await claude.delete(`/api/projects/CRONK/statuses/${spare.id}`),
-      await claude.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${done.id}`),
+      await claude.delete(`/api/projects/CRONK/statuses/${qa.id}?moveTo=${done}`),
     ]) {
       expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/Only a User can manage Statuses/);
