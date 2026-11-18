@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, startSession, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, startSession, statusIn } from "./harness.js";
 
 describe("Reports", () => {
   it("are written by the Claim holder as Documents of the Ticket's Project, listed on the Ticket and kept out of the page tree", async () => {
@@ -52,9 +52,6 @@ describe("A Report", () => {
 });
 
 describe("An Agent's move into In Review", () => {
-  const statusIn = async (admin: Client, category: string) =>
-    ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
-
   it("is refused until the Ticket has a Report written during the current Claim, then allowed", async () => {
     const { admin, session } = await delegatedSetup();
     const inReview = await statusIn(admin, "in_review");

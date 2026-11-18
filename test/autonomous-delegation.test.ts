@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegatedSetup, joinAs, projectWithTickets, registerAgent, type Client } from "./harness.js";
+import { delegatedSetup, joinAs, projectWithTickets, registerAgent, statusIn, type Client } from "./harness.js";
 
 describe("Autonomous Delegation", () => {
   it("is off on a Ticket until a User turns it on, recorded as a Change", async () => {
@@ -97,11 +97,6 @@ describe("A Project's Autonomous Delegation default", () => {
     expect((await admin.patch("/api/tickets/CRONK-3", { delegateId: claude.agentId })).body.ticket.autonomous).toBe(false);
   });
 });
-
-/** The id of the Status in `category` of `project` (CRONK unless named). */
-async function statusIn(admin: Client, category: string, project = "CRONK"): Promise<string> {
-  return ((await admin.get(`/api/projects/${project}`)).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
-}
 
 describe("An Agent's completion under Autonomous Delegation", () => {
   it("needs a Report written during its Claim, then is recorded Unverified and ends the Claim", async () => {

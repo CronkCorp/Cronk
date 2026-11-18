@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOf, delegatedSetup, joinAs, registerAgent, startSession } from "./harness.js";
+import { agentOf, delegatedSetup, joinAs, registerAgent, startSession, statusIn } from "./harness.js";
 
 const reason = "It builds on the migration that leaves orphans.";
 
@@ -189,11 +189,6 @@ async function readOnlyBlockSetup() {
   return { ...setup, blockWhileWaiting };
 }
 
-/** The id of the CRONK Status in `category`. */
-async function statusIn(admin: { get: (path: string) => Promise<{ body: any }> }, category: string): Promise<string> {
-  return ((await admin.get("/api/projects/CRONK")).body.statuses as { id: string; category: string }[]).find((s) => s.category === category)!.id;
-}
-
 describe("Blocks added at once by holders of the Tickets' Claims", () => {
   it("queue rather than deadlock when two Agents block each other's Ticket: one is added, the other would close a cycle", async () => {
     const { cronk, admin, adaId, session } = await delegatedSetup(4);
@@ -222,7 +217,7 @@ describe("Blocks added at once by holders of the Tickets' Claims", () => {
     const { cronk, admin, session } = await delegatedSetup(3);
     const agent = await session();
     await agent.post("/api/tickets/CRONK-1/claim");
-    const backlog = (await admin.get("/api/projects/CRONK")).body.statuses.find((s: { category: string }) => s.category === "backlog").id;
+    const backlog = await statusIn(admin, "backlog");
 
     // The filing waits to file its Ticket in Backlog, then the User's block waits on the filing's source.
     const held = await cronk.holdRow("statuses", backlog);
