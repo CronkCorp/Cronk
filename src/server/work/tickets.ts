@@ -359,55 +359,54 @@ export interface TicketEdit {
  */
 export async function updateTicket(db: Queryable, ticket: Ticket, changes: TicketEdit, actor: Actor | SystemActor, now: Date): Promise<Ticket> {
   const recorded: TicketChange[] = [];
-  const columns: [column: string, value: unknown][] = [];
+  const columns: [column: string, value: unknown, type: string][] = [];
   if (changes.title !== undefined && changes.title !== ticket.title) {
     recorded.push({ change: "title", from: ticket.title, to: changes.title });
-    columns.push(["title", changes.title]);
+    columns.push(["title", changes.title, "text"]);
   }
   if (changes.description !== undefined && changes.description !== ticket.description) {
     recorded.push({ change: "description", from: ticket.description, to: changes.description });
-    columns.push(["description", changes.description]);
+    columns.push(["description", changes.description, "text"]);
   }
   if (changes.status !== undefined && changes.status.id !== ticket.status.id) {
     recorded.push({ change: "status", from: ticket.status, to: changes.status, ...(changes.sendBack && { sentBack: true }), ...(changes.reopen && { reopened: true }) });
-    columns.push(["status_id", changes.status.id]);
+    columns.push(["status_id", changes.status.id, "uuid"]);
   }
   if (changes.priority !== undefined && changes.priority !== ticket.priority) {
     recorded.push({ change: "priority", from: ticket.priority, to: changes.priority });
-    columns.push(["priority", changes.priority]);
+    columns.push(["priority", changes.priority, "text"]);
   }
   if (changes.labels !== undefined && !sameList(changes.labels, ticket.labels)) {
     recorded.push({ change: "labels", from: ticket.labels, to: changes.labels });
-    columns.push(["labels", changes.labels]);
+    columns.push(["labels", changes.labels, "text[]"]);
   }
   if (changes.assignee !== undefined && changes.assignee?.id !== ticket.assignee?.id) {
     recorded.push({ change: "assignee", from: ticket.assignee, to: changes.assignee });
-    columns.push(["assignee_id", changes.assignee?.id ?? null]);
+    columns.push(["assignee_id", changes.assignee?.id ?? null, "uuid"]);
   }
   if (changes.delegate !== undefined && changes.delegate?.id !== ticket.delegate?.id) {
     recorded.push({ change: "delegate", from: ticket.delegate, to: changes.delegate });
-    columns.push(["delegate_id", changes.delegate?.id ?? null]);
+    columns.push(["delegate_id", changes.delegate?.id ?? null, "uuid"]);
   }
   if (changes.parent !== undefined && changes.parent?.key !== ticket.parent?.key) {
     const to = changes.parent && { key: changes.parent.key, title: changes.parent.title };
     recorded.push({ change: "parent", from: ticket.parent, to });
-    columns.push(["parent_id", changes.parent?.id ?? null]);
+    columns.push(["parent_id", changes.parent?.id ?? null, "uuid"]);
   }
   if (changes.autonomous !== undefined && changes.autonomous !== ticket.autonomous) {
     recorded.push({ change: "autonomous", from: ticket.autonomous, to: changes.autonomous });
-    columns.push(["autonomous", changes.autonomous]);
+    columns.push(["autonomous", changes.autonomous, "boolean"]);
   }
   if (changes.verification !== undefined && changes.verification !== ticket.verification) {
     recorded.push({ change: "verification", from: ticket.verification, to: changes.verification });
-    columns.push(["verification", changes.verification]);
+    columns.push(["verification", changes.verification, "text"]);
   }
   if (recorded.length === 0) return ticket;
 
-  columns.push(["updated_at", now]);
-  await db.query(`UPDATE tickets SET ${columns.map(([column], i) => `${column} = $${i + 2}`).join(", ")} WHERE id = $1`, [
-    ticket.id,
-    ...columns.map(([, value]) => value),
-  ]);
+  columns.push(["updated_at", now, "timestamptz"]);
+  const params = queryParams();
+  const sets = columns.map(([column, value, type]) => `${column} = ${params.bind(value, type)}`).join(", ");
+  await db.query(`UPDATE tickets SET ${sets} WHERE id = ${params.bind(ticket.id, "uuid")}`, params.values);
   for (const change of recorded) await recordChange(db, ticket.id, actor, now, change);
   if (ticket.discovered && changes.status && FINISHED_CATEGORIES.includes(changes.status.category) && changes.status.id !== ticket.status.id) {
     await endVettedDiscoveredBlocks(db, [ticket.id], actor, now);
