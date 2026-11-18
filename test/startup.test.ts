@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { ada, delegatedSetup, startCronk, startInstalledCronk, type Cronk, type HeldLock } from "./harness.js";
@@ -61,6 +63,38 @@ async function restartWhileWaiting<T>(cronk: Cronk, wait: () => Promise<T>): Pro
   const body = JSON.parse(Buffer.concat(await health.toArray()).toString());
   expect({ status: health.statusCode, body }).toEqual({ status: 200, body: { status: "ok" } });
   return { waiting, held };
+}
+
+/** Bytes a stalled download's file holds: more than the connection's buffers hold, so the server is left with more to send. */
+const DOWNLOAD_SIZE = 32 * 1024 * 1024;
+
+/** Attaches `DOWNLOAD_SIZE` random bytes, which don't compress, to CRONK-1 over HTTP and answers the Attachment's id. */
+async function attachLargeFile(client: ReturnType<Cronk["client"]>): Promise<string> {
+  const res = await client.send("/api/tickets/CRONK-1/attachments?name=large.bin", {
+    method: "POST",
+    body: Readable.from([randomBytes(DOWNLOAD_SIZE)]),
+    headers: { "content-type": "application/octet-stream" },
+  });
+  const body = JSON.parse(Buffer.concat(await res.toArray()).toString());
+  expect(res.statusCode, JSON.stringify(body)).toBe(201);
+  return body.attachment.id;
+}
+
+/**
+ * Starts downloading `path` over HTTP and stops reading it once it has begun to arrive, as a client that stalls does: the
+ * response is left unread, so the server still has bytes to send that its connection won't take. Fails unless closing
+ * finishes within its bound and Cronk then answers over HTTP. Answers the response, still unread.
+ */
+async function restartWhileDownloadStalls(cronk: Cronk, client: ReturnType<Cronk["client"]>, path: string): Promise<IncomingMessage> {
+  const download = await client.send(path);
+  expect(download.statusCode).toBe(200);
+  // Its first bytes have arrived; nothing reads on, so the connection's buffers fill and the server stops sending.
+  await new Promise((resolve) => download.once("readable", resolve));
+
+  await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
+
+  expect((await client.send("/api/health")).statusCode).toBe(200);
+  return download;
 }
 
 describe("starting the application", () => {
@@ -152,6 +186,16 @@ describe("stopping the application", () => {
     await expect(uploading).rejects.toThrow();
     expect((await admin.send("/api/health")).statusCode).toBe(200);
     expect((await admin.get("/api/tickets/CRONK-1/attachments")).body.attachments).toEqual([]);
+  });
+
+  it("finishes within its bound while an Attachment download's client stops reading, and answers after it starts again", async () => {
+    const { cronk, admin } = await delegatedSetup(1, { closeWithinMs: CLOSE_WITHIN_MS });
+    const id = await attachLargeFile(admin);
+
+    const download = await restartWhileDownloadStalls(cronk, admin, `/api/attachments/${id}/file`);
+
+    // The client reading on finds the connection ended before the whole file arrived.
+    await expect(download.toArray()).rejects.toThrow();
   });
 });
 
