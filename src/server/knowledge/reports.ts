@@ -37,6 +37,7 @@ export interface Report {
 
 interface ReportRow {
   id: string;
+  ticket_id: string;
   ticket_key: string;
   ticket_title: string;
   title: string;
@@ -85,7 +86,7 @@ async function toReports(db: Queryable, rows: ReportRow[]): Promise<Report[]> {
 
 /** Selects Reports as `d`, with their Ticket `t` and the Agent and Session of their first Version. */
 const SELECT_REPORTS = `
-  SELECT d.id, ${ticketKeySql("p", "t")} AS ticket_key, t.title AS ticket_title, d.title, d.version, d.created_at, d.updated_at,
+  SELECT d.id, d.ticket_id, ${ticketKeySql("p", "t")} AS ticket_key, t.title AS ticket_title, d.title, d.version, d.created_at, d.updated_at,
     a.id AS agent_id, a.name AS agent_name, u.id AS owner_id, u.name AS owner_name, v.actor_session_id AS session_id,
     d.claim_id, t.project_id
   FROM documents d JOIN tickets t ON t.id = d.ticket_id JOIN projects p ON p.id = t.project_id
@@ -128,6 +129,19 @@ export async function findReport(db: Queryable, id: string): Promise<Report | un
 export async function listTicketReports(db: Queryable, ticketId: string): Promise<Report[]> {
   const { rows } = await db.query<ReportRow>(`${SELECT_REPORTS} WHERE d.ticket_id = $1 ORDER BY d.created_at, d.id`, [ticketId]);
   return toReports(db, rows);
+}
+
+/** The Reports of each of the Tickets `ticketIds`, by Ticket id, oldest first; in a fixed number of queries however many there are. */
+export async function listReportsOfTickets(db: Queryable, ticketIds: string[]): Promise<Map<string, Report[]>> {
+  const byTicket = new Map<string, Report[]>(ticketIds.map((id) => [id, []]));
+  if (ticketIds.length === 0) return byTicket;
+  const { rows } = await db.query<ReportRow>(
+    `${SELECT_REPORTS} WHERE d.ticket_id = ANY($1::uuid[]) ORDER BY d.created_at, d.id`,
+    [ticketIds],
+  );
+  const reports = await toReports(db, rows);
+  rows.forEach((row, i) => byTicket.get(row.ticket_id)!.push(reports[i]!));
+  return byTicket;
 }
 
 /** A Project's Reports, newest first. */
