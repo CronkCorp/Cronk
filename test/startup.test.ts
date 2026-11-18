@@ -26,6 +26,22 @@ async function expectWithin(ms: number, work: Promise<unknown>): Promise<void> {
 /** More bytes than a connection's buffers hold, so a transfer of them stalls on the end that stops reading them. */
 const MORE_THAN_BUFFERED = 32 * 1024 * 1024;
 
+/**
+ * What work waiting on the database fails with once closing cuts it off: Postgres ending the session on the server's
+ * behalf (`57P01`, admin_shutdown), or the connection dropped under it should that word not arrive before the socket goes.
+ */
+const DATABASE_CUT_OFF = expect.toSatisfy(
+  (err: unknown) => err instanceof Error && ((err as { code?: string }).code === "57P01" || err.message === "Connection terminated unexpectedly"),
+  "a database connection cut off",
+);
+
+/**
+ * What a client over HTTP sees once closing ends its connection before the request or answer is complete: the connection
+ * reset under it. Node words it `socket hang up` to a client still sending and `aborted` to one reading, so only the code
+ * is matched.
+ */
+const CONNECTION_CUT_OFF = expect.objectContaining({ code: "ECONNRESET" });
+
 /** Closes the application and starts it again, failing unless closing finishes within its bound and Cronk then answers over HTTP. */
 async function restartWithinBound(cronk: Cronk): Promise<void> {
   await expectWithin(CLOSE_WITHIN_MS + SLACK_MS, cronk.restart());
@@ -143,7 +159,7 @@ describe("stopping the application", () => {
     const { waiting: looking, held } = await restartWhileWaiting(cronk, () => cronk.lookForLapses());
 
     // The look cut off finds nothing done; the Claim is found lapsed again once the table is free.
-    await expect(looking).rejects.toThrow();
+    await expect(looking).rejects.toEqual(DATABASE_CUT_OFF);
     await held.release();
     expect((await admin.get("/api/tickets/CRONK-1")).body.claim).toBeNull();
   });
@@ -178,7 +194,7 @@ describe("stopping the application", () => {
     await restartWithinBound(cronk);
 
     // The client mid-upload sees its connection end without an answer, and nothing of the upload is kept.
-    await expect(uploading).rejects.toThrow();
+    await expect(uploading).rejects.toEqual(CONNECTION_CUT_OFF);
     expect((await admin.get("/api/tickets/CRONK-1/attachments")).body.attachments).toEqual([]);
   });
 
@@ -189,7 +205,7 @@ describe("stopping the application", () => {
     const download = await restartWhileDownloadStalls(cronk, admin, `/api/attachments/${id}/file`);
 
     // The client reading on finds the connection ended before the whole file arrived.
-    await expect(download.toArray()).rejects.toThrow();
+    await expect(download.toArray()).rejects.toEqual(CONNECTION_CUT_OFF);
   });
 
   it("finishes within its bound while an export's client stops reading, and answers after it starts again", async () => {
@@ -200,7 +216,7 @@ describe("stopping the application", () => {
     const download = await restartWhileDownloadStalls(cronk, admin, "/api/export");
 
     // The client reading on finds the connection ended before the whole archive arrived.
-    await expect(download.toArray()).rejects.toThrow();
+    await expect(download.toArray()).rejects.toEqual(CONNECTION_CUT_OFF);
   });
 });
 
