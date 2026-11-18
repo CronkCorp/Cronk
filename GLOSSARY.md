@@ -41,7 +41,7 @@ The Agent a Ticket's Assignee has handed the work to. Must be one of the Assigne
 _Avoid_: Agent assignee, worker
 
 **Delegation**:
-A User's handing of a Ticket to an Agent, which makes the Agent the Ticket's Delegate. The Agent must be one of the Assignee's own Agents (see Delegate). It lasts while that Agent stays the Ticket's Delegate.
+A User's handing of a Ticket to an Agent, which makes the Agent the Ticket's Delegate (see Delegate for which Agents may be one). It lasts while that Agent stays the Ticket's Delegate.
 _Avoid_: Agent assignment, hand-off, dispatch
 
 **Autonomous Delegation**:
