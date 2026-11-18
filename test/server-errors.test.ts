@@ -4,6 +4,8 @@ import { promisify } from "node:util";
 import { describe, expect, inject, it } from "vitest";
 
 const VITEST = fileURLToPath(new URL("../node_modules/vitest/vitest.mjs", import.meta.url));
+/** The error `failCommitsWriting` fails a commit with. */
+const COMMIT_FAILED = "Commit failed by the test harness";
 const CONFIG = fileURLToPath(new URL("fixtures/server-errors/vitest.config.ts", import.meta.url));
 
 /** What a test run prints running the fixture test named `name` alone, on this run's Postgres. */
@@ -19,9 +21,8 @@ describe("a test run", () => {
     const output = await runFixture("fails on an answer of 500");
 
     expect(output).toContain("1 failed");
-    expect(output).toContain("Commit failed by the test harness");
-    // Its stack too, down into the code that sent the query.
-    expect(output).toMatch(/Commit failed by the test harness[^]*\n\s+at .*node_modules\/pg/);
+    // The error failCommitsWriting raises, with its stack down into the code that sent the query.
+    expect(output).toMatch(new RegExp(`${COMMIT_FAILED}[^]*\n\\s+at .*node_modules/pg/`));
   });
 
   it("shows nothing of an answer of 400", async () => {
@@ -36,6 +37,6 @@ describe("a test run", () => {
     const output = await runFixture("passes on an answer of 500 it provokes");
 
     expect(output).toContain("1 passed");
-    expect(output).not.toContain("Commit failed by the test harness");
+    expect(output).not.toContain(COMMIT_FAILED);
   });
 });
