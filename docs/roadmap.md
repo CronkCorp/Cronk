@@ -112,6 +112,8 @@ Decided in the Phase 2 grilling:
 
 ## Phase 3: Code and reach
 
+Spec: GitHub issue #487; the Reconcile fixes #472–#483 are its first sub-issues, and its tickets follow as sub-issues with native blocking dependencies. Screens: `docs/ui.md`.
+
 Scope:
 
 - **Repositories** listed per Project.
@@ -134,12 +136,12 @@ Decided in the Phase 3 grilling:
 - **Git host access.** Each Repository holds a token (a GitHub fine-grained token, or a GitLab project or group access token) and a webhook secret. A GitHub App can come later behind the same adapter.
 - **Webhooks only.** Cronk doesn't poll Git hosts; its server must be reachable from them, directly or through a tunnel. A Ticket's Pull Requests have a Refresh action that re-reads them on demand.
 - **Shared Repositories.** Several Projects may list one Repository; Ticket keys are unique across the Workspace, so a Pull Request still links to the right Ticket.
-- **Git host accounts.** Users link theirs in their profile, and each Agent records its own. A merge by an account linked to a User is a User's; any other merge is automated, so the completion is Unverified. No matching by email.
+- **Git host accounts.** Users link theirs in their profile, and each Agent records its own. A merge by an account linked to a User is a User's; any other merge is automated, so the completion is Unverified. No matching by email. Linking takes only a login and isn't verified with the host, since Users are trusted colleagues; history records who linked which account. Verifying through the host's sign-in can come later.
 - **CI failure and requested changes** on a Ticket In Review are a Send back by Cronk: a system Change, with a Comment from Cronk linking the failing checks or the review, reaching the Delegate as Waiting Work (#476 keeps Send back the only way back).
 - **Which Tickets move.** The automation follows the Pull Request whoever works the Ticket, delegated or not, and a PR ready for review moves a Backlog or Unstarted Ticket to In Review too. It never moves a Completed, Canceled or Unverified Ticket. A User's merge on an undelegated Ticket simply completes it.
 - **On by default.** Status changes from Pull Request events are on once a Project lists a Repository; the Project can turn them off.
 - **Several Pull Requests.** A merge completes the Ticket only when no other linked Pull Request is still open; ones closed without merging don't count.
-- **Reports still come from the Agent.** A Pull Request ready for review doesn't move a Ticket whose Claim is live and has no Report from it: the Ticket stays Started with an Activity telling the Agent to write one and move it itself. Without a live Claim the move goes ahead, and the Ticket shows that it has no Report.
+- **Reports still come from the Agent.** A Pull Request ready for review doesn't move a Ticket whose Claim is live and has no Report from it: the Ticket stays Started with a Comment from Cronk telling the Agent to write one and move it itself, which reaches the Agent as Waiting Work. Without a live Claim the move goes ahead, and the Ticket shows that it has no Report.
 - **A User's merge is the review.** It completes a delegated Ticket as Verified, with a Change recording which User's merge on the Git host verified it.
 - **Webhook delivery**, for User and Agent Webhooks alike: one JSON body format naming the event kind, signed with an HMAC of the webhook's own secret; retries with exponential backoff for about 24 hours, then the webhook is marked failing and its User sees it; 7 days of delivery history shown to its User. Retries are kept in Postgres, with no new service (ADR 0006); delivery order isn't guaranteed.
 - **Agent Webhooks** carry the Agent's id, the kinds and counts of its Waiting Work and the Ticket keys, never text, so content stays behind Agent Access. They fire only while the Agent has no live Agent Session, at most once a minute per Agent.
