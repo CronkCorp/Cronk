@@ -375,9 +375,9 @@ export interface HeldLock {
 }
 
 /**
- * Matches what work waiting on the database fails with once its connection is cut off, as closing Cronk or
- * `terminateConnections` does: Postgres ending the session on the server's behalf (`57P01`, admin_shutdown), or the
- * connection dropped under it should that word not arrive before the socket goes. Use as `rejects.toEqual(DATABASE_CUT_OFF)`.
+ * Matches what work waiting on the database fails with once closing Cronk cuts its connection off: Postgres ending the
+ * session on the server's behalf (`57P01`, admin_shutdown), or the connection dropped under it should that word not
+ * arrive before the socket goes. Use as `rejects.toEqual(DATABASE_CUT_OFF)`.
  */
 export const DATABASE_CUT_OFF = expect.toSatisfy(
   (err: unknown) => err instanceof Error && ((err as { code?: string }).code === "57P01" || err.message === "Connection terminated unexpectedly"),
