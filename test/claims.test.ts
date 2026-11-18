@@ -150,6 +150,7 @@ describe("A Claim", () => {
 
   it("ends when a User moves its Ticket into review, completes or cancels it, so the Agent Session can't keep working on it", async () => {
     const { admin, session } = await delegatedSetup(3);
+    const started = await statusIn(admin, "started");
     const agent = await session();
 
     for (const [key, category] of [["CRONK-1", "in_review"], ["CRONK-2", "completed"], ["CRONK-3", "canceled"]] as const) {
@@ -157,7 +158,7 @@ describe("A Claim", () => {
       await admin.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, category) });
 
       expect((await admin.get(`/api/tickets/${key}`)).body.claim).toBeNull();
-      expect((await agent.patch(`/api/tickets/${key}`, { statusId: await statusIn(admin, "started") })).status).toBe(409);
+      expect((await agent.patch(`/api/tickets/${key}`, { statusId: started })).status).toBe(409);
       expect((await agent.post(`/api/tickets/${key}/activities`, { kind: "progress", body: "Still going" })).status).toBe(409);
     }
   });
